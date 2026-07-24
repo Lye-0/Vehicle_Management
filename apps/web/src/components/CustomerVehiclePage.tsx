@@ -1,9 +1,12 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import {
-  CalendarDays,
   CarFront,
+  ChevronRight,
   FileText,
   Image as ImageIcon,
+  Mail,
+  MapPin,
   Paperclip,
   Pencil,
   Phone,
@@ -44,8 +47,10 @@ type Customer = {
   name: string
   kana: string
   phone: string
+  email: string
   postalCode: string
   address: string
+  memo: string
   vehicles: Vehicle[]
 }
 
@@ -55,8 +60,10 @@ const initialCustomers: Customer[] = [
     name: '佐藤 太郎',
     kana: 'さとう たろう',
     phone: '090-1234-5678',
+    email: 'sato.taro@example.com',
     postalCode: '100-0001',
     address: '東京都千代田区千代田1-1',
+    memo: '土曜午前の来店が多い。メールより電話を希望。',
     vehicles: [
       {
         id: 'vehicle-sato-prius', maker: 'トヨタ', model: 'プリウス', plate: '品川 500 あ 1234', vin: 'ZVW5000001', year: '2020年', inspectionDate: '2026/10/15', mileage: '68,420 km', color: 'パールホワイト', displacement: '1,800 cc', transmission: 'CVT', note: '左後ドア小傷あり。次回点検時に要確認。',
@@ -71,20 +78,20 @@ const initialCustomers: Customer[] = [
     ],
   },
   {
-    id: 'customer-tanaka', name: '田中 花子', kana: 'たなか はなこ', phone: '080-2345-6789', postalCode: '231-0001', address: '神奈川県横浜市中区',
+    id: 'customer-tanaka', name: '田中 花子', kana: 'たなか はなこ', phone: '080-2345-6789', email: 'tanaka.hanako@example.com', postalCode: '231-0001', address: '神奈川県横浜市中区', memo: '',
     vehicles: [{ id: 'vehicle-tanaka-fit', maker: 'ホンダ', model: 'フィット', plate: '横浜 300 い 5678', vin: 'GK3000003', year: '2019年', inspectionDate: '2026/08/20', mileage: '42,100 km', color: 'ミッドナイトブルー', displacement: '1,300 cc', transmission: 'CVT', note: '', attachments: [] }],
   },
   {
-    id: 'customer-suzuki', name: '鈴木 一郎', kana: 'すずき いちろう', phone: '070-3456-7890', postalCode: '330-0001', address: '埼玉県さいたま市大宮区',
+    id: 'customer-suzuki', name: '鈴木 一郎', kana: 'すずき いちろう', phone: '070-3456-7890', email: 'suzuki.ichiro@example.com', postalCode: '330-0001', address: '埼玉県さいたま市大宮区', memo: '',
     vehicles: [{ id: 'vehicle-suzuki-note', maker: 'ニッサン', model: 'ノート', plate: '大宮 400 う 9012', vin: 'E1200004', year: '2018年', inspectionDate: '2025/12/01', mileage: '93,750 km', color: 'ブリリアントシルバー', displacement: '1,200 cc', transmission: 'CVT', note: '車検期限を超過。早急に案内。', attachments: [] }],
   },
   {
-    id: 'customer-yamada', name: '山田 恵子', kana: 'やまだ けいこ', phone: '090-4567-8901', postalCode: '210-0001', address: '神奈川県川崎市川崎区',
+    id: 'customer-yamada', name: '山田 恵子', kana: 'やまだ けいこ', phone: '090-4567-8901', email: 'yamada.keiko@example.com', postalCode: '210-0001', address: '神奈川県川崎市川崎区', memo: '',
     vehicles: [{ id: 'vehicle-yamada-cx5', maker: 'マツダ', model: 'CX-5', plate: '川崎 501 お 7890', vin: 'KF2000005', year: '2021年', inspectionDate: '2027/03/31', mileage: '31,200 km', color: 'ソウルレッド', displacement: '2,000 cc', transmission: '6AT', note: '', attachments: [] }],
   },
 ]
 
-const emptyCustomerForm = { name: '', kana: '', phone: '', address: '' }
+const emptyCustomerForm = { name: '', kana: '', phone: '', email: '', address: '', memo: '' }
 const emptyVehicleForm = { maker: '', model: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '' }
 
 export function CustomerVehiclePage() {
@@ -108,13 +115,18 @@ export function CustomerVehiclePage() {
     })
   }, [customers, query])
 
-  const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId) ?? customers[0] ?? null
+  const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
   const filteredVehicleCount = filteredCustomers.reduce((count, customer) => count + customer.vehicles.length, 0)
 
   function selectVehicle(customer: Customer, vehicle: Vehicle | null) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(vehicle?.id ?? '')
+  }
+
+  function selectCustomer(customer: Customer) {
+    setSelectedCustomerId(customer.id)
+    setSelectedVehicleId(customer.vehicles[0]?.id ?? '')
   }
 
   function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
@@ -126,8 +138,10 @@ export function CustomerVehiclePage() {
       name: customerForm.name.trim(),
       kana: customerForm.kana.trim(),
       phone: customerForm.phone.trim(),
+      email: customerForm.email.trim(),
       postalCode: '',
       address: customerForm.address.trim(),
+      memo: customerForm.memo.trim(),
       vehicles: [],
     }
     setCustomers((current) => [...current, newCustomer])
@@ -181,17 +195,9 @@ export function CustomerVehiclePage() {
         <span className="customer-result-summary"><strong>{filteredVehicleCount}台</strong><span>{filteredCustomers.length}名の顧客</span></span>
       </div>
 
-      <div className="customer-workspace">
-        <section className="panel customer-results-panel">
-          <div className="panel-header customer-panel-header"><div><h2>検索結果</h2><span className="panel-caption">車両を選択すると詳細を表示します</span></div><span className="results-count">{filteredVehicleCount} 件</span></div>
-          <div className="customer-table" role="table" aria-label="顧客・車両の検索結果">
-            <div className="customer-table-head" role="row"><span>顧客名</span><span>電話番号</span><span>車名</span><span>登録番号</span><span>車検満了日</span><span>走行距離</span></div>
-            {filteredCustomers.map((customer) => customer.vehicles.length ? customer.vehicles.map((vehicle) => <VehicleRow key={vehicle.id} customer={customer} vehicle={vehicle} selected={vehicle.id === selectedVehicle?.id} onSelect={() => selectVehicle(customer, vehicle)} />) : <button className={`customer-table-row no-vehicle-row${customer.id === selectedCustomer?.id ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => selectVehicle(customer, null)}><span className="customer-name-cell"><strong>{customer.name}</strong><small>{customer.phone}</small></span><span className="table-muted">{customer.phone}</span><span className="table-muted">車両未登録</span><span className="table-muted">—</span><span className="table-muted">—</span><span className="table-muted">—</span></button>)}
-            {!filteredCustomers.length && <div className="empty-state"><Search size={24} /><strong>検索結果がありません</strong><span>検索条件を変更してください。</span></div>}
-          </div>
-        </section>
-
-        <VehicleDetail customer={selectedCustomer} vehicle={selectedVehicle} onAddVehicle={() => setVehicleDialogOpen(true)} onAttachments={handleAttachments} onRemoveAttachment={removeAttachment} />
+      <div className="customer-directory">
+        <CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} />
+        <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={() => setVehicleDialogOpen(true)} onAttachments={handleAttachments} onRemoveAttachment={removeAttachment} />
       </div>
 
       {customerDialogOpen && <CustomerDialog form={customerForm} onChange={setCustomerForm} onClose={() => { setCustomerDialogOpen(false); setCustomerForm(emptyCustomerForm) }} onSubmit={handleCustomerSubmit} />}
@@ -200,21 +206,22 @@ export function CustomerVehiclePage() {
   )
 }
 
-function VehicleRow({ customer, vehicle, selected, onSelect }: { customer: Customer; vehicle: Vehicle; selected: boolean; onSelect: () => void }) {
-  return <button className={`customer-table-row${selected ? ' is-selected' : ''}`} type="button" role="row" onClick={onSelect}><span className="customer-name-cell"><strong>{customer.name}</strong><small>{customer.vehicles.length}台登録</small></span><span className="table-muted">{customer.phone}</span><span className="vehicle-name-cell"><strong>{vehicle.maker} {vehicle.model}</strong><small>{vehicle.year} ・ {vehicle.color}</small></span><span className="table-muted">{vehicle.plate || '—'}</span><span><InspectionStatus date={vehicle.inspectionDate} /></span><span className="table-muted">{vehicle.mileage || '—'}</span></button>
+function CustomerList({ customers, selectedCustomerId, onSelect }: { customers: Customer[]; selectedCustomerId: string; onSelect: (customer: Customer) => void }) {
+  return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div><span className="results-count">{customers.length}名</span></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone}</small><em>{customer.vehicles.length}台所有</em></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>検索条件を変更してください。</span></div>}</div></section>
 }
 
-function InspectionStatus({ date }: { date: string }) {
-  if (!date) return <span className="table-muted">未登録</span>
-  const isPast = date.startsWith('2025')
-  const isSoon = date.startsWith('2026/08')
-  return <span className={`inspection-status ${isPast ? 'is-danger' : isSoon ? 'is-warning' : ''}`}><span className="status-dot" />{date}</span>
+function CustomerProfile({ customer, vehicle, onSelectVehicle, onAddVehicle, onAttachments, onRemoveAttachment }: { customer: Customer | null; vehicle: Vehicle | null; onSelectVehicle: (vehicle: Vehicle) => void; onAddVehicle: () => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
+  if (!customer) return <section className="panel customer-profile-empty"><UserRound size={30} /><strong>顧客を登録してください</strong><span>登録した顧客の情報がここに表示されます。</span></section>
+
+  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button"><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両 <small>{customer.vehicles.length}台</small></h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${item.inspectionDate.startsWith('2025') ? 'is-danger' : item.inspectionDate.startsWith('2026/08') ? 'is-warning' : ''}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onRemoveAttachment={onRemoveAttachment} /></section></div>}</section>
 }
 
-function VehicleDetail({ customer, vehicle, onAddVehicle, onAttachments, onRemoveAttachment }: { customer: Customer | null; vehicle: Vehicle | null; onAddVehicle: () => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
-  if (!customer) return <aside className="panel vehicle-detail-panel empty-detail"><CarFront size={30} /><strong>顧客を登録してください</strong><span>登録した顧客の車両情報がここに表示されます。</span></aside>
+function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return <div className="customer-info-item"><span className="customer-info-label"><Icon size={16} />{label}</span><strong>{value}</strong></div>
+}
 
-  return <aside className="panel vehicle-detail-panel"><div className="vehicle-detail-hero"><span className="detail-eyebrow">選択中の車両</span><h2>{vehicle ? `${vehicle.maker} ${vehicle.model}` : '車両未登録'}</h2><span className="detail-plate">{vehicle?.plate || '車両を追加してください'}</span><div className="vehicle-detail-actions"><button className="detail-action-button" type="button"><Pencil size={15} />編集</button><button className="detail-action-button is-light" type="button" onClick={onAddVehicle}><Plus size={15} />車両を追加</button></div></div><div className="vehicle-detail-body"><div className="owner-summary"><span className="owner-avatar"><UserRound size={19} /></span><span><small>顧客</small><strong>{customer.name}</strong></span><span className="owner-contact"><Phone size={15} />{customer.phone}</span></div>{vehicle ? <><div className="detail-fields"><DetailField label="車台番号" value={vehicle.vin || '未登録'} /><DetailField label="型式・年式" value={`${vehicle.maker} ・ ${vehicle.year || '未登録'}`} /><DetailField label="車体色" value={vehicle.color || '未登録'} /><DetailField label="走行距離" value={vehicle.mileage || '未登録'} /></div><div className="inspection-highlight"><span><CalendarDays size={18} /><small>車検満了日</small></span><strong>{vehicle.inspectionDate || '未登録'}</strong><InspectionStatus date={vehicle.inspectionDate} /></div><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onRemoveAttachment={onRemoveAttachment} /></> : <div className="detail-empty-vehicle"><CarFront size={25} /><strong>この顧客に車両が登録されていません</strong><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</div></aside>
+function VehicleSummary({ vehicle }: { vehicle: Vehicle }) {
+  return <section className="panel vehicle-summary-panel"><div className="vehicle-summary-header"><div><span>選択中の車両</span><h2>{vehicle.maker} {vehicle.model}</h2><small>{vehicle.plate || '登録番号未登録'}</small></div><button className="detail-action-button" type="button"><Pencil size={15} />編集</button></div><div className="vehicle-summary-body"><div className="detail-fields"><DetailField label="車検満了日" value={vehicle.inspectionDate || '未登録'} /><DetailField label="車台番号" value={vehicle.vin || '未登録'} /><DetailField label="型式・年式" value={`${vehicle.maker} ・ ${vehicle.year || '未登録'}`} /><DetailField label="車体色" value={vehicle.color || '未登録'} /><DetailField label="走行距離" value={vehicle.mileage || '未登録'} /><DetailField label="ミッション" value={vehicle.transmission || '未登録'} /></div>{vehicle.note && <div className="vehicle-note"><span>備考</span><p>{vehicle.note}</p></div>}</div></section>
 }
 
 function DetailField({ label, value }: { label: string; value: string }) {
@@ -226,7 +233,7 @@ function AttachmentSection({ vehicle, onAttachments, onRemoveAttachment }: { veh
 }
 
 function CustomerDialog({ form, onChange, onClose, onSubmit }: { form: typeof emptyCustomerForm; onChange: (form: typeof emptyCustomerForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <Modal title="顧客を登録" onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><input type="tel" value={form.phone} onChange={(event) => onChange({ ...form, phone: event.target.value })} placeholder="例：090-1234-5678" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField></div><ModalFooter onClose={onClose} submitLabel="顧客を登録" /></form></Modal>
+  return <Modal title="顧客を登録" onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><input type="tel" value={form.phone} onChange={(event) => onChange({ ...form, phone: event.target.value })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter onClose={onClose} submitLabel="顧客を登録" /></form></Modal>
 }
 
 function VehicleDialog({ form, customerName, onChange, onClose, onSubmit }: { form: typeof emptyVehicleForm; customerName: string; onChange: (form: typeof emptyVehicleForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
