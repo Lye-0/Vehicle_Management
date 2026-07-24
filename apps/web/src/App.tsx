@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { CustomerVehiclePage } from './components/CustomerVehiclePage'
 import { MaintenancePage } from './components/MaintenancePage'
+import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import './App.css'
 
@@ -76,7 +77,7 @@ function App() {
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : <SectionPlaceholder section={activeSection} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SectionPlaceholder section={activeSection} />}
         </div>
       </main>
     </div>
