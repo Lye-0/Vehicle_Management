@@ -1,5 +1,6 @@
 [tools]
 java = "temurin-21.0.11+10.0.LTS"
 node = "24.18.0"
+"npm:firebase-tools" = "15.24.0"
 pnpm = "11.16.0"
 rclone = "1.74.4"
