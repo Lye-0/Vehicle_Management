@@ -1,4 +1,6 @@
 import { requireFirebaseUser, UnauthorizedError } from './auth/firebase'
+import { handleCustomerRoutes } from './routes/customer-routes'
+import { corsHeaders, jsonResponse } from './http'
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -7,6 +9,9 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(env) })
     }
+
+    const customerRouteResponse = await handleCustomerRoutes(request, env)
+    if (customerRouteResponse) return customerRouteResponse
 
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/health")) {
       return jsonResponse({
@@ -33,19 +38,6 @@ export default {
     return jsonResponse({ error: "Not Found" }, 404, env)
   },
 } satisfies ExportedHandler<Env>;
-
-function jsonResponse(body: unknown, status: number, env: Env) {
-  return Response.json(body, { status, headers: corsHeaders(env) })
-}
-
-function corsHeaders(env: Env) {
-  return {
-    "Access-Control-Allow-Origin": env.CORS_ORIGIN ?? "http://localhost:5173",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Vary": "Origin",
-  }
-}
 
 function isB2Configured(env: Env) {
   return Boolean(env.B2_ENDPOINT && env.B2_REGION && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY)

@@ -37,6 +37,11 @@ export async function requireFirebaseUser(request: Request, projectId: string | 
   }
 }
 
+export function requireAuthenticatedUser(request: Request, env: Pick<Env, 'APP_ENV' | 'FIREBASE_PROJECT_ID' | 'FIREBASE_AUTH_EMULATOR'>) {
+  const allowEmulatorToken = env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true'
+  return requireFirebaseUser(request, env.FIREBASE_PROJECT_ID, allowEmulatorToken)
+}
+
 function getBearerToken(request: Request) {
   const authorization = request.headers.get('Authorization')
   const match = authorization?.match(/^Bearer\s+(.+)$/i)

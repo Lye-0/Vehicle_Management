@@ -18,6 +18,7 @@ D1マイグレーション:
 
 ```powershell
 pnpm --filter api db:migrate:local
+pnpm --filter api db:seed:local
 ```
 
 API:

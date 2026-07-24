@@ -497,6 +497,9 @@
 .payment-empty span { font-size: 12px; }
 
 .customer-directory { display: grid; grid-template-columns: 286px minmax(0, 1fr); align-items: start; gap: 20px; }
+.customer-sync-status { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: -6px 0 18px; padding: 10px 13px; color: var(--primary); border: 1px solid #c8daf8; border-radius: 8px; background: #f3f7ff; font-size: 11px; }
+.customer-sync-status.is-error { color: var(--danger); border-color: #f3c8c8; background: var(--danger-soft); }
+.customer-sync-status .text-button { color: inherit; font-size: 11px; }
 .customer-list-panel { position: sticky; top: 24px; padding: 0; overflow: hidden; }
 .customer-list-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 18px 16px; border-bottom: 1px solid var(--border); }
 .customer-list-header h2 { margin: 0; color: var(--text); font-size: 16px; }
