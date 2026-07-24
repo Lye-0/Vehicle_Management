@@ -18,6 +18,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { CustomerVehiclePage } from './components/CustomerVehiclePage'
+import { SalesPage } from './components/SalesPage'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'payments' | 'settings'
@@ -74,7 +75,7 @@ function App() {
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : <SectionPlaceholder section={activeSection} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : <SectionPlaceholder section={activeSection} />}
         </div>
       </main>
     </div>
