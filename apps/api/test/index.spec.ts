@@ -1,29 +1,23 @@
-import {
-	env,
-	createExecutionContext,
-	waitOnExecutionContext,
-	SELF,
-} from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import worker from "../src/index";
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
-
-describe("Hello World worker", () => {
-	it("responds with Hello World! (unit style)", async () => {
-		const request = new IncomingRequest("http://example.com");
-		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+describe("Vehicle Management API", () => {
+	it("returns service status from the health endpoint", async () => {
+		const response = await worker.fetch(new Request("http://example.com/health"), env, {} as ExecutionContext);
+		const body = await response.json() as { status: string; services: Record<string, string> };
+		expect(response.status).toBe(200);
+		expect(body.status).toBe("ok");
+		expect(body.services.database).toBe("configured");
 	});
 
-	it("responds with Hello World! (integration style)", async () => {
-		const response = await SELF.fetch("https://example.com");
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it("returns 401 when the current user is not authenticated", async () => {
+		const response = await SELF.fetch("https://example.com/api/auth/me");
+		expect(response.status).toBe(401);
+	});
+
+	it("returns 404 for unknown routes", async () => {
+		const response = await SELF.fetch("https://example.com/unknown");
+		expect(response.status).toBe(404);
 	});
 });

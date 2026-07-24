@@ -44,8 +44,10 @@
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
 
 	"d1_databases": [
-  		{
-    	"binding": "DB"
-  		}
+		{
+			"binding": "DB",
+			"database_name": "vehicle-management-db",
+			"migrations_dir": "migrations"
+		}
 	]
 }
