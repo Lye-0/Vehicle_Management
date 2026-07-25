@@ -1,0 +1,527 @@
+import { useEffect, useState, type FormEvent } from 'react'
+import type { User } from 'firebase/auth'
+import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Link2, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { apiFetchBlob } from '../lib/api'
+import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
+import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
+import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
+import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
+import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
+
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'members'
+type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
+
+const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
+  { id: 'shop', label: '店舗・帳票', description: '店舗情報と帳票に表示する内容', icon: Building2 },
+  { id: 'tax', label: '税・端数処理', description: '消費税と請求期限の初期値', icon: ReceiptText },
+  { id: 'masters', label: '明細候補', description: '販売・整備で選べる項目', icon: Settings2 },
+  { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
+]
+
+export function SettingsPage({ user }: { user: User }) {
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const [exporting, setExporting] = useState<CsvResource | ''>('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchSettings()
+      .then((nextSettings) => {
+        if (!cancelled) {
+          setSettings(nextSettings)
+          setError('')
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : '設定を読み込めませんでした。')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  function updateShop(field: keyof ShopSettings, value: string) {
+    setSettings((current) => ({ ...current, shop: { ...current.shop, [field]: value } }))
+    setSaved(false)
+  }
+
+  function updateDocument(field: keyof DocumentSettings, value: string | number) {
+    setSettings((current) => ({ ...current, document: { ...current.document, [field]: value } }))
+    setSaved(false)
+  }
+
+  function updateTax(field: keyof TaxSettings, value: string | number) {
+    setSettings((current) => ({ ...current, tax: { ...current.tax, [field]: value } as TaxSettings }))
+    setSaved(false)
+  }
+
+  function updatePreset(kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) {
+    setSettings((current) => ({ ...current, [kind]: current[kind].map((item, itemIndex) => itemIndex === index ? value : item) }))
+    setSaved(false)
+  }
+
+  function addPreset(kind: 'salesItemPresets' | 'maintenanceItemPresets') {
+    setSettings((current) => ({ ...current, [kind]: [...current[kind], ''] }))
+    setSaved(false)
+  }
+
+  function removePreset(kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) {
+    setSettings((current) => ({ ...current, [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index) }))
+    setSaved(false)
+  }
+
+  async function save() {
+    if (saving) return
+    setSaving(true)
+    setSaved(false)
+    try {
+      const nextSettings = await updateSettings(settings)
+      setSettings(nextSettings)
+      setSaved(true)
+      setError('')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '設定を保存できませんでした。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function exportCsv(resource: CsvResource) {
+    setExporting(resource)
+    setError('')
+    try {
+      const blob = await apiFetchBlob(`/api/export/${resource}`)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${csvResourceLabel(resource)}-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを出力できませんでした。')
+    } finally {
+      setExporting('')
+    }
+  }
+
+  return (
+    <>
+      <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
+      {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
+      <div className="settings-layout">
+        <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /><CsvImportPanel /><BackupPanel /></section>
+      </div>
+    </>
+  )
+}
+
+function MemberSettingsPanel({ user }: { user: User }) {
+  const [currentUser, setCurrentUser] = useState(user)
+  const [displayName, setDisplayName] = useState(user.displayName ?? '')
+  const [newEmail, setNewEmail] = useState(user.email ?? '')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [linkEmail, setLinkEmail] = useState(user.email ?? '')
+  const [linkPasswordValue, setLinkPasswordValue] = useState('')
+  const [loading, setLoading] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [members, setMembers] = useState<MemberRecord[]>([])
+  const [currentRole, setCurrentRole] = useState<MemberRole>('employee')
+  const [membersLoading, setMembersLoading] = useState(true)
+  const [memberLoading, setMemberLoading] = useState('')
+  const [memberError, setMemberError] = useState('')
+  const [memberMessage, setMemberMessage] = useState('')
+  const [showAddMember, setShowAddMember] = useState(false)
+  const [newMemberName, setNewMemberName] = useState('')
+  const [newMemberEmail, setNewMemberEmail] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
+
+  const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
+  const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
+  const isAnonymous = currentUser.isAnonymous
+  const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
+
+  useEffect(() => {
+    let cancelled = false
+    setMembersLoading(true)
+    fetchMembers()
+      .then((response) => {
+        if (cancelled) return
+        setMembers(response.members)
+        setCurrentRole(response.currentRole)
+        setMemberError('')
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setMemberError(getMemberError(reason))
+      })
+      .finally(() => {
+        if (!cancelled) setMembersLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  async function refreshUser() {
+    const nextUser = await refreshCurrentUser()
+    if (nextUser) {
+      setCurrentUser(nextUser)
+      setDisplayName(nextUser.displayName ?? '')
+      setNewEmail(nextUser.email ?? '')
+      setLinkEmail(nextUser.email ?? '')
+    }
+  }
+
+  async function runAction(action: string, callback: () => Promise<void>) {
+    setLoading(action)
+    setError('')
+    setMessage('')
+    try {
+      await callback()
+      await refreshUser()
+    } catch (reason) {
+      setError(getSettingsAuthError(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function saveDisplayName() {
+    if (!displayName.trim()) {
+      setError('表示名を入力してください。')
+      return
+    }
+    await runAction('displayName', async () => {
+      await changeCurrentDisplayName(displayName)
+      setMessage('表示名を更新しました。')
+    })
+  }
+
+  async function saveEmail() {
+    if (!newEmail.trim()) {
+      setError('メールアドレスを入力してください。')
+      return
+    }
+    await runAction('email', async () => {
+      await changeCurrentEmail(newEmail)
+      await sendCurrentEmailVerification()
+      setMessage('メールアドレスを更新し、確認メールを送信しました。')
+    })
+  }
+
+  async function savePassword() {
+    if (newPassword.length < 8) {
+      setError('パスワードは8文字以上で設定してください。')
+      return
+    }
+    if (newPassword !== passwordConfirmation) {
+      setError('パスワードが一致しません。')
+      return
+    }
+    await runAction('password', async () => {
+      await changeCurrentPassword(newPassword)
+      setNewPassword('')
+      setPasswordConfirmation('')
+      setMessage('パスワードを更新しました。')
+    })
+  }
+
+  async function linkPassword() {
+    if (!linkEmail.trim() || linkPasswordValue.length < 8) {
+      setError('メールアドレスと8文字以上のパスワードを入力してください。')
+      return
+    }
+    await runAction('link-password', async () => {
+      await addEmailPasswordLogin(linkEmail, linkPasswordValue)
+      setLinkPasswordValue('')
+      setMessage('メールアドレス＋パスワードを追加しました。')
+    })
+  }
+
+  async function linkGoogle() {
+    await runAction('link-google', async () => {
+      await addGoogleLogin()
+      setMessage('Googleログインを追加しました。')
+    })
+  }
+
+  async function unlinkProvider(providerId: string) {
+    if (!window.confirm('このログイン方法を解除しますか？')) return
+    await runAction(`unlink-${providerId}`, async () => {
+      await removeLoginProvider(providerId)
+      setMessage('ログイン方法を解除しました。')
+    })
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!newMemberName.trim() || !newMemberEmail.trim()) {
+      setMemberError('表示名とメールアドレスを入力してください。')
+      return
+    }
+    setMemberLoading('create')
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
+      if (response.member) setMembers((current) => [...current, response.member])
+      setTemporaryPassword(response.temporaryPassword)
+      setNewMemberName('')
+      setNewMemberEmail('')
+      setShowAddMember(false)
+      setMemberMessage('従業員を登録しました。初期パスワードはこの画面を閉じると再表示できません。')
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function changeMember(uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) {
+    setMemberLoading(uid)
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await updateMember(uid, input)
+      setMembers(response.members)
+      setMemberMessage('所属情報を更新しました。')
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function resetMemberPassword(uid: string) {
+    if (!window.confirm('このユーザーにパスワード再設定メールを送信しますか？')) return
+    setMemberLoading(`reset-${uid}`)
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await sendMemberPasswordReset(uid)
+      setMemberMessage(response.message)
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function copyTemporaryPassword() {
+    if (!temporaryPassword) return
+    if (!navigator.clipboard) {
+      setMemberMessage('この環境では自動コピーできません。表示されたパスワードを安全に控えてください。')
+      return
+    }
+    await navigator.clipboard.writeText(temporaryPassword)
+    setMemberMessage('初期パスワードをコピーしました。')
+  }
+
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={UsersRound} title="管理者・従業員" description="自分のプロフィールとログイン方法を管理します。" /><section className="panel settings-panel"><div className="account-summary"><span className="account-avatar"><UserRound size={24} /></span><div><strong>{currentUser.displayName || currentUser.email || 'ログインユーザー'}</strong><small>{isAnonymous ? '開発用匿名アカウント' : currentUser.email || 'メールアドレス未設定'}</small></div></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<div className="settings-form-grid account-form-grid"><SettingsField label="表示名" value={displayName} onChange={setDisplayName} /><div className="account-action-field"><span>プロフィール</span><button className="button button-secondary" type="button" disabled={Boolean(loading) || isAnonymous} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '保存中…' : '表示名を保存'}</button></div></div></section>{!isAnonymous && <section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>ログイン方法</h2><p>同じアカウントに複数のログイン方法を連携できます。</p></div></div><div className="provider-list">{currentUser.providerData.map((provider) => <div className="provider-row" key={provider.providerId}><span><strong>{provider.providerId === 'google.com' ? 'Google' : provider.providerId === 'password' ? 'メール＋パスワード' : provider.providerId}</strong><small>{provider.email || currentUser.email || '登録済み'}</small></span><span className="provider-actions"><span className="provider-badge">連携済み</span>{currentUser.providerData.length > 1 && <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider(provider.providerId)}>解除</button>}</span></div>)}</div>{!hasGoogle && <button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void linkGoogle()}>{loading === 'link-google' ? 'Googleを確認しています…' : 'Googleログインを追加'}</button>}{!hasPassword && <div className="account-link-form"><strong>メール＋パスワードを追加</strong><div className="settings-form-grid"><SettingsField label="メールアドレス" value={linkEmail} onChange={setLinkEmail} /><SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === 'link-password' ? '追加しています…' : 'メール認証を追加'}</button></div>}</section>}{!isAnonymous && <section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>アカウント情報</h2><p>メールアドレスやパスワードを変更できます。</p></div></div><div className="settings-form-grid"><SettingsField label="メールアドレス" value={newEmail} onChange={setNewEmail} /><div className="account-action-field"><span>メール確認</span>{currentUser.emailVerified ? <small className="verified-label">確認済み</small> : <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}</div></div><button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '更新中…' : 'メールアドレスを更新'}</button>{hasPassword && <div className="account-password-form"><strong>パスワード変更</strong><div className="settings-form-grid"><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '更新中…' : 'パスワードを変更'}</button></div>}</section>}<section className="panel settings-panel"><div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError('') }}><UserPlus size={15} />従業員を追加</button>}</div>{memberError && <div className="auth-error" role="alert">{memberError}</div>}{memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}{temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword('')}>閉じる</button></div></div>}{showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}{membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}</section></div>
+}
+
+function MemberRow({ member, currentRole, loading, onChange, onReset }: { member: MemberRecord; currentRole: MemberRole; loading: string; onChange: (uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) => void; onReset: (uid: string) => void }) {
+  const canEdit = !member.isSelf && member.role !== 'owner' && (currentRole === 'owner' || (currentRole === 'admin' && member.role === 'employee'))
+  const canReset = canEdit
+  return <article className="member-row"><div className="member-avatar"><UserRound size={18} /></div><div className="member-main"><div className="member-heading"><strong>{member.displayName}</strong>{member.isSelf && <span className="member-self-badge">自分</span>}{member.mustChangePassword && <span className="member-pending-badge">初回変更待ち</span>}</div><small>{member.email || 'メールアドレス未設定'}</small></div><div className="member-role-control">{member.role === 'owner' ? <span className="member-role-badge"><ShieldCheck size={13} />オーナー</span> : canEdit ? <select aria-label={`${member.displayName}の権限`} value={member.role} disabled={Boolean(loading)} onChange={(event) => onChange(member.uid, { role: event.target.value as Exclude<MemberRole, 'owner'> })}><option value="employee">従業員</option><option value="admin">管理者</option></select> : <span className="member-role-badge">{member.role === 'admin' ? '管理者' : '従業員'}</span>}</div><div className="member-status-control">{canEdit ? <button className={`member-status-button is-${member.status}`} type="button" disabled={Boolean(loading)} onClick={() => onChange(member.uid, { status: member.status === 'active' ? 'suspended' : 'active' })}>{member.status === 'active' ? '利用中' : '停止中'}</button> : <span className={`member-status-badge is-${member.status}`}>{member.status === 'active' ? '利用中' : '停止中'}</span>}</div>{canReset && <button className="text-button member-reset-button" type="button" disabled={Boolean(loading)} onClick={() => onReset(member.uid)}>{loading === `reset-${member.uid}` ? '送信中…' : '再設定メール'}</button>}</article>
+}
+
+function getMemberError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  return '管理者・従業員情報の処理に失敗しました。'
+}
+
+function getSettingsAuthError(error: unknown) {
+  if (!(error instanceof Error) || !error.message) return 'アカウント情報の更新に失敗しました。'
+  if (error.message.includes('auth/requires-recent-login')) return '安全のため、いったんログアウトして再ログインしてからお試しください。'
+  if (error.message.includes('auth/credential-already-in-use') || error.message.includes('auth/email-already-in-use')) return 'この認証情報は別のアカウントで使用されています。'
+  if (error.message.includes('auth/weak-password')) return 'パスワードは8文字以上で設定してください。'
+  if (error.message.includes('auth/popup-closed-by-user')) return 'Googleの認証画面が閉じられました。'
+  return error.message
+}
+
+function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
+  const resources: Array<{ id: CsvResource; label: string; description: string }> = [
+    { id: 'customers', label: '顧客一覧', description: '顧客情報を出力' },
+    { id: 'vehicles', label: '車両一覧', description: '車両情報を出力' },
+    { id: 'sales', label: '販売書類', description: '販売書類と明細を出力' },
+    { id: 'maintenance', label: '整備書類', description: '整備書類と明細を出力' },
+    { id: 'payments', label: '入金管理', description: '請求・入金状況を出力' },
+  ]
+  return <section className="panel settings-panel csv-export-panel"><div className="settings-section-heading"><Table2 size={18} /><div><h2>データ出力</h2><p>Excelで開けるUTF-8 CSVとして現在のデータをダウンロードします。</p></div></div><div className="csv-export-grid">{resources.map((resource) => <button className="csv-export-card" type="button" key={resource.id} disabled={Boolean(exporting)} onClick={() => onExport(resource.id)}><span className="csv-export-icon"><Download size={17} /></span><span><strong>{resource.label}</strong><small>{exporting === resource.id ? '出力中…' : resource.description}</small></span><ChevronRightIcon /></button>)}</div></section>
+}
+
+function CsvImportPanel() {
+  const [resource, setResource] = useState<CsvImportResource>('customers')
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<CsvImportPreview | null>(null)
+  const [result, setResult] = useState<CsvImportResult | null>(null)
+  const [loading, setLoading] = useState<'preview' | 'import' | ''>('')
+  const [error, setError] = useState('')
+  const resourceOptions: Array<{ id: CsvImportResource; label: string; description: string }> = [
+    { id: 'customers', label: '顧客一覧', description: '顧客情報を取込' },
+    { id: 'vehicles', label: '車両一覧', description: '顧客に紐づく車両を取込' },
+    { id: 'sales', label: '販売書類', description: '販売書類と明細を取込' },
+    { id: 'maintenance', label: '整備書類', description: '整備書類と明細を取込' },
+    { id: 'payments', label: '入金管理', description: '請求ごとの入金情報を取込' },
+  ]
+
+  function selectResource(nextResource: CsvImportResource) {
+    setResource(nextResource)
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+    setError('')
+  }
+
+  async function previewFile() {
+    if (!file) {
+      setError('CSVファイルを選択してください。')
+      return
+    }
+    setLoading('preview')
+    setError('')
+    setResult(null)
+    try {
+      setPreview(await previewCsvImport(resource, file))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを確認できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function importFile() {
+    if (!file || !preview || preview.totalRows <= preview.errors.length) return
+    setLoading('import')
+    setError('')
+    try {
+      setResult(await commitCsvImport(resource, file))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを取り込めませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  const previewHeaders = preview?.previewRows[0] ? Object.keys(preview.previewRows[0]).slice(0, 5) : []
+  return <section className="panel settings-panel csv-import-panel"><div className="settings-section-heading"><FileUp size={18} /><div><h2>CSVインポート・移行</h2><p>この画面から出力したCSVを確認してから、現在の組織へ取り込みます。実行には管理者権限が必要です。</p></div></div><div className="csv-import-controls"><label className="form-field"><span>取込対象</span><select value={resource} onChange={(event) => selectResource(event.target.value as CsvImportResource)} disabled={Boolean(loading)}>{resourceOptions.map((option) => <option key={option.id} value={option.id}>{option.label} - {option.description}</option>)}</select></label><label className="csv-file-input"><span><Upload size={16} />CSVファイルを選択</span><small>{file ? `${file.name} (${formatFileSize(file.size)})` : '5MB・5,000行以内'}</small><input type="file" accept=".csv,text/csv" disabled={Boolean(loading)} onChange={(event) => { const nextFile = event.target.files?.[0] ?? null; setFile(nextFile); setPreview(null); setResult(null); setError('') }} /></label><button className="button button-secondary" type="button" disabled={!file || Boolean(loading)} onClick={() => void previewFile()}>{loading === 'preview' ? '確認中…' : '内容を確認'}</button></div>{error && <div className="auth-error" role="alert">{error}</div>}{preview && <div className="csv-import-preview"><div className="csv-import-summary"><span>全{preview.totalRows}行</span><span className={preview.errors.length ? 'is-warning' : 'is-success'}>{preview.errors.length ? `要確認 ${preview.errors.length}行` : '入力エラーなし'}</span></div>{previewHeaders.length > 0 && <div className="csv-preview-table"><div className="csv-preview-row csv-preview-head">{previewHeaders.map((header) => <span key={header}>{header}</span>)}</div>{preview.previewRows.slice(0, 5).map((row, index) => <div className="csv-preview-row" key={index}>{previewHeaders.map((header) => <span key={header} title={row[header]}>{row[header] || '-'}</span>)}</div>)}</div>}{preview.errors.length > 0 && <ul className="csv-import-errors">{preview.errors.slice(0, 5).map((item) => <li key={`${item.row}-${item.message}`}>{item.row}行目: {item.message}</li>)}</ul>}<button className="button button-primary" type="button" disabled={Boolean(loading) || preview.totalRows <= preview.errors.length} onClick={() => void importFile()}>{loading === 'import' ? '取り込み中…' : 'この内容を取り込む'}</button></div>}{result && <div className="settings-success csv-import-result" role="status"><CheckCircle2 size={16} />{result.imported}件を追加、{result.updated}件を更新、{result.skipped}件をスキップしました。{result.errors.length > 0 && <span>エラー{result.errors.length}件</span>}</div>}</section>
+}
+
+function ChevronRightIcon() { return <span className="csv-export-arrow">›</span> }
+
+function csvResourceLabel(resource: CsvResource) {
+  return resource === 'customers' ? '顧客一覧' : resource === 'vehicles' ? '車両一覧' : resource === 'sales' ? '販売書類' : resource === 'maintenance' ? '整備書類' : '入金管理'
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function BackupPanel() {
+  const [backups, setBackups] = useState<BackupRecord[]>([])
+  const [canManage, setCanManage] = useState(false)
+  const [loading, setLoading] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  async function load() {
+    try {
+      const response = await fetchBackups()
+      setBackups(response.backups)
+      setCanManage(response.canManage)
+      setError('')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップ一覧を読み込めませんでした。')
+    }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  async function runBackup() {
+    setLoading('create')
+    setError('')
+    setMessage('')
+    try {
+      await createBackup()
+      setMessage('バックアップを作成しました。')
+      await load()
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを作成できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runRestore(backup: BackupRecord) {
+    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）で現在の組織データを置き換えます。続行しますか？`)) return
+    setLoading(`restore-${backup.id}`)
+    setError('')
+    setMessage('')
+    try {
+      const response = await restoreBackup(backup.id)
+      setMessage(`${response.rowCount}件のデータを復元しました。画面を再読み込みします。`)
+      window.setTimeout(() => window.location.reload(), 800)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを復元できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runDelete(backup: BackupRecord) {
+    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）を削除しますか？`)) return
+    setLoading(`delete-${backup.id}`)
+    setError('')
+    setMessage('')
+    try {
+      await deleteBackup(backup.id)
+      setBackups((current) => current.filter((item) => item.id !== backup.id))
+      setMessage('バックアップを削除しました。')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを削除できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  return <section className="panel settings-panel backup-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>バックアップ・復元</h2><p>D1の組織データとB2の車両添付ファイルをまとめて保存します。</p></div>{canManage && <button className="button button-secondary settings-add-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackup()}>{loading === 'create' ? '作成中…' : '今すぐバックアップ'}</button>}</div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{!canManage && !error && <div className="backup-notice">バックアップの作成・復元は管理者のみ実行できます。</div>}{backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}><span className="backup-icon"><Archive size={17} /></span><span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件</small></span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : '削除'}</button></span>}</div>)}</div>}</section>
+}
+
+function formatBackupDate(value: string) {
+  const date = new Date(value.replace(' ', 'T'))
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP')
+}
+
+function ShopSettingsPanel({ settings, onUpdate, onUpdateDocument }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗・帳票情報" description="見積書、注文書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="担当者名" value={settings.shop.representative} onChange={(value) => onUpdate('representative', value)} /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先・帳票フッター</h2><p>請求書などに表示する支払情報を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="金融機関名" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座情報" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /><SettingsField label="帳票フッター" value={settings.document.footerNote} onChange={(value) => onUpdateDocument('footerNote', value)} wide /><SettingsField label="支払案内" value={settings.document.paymentNote} onChange={(value) => onUpdateDocument('paymentNote', value)} wide /></div></section></div>
+}
+
+function TaxSettingsPanel({ settings, onUpdateTax, onUpdateDocument }: { settings: AppSettings; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={ReceiptText} title="税・端数処理" description="販売書類・整備書類の金額計算に使う初期値です。" /><section className="panel settings-panel"><div className="settings-section-heading"><ReceiptText size={18} /><div><h2>消費税</h2><p>書類作成時の税率と表示方法を設定します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>消費税率</span><div className="settings-number-input"><input type="number" min="0" max="100" value={settings.tax.consumptionTaxRate} onChange={(event) => onUpdateTax('consumptionTaxRate', Number(event.target.value))} /><span>%</span></div></label><label className="form-field"><span>金額表示</span><select value={settings.tax.display} onChange={(event) => onUpdateTax('display', event.target.value)}><option value="税込">税込</option><option value="税別">税別</option></select></label><label className="form-field"><span>端数処理</span><select value={settings.tax.rounding} onChange={(event) => onUpdateTax('rounding', event.target.value)}><option value="切り捨て">切り捨て</option><option value="四捨五入">四捨五入</option></select></label></div></section><section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>帳票の初期値</h2><p>新しい販売書類を作成するときに適用します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>支払期限の初期日数</span><div className="settings-number-input"><input type="number" min="0" max="365" value={settings.document.defaultDueDays} onChange={(event) => onUpdateDocument('defaultDueDays', Number(event.target.value))} /><span>日後</span></div></label></div></section></div>
+}
+
+function MasterSettingsPanel({ settings, onUpdate, onAdd, onRemove }: { settings: AppSettings; onUpdate: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) => void; onAdd: (kind: 'salesItemPresets' | 'maintenanceItemPresets') => void; onRemove: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Settings2} title="明細候補" description="販売書類・整備書類で選択できる定型項目です。" /><PresetPanel title="販売明細候補" description="車両本体、付属品、諸費用など" items={settings.salesItemPresets} kind="salesItemPresets" onUpdate={onUpdate} onAdd={onAdd} onRemove={onRemove} /><PresetPanel title="整備作業・部品候補" description="作業内容や部品名など" items={settings.maintenanceItemPresets} kind="maintenanceItemPresets" onUpdate={onUpdate} onAdd={onAdd} onRemove={onRemove} /></div>
+}
+
+function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof Building2; title: string; description: string }) {
+  return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
+}
+
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password' }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
+}
+
+function PresetPanel({ title, description, items, kind, onUpdate, onAdd, onRemove }: { title: string; description: string; items: string[]; kind: 'salesItemPresets' | 'maintenanceItemPresets'; onUpdate: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) => void; onAdd: (kind: 'salesItemPresets' | 'maintenanceItemPresets') => void; onRemove: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) => void }) {
+  return <section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>{title}</h2><p>{description}</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => onAdd(kind)}><Plus size={15} />項目を追加</button></div><div className="settings-preset-list">{items.map((item, index) => <div className="settings-preset-row" key={`${kind}-${index}`}><span className="settings-preset-index">{index + 1}</span><input value={item} onChange={(event) => onUpdate(kind, index, event.target.value)} placeholder="項目名" /><button className="icon-button" type="button" aria-label={`${index + 1}番目の項目を削除`} onClick={() => onRemove(kind, index)}><Trash2 size={16} /></button></div>)}{items.length === 0 && <div className="settings-preset-empty">登録されている項目はありません。右上の「項目を追加」から登録できます。</div>}</div></section>
+}

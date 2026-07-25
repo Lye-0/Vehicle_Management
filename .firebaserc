@@ -1,5 +1,6 @@
 {
-  "projects": {
-    "default": "vehicle-management-64"
-  }
+	"projects": {
+		"default": "vehicle-management-64",
+		"development": "vehicle-management-64"
+	}
 }

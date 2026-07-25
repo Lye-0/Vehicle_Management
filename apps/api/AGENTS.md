@@ -14,7 +14,8 @@ For all limits and quotas, retrieve from the product's `/platform/limits/` page.
 | Command | Purpose |
 |---------|---------|
 | `npx wrangler dev` | Local development |
-| `npx wrangler deploy` | Deploy to Cloudflare |
+| `pnpm run deploy:production` | Deploy the named production environment |
+| `pnpm run db:migrate:production` | Apply migrations to the production D1 |
 | `npx wrangler types` | Generate TypeScript types |
 
 Run `wrangler types` after changing bindings in wrangler.jsonc.

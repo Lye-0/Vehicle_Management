@@ -44,8 +44,40 @@
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
 
 	"d1_databases": [
-  		{
-    	"binding": "DB"
-  		}
-	]
+		{
+			"binding": "DB",
+			"database_name": "vehicle-management-db",
+			"migrations_dir": "migrations"
+		}
+	],
+	"env": {
+		"development": {
+			"name": "vehicle-management-api-development",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "vehicle-management-db",
+					"migrations_dir": "migrations"
+				}
+			]
+		},
+		"production": {
+			"name": "vehicle-management-api-production",
+			"vars": {
+				"APP_ENV": "production",
+				"DATA_ENV": "production",
+				"FIREBASE_PROJECT_ID": "REPLACE_WITH_PRODUCTION_FIREBASE_PROJECT_ID",
+				"FIREBASE_AUTH_EMULATOR": "false",
+				"CORS_ORIGIN": "https://REPLACE_WITH_PRODUCTION_WEB_DOMAIN"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "vehicle-management-db-production",
+					"database_id": "00000000-0000-0000-0000-000000000000",
+					"migrations_dir": "migrations"
+				}
+			]
+		}
+	}
 }

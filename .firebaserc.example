@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "vehicle-management-64",
+    "development": "vehicle-management-64",
+    "production": "REPLACE_WITH_PRODUCTION_FIREBASE_PROJECT_ID"
+  }
+}
