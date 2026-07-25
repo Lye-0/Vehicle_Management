@@ -15,6 +15,12 @@ pnpm dev
 - Cloudflare Workers API（`http://127.0.0.1:8787`）
 - Vite Web（`http://localhost:5173`）
 
+API起動時に開発用ローカルD1の未適用マイグレーションを自動適用します。手動で適用する場合は次を実行してください。
+
+```powershell
+pnpm migrate:local
+```
+
 個別に起動する場合は、次を使用します。
 
 ```powershell
