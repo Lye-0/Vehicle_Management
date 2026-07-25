@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
-import { Banknote, Building2, Copy, Download, FileText, KeyRound, Link2, Plus, ReceiptText, Save, Settings2, ShieldCheck, Table2, Trash2, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Link2, Plus, ReceiptText, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
+import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
@@ -115,7 +116,7 @@ export function SettingsPage({ user }: { user: User }) {
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /></section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /><CsvImportPanel /></section>
       </div>
     </>
   )
@@ -356,10 +357,73 @@ function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; 
   return <section className="panel settings-panel csv-export-panel"><div className="settings-section-heading"><Table2 size={18} /><div><h2>データ出力</h2><p>Excelで開けるUTF-8 CSVとして現在のデータをダウンロードします。</p></div></div><div className="csv-export-grid">{resources.map((resource) => <button className="csv-export-card" type="button" key={resource.id} disabled={Boolean(exporting)} onClick={() => onExport(resource.id)}><span className="csv-export-icon"><Download size={17} /></span><span><strong>{resource.label}</strong><small>{exporting === resource.id ? '出力中…' : resource.description}</small></span><ChevronRightIcon /></button>)}</div></section>
 }
 
+function CsvImportPanel() {
+  const [resource, setResource] = useState<CsvImportResource>('customers')
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<CsvImportPreview | null>(null)
+  const [result, setResult] = useState<CsvImportResult | null>(null)
+  const [loading, setLoading] = useState<'preview' | 'import' | ''>('')
+  const [error, setError] = useState('')
+  const resourceOptions: Array<{ id: CsvImportResource; label: string; description: string }> = [
+    { id: 'customers', label: '顧客一覧', description: '顧客情報を取込' },
+    { id: 'vehicles', label: '車両一覧', description: '顧客に紐づく車両を取込' },
+    { id: 'sales', label: '販売書類', description: '販売書類と明細を取込' },
+    { id: 'maintenance', label: '整備書類', description: '整備書類と明細を取込' },
+    { id: 'payments', label: '入金管理', description: '請求ごとの入金情報を取込' },
+  ]
+
+  function selectResource(nextResource: CsvImportResource) {
+    setResource(nextResource)
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+    setError('')
+  }
+
+  async function previewFile() {
+    if (!file) {
+      setError('CSVファイルを選択してください。')
+      return
+    }
+    setLoading('preview')
+    setError('')
+    setResult(null)
+    try {
+      setPreview(await previewCsvImport(resource, file))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを確認できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function importFile() {
+    if (!file || !preview || preview.totalRows <= preview.errors.length) return
+    setLoading('import')
+    setError('')
+    try {
+      setResult(await commitCsvImport(resource, file))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを取り込めませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  const previewHeaders = preview?.previewRows[0] ? Object.keys(preview.previewRows[0]).slice(0, 5) : []
+  return <section className="panel settings-panel csv-import-panel"><div className="settings-section-heading"><FileUp size={18} /><div><h2>CSVインポート・移行</h2><p>この画面から出力したCSVを確認してから、現在の組織へ取り込みます。実行には管理者権限が必要です。</p></div></div><div className="csv-import-controls"><label className="form-field"><span>取込対象</span><select value={resource} onChange={(event) => selectResource(event.target.value as CsvImportResource)} disabled={Boolean(loading)}>{resourceOptions.map((option) => <option key={option.id} value={option.id}>{option.label} - {option.description}</option>)}</select></label><label className="csv-file-input"><span><Upload size={16} />CSVファイルを選択</span><small>{file ? `${file.name} (${formatFileSize(file.size)})` : '5MB・5,000行以内'}</small><input type="file" accept=".csv,text/csv" disabled={Boolean(loading)} onChange={(event) => { const nextFile = event.target.files?.[0] ?? null; setFile(nextFile); setPreview(null); setResult(null); setError('') }} /></label><button className="button button-secondary" type="button" disabled={!file || Boolean(loading)} onClick={() => void previewFile()}>{loading === 'preview' ? '確認中…' : '内容を確認'}</button></div>{error && <div className="auth-error" role="alert">{error}</div>}{preview && <div className="csv-import-preview"><div className="csv-import-summary"><span>全{preview.totalRows}行</span><span className={preview.errors.length ? 'is-warning' : 'is-success'}>{preview.errors.length ? `要確認 ${preview.errors.length}行` : '入力エラーなし'}</span></div>{previewHeaders.length > 0 && <div className="csv-preview-table"><div className="csv-preview-row csv-preview-head">{previewHeaders.map((header) => <span key={header}>{header}</span>)}</div>{preview.previewRows.slice(0, 5).map((row, index) => <div className="csv-preview-row" key={index}>{previewHeaders.map((header) => <span key={header} title={row[header]}>{row[header] || '-'}</span>)}</div>)}</div>}{preview.errors.length > 0 && <ul className="csv-import-errors">{preview.errors.slice(0, 5).map((item) => <li key={`${item.row}-${item.message}`}>{item.row}行目: {item.message}</li>)}</ul>}<button className="button button-primary" type="button" disabled={Boolean(loading) || preview.totalRows <= preview.errors.length} onClick={() => void importFile()}>{loading === 'import' ? '取り込み中…' : 'この内容を取り込む'}</button></div>}{result && <div className="settings-success csv-import-result" role="status"><CheckCircle2 size={16} />{result.imported}件を追加、{result.updated}件を更新、{result.skipped}件をスキップしました。{result.errors.length > 0 && <span>エラー{result.errors.length}件</span>}</div>}</section>
+}
+
 function ChevronRightIcon() { return <span className="csv-export-arrow">›</span> }
 
 function csvResourceLabel(resource: CsvResource) {
   return resource === 'customers' ? '顧客一覧' : resource === 'vehicles' ? '車両一覧' : resource === 'sales' ? '販売書類' : resource === 'maintenance' ? '整備書類' : '入金管理'
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function ShopSettingsPanel({ settings, onUpdate, onUpdateDocument }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
