@@ -23,12 +23,12 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
     const organizationId = context.organization.organizationId
 
     if (isCollection) {
-      if (request.method === 'GET') return listMaintenanceDocuments(env, database, organizationId)
-      if (request.method === 'POST') return createMaintenanceDocument(request, env, database, organizationId)
+      if (request.method === 'GET') return await listMaintenanceDocuments(env, database, organizationId)
+      if (request.method === 'POST') return await createMaintenanceDocument(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
-    if (request.method === 'PATCH') return updateMaintenanceDocument(request, env, database, documentMatch![1], organizationId)
+    if (request.method === 'PATCH') return await updateMaintenanceDocument(request, env, database, documentMatch![1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)

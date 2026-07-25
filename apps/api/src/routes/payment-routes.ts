@@ -19,10 +19,10 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
     const context = await requireOrganizationContext(request, env, database)
     const organizationId = context.organization.organizationId
     if (isCollection) {
-      if (request.method === 'GET') return listPayments(env, database, organizationId)
+      if (request.method === 'GET') return await listPayments(env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
-    if (request.method === 'PATCH') return updatePayment(request, env, database, decodeURIComponent(itemMatch![1]), decodeURIComponent(itemMatch![2]), organizationId)
+    if (request.method === 'PATCH') return await updatePayment(request, env, database, decodeURIComponent(itemMatch![1]), decodeURIComponent(itemMatch![2]), organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)

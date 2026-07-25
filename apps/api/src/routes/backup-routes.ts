@@ -20,9 +20,9 @@ export async function handleBackupRoutes(request: Request, env: Env): Promise<Re
       const records = await database.select().from(backupRecords).where(eq(backupRecords.organizationId, context.organization.organizationId)).orderBy(desc(backupRecords.createdAt)).all()
       return jsonResponse({ canManage: context.organization.role === 'owner' || context.organization.role === 'admin', backups: records.map(serializeBackup) }, 200, env)
     }
-    if (collectionPath && request.method === 'POST') return createBackup(request, env, database)
-    if (restoreMatch && request.method === 'POST') return restoreBackup(request, env, database, decodeURIComponent(restoreMatch[1]))
-    if (itemMatch && request.method === 'DELETE') return deleteBackup(request, env, database, decodeURIComponent(itemMatch[1]))
+    if (collectionPath && request.method === 'POST') return await createBackup(request, env, database)
+    if (restoreMatch && request.method === 'POST') return await restoreBackup(request, env, database, decodeURIComponent(restoreMatch[1]))
+    if (itemMatch && request.method === 'DELETE') return await deleteBackup(request, env, database, decodeURIComponent(itemMatch[1]))
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)

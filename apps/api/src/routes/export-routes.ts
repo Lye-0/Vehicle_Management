@@ -19,11 +19,11 @@ export async function handleExportRoutes(request: Request, env: Env): Promise<Re
     const database = createDatabase(env.DB)
     const context = await requireOrganizationContext(request, env, database)
     const organizationId = context.organization.organizationId
-    if (resource === 'customers') return exportCustomers(env, database, organizationId)
-    if (resource === 'vehicles') return exportVehicles(env, database, organizationId)
-    if (resource === 'sales') return exportSales(env, database, organizationId)
-    if (resource === 'maintenance') return exportMaintenance(env, database, organizationId)
-    return exportPayments(env, database, organizationId)
+    if (resource === 'customers') return await exportCustomers(env, database, organizationId)
+    if (resource === 'vehicles') return await exportVehicles(env, database, organizationId)
+    if (resource === 'sales') return await exportSales(env, database, organizationId)
+    if (resource === 'maintenance') return await exportMaintenance(env, database, organizationId)
+    return await exportPayments(env, database, organizationId)
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonError(error.message, 401, env)
     if (error instanceof HttpError) return jsonError(error.message, error.status, env)

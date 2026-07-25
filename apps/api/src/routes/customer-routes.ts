@@ -21,39 +21,39 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     const organizationId = context.organization.organizationId
 
     if (pathname === '/api/customers') {
-      if (request.method === 'GET') return listCustomers(request, env, database, organizationId)
-      if (request.method === 'POST') return createCustomer(request, env, database, organizationId)
+      if (request.method === 'GET') return await listCustomers(request, env, database, organizationId)
+      if (request.method === 'POST') return await createCustomer(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const customerMatch = pathname.match(/^\/api\/customers\/([^/]+)$/)
     if (customerMatch) {
-      if (request.method === 'PATCH') return updateCustomer(request, env, database, customerMatch[1], organizationId)
+      if (request.method === 'PATCH') return await updateCustomer(request, env, database, customerMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleCollectionMatch = pathname.match(/^\/api\/customers\/([^/]+)\/vehicles$/)
     if (vehicleCollectionMatch) {
-      if (request.method === 'POST') return createVehicle(request, env, database, vehicleCollectionMatch[1], organizationId)
+      if (request.method === 'POST') return await createVehicle(request, env, database, vehicleCollectionMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleFileCollectionMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files$/)
     if (vehicleFileCollectionMatch) {
-      if (request.method === 'POST') return uploadVehicleFile(request, env, database, vehicleFileCollectionMatch[1], organizationId)
+      if (request.method === 'POST') return await uploadVehicleFile(request, env, database, vehicleFileCollectionMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleFileItemMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files\/([^/]+)$/)
     if (vehicleFileItemMatch) {
-      if (request.method === 'GET') return downloadVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
-      if (request.method === 'DELETE') return deleteVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
+      if (request.method === 'GET') return await downloadVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
+      if (request.method === 'DELETE') return await deleteVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleMatch = pathname.match(/^\/api\/vehicles\/([^/]+)$/)
     if (vehicleMatch) {
-      if (request.method === 'PATCH') return updateVehicle(request, env, database, vehicleMatch[1], organizationId)
+      if (request.method === 'PATCH') return await updateVehicle(request, env, database, vehicleMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 

@@ -24,9 +24,9 @@ export async function handleMemberRoutes(request: Request, env: Env): Promise<Re
       const context = await requireOrganizationContext(request, env, database)
       return jsonResponse({ currentRole: context.organization.role, members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
     }
-    if (collectionPath && request.method === 'POST') return createMember(request, env, database)
-    if (resetMatch && request.method === 'POST') return resetMemberPassword(request, env, database, decodeURIComponent(resetMatch[1]))
-    if (memberMatch && request.method === 'PATCH') return updateMember(request, env, database, decodeURIComponent(memberMatch[1]))
+    if (collectionPath && request.method === 'POST') return await createMember(request, env, database)
+    if (resetMatch && request.method === 'POST') return await resetMemberPassword(request, env, database, decodeURIComponent(resetMatch[1]))
+    if (memberMatch && request.method === 'PATCH') return await updateMember(request, env, database, decodeURIComponent(memberMatch[1]))
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)

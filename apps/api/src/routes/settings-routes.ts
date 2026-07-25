@@ -41,7 +41,7 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     const context = await requireOrganizationContext(request, env, database)
     const organizationId = context.organization.organizationId
     if (request.method === 'GET') return jsonResponse({ settings: await loadSettings(database, organizationId) }, 200, env)
-    if (request.method === 'PATCH') return updateSettings(request, env, database, organizationId)
+    if (request.method === 'PATCH') return await updateSettings(request, env, database, organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)

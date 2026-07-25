@@ -20,13 +20,13 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
     const organizationId = context.organization.organizationId
 
     if (isCollection) {
-      if (request.method === 'GET') return listSalesDocuments(request, env, database, organizationId)
-      if (request.method === 'POST') return createSalesDocument(request, env, database, organizationId)
+      if (request.method === 'GET') return await listSalesDocuments(request, env, database, organizationId)
+      if (request.method === 'POST') return await createSalesDocument(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     if (!documentMatch) throw new HttpError(404, '販売書類のAPIが見つかりません。')
-    if (request.method === 'PATCH') return updateSalesDocument(request, env, database, documentMatch[1], organizationId)
+    if (request.method === 'PATCH') return await updateSalesDocument(request, env, database, documentMatch[1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
