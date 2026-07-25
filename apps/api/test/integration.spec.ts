@@ -18,6 +18,14 @@ type TestEnv = Env & {
 };
 
 describe("CLI authenticated workflow", () => {
+	it("rejects missing and malformed authentication before loading organization data", async () => {
+		const missingToken = await requestJsonWithoutAuth<JsonObject>("/api/customers");
+		expect(missingToken.response.status).toBe(401);
+
+		const malformedToken = await requestJsonWithToken<JsonObject>("/api/customers", "not-a-jwt");
+		expect(malformedToken.response.status).toBe(401);
+	});
+
 	it("completes the core organization workflow without browser interaction", async () => {
 		let customerId: string | undefined;
 		let vehicleId: string | undefined;
@@ -135,6 +143,8 @@ describe("CLI authenticated workflow", () => {
 			const updatedSchedule = await requestJson<JsonObject>(`/api/inspection-schedules/${inspectionScheduleId}`, 'PATCH', { status: '完了', note: `${marker} 点検完了` });
 			expect(updatedSchedule.response.status).toBe(200);
 			expect(objectValue(updatedSchedule.body.schedule)).toEqual(expect.objectContaining({ status: '完了', note: `${marker} 点検完了` }));
+			const tamperedSchedule = await requestJson<JsonObject>(`/api/inspection-schedules/${inspectionScheduleId}`, 'PATCH', { status: '不正状態' });
+			expect(tamperedSchedule.response.status).toBe(400);
 
 			const sales = await requestJson<JsonObject>("/api/sales-documents", "POST", {
 				type: "請求書",
@@ -176,6 +186,8 @@ describe("CLI authenticated workflow", () => {
 			});
 			expect(updatedSales.response.status).toBe(200);
 			expect(objectValue(updatedSales.body.document)).toEqual(expect.objectContaining({ number: `${marker}-SALE-EDITED`, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
+			const tamperedSalesStatus = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", { status: "不正状態" });
+			expect(tamperedSalesStatus.response.status).toBe(400);
 
 			const maintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
 				type: "整備請求書",
@@ -218,6 +230,8 @@ describe("CLI authenticated workflow", () => {
 			});
 			expect(updatedMaintenance.response.status).toBe(200);
 			expect(objectValue(updatedMaintenance.body.document)).toEqual(expect.objectContaining({ status: "完了", plannedReleaseDate: "2026-07-27", completionDate: "2026-07-27" }));
+			const tamperedMaintenanceStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "不正状態" });
+			expect(tamperedMaintenanceStatus.response.status).toBe(400);
 
 			const payment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}`, "PATCH", {
 				paidAmount: 50000,
@@ -279,6 +293,16 @@ describe("CLI authenticated workflow", () => {
 			const rejectedUpload = await requestForm<JsonObject>(`/api/vehicles/${vehicleId}/files`, invalidAttachment);
 			if (Number(rejectedUpload.response.status) !== 415) throw new Error(`不正添付の応答が不正です: ${rejectedUpload.response.status}`);
 
+			const emptyCsv = new FormData();
+			emptyCsv.append("file", new File([""], "empty.csv", { type: "text/csv" }));
+			const emptyCsvResponse = await requestForm<JsonObject>("/api/import/customers/preview", emptyCsv);
+			expect(emptyCsvResponse.response.status).toBe(400);
+
+			const malformedCsv = new FormData();
+			malformedCsv.append("file", new File(["顧客ID,顧客名\r\n\"閉じていない"], "malformed.csv", { type: "text/csv" }));
+			const malformedCsvResponse = await requestForm<JsonObject>("/api/import/customers/preview", malformedCsv);
+			expect(malformedCsvResponse.response.status).toBe(400);
+
 			const b2Configured = isB2Configured(env as TestEnv);
 			if (b2Configured) {
 				const attachment = new FormData();
@@ -328,6 +352,23 @@ describe("CLI authenticated workflow", () => {
 				expect.objectContaining({ id: importedCustomerId, name: `${marker} CSV顧客` }),
 			]));
 
+			const invalidRowCsv = [
+				"顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数",
+				`${importedCustomerId},C-${marker}-INVALID,,シーエスブイ,090-3333-3333,invalid@example.com,100-0004,東京都台東区,${marker} invalid,0`,
+			].join("\r\n");
+			const invalidRowPreviewFile = new FormData();
+			invalidRowPreviewFile.append("file", new File([invalidRowCsv], "invalid-row.csv", { type: "text/csv" }));
+			const invalidRowPreview = await requestForm<JsonObject>("/api/import/customers/preview", invalidRowPreviewFile);
+			expect(invalidRowPreview.response.status).toBe(200);
+			expect(arrayValue(invalidRowPreview.body.errors)).toEqual(expect.arrayContaining([expect.objectContaining({ row: 2 })]));
+			const invalidRowCommitFile = new FormData();
+			invalidRowCommitFile.append("file", new File([invalidRowCsv], "invalid-row.csv", { type: "text/csv" }));
+			const invalidRowCommit = await requestForm<JsonObject>("/api/import/customers/commit", invalidRowCommitFile);
+			expect(invalidRowCommit.response.status).toBe(200);
+			expect(invalidRowCommit.body.imported).toBe(0);
+			expect(invalidRowCommit.body.skipped).toBe(1);
+			expect(arrayValue(invalidRowCommit.body.errors)).toHaveLength(1);
+
 			const employeeCannotManageMembers = await requestJson<JsonObject>(`/api/organization/members/${ownerUid}`, "PATCH", { status: "suspended" }, employeeUid);
 			expect(employeeCannotManageMembers.response.status).toBe(403);
 			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", new FormData(), employeeUid);
@@ -346,12 +387,18 @@ describe("CLI authenticated workflow", () => {
 
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);
+			const crossTenantCustomerMutation = await requestJson<JsonObject>(`/api/customers/other-customer-${marker.toLowerCase()}`, "PATCH", { name: `${marker} 越境更新` });
+			expect(crossTenantCustomerMutation.response.status).toBe(404);
+			const crossTenantVehicleHistory = await requestJson<JsonObject>(`/api/vehicles/vehicle-from-other-organization-${marker.toLowerCase()}/history`);
+			expect(crossTenantVehicleHistory.response.status).toBe(404);
 
 			if (b2Configured) {
 				const createdBackup = await requestJson<JsonObject>("/api/backups", "POST");
 				expect(createdBackup.response.status).toBe(201);
 				backupId = stringValue(objectValue(createdBackup.body.backup).id);
 				expect(objectValue(createdBackup.body.backup).rowCount).toEqual(expect.any(Number));
+				const mismatchedRestoreConfirmation = await requestJson<JsonObject>(`/api/backups/${backupId}/restore`, "POST", { confirmId: "different-backup-id" });
+				expect(mismatchedRestoreConfirmation.response.status).toBe(400);
 
 				const changedAfterBackup = await requestJson<JsonObject>(`/api/customers/${customerId}`, "PATCH", {
 					name: `${marker} 変更後`,
@@ -368,6 +415,8 @@ describe("CLI authenticated workflow", () => {
 				expect(arrayValue(afterRestore.body.customers)).toEqual(expect.arrayContaining([
 					expect.objectContaining({ id: customerId, name: `${marker} 顧客 更新` }),
 				]));
+				const missingBackupRestore = await requestJson<JsonObject>(`/api/backups/missing-${marker.toLowerCase()}/restore`, "POST", { confirmId: `missing-${marker.toLowerCase()}` });
+				expect(missingBackupRestore.response.status).toBe(404);
 
 				const deletedBackup = await requestJson<JsonObject>(`/api/backups/${backupId}`, "DELETE");
 				expect(deletedBackup.response.status).toBe(200);
@@ -451,7 +500,18 @@ async function requestJson<T extends JsonObject>(
 	uid = ownerUid,
 	selectedOrganizationId = organizationId,
 ) {
-	const headers = authHeaders(uid, selectedOrganizationId);
+	return requestJsonWithHeaders<T>(path, authHeaders(uid, selectedOrganizationId), method, payload);
+}
+
+async function requestJsonWithoutAuth<T extends JsonObject>(path: string, method = "GET", payload?: unknown) {
+	return requestJsonWithHeaders<T>(path, new Headers(), method, payload);
+}
+
+async function requestJsonWithToken<T extends JsonObject>(path: string, token: string, method = "GET", payload?: unknown, selectedOrganizationId = organizationId) {
+	return requestJsonWithHeaders<T>(path, new Headers({ Authorization: `Bearer ${token}`, "X-Organization-Id": selectedOrganizationId }), method, payload);
+}
+
+async function requestJsonWithHeaders<T extends JsonObject>(path: string, headers: Headers, method = "GET", payload?: unknown) {
 	const requestInit: RequestInit = { method, headers };
 	if (payload !== undefined) {
 		headers.set("Content-Type", "application/json");
