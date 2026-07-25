@@ -860,7 +860,9 @@
 }
 
 @media print {
-  body { background: #fff; }
+  @page { size: A4; margin: 12mm; }
+  html, body { background: #fff; }
+  body { color: #172033; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .sidebar,
   .topbar,
   .page-header,
@@ -868,11 +870,70 @@
   .sales-toolbar,
   .sales-list-panel,
   .sales-detail-actions,
+  .maintenance-toolbar,
+  .maintenance-list-panel,
+  .maintenance-detail-actions,
+  .payment-toolbar,
+  .payment-list-panel,
+  .payment-detail-actions,
   .sales-items-header .text-button,
-  .sales-item-remove { display: none !important; }
-  .app-shell { display: block; }
+  .maintenance-items-header .text-button,
+  .sales-item-remove,
+  .maintenance-item-remove,
+  .payment-current-note,
+  .payment-saved { display: none !important; }
+  .app-shell { display: block; min-height: 0; background: #fff; }
   .app-main { width: 100%; }
   .page-content { padding: 0; }
-  .sales-workspace { display: block; }
-  .sales-detail-panel { border: 0; box-shadow: none; }
+  .sales-workspace,
+  .maintenance-workspace,
+  .payment-workspace { display: block; }
+  .sales-detail-panel,
+  .maintenance-detail-panel,
+  .payment-detail-panel { width: 100%; min-width: 0; border: 0; box-shadow: none; overflow: visible; }
+  .sales-detail-header,
+  .maintenance-detail-header,
+  .payment-detail-header { padding: 0 0 8mm; border-bottom: 1px solid #b8c1cf; }
+  .sales-detail-title h2,
+  .maintenance-detail-title h2,
+  .payment-detail-title h2 { font-size: 20px; }
+  .sales-detail-content,
+  .maintenance-detail-content,
+  .payment-detail-content { padding: 7mm 0 0; }
+  .sales-context-card,
+  .maintenance-context-card,
+  .payment-context-card,
+  .intake-summary-panel,
+  .payment-amount-panel { border-color: #cbd4df; background: #f7f9fc; box-shadow: none; }
+  .sales-items-table,
+  .maintenance-items-table { overflow: visible; }
+  .sales-items-head,
+  .sales-item-row { min-width: 0; grid-template-columns: minmax(150px, 1fr) 48px 38px 82px 90px; gap: 6px; }
+  .maintenance-items-head,
+  .maintenance-item-row { min-width: 0; grid-template-columns: 55px minmax(130px, 1fr) 45px 36px 76px 82px; gap: 5px; }
+  .sales-item-row input,
+  .maintenance-item-row input,
+  .maintenance-item-row select,
+  .maintenance-fee-input,
+  .maintenance-totals > div input,
+  .payment-input-with-prefix,
+  .payment-form-panel input,
+  .payment-form-panel select,
+  .payment-form-panel textarea { border: 0 !important; background: transparent !important; box-shadow: none !important; }
+  .maintenance-item-row select,
+  .payment-form-panel select { appearance: none; -webkit-appearance: none; }
+  .payment-form-panel input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+  .payment-form-panel textarea { resize: none; }
+  .sales-item-row input,
+  .maintenance-item-row input,
+  .maintenance-item-row select { height: auto; padding: 0; }
+  .sales-summary-grid,
+  .maintenance-summary-grid { grid-template-columns: minmax(0, 1fr) 220px; }
+  .payment-amount-grid { gap: 8px; }
+  .payment-form-grid { gap: 10px; }
+  .sales-items-panel,
+  .maintenance-items-panel,
+  .maintenance-fees-panel,
+  .payment-amount-panel,
+  .payment-form-panel { break-inside: avoid; }
 }

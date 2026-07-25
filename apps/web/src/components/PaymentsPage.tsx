@@ -14,6 +14,7 @@ import {
   WalletCards,
 } from 'lucide-react'
 import { fetchPayments, updatePayment, type PaymentMethod, type PaymentRecord } from '../lib/paymentsApi'
+import { printDocument } from '../lib/print'
 
 type PaymentStatus = '未入金' | '一部入金' | '入金済み'
 type PaymentFilter = 'すべて' | PaymentStatus
@@ -83,7 +84,7 @@ export function PaymentsPage() {
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>請求・入金データを読み込んでいます。</span></div>}
     <div className="payment-toolbar"><label className="payment-search"><Search size={18} /><span className="sr-only">入金情報を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="請求書番号、顧客名、車名で検索" /></label><div className="payment-filter-tabs" aria-label="入金状態">{(['すべて', '未入金', '一部入金', '入金済み'] as PaymentFilter[]).map((filter) => <button className={statusFilter === filter ? 'is-active' : ''} key={filter} type="button" aria-pressed={statusFilter === filter} onClick={() => setStatusFilter(filter)}>{filter}</button>)}</div><span className="payment-result-summary"><strong>{filteredRecords.length}件</strong><span>請求</span><em>未入金 {formatYen(totalOutstanding)}</em></span></div>
-    <div className="payment-workspace"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false) }} />{selectedRecord ? <PaymentRecordDetail record={selectedRecord} saved={saved} saving={saving} onUpdate={updateSelected} onSave={() => void saveSelected()} onPdf={() => window.print()} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入金状態を変更してください。'}</span></div>}</div>
+    <div className="payment-workspace"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false) }} />{selectedRecord ? <PaymentRecordDetail record={selectedRecord} saved={saved} saving={saving} onUpdate={updateSelected} onSave={() => void saveSelected()} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入金状態を変更してください。'}</span></div>}</div>
   </>
 }
 
