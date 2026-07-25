@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { appSettings } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -36,10 +37,11 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
   if (pathname !== '/api/settings') return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
-    if (request.method === 'GET') return jsonResponse({ settings: await loadSettings(database) }, 200, env)
-    if (request.method === 'PATCH') return updateSettings(request, env, database)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
+    if (request.method === 'GET') return jsonResponse({ settings: await loadSettings(database, organizationId) }, 200, env)
+    if (request.method === 'PATCH') return updateSettings(request, env, database, organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -49,11 +51,11 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
   }
 }
 
-async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const body = await readJson(request)
   const incoming = recordValue(body.settings)
   if (!incoming) throw new HttpError(400, '設定内容が不正です。')
-  const current = await loadSettings(database)
+  const current = await loadSettings(database, organizationId)
   const next = normalizeSettings({
     shop: { ...current.shop, ...recordValue(incoming.shop) },
     document: { ...current.document, ...recordValue(incoming.document) },
@@ -72,18 +74,18 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
   const now = new Date().toISOString()
   for (const key of settingKeys) {
     const value = JSON.stringify(serializedSettings[key])
-    const existing = await database.select({ key: appSettings.key }).from(appSettings).where(eq(appSettings.key, key)).get()
+    const existing = await database.select({ key: appSettings.key }).from(appSettings).where(and(eq(appSettings.organizationId, organizationId), eq(appSettings.key, key))).get()
     if (existing) {
-      await database.update(appSettings).set({ value, updatedAt: now }).where(eq(appSettings.key, key)).run()
+      await database.update(appSettings).set({ value, updatedAt: now }).where(and(eq(appSettings.organizationId, organizationId), eq(appSettings.key, key))).run()
     } else {
-      await database.insert(appSettings).values({ key, value, updatedAt: now }).run()
+      await database.insert(appSettings).values({ organizationId, key, value, updatedAt: now }).run()
     }
   }
   return jsonResponse({ settings: next }, 200, env)
 }
 
-async function loadSettings(database: ReturnType<typeof createDatabase>): Promise<AppSettings> {
-  const rows = await database.select().from(appSettings).all()
+async function loadSettings(database: ReturnType<typeof createDatabase>, organizationId: string): Promise<AppSettings> {
+  const rows = await database.select().from(appSettings).where(eq(appSettings.organizationId, organizationId)).all()
   const saved = new Map(rows.map((row) => [row.key, parseJson(row.value)]))
   return normalizeSettings({
     shop: saved.get('shop'),

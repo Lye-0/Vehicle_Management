@@ -1,6 +1,7 @@
-import { desc } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse } from '../http'
 
@@ -9,10 +10,10 @@ export async function handleDashboardRoutes(request: Request, env: Env): Promise
   if (pathname !== '/api/dashboard') return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     if (request.method !== 'GET') throw new HttpError(405, 'この操作には対応していません。')
     const database = createDatabase(env.DB)
-    return jsonResponse({ dashboard: await loadDashboard(database) }, 200, env)
+    const context = await requireOrganizationContext(request, env, database)
+    return jsonResponse({ dashboard: await loadDashboard(database, context.organization.organizationId) }, 200, env)
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
     if (error instanceof HttpError) return jsonResponse({ error: error.message }, error.status, env)
@@ -21,13 +22,13 @@ export async function handleDashboardRoutes(request: Request, env: Env): Promise
   }
 }
 
-async function loadDashboard(database: ReturnType<typeof createDatabase>) {
+async function loadDashboard(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows] = await Promise.all([
-    database.select().from(customers).all(),
-    database.select().from(vehicles).all(),
-    database.select().from(salesDocuments).orderBy(desc(salesDocuments.updatedAt)).all(),
-    database.select().from(maintenanceDocuments).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
-    database.select().from(paymentRecords).orderBy(desc(paymentRecords.updatedAt)).all(),
+    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
+    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.updatedAt)).all(),
+    database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
+    database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
   ])
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))

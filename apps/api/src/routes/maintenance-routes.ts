@@ -1,6 +1,7 @@
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -17,16 +18,17 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
   if (!isCollection && !documentMatch) return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
 
     if (isCollection) {
-      if (request.method === 'GET') return listMaintenanceDocuments(env, database)
-      if (request.method === 'POST') return createMaintenanceDocument(request, env, database)
+      if (request.method === 'GET') return listMaintenanceDocuments(env, database, organizationId)
+      if (request.method === 'POST') return createMaintenanceDocument(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
-    if (request.method === 'PATCH') return updateMaintenanceDocument(request, env, database, documentMatch![1])
+    if (request.method === 'PATCH') return updateMaintenanceDocument(request, env, database, documentMatch![1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -36,18 +38,19 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
   }
 }
 
-async function listMaintenanceDocuments(env: Env, database: ReturnType<typeof createDatabase>) {
-  return jsonResponse({ documents: await loadMaintenanceDocuments(database) }, 200, env)
+async function listMaintenanceDocuments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  return jsonResponse({ documents: await loadMaintenanceDocuments(database, organizationId) }, 200, env)
 }
 
-async function createMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const input = await parseMaintenanceInput(await readJson(request), database)
+async function createMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const input = await parseMaintenanceInput(await readJson(request), database, organizationId)
   const id = crypto.randomUUID()
-  const number = await nextMaintenanceDocumentNumber(database, input.issuedAt)
+  const number = await nextMaintenanceDocumentNumber(database, input.issuedAt, organizationId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.insert(maintenanceDocuments).values({
     id,
+    organizationId,
     number,
     type: input.type,
     category: input.category,
@@ -64,16 +67,16 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     total: totals.total,
     note: input.note,
   }).run()
-  await insertMaintenanceItems(database, id, input.items, input.fees, input.adjustment)
+  await insertMaintenanceItems(database, id, input.items, input.fees, input.adjustment, organizationId)
 
-  return jsonResponse({ document: await findMaintenanceDocument(database, id) }, 201, env)
+  return jsonResponse({ document: await findMaintenanceDocument(database, id, organizationId) }, 201, env)
 }
 
-async function updateMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentId: string) {
-  const current = await database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.id, documentId)).get()
+async function updateMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
   if (!current) throw new HttpError(404, '整備書類が見つかりません。')
 
-  const currentItems = await loadMaintenanceItems(database, documentId)
+  const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
   const input = await parseMaintenanceInput({
     ...body,
@@ -91,7 +94,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     items: body.items === undefined ? currentItems.filter((item) => item.itemType === '作業' || item.itemType === '部品').map(toInputItem) : body.items,
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
-  }, database)
+  }, database, organizationId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.update(maintenanceDocuments).set({
@@ -110,19 +113,19 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     total: totals.total,
     note: input.note,
     updatedAt: new Date().toISOString(),
-  }).where(eq(maintenanceDocuments.id, documentId)).run()
-  await database.delete(maintenanceItems).where(eq(maintenanceItems.documentId, documentId)).run()
-  await insertMaintenanceItems(database, documentId, input.items, input.fees, input.adjustment)
+  }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
+  await database.delete(maintenanceItems).where(and(eq(maintenanceItems.documentId, documentId), eq(maintenanceItems.organizationId, organizationId))).run()
+  await insertMaintenanceItems(database, documentId, input.items, input.fees, input.adjustment, organizationId)
 
-  return jsonResponse({ document: await findMaintenanceDocument(database, documentId) }, 200, env)
+  return jsonResponse({ document: await findMaintenanceDocument(database, documentId, organizationId) }, 200, env)
 }
 
-async function loadMaintenanceDocuments(database: ReturnType<typeof createDatabase>) {
+async function loadMaintenanceDocuments(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(maintenanceDocuments).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
-    database.select().from(maintenanceItems).orderBy(asc(maintenanceItems.sortOrder)).all(),
-    database.select().from(customers).all(),
-    database.select().from(vehicles).all(),
+    database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
+    database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
+    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
+    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
   ])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -136,30 +139,30 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   ))
 }
 
-async function findMaintenanceDocument(database: ReturnType<typeof createDatabase>, documentId: string) {
-  const documents = await loadMaintenanceDocuments(database)
+async function findMaintenanceDocument(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const documents = await loadMaintenanceDocuments(database, organizationId)
   return documents.find((document) => document.id === documentId) ?? null
 }
 
-async function loadMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string) {
-  return database.select().from(maintenanceItems).where(eq(maintenanceItems.documentId, documentId)).orderBy(asc(maintenanceItems.sortOrder)).all()
+async function loadMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  return database.select().from(maintenanceItems).where(and(eq(maintenanceItems.documentId, documentId), eq(maintenanceItems.organizationId, organizationId))).orderBy(asc(maintenanceItems.sortOrder)).all()
 }
 
-async function insertMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number) {
+async function insertMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, organizationId: string) {
   const rows = [
     ...items.map((item) => ({ itemType: item.kind, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount })),
     ...feeNames.map((name) => ({ itemType: '法定費用', description: name, quantity: 1, unit: '式', unitPrice: fees[name], amount: fees[name] })),
     ...(adjustment === 0 ? [] : [{ itemType: '調整', description: '調整額', quantity: 1, unit: '式', unitPrice: adjustment, amount: adjustment }]),
   ]
   if (!rows.length) return
-  await database.insert(maintenanceItems).values(rows.map((item, index) => ({ id: crypto.randomUUID(), documentId, ...item, sortOrder: index }))).run()
+  await database.insert(maintenanceItems).values(rows.map((item, index) => ({ id: crypto.randomUUID(), organizationId, documentId, ...item, sortOrder: index }))).run()
 }
 
-function parseMaintenanceInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>): Promise<MaintenanceInput> {
-  return parseMaintenanceInputAsync(body, database)
+function parseMaintenanceInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<MaintenanceInput> {
+  return parseMaintenanceInputAsync(body, database, organizationId)
 }
 
-async function parseMaintenanceInputAsync(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>): Promise<MaintenanceInput> {
+async function parseMaintenanceInputAsync(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<MaintenanceInput> {
   const type = stringValue(body, 'type') || '整備請求書'
   if (!maintenanceDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
   const status = stringValue(body, 'status') || '受付中'
@@ -168,10 +171,10 @@ async function parseMaintenanceInputAsync(body: Record<string, unknown>, databas
   if (!maintenanceCategories.has(category)) throw new HttpError(400, '入庫区分が不正です。')
 
   const customerId = stringValue(body, 'customerId')
-  const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).get() : null
+  const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get() : null
   if (!customer) throw new HttpError(400, '顧客を選択してください。')
   const vehicleId = stringValue(body, 'vehicleId')
-  const vehicle = vehicleId ? await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(eq(vehicles.id, vehicleId)).get() : null
+  const vehicle = vehicleId ? await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get() : null
   if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
 
   const items = parseItems(body.items)
@@ -230,9 +233,9 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   }
 }
 
-async function nextMaintenanceDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string) {
+async function nextMaintenanceDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string, organizationId: string) {
   const prefix = `M-${issuedAt.slice(0, 4) || new Date().getFullYear()}-`
-  const rows = await database.select({ number: maintenanceDocuments.number }).from(maintenanceDocuments).all()
+  const rows = await database.select({ number: maintenanceDocuments.number }).from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).all()
   const usedNumbers = new Set(rows.map((row) => row.number))
   let sequence = 1
   while (usedNumbers.has(`${prefix}${String(sequence).padStart(3, '0')}`)) sequence += 1

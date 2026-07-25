@@ -1,6 +1,7 @@
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, corsHeaders } from '../http'
 
@@ -12,16 +13,17 @@ export async function handleExportRoutes(request: Request, env: Env): Promise<Re
   if (!match) return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     if (request.method !== 'GET') throw new HttpError(405, 'この操作には対応していません。')
     const resource = match[1]
     if (!resources.has(resource)) throw new HttpError(404, '出力対象が見つかりません。')
     const database = createDatabase(env.DB)
-    if (resource === 'customers') return exportCustomers(env, database)
-    if (resource === 'vehicles') return exportVehicles(env, database)
-    if (resource === 'sales') return exportSales(env, database)
-    if (resource === 'maintenance') return exportMaintenance(env, database)
-    return exportPayments(env, database)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
+    if (resource === 'customers') return exportCustomers(env, database, organizationId)
+    if (resource === 'vehicles') return exportVehicles(env, database, organizationId)
+    if (resource === 'sales') return exportSales(env, database, organizationId)
+    if (resource === 'maintenance') return exportMaintenance(env, database, organizationId)
+    return exportPayments(env, database, organizationId)
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonError(error.message, 401, env)
     if (error instanceof HttpError) return jsonError(error.message, error.status, env)
@@ -30,37 +32,37 @@ export async function handleExportRoutes(request: Request, env: Env): Promise<Re
   }
 }
 
-async function exportCustomers(env: Env, database: ReturnType<typeof createDatabase>) {
-  const [rows, vehicleRows] = await Promise.all([database.select().from(customers).orderBy(asc(customers.name)).all(), database.select({ customerId: vehicles.customerId }).from(vehicles).all()])
+async function exportCustomers(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const [rows, vehicleRows] = await Promise.all([database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.name)).all(), database.select({ customerId: vehicles.customerId }).from(vehicles).where(eq(vehicles.organizationId, organizationId)).all()])
   const vehicleCounts = new Map<string, number>()
   for (const vehicle of vehicleRows) vehicleCounts.set(vehicle.customerId, (vehicleCounts.get(vehicle.customerId) ?? 0) + 1)
   return csvResponse(['顧客ID', '顧客番号', '顧客名', 'ふりがな', '電話番号', 'メールアドレス', '郵便番号', '住所', 'メモ', '車両台数'], rows.map((row) => [row.id, row.customerNumber, row.name, row.nameKana, row.phone, row.email, row.postalCode, row.address, row.memo, vehicleCounts.get(row.id) ?? 0]), 'customers.csv', env)
 }
 
-async function exportVehicles(env: Env, database: ReturnType<typeof createDatabase>) {
-  const [vehicleRows, customerRows] = await Promise.all([database.select().from(vehicles).orderBy(asc(vehicles.name)).all(), database.select().from(customers).all()])
+async function exportVehicles(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const [vehicleRows, customerRows] = await Promise.all([database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.name)).all(), database.select().from(customers).where(eq(customers.organizationId, organizationId)).all()])
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   return csvResponse(['車両ID', '顧客ID', '顧客名', 'メーカー', '車名', '型式', '登録番号', '車台番号', '年式', '車検満了日', '走行距離', '車体色', '排気量', 'ミッション', '記録簿', '備考'], vehicleRows.map((row) => [row.id, row.customerId, customersById.get(row.customerId)?.name, row.maker, row.name, row.model, row.registrationNumber, row.chassisNumber, row.modelYear, row.inspectionDate, row.mileage, row.bodyColor, row.displacement, row.transmission, row.inspectionRecordAvailable ? 'あり' : 'なし', row.memo]), 'vehicles.csv', env)
 }
 
-async function exportSales(env: Env, database: ReturnType<typeof createDatabase>) {
-  const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([database.select().from(salesDocuments).orderBy(desc(salesDocuments.issuedAt)).all(), database.select().from(salesDocumentItems).orderBy(asc(salesDocumentItems.sortOrder)).all(), database.select().from(customers).all(), database.select().from(vehicles).all()])
+async function exportSales(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.issuedAt)).all(), database.select().from(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).orderBy(asc(salesDocumentItems.sortOrder)).all(), database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(), database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all()])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
   return csvResponse(['書類ID', '書類番号', '書類種別', 'ステータス', '顧客名', '車名', '登録番号', '発行日', '支払期限', '税率', '小計', '消費税', '合計', '明細'], documentRows.map((row) => [row.id, row.number, row.type, row.status, customersById.get(row.customerId)?.name, vehicleLabel(row.vehicleId, vehiclesById), plateLabel(row.vehicleId, vehiclesById), row.issuedAt, row.dueDate, `${row.taxRate}%`, row.subtotal, row.tax, row.total, (itemsByDocument.get(row.id) ?? []).map((item) => `${item.description} x${item.quantity} ${item.unit} ¥${item.amount}`).join(' / ')]), 'sales.csv', env)
 }
 
-async function exportMaintenance(env: Env, database: ReturnType<typeof createDatabase>) {
-  const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([database.select().from(maintenanceDocuments).orderBy(desc(maintenanceDocuments.issuedAt)).all(), database.select().from(maintenanceItems).orderBy(asc(maintenanceItems.sortOrder)).all(), database.select().from(customers).all(), database.select().from(vehicles).all()])
+async function exportMaintenance(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.issuedAt)).all(), database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(), database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(), database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all()])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
   return csvResponse(['書類ID', '書類番号', '書類種別', '入庫区分', 'ステータス', '顧客名', '車名', '登録番号', '入庫日', '出庫予定日', '支払期限', '税率', '小計', '消費税', '合計', '明細'], documentRows.map((row) => [row.id, row.number, row.type, row.category, row.status, customersById.get(row.customerId)?.name, vehicleLabel(row.vehicleId, vehiclesById), plateLabel(row.vehicleId, vehiclesById), row.intakeDate, row.completionDate, row.dueDate, `${row.taxRate}%`, row.subtotal, row.tax, row.total, (itemsByDocument.get(row.id) ?? []).map((item) => `${item.itemType}:${item.description} x${item.quantity} ${item.unit} ¥${item.amount}`).join(' / ')]), 'maintenance.csv', env)
 }
 
-async function exportPayments(env: Env, database: ReturnType<typeof createDatabase>) {
-  const [salesRows, maintenanceRows, paymentRows, customerRows, vehicleRows] = await Promise.all([database.select().from(salesDocuments).where(eq(salesDocuments.type, '請求書')).orderBy(desc(salesDocuments.issuedAt)).all(), database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.type, '整備請求書')).orderBy(desc(maintenanceDocuments.issuedAt)).all(), database.select().from(paymentRecords).all(), database.select().from(customers).all(), database.select().from(vehicles).all()])
+async function exportPayments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const [salesRows, maintenanceRows, paymentRows, customerRows, vehicleRows] = await Promise.all([database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'))).orderBy(desc(salesDocuments.issuedAt)).all(), database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'))).orderBy(desc(maintenanceDocuments.issuedAt)).all(), database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).all(), database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(), database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all()])
   const paymentsByKey = new Map(paymentRows.map((row) => [`${row.documentType}:${row.documentId}`, row]))
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))

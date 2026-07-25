@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -14,13 +15,14 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
   if (!isCollection && !itemMatch) return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
     if (isCollection) {
-      if (request.method === 'GET') return listPayments(env, database)
+      if (request.method === 'GET') return listPayments(env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
-    if (request.method === 'PATCH') return updatePayment(request, env, database, decodeURIComponent(itemMatch![1]), decodeURIComponent(itemMatch![2]))
+    if (request.method === 'PATCH') return updatePayment(request, env, database, decodeURIComponent(itemMatch![1]), decodeURIComponent(itemMatch![2]), organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -30,13 +32,13 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
   }
 }
 
-async function listPayments(env: Env, database: ReturnType<typeof createDatabase>) {
+async function listPayments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [salesRows, maintenanceRows, paymentRows, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(salesDocuments).where(eq(salesDocuments.type, '請求書')).orderBy(desc(salesDocuments.issuedAt)).all(),
-    database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.type, '整備請求書')).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
-    database.select().from(paymentRecords).orderBy(desc(paymentRecords.updatedAt)).all(),
-    database.select().from(customers).all(),
-    database.select().from(vehicles).all(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'))).orderBy(desc(salesDocuments.issuedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
+    database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
+    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
+    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
   ])
   const paymentsByKey = new Map(paymentRows.map((payment) => [`${payment.documentType}:${payment.documentId}`, payment]))
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -48,30 +50,30 @@ async function listPayments(env: Env, database: ReturnType<typeof createDatabase
   return jsonResponse({ records }, 200, env)
 }
 
-async function updatePayment(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentType: string, documentId: string) {
+async function updatePayment(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentType: string, documentId: string, organizationId: string) {
   if (!paymentDocumentTypes.has(documentType)) throw new HttpError(400, '請求書種別が不正です。')
-  const invoice = await findInvoice(database, documentType, documentId)
+  const invoice = await findInvoice(database, documentType, documentId, organizationId)
   if (!invoice) throw new HttpError(404, '請求書が見つかりません。')
   const body = await readJson(request)
   const paidAmount = Math.min(invoice.total, Math.max(0, integerNumber(body.paidAmount, 0)))
   const paymentDate = nullableDate(body.paymentDate)
   const method = typeof body.method === 'string' && paymentMethods.has(body.method) ? body.method : null
   const note = nullableString(body, 'note')
-  const current = await database.select().from(paymentRecords).where(and(eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get()
+  const current = await database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get()
   const now = new Date().toISOString()
   if (current) {
-    await database.update(paymentRecords).set({ invoiceAmount: invoice.total, paidAmount, paymentDate, method, note, updatedAt: now }).where(eq(paymentRecords.id, current.id)).run()
+    await database.update(paymentRecords).set({ invoiceAmount: invoice.total, paidAmount, paymentDate, method, note, updatedAt: now }).where(and(eq(paymentRecords.id, current.id), eq(paymentRecords.organizationId, organizationId))).run()
   } else {
-    await database.insert(paymentRecords).values({ id: crypto.randomUUID(), documentType, documentId, invoiceAmount: invoice.total, paidAmount, paymentDate, method, note, updatedAt: now }).run()
+    await database.insert(paymentRecords).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, invoiceAmount: invoice.total, paidAmount, paymentDate, method, note, updatedAt: now }).run()
   }
-  const [customerRows, vehicleRows] = await Promise.all([database.select().from(customers).all(), database.select().from(vehicles).all()])
-  const payment = await database.select().from(paymentRecords).where(and(eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get()
+  const [customerRows, vehicleRows] = await Promise.all([database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(), database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all()])
+  const payment = await database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get()
   return jsonResponse({ record: serializePayment(documentType as '販売請求書' | '整備請求書', invoice, payment, new Map(customerRows.map((customer) => [customer.id, customer])), new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))) }, 200, env)
 }
 
-async function findInvoice(database: ReturnType<typeof createDatabase>, documentType: string, documentId: string) {
-  if (documentType === '販売請求書') return database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.type, '請求書'))).get()
-  return database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.type, '整備請求書'))).get()
+async function findInvoice(database: ReturnType<typeof createDatabase>, documentType: string, documentId: string, organizationId: string) {
+  if (documentType === '販売請求書') return database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'))).get()
+  return database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'))).get()
 }
 
 function serializePayment(documentType: '販売請求書' | '整備請求書', document: InvoiceRow, payment: typeof paymentRecords.$inferSelect | undefined, customersById: Map<string, typeof customers.$inferSelect>, vehiclesById: Map<string, typeof vehicles.$inferSelect>) {

@@ -1,6 +1,7 @@
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -14,17 +15,18 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
   if (!isCollection && !documentMatch) return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
 
     if (isCollection) {
-      if (request.method === 'GET') return listSalesDocuments(request, env, database)
-      if (request.method === 'POST') return createSalesDocument(request, env, database)
+      if (request.method === 'GET') return listSalesDocuments(request, env, database, organizationId)
+      if (request.method === 'POST') return createSalesDocument(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     if (!documentMatch) throw new HttpError(404, '販売書類のAPIが見つかりません。')
-    if (request.method === 'PATCH') return updateSalesDocument(request, env, database, documentMatch[1])
+    if (request.method === 'PATCH') return updateSalesDocument(request, env, database, documentMatch[1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -34,11 +36,11 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
   }
 }
 
-async function listSalesDocuments(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+async function listSalesDocuments(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const url = new URL(request.url)
   const query = url.searchParams.get('q')?.trim().toLocaleLowerCase() ?? ''
   const type = url.searchParams.get('type')?.trim() ?? ''
-  const documents = await loadSalesDocuments(database)
+  const documents = await loadSalesDocuments(database, organizationId)
   const filtered = documents.filter((document) => {
     const matchesType = !type || type === 'すべて' || document.type === type
     const searchable = `${document.number} ${document.customerName} ${document.vehicle} ${document.plate}`.toLocaleLowerCase()
@@ -47,15 +49,16 @@ async function listSalesDocuments(request: Request, env: Env, database: ReturnTy
   return jsonResponse({ documents: filtered }, 200, env)
 }
 
-async function createSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+async function createSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const body = await readJson(request)
-  const input = await parseSalesDocumentInput(body, database)
+  const input = await parseSalesDocumentInput(body, database, organizationId)
   const id = crypto.randomUUID()
-  const number = await nextSalesDocumentNumber(database, input.issuedAt)
+  const number = await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
   const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.insert(salesDocuments).values({
     id,
+    organizationId,
     number,
     type: input.type,
     status: input.status,
@@ -69,13 +72,13 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     total: totals.total,
     note: input.note,
   }).run()
-  await insertSalesItems(database, id, input.items)
+  await insertSalesItems(database, id, input.items, organizationId)
 
-  return jsonResponse({ document: await findSalesDocument(database, id) }, 201, env)
+  return jsonResponse({ document: await findSalesDocument(database, id, organizationId) }, 201, env)
 }
 
-async function updateSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentId: string) {
-  const current = await database.select().from(salesDocuments).where(eq(salesDocuments.id, documentId)).get()
+async function updateSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
   if (!current) throw new HttpError(404, '販売書類が見つかりません。')
 
   const body = await readJson(request)
@@ -89,8 +92,8 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
-    items: body.items === undefined ? await loadSalesItems(database, documentId) : body.items,
-  }, database)
+    items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
+  }, database, organizationId)
   const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.update(salesDocuments).set({
@@ -106,20 +109,20 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     total: totals.total,
     note: input.note,
     updatedAt: new Date().toISOString(),
-  }).where(eq(salesDocuments.id, documentId)).run()
+  }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
 
-  await database.delete(salesDocumentItems).where(eq(salesDocumentItems.documentId, documentId)).run()
-  await insertSalesItems(database, documentId, input.items)
+  await database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.documentId, documentId), eq(salesDocumentItems.organizationId, organizationId))).run()
+  await insertSalesItems(database, documentId, input.items, organizationId)
 
-  return jsonResponse({ document: await findSalesDocument(database, documentId) }, 200, env)
+  return jsonResponse({ document: await findSalesDocument(database, documentId, organizationId) }, 200, env)
 }
 
-async function loadSalesDocuments(database: ReturnType<typeof createDatabase>) {
+async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(salesDocuments).orderBy(desc(salesDocuments.issuedAt), desc(salesDocuments.number)).all(),
-    database.select().from(salesDocumentItems).orderBy(asc(salesDocumentItems.sortOrder)).all(),
-    database.select().from(customers).all(),
-    database.select().from(vehicles).all(),
+    database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.issuedAt), desc(salesDocuments.number)).all(),
+    database.select().from(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).orderBy(asc(salesDocumentItems.sortOrder)).all(),
+    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
+    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
   ])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -133,19 +136,20 @@ async function loadSalesDocuments(database: ReturnType<typeof createDatabase>) {
   ))
 }
 
-async function findSalesDocument(database: ReturnType<typeof createDatabase>, documentId: string) {
-  const documents = await loadSalesDocuments(database)
+async function findSalesDocument(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const documents = await loadSalesDocuments(database, organizationId)
   return documents.find((document) => document.id === documentId) ?? null
 }
 
-async function loadSalesItems(database: ReturnType<typeof createDatabase>, documentId: string) {
-  return database.select().from(salesDocumentItems).where(eq(salesDocumentItems.documentId, documentId)).orderBy(asc(salesDocumentItems.sortOrder)).all()
+async function loadSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  return database.select().from(salesDocumentItems).where(and(eq(salesDocumentItems.documentId, documentId), eq(salesDocumentItems.organizationId, organizationId))).orderBy(asc(salesDocumentItems.sortOrder)).all()
 }
 
-async function insertSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, items: SalesItemInput[]) {
+async function insertSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, items: SalesItemInput[], organizationId: string) {
   if (!items.length) return
   await database.insert(salesDocumentItems).values(items.map((item, index) => ({
     id: crypto.randomUUID(),
+    organizationId,
     documentId,
     description: item.description,
     quantity: item.quantity,
@@ -156,7 +160,7 @@ async function insertSalesItems(database: ReturnType<typeof createDatabase>, doc
   }))).run()
 }
 
-async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>): Promise<SalesDocumentInput> {
+async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<SalesDocumentInput> {
   const type = stringValue(body, 'type')
   if (!salesDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
 
@@ -164,12 +168,12 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   if (!salesStatuses.has(status)) throw new HttpError(400, '書類ステータスが不正です。')
 
   const customerId = stringValue(body, 'customerId')
-  const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).get() : null
+  const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get() : null
   if (!customer) throw new HttpError(400, '顧客を選択してください。')
 
   const vehicleId = nullableString(body, 'vehicleId')
   if (vehicleId) {
-    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(eq(vehicles.id, vehicleId)).get()
+    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
@@ -216,10 +220,10 @@ function serializeSalesDocument(
   }
 }
 
-async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string) {
+async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string, organizationId: string) {
   const year = issuedAt.slice(0, 4) || String(new Date().getFullYear())
   const prefix = `S-${year}-`
-  const rows = await database.select({ number: salesDocuments.number }).from(salesDocuments).all()
+  const rows = await database.select({ number: salesDocuments.number }).from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).all()
   const usedNumbers = new Set(rows.map((row) => row.number))
   let sequence = 1
   while (usedNumbers.has(`${prefix}${String(sequence).padStart(3, '0')}`)) sequence += 1

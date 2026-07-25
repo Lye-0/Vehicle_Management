@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { customers, vehicleFiles, vehicles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
+import { UnauthorizedError } from '../auth/firebase'
+import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
 import { createB2Storage } from '../storage/b2'
@@ -15,43 +16,44 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
   if (!isCustomerRoute && !isVehicleRoute) return null
 
   try {
-    await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
+    const context = await requireOrganizationContext(request, env, database)
+    const organizationId = context.organization.organizationId
 
     if (pathname === '/api/customers') {
-      if (request.method === 'GET') return listCustomers(request, env, database)
-      if (request.method === 'POST') return createCustomer(request, env, database)
+      if (request.method === 'GET') return listCustomers(request, env, database, organizationId)
+      if (request.method === 'POST') return createCustomer(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const customerMatch = pathname.match(/^\/api\/customers\/([^/]+)$/)
     if (customerMatch) {
-      if (request.method === 'PATCH') return updateCustomer(request, env, database, customerMatch[1])
+      if (request.method === 'PATCH') return updateCustomer(request, env, database, customerMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleCollectionMatch = pathname.match(/^\/api\/customers\/([^/]+)\/vehicles$/)
     if (vehicleCollectionMatch) {
-      if (request.method === 'POST') return createVehicle(request, env, database, vehicleCollectionMatch[1])
+      if (request.method === 'POST') return createVehicle(request, env, database, vehicleCollectionMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleFileCollectionMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files$/)
     if (vehicleFileCollectionMatch) {
-      if (request.method === 'POST') return uploadVehicleFile(request, env, database, vehicleFileCollectionMatch[1])
+      if (request.method === 'POST') return uploadVehicleFile(request, env, database, vehicleFileCollectionMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleFileItemMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files\/([^/]+)$/)
     if (vehicleFileItemMatch) {
-      if (request.method === 'GET') return downloadVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2])
-      if (request.method === 'DELETE') return deleteVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2])
+      if (request.method === 'GET') return downloadVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
+      if (request.method === 'DELETE') return deleteVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
     const vehicleMatch = pathname.match(/^\/api\/vehicles\/([^/]+)$/)
     if (vehicleMatch) {
-      if (request.method === 'PATCH') return updateVehicle(request, env, database, vehicleMatch[1])
+      if (request.method === 'PATCH') return updateVehicle(request, env, database, vehicleMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
@@ -64,18 +66,18 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
   }
 }
 
-async function listCustomers(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const records = await loadCustomerRecords(database)
+async function listCustomers(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const records = await loadCustomerRecords(database, organizationId)
   const query = new URL(request.url).searchParams.get('q')?.trim().toLocaleLowerCase()
   const filteredRecords = query ? records.filter((customer) => JSON.stringify(customer).toLocaleLowerCase().includes(query)) : records
   return jsonResponse({ customers: filteredRecords }, 200, env)
 }
 
-async function loadCustomerRecords(database: ReturnType<typeof createDatabase>) {
+async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [customerRows, vehicleRows, fileRows] = await Promise.all([
-    database.select().from(customers).orderBy(asc(customers.name)).all(),
-    database.select().from(vehicles).orderBy(asc(vehicles.name)).all(),
-    database.select().from(vehicleFiles).orderBy(asc(vehicleFiles.createdAt)).all(),
+    database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.name)).all(),
+    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.name)).all(),
+    database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
   ])
   const filesByVehicle = groupBy(fileRows, (file) => file.vehicleId)
   const vehiclesByCustomer = groupBy(vehicleRows, (vehicle) => vehicle.customerId)
@@ -109,13 +111,14 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>) 
   return records
 }
 
-async function createCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+async function createCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const body = await readJson(request)
   const name = stringValue(body, 'name')
   if (!name) throw new HttpError(400, '顧客名は必須です。')
   const id = crypto.randomUUID()
   await database.insert(customers).values({
     id,
+    organizationId,
     customerNumber: `C-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
     name,
     nameKana: nullableString(body, 'nameKana'),
@@ -125,11 +128,11 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
     address: nullableString(body, 'address'),
     memo: nullableString(body, 'memo'),
   }).run()
-  return jsonResponse({ customer: await findCustomer(database, id) }, 201, env)
+  return jsonResponse({ customer: await findCustomer(database, id, organizationId) }, 201, env)
 }
 
-async function updateCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string) {
-  if (!await database.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).get()) throw new HttpError(404, '顧客が見つかりません。')
+async function updateCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  if (!await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()) throw new HttpError(404, '顧客が見つかりません。')
   const body = await readJson(request)
   const name = stringValue(body, 'name')
   if (!name) throw new HttpError(400, '顧客名は必須です。')
@@ -142,12 +145,12 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     address: nullableString(body, 'address'),
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
-  }).where(eq(customers.id, customerId)).run()
-  return jsonResponse({ customer: await findCustomer(database, customerId) }, 200, env)
+  }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
+  return jsonResponse({ customer: await findCustomer(database, customerId, organizationId) }, 200, env)
 }
 
-async function createVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string) {
-  if (!await database.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).get()) throw new HttpError(404, '顧客が見つかりません。')
+async function createVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  if (!await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()) throw new HttpError(404, '顧客が見つかりません。')
   const body = await readJson(request)
   const maker = stringValue(body, 'maker')
   const name = stringValue(body, 'model') || stringValue(body, 'name')
@@ -155,6 +158,7 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
   const id = crypto.randomUUID()
   await database.insert(vehicles).values({
     id,
+    organizationId,
     customerId,
     maker,
     name,
@@ -166,11 +170,11 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
     mileage: nullableInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
   }).run()
-  return jsonResponse({ customer: await findCustomer(database, customerId), vehicleId: id }, 201, env)
+  return jsonResponse({ customer: await findCustomer(database, customerId, organizationId), vehicleId: id }, 201, env)
 }
 
-async function updateVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string) {
-  if (!await database.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.id, vehicleId)).get()) throw new HttpError(404, '車両が見つかりません。')
+async function updateVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
+  if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
   const body = await readJson(request)
   const maker = stringValue(body, 'maker')
   const name = stringValue(body, 'model') || stringValue(body, 'name')
@@ -185,12 +189,12 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
     mileage: nullableInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
     updatedAt: new Date().toISOString(),
-  }).where(eq(vehicles.id, vehicleId)).run()
+  }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).run()
   return jsonResponse({ vehicleId }, 200, env)
 }
 
-async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string) {
-  if (!await database.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.id, vehicleId)).get()) throw new HttpError(404, '車両が見つかりません。')
+async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
+  if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
   const formData = await request.formData()
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
@@ -199,7 +203,7 @@ async function uploadVehicleFile(request: Request, env: Env, database: ReturnTyp
 
   const fileId = crypto.randomUUID()
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  const objectKey = `vehicles/${vehicleId}/${fileId}-${safeName}`
+  const objectKey = `organizations/${organizationId}/vehicles/${vehicleId}/${fileId}-${safeName}`
   try {
     await createB2Storage(env).putObject({ key: objectKey, body: await file.arrayBuffer(), contentType: file.type })
   } catch {
@@ -207,29 +211,29 @@ async function uploadVehicleFile(request: Request, env: Env, database: ReturnTyp
   }
 
   try {
-    await database.insert(vehicleFiles).values({ id: fileId, vehicleId, objectKey, fileName: file.name, contentType: file.type, sizeBytes: file.size, fileKind: getFileKind(file.type) }).run()
+    await database.insert(vehicleFiles).values({ id: fileId, organizationId, vehicleId, objectKey, fileName: file.name, contentType: file.type, sizeBytes: file.size, fileKind: getFileKind(file.type) }).run()
   } catch (error) {
     await createB2Storage(env).deleteObject(objectKey).catch(() => undefined)
     throw error
   }
-  const storedFile = await database.select().from(vehicleFiles).where(eq(vehicleFiles.id, fileId)).get()
+  const storedFile = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).get()
   return jsonResponse({ file: storedFile ? serializeFile(storedFile) : null }, 201, env)
 }
 
-async function deleteVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string) {
-  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId))).get()
+async function deleteVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string, organizationId: string) {
+  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).get()
   if (!file) throw new HttpError(404, '添付ファイルが見つかりません。')
   try {
     await createB2Storage(env).deleteObject(file.objectKey)
   } catch {
     throw new HttpError(503, 'ファイル保存先を利用できません。')
   }
-  await database.delete(vehicleFiles).where(eq(vehicleFiles.id, fileId)).run()
+  await database.delete(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).run()
   return jsonResponse({ deleted: true }, 200, env)
 }
 
-async function downloadVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string) {
-  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId))).get()
+async function downloadVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string, organizationId: string) {
+  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).get()
   if (!file) throw new HttpError(404, '添付ファイルが見つかりません。')
   let response: Response
   try {
@@ -245,8 +249,8 @@ async function downloadVehicleFile(_request: Request, env: Env, database: Return
   return new Response(response.body, { status: 200, headers })
 }
 
-async function findCustomer(database: ReturnType<typeof createDatabase>, customerId: string) {
-  const records = await loadCustomerRecords(database)
+async function findCustomer(database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  const records = await loadCustomerRecords(database, organizationId)
   return records.find((customer) => customer.id === customerId) ?? null
 }
 
