@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import type { User } from 'firebase/auth'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowUpRight,
@@ -10,6 +11,7 @@ import {
   ClipboardCheck,
   FileText,
   LayoutDashboard,
+  LogOut,
   Plus,
   Search,
   Settings,
@@ -20,6 +22,7 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
+import { observeAuthState, signInAnonymouslyForDevelopment, signInWithGoogle, signOutCurrentUser } from './lib/auth'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
@@ -51,11 +54,27 @@ const pageMeta: Record<SectionId, PageMeta> = {
 }
 
 function App() {
+  const [authState, setAuthState] = useState<{ loading: boolean; user: User | null; error: string }>({ loading: true, user: null, error: '' })
+
+  useEffect(() => {
+    try {
+      return observeAuthState((user) => setAuthState({ loading: false, user, error: '' }))
+    } catch (error) {
+      setAuthState({ loading: false, user: null, error: getAuthErrorMessage(error) })
+    }
+  }, [])
+
+  if (authState.loading) return <AuthLoading />
+  if (!authState.user) return <LoginPage initialError={authState.error} />
+  return <AuthenticatedApp user={authState.user} />
+}
+
+function AuthenticatedApp({ user }: { user: User }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
 
   return (
     <div className="app-shell">
-      <Sidebar activeSection={activeSection} onSelect={setActiveSection} />
+      <Sidebar user={user} activeSection={activeSection} onSelect={setActiveSection} onSignOut={() => void signOutCurrentUser()} />
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
@@ -66,7 +85,60 @@ function App() {
   )
 }
 
-function Sidebar({ activeSection, onSelect }: { activeSection: SectionId; onSelect: (section: SectionId) => void }) {
+function AuthLoading() {
+  return <div className="auth-page"><div className="auth-card auth-loading"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><strong>車両管理を起動しています</strong><span>認証状態を確認しています。</span></div></div>
+}
+
+function LoginPage({ initialError }: { initialError?: string }) {
+  const [error, setError] = useState(initialError ?? '')
+  const [loading, setLoading] = useState<'google' | 'anonymous' | ''>('')
+
+  async function runSignIn(kind: 'google' | 'anonymous') {
+    setError('')
+    setLoading(kind)
+    try {
+      if (kind === 'google') await signInWithGoogle()
+      else await signInAnonymouslyForDevelopment()
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  const isDevelopment = import.meta.env.DEV && Boolean(import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL)
+  return (
+    <div className="auth-page">
+      <section className="auth-card">
+        <div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div>
+        <span className="page-eyebrow">SECURE SIGN IN</span>
+        <h1>業務画面にログイン</h1>
+        <p>顧客・車両、販売、整備、入金の情報を安全に管理します。</p>
+        {error && <div className="auth-error" role="alert">{error}</div>}
+        <button className="button button-primary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runSignIn('google')}>
+          {loading === 'google' ? 'ログインしています…' : 'Googleアカウントでログイン'}
+        </button>
+        {isDevelopment && <button className="button button-secondary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runSignIn('anonymous')}>
+          {loading === 'anonymous' ? '接続しています…' : '開発用匿名ログイン'}
+        </button>}
+        <small className="auth-hint">{isDevelopment ? '現在はFirebase Auth Emulatorに接続しています。' : 'ログインには店舗から発行されたGoogleアカウントを使用してください。'}</small>
+      </section>
+    </div>
+  )
+}
+
+function getAuthErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    if (error.message.includes('popup-closed-by-user')) return 'ログイン画面が閉じられました。もう一度お試しください。'
+    if (error.message.includes('auth/network-request-failed')) return '認証サーバーに接続できません。Auth Emulatorまたはネットワークを確認してください。'
+    return error.message
+  }
+  return 'ログインに失敗しました。設定と接続を確認してください。'
+}
+
+function Sidebar({ user, activeSection, onSelect, onSignOut }: { user: User; activeSection: SectionId; onSelect: (section: SectionId) => void; onSignOut: () => void }) {
+  const profileName = user.displayName || user.email || 'ログインユーザー'
+  const profileRole = user.isAnonymous ? '開発用アカウント' : 'サービスアドバイザー'
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -85,8 +157,9 @@ function Sidebar({ activeSection, onSelect }: { activeSection: SectionId; onSele
         })}
       </nav>
       <div className="sidebar-footer">
-        <span className="avatar" aria-hidden="true"><UserRound size={21} /></span>
-        <span className="profile-copy"><strong>山本 翔太</strong><small>サービスアドバイザー</small></span>
+        <span className="avatar" aria-hidden="true">{user.photoURL ? <img src={user.photoURL} alt="" /> : <UserRound size={21} />}</span>
+        <span className="profile-copy"><strong>{profileName}</strong><small>{profileRole}</small></span>
+        <button className="sidebar-signout" type="button" aria-label="ログアウト" title="ログアウト" onClick={onSignOut}><LogOut size={17} /></button>
       </div>
     </aside>
   )

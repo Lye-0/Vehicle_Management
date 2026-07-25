@@ -13,6 +13,13 @@ export async function signInWithGoogle() {
   return signInWithPopup(getFirebaseAuth(), provider)
 }
 
+export async function signInAnonymouslyForDevelopment() {
+  if (!import.meta.env.DEV || !import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL) {
+    throw new Error('開発用匿名ログインはAuth Emulator接続時のみ利用できます。')
+  }
+  return signInAnonymously(getFirebaseAuth())
+}
+
 export async function signOutCurrentUser() {
   await signOut(getFirebaseAuth())
 }
