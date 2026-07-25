@@ -15,6 +15,20 @@
       "when": 1784948890071,
       "tag": "0001_outstanding_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784962556226,
+      "tag": "0002_breezy_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784962597775,
+      "tag": "0003_odd_grim_reaper",
+      "breakpoints": true
     }
   ]
 }
