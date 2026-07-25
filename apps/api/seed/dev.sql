@@ -79,3 +79,8 @@ INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description
 VALUES ('maintenance-item-011', 'maintenance-003', '法定費用', '印紙代', 1, '式', 1800, 1800, 4);
 INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
 VALUES ('maintenance-item-012', 'maintenance-003', '法定費用', 'リサイクル料金', 1, '式', 9800, 9800, 5);
+
+INSERT OR IGNORE INTO payment_records (id, document_type, document_id, invoice_amount, paid_amount, payment_date, method, note)
+VALUES ('payment-sales-003', '販売請求書', 'sales-invoice-003', 3534080, 120000, '2026-07-20', '銀行振込', '残金は納車日に支払い予定。');
+INSERT OR IGNORE INTO payment_records (id, document_type, document_id, invoice_amount, paid_amount, payment_date, method, note)
+VALUES ('payment-maintenance-003', '整備請求書', 'maintenance-003', 103350, 103350, '2026-07-22', '現金', '店頭で受領。');
