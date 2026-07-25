@@ -52,7 +52,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   const input = await parseSalesDocumentInput(body, database)
   const id = crypto.randomUUID()
   const number = await nextSalesDocumentNumber(database, input.issuedAt)
-  const totals = calculateTotals(input.items, input.taxRate)
+  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.insert(salesDocuments).values({
     id,
@@ -91,7 +91,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     note: body.note === undefined ? current.note : body.note,
     items: body.items === undefined ? await loadSalesItems(database, documentId) : body.items,
   }, database)
-  const totals = calculateTotals(input.items, input.taxRate)
+  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.update(salesDocuments).set({
     type: input.type,
@@ -174,10 +174,11 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   }
 
   const taxRate = parseTaxRate(body.taxRate)
+  const rounding = body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
   const issuedAt = dateValue(body.issuedAt) || today()
   const dueDate = nullableDate(body.dueDate)
   const items = parseItems(body.items)
-  return { type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, note: nullableString(body, 'note'), items }
+  return { type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), items }
 }
 
 function serializeSalesDocument(
@@ -225,9 +226,10 @@ async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabas
   return `${prefix}${String(sequence).padStart(3, '0')}`
 }
 
-function calculateTotals(items: SalesItemInput[], taxRate: number) {
+function calculateTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const tax = Math.floor(Math.max(0, subtotal) * taxRate / 100)
+  const taxValue = Math.max(0, subtotal) * taxRate / 100
+  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + tax }
 }
 
@@ -311,6 +313,7 @@ type SalesDocumentInput = {
   issuedAt: string
   dueDate: string | null
   taxRate: number
+  rounding: '切り捨て' | '四捨五入'
   note: string | null
   items: SalesItemInput[]
 }

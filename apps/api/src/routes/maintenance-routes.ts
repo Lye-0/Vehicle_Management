@@ -44,7 +44,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   const input = await parseMaintenanceInput(await readJson(request), database)
   const id = crypto.randomUUID()
   const number = await nextMaintenanceDocumentNumber(database, input.issuedAt)
-  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate)
+  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.insert(maintenanceDocuments).values({
     id,
@@ -77,7 +77,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   const body = await readJson(request)
   const input = await parseMaintenanceInput({
     ...body,
-    type: body.type ?? '整備請求書',
+    type: body.type ?? current.type,
     status: body.status ?? current.status,
     category: body.category ?? current.category,
     customerId: body.customerId ?? current.customerId,
@@ -92,7 +92,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database)
-  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate)
+  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.update(maintenanceDocuments).set({
     type: input.type,
@@ -178,6 +178,7 @@ async function parseMaintenanceInputAsync(body: Record<string, unknown>, databas
   const fees = parseFees(body.fees)
   const adjustment = integerNumber(body.adjustment, 0)
   const taxRate = parseTaxRate(body.taxRate)
+  const rounding = body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
   return {
     type,
     status,
@@ -189,6 +190,7 @@ async function parseMaintenanceInputAsync(body: Record<string, unknown>, databas
     issuedAt: dateValue(body.issuedAt) || today(),
     dueDate: nullableDate(body.dueDate),
     taxRate,
+    rounding,
     note: nullableString(body, 'note'),
     items,
     fees,
@@ -237,10 +239,11 @@ async function nextMaintenanceDocumentNumber(database: ReturnType<typeof createD
   return `${prefix}${String(sequence).padStart(3, '0')}`
 }
 
-function calculateTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number) {
+function calculateTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
   const taxableAmount = Math.max(0, subtotal + adjustment)
-  const tax = Math.floor(taxableAmount * taxRate / 100)
+  const taxValue = taxableAmount * taxRate / 100
+  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment + tax }
 }
 
@@ -288,4 +291,4 @@ function integerNumber(value: unknown, fallback: number) { const number = typeof
 function today() { return new Date().toISOString().slice(0, 10) }
 
 type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; amount: number }
-type MaintenanceInput = { type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; note: string | null; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }
+type MaintenanceInput = { type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }

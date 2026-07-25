@@ -38,7 +38,9 @@ export type MaintenanceDocumentInput = {
   vehicleId: string
   intakeDate: string
   plannedReleaseDate: string
+  dueDate: string
   taxRate: number
+  taxRounding: '切り捨て' | '四捨五入'
   fees: MandatoryFees
   adjustment: number
   note: string
@@ -67,7 +69,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  return { ...input, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), taxRate: Math.round(input.taxRate * 100), items: input.items.map(({ description, kind, quantity, unit, unitPrice }) => ({ description, kind, quantity, unit, unitPrice })) }
+  return { ...input, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice }) => ({ description, kind, quantity, unit, unitPrice })) }
 }
 
 function formatDate(value: string | null) { return value ? value.slice(0, 10).replaceAll('-', '/') : '' }
