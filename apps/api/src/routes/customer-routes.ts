@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm'
 import { customers, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
-import { HttpError, jsonResponse, readJson } from '../http'
+import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
@@ -44,6 +44,7 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
 
     const vehicleFileItemMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files\/([^/]+)$/)
     if (vehicleFileItemMatch) {
+      if (request.method === 'GET') return downloadVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2])
       if (request.method === 'DELETE') return deleteVehicleFile(request, env, database, vehicleFileItemMatch[1], vehicleFileItemMatch[2])
       throw new HttpError(405, 'この操作には対応していません。')
     }
@@ -225,6 +226,23 @@ async function deleteVehicleFile(_request: Request, env: Env, database: ReturnTy
   }
   await database.delete(vehicleFiles).where(eq(vehicleFiles.id, fileId)).run()
   return jsonResponse({ deleted: true }, 200, env)
+}
+
+async function downloadVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string) {
+  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId))).get()
+  if (!file) throw new HttpError(404, '添付ファイルが見つかりません。')
+  let response: Response
+  try {
+    response = await createB2Storage(env).getObject(file.objectKey)
+  } catch {
+    throw new HttpError(503, 'ファイル保存先を利用できません。')
+  }
+  const headers = new Headers(corsHeaders(env))
+  headers.set('Content-Type', file.contentType)
+  headers.set('Content-Length', String(file.sizeBytes))
+  headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+  headers.set('Cache-Control', 'private, max-age=300')
+  return new Response(response.body, { status: 200, headers })
 }
 
 async function findCustomer(database: ReturnType<typeof createDatabase>, customerId: string) {

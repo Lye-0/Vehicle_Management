@@ -1,9 +1,10 @@
-import { apiFetch } from './api'
+import { apiFetch, apiFetchBlob } from './api'
 
 export type Attachment = {
   id: string
   name: string
   type: 'image' | 'pdf' | 'other'
+  contentType: string
   size: number
   createdAt: string
 }
@@ -89,6 +90,7 @@ type ApiAttachment = {
   id: string
   name: string
   type: 'image' | 'pdf' | 'other'
+  contentType: string
   size: number
   createdAt: string
 }
@@ -126,6 +128,10 @@ export async function uploadVehicleFile(vehicleId: string, file: File) {
 
 export async function deleteVehicleFile(vehicleId: string, fileId: string) {
   await apiFetch(`/api/vehicles/${vehicleId}/files/${fileId}`, { method: 'DELETE' })
+}
+
+export async function fetchVehicleFile(vehicleId: string, fileId: string) {
+  return apiFetchBlob(`/api/vehicles/${vehicleId}/files/${fileId}`)
 }
 
 function mapCustomer(customer: ApiCustomer): Customer {

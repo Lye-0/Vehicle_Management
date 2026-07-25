@@ -31,6 +31,15 @@ export function createB2Storage(env: Env) {
       await assertSuccessfulResponse(response, 'B2のファイル削除に失敗しました。')
     },
 
+    async getObject(key: string) {
+      const response = await client.fetch(`${bucketUrl}/${encodeObjectKey(key)}`, { method: 'GET' })
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(`B2のファイル取得に失敗しました。 ${detail.slice(0, 200)}`)
+      }
+      return response
+    },
+
     objectUrl(key: string) {
       return `${bucketUrl}/${encodeObjectKey(key)}`
     },

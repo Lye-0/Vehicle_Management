@@ -218,6 +218,10 @@
 .attachment-card-copy { min-width: 0; display: grid; gap: 4px; }
 .attachment-card-copy strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-card-copy small { color: var(--text-muted); font-size: 9px; }
+.attachment-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.attachment-action { width: 26px; height: 26px; display: grid; place-items: center; color: var(--text-secondary); border: 0; border-radius: 6px; background: transparent; }
+.attachment-action:hover { color: var(--primary); background: var(--primary-soft); }
+.attachment-actions .attachment-remove { margin-left: 0; }
 .attachment-remove { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; margin-left: auto; color: var(--text-muted); border: 0; border-radius: 6px; background: transparent; }
 .attachment-remove:hover { color: var(--danger); background: var(--danger-soft); }
 .attachment-dropzone { min-height: 118px; display: grid; place-items: center; align-content: center; gap: 5px; color: var(--primary); border: 1px dashed #afc6ed; border-radius: 9px; background: #f8fbff; cursor: pointer; }
