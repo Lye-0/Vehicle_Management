@@ -5,7 +5,7 @@ import path from 'node:path'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const apiDirectory = path.join(repositoryRoot, 'apps', 'api')
-const varsPath = path.join(apiDirectory, '.dev.vars')
+const varsPath = path.join(apiDirectory, '.dev.vars.development')
 
 function fail(message) {
   console.error(`[development-seed] ${message}`)
@@ -17,7 +17,7 @@ if (process.argv.length > 2) {
 }
 
 if (!existsSync(varsPath)) {
-  fail('apps/api/.dev.vars がありません。.dev.vars.example をコピーして設定してください。')
+  fail('apps/api/.dev.vars.development がありません。開発用の環境変数を設定してください。')
 }
 
 const variables = parseVars(readFileSync(varsPath, 'utf8'))
@@ -35,7 +35,7 @@ if (variables.DATA_ENV === 'production') {
 }
 
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-const result = spawnSync(pnpmCommand, ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--file', 'seed/dev.sql'], {
+const result = spawnSync(pnpmCommand, ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'development', '--file', 'seed/dev.sql'], {
   cwd: apiDirectory,
   stdio: 'inherit',
   shell: process.platform === 'win32',

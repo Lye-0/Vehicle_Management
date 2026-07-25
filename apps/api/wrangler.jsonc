@@ -51,6 +51,16 @@
 		}
 	],
 	"env": {
+		"development": {
+			"name": "vehicle-management-api-development",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "vehicle-management-db",
+					"migrations_dir": "migrations"
+				}
+			]
+		},
 		"production": {
 			"name": "vehicle-management-api-production",
 			"vars": {
