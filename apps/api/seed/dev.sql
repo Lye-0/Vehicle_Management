@@ -47,3 +47,35 @@ INSERT OR IGNORE INTO sales_document_items (id, document_id, description, quanti
 VALUES ('sales-item-009', 'sales-quote-004', '車両本体価格', 1, '式', 2140000, 2140000, 0);
 INSERT OR IGNORE INTO sales_document_items (id, document_id, description, quantity, unit, unit_price, amount, sort_order)
 VALUES ('sales-item-010', 'sales-quote-004', '付属品・特別仕様', 1, '式', 78000, 78000, 1);
+
+INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
+VALUES ('maintenance-001', 'M-2026-118', '整備見積書', '一般整備', '受付中', 'customer-sato', 'vehicle-sato-prius', '2026-07-25', '2026-07-27', '2026-07-25', '2026-08-08', 10, 23600, 2060, 22660, '左後ドア小傷を次回点検時に確認。');
+INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
+VALUES ('maintenance-002', 'M-2026-114', '納品書', '法定点検', '作業中', 'customer-tanaka', 'vehicle-tanaka-fit', '2026-07-24', '2026-07-26', '2026-07-24', '2026-08-07', 10, 27200, 2720, 29920, '代車：軽自動車を手配。');
+INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
+VALUES ('maintenance-003', 'M-2026-108', '整備請求書', '車検', '完了', 'customer-suzuki', 'vehicle-suzuki-note', '2026-07-20', '2026-07-22', '2026-07-20', '2026-08-03', 10, 45000, 4500, 103350, '車検整備完了。次回オイル交換は3か月後。');
+
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-001', 'maintenance-001', '作業', 'エンジンオイル交換', 1, '式', 6800, 6800, 0);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-002', 'maintenance-001', '部品', 'オイルフィルター', 1, '個', 1800, 1800, 1);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-003', 'maintenance-001', '作業', '12か月点検', 1, '式', 15000, 15000, 2);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-004', 'maintenance-001', '調整', '調整額', 1, '式', -3000, -3000, 3);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-005', 'maintenance-002', '作業', '24か月点検', 1, '式', 24000, 24000, 0);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-006', 'maintenance-002', '部品', 'ブレーキフルード', 1, '個', 3200, 3200, 1);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-007', 'maintenance-003', '作業', '車検基本整備', 1, '式', 42000, 42000, 0);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-008', 'maintenance-003', '部品', 'ワイパーゴム', 2, '本', 1500, 3000, 1);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-009', 'maintenance-003', '法定費用', '自賠責', 1, '式', 17650, 17650, 2);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-010', 'maintenance-003', '法定費用', '重量税', 1, '式', 24600, 24600, 3);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-011', 'maintenance-003', '法定費用', '印紙代', 1, '式', 1800, 1800, 4);
+INSERT OR IGNORE INTO maintenance_items (id, document_id, item_type, description, quantity, unit, unit_price, amount, sort_order)
+VALUES ('maintenance-item-012', 'maintenance-003', '法定費用', 'リサイクル料金', 1, '式', 9800, 9800, 5);

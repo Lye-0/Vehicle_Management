@@ -1,0 +1,1 @@
+ALTER TABLE `maintenance_documents` ADD `type` text DEFAULT '整備請求書' NOT NULL;

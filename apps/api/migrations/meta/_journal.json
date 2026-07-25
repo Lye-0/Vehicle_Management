@@ -8,6 +8,13 @@
       "when": 1784913377898,
       "tag": "0000_dizzy_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784948890071,
+      "tag": "0001_outstanding_warstar",
+      "breakpoints": true
     }
   ]
 }

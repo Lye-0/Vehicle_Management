@@ -109,6 +109,7 @@ export const salesDocumentItems = sqliteTable('sales_document_items', {
 export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   id: text('id').primaryKey(),
   number: text('number').notNull(),
+  type: text('type').notNull().default('整備請求書'),
   category: text('category').notNull(),
   status: text('status').notNull().default('下書き'),
   customerId: text('customer_id').notNull().references(() => customers.id),
