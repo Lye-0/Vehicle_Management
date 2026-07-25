@@ -6,6 +6,7 @@ import { handlePaymentRoutes } from './routes/payment-routes'
 import { handleSalesRoutes } from './routes/sales-routes'
 import { handleSettingsRoutes } from './routes/settings-routes'
 import { handleOrganizationRoutes } from './routes/organization-routes'
+import { handleMemberRoutes } from './routes/member-routes'
 import { corsHeaders, jsonResponse } from './http'
 
 export default {
@@ -18,6 +19,9 @@ export default {
 
     const organizationRouteResponse = await handleOrganizationRoutes(request, env)
     if (organizationRouteResponse) return organizationRouteResponse
+
+    const memberRouteResponse = await handleMemberRoutes(request, env)
+    if (memberRouteResponse) return memberRouteResponse
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse

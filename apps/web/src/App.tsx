@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import type { User } from 'firebase/auth'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -23,9 +23,9 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
-import { createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { changeCurrentPassword, createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
 import { setActiveOrganizationId } from './lib/api'
-import { completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
+import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
@@ -78,31 +78,65 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [sessionLoading, setSessionLoading] = useState(true)
   const [activeOrganizationId, setLocalActiveOrganizationId] = useState('')
 
-  async function loadSession() {
+  const loadSession = useCallback(async () => {
     setSessionLoading(true)
     try {
       const nextSession = await fetchAuthSession()
       setSession(nextSession)
       setSessionError('')
-      setLocalActiveOrganizationId((current) => nextSession.organizations.some((organization) => organization.organizationId === current) ? current : nextSession.organizations[0]?.organizationId ?? '')
+      const nextActiveOrganizationId = nextSession.organizations.some((organization) => organization.organizationId === activeOrganizationId) ? activeOrganizationId : nextSession.organizations[0]?.organizationId ?? ''
+      setLocalActiveOrganizationId(nextActiveOrganizationId)
+      setActiveOrganizationId(nextActiveOrganizationId || null)
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : '認証情報を読み込めませんでした。')
     } finally {
       setSessionLoading(false)
     }
-  }
+  }, [activeOrganizationId])
 
-  useEffect(() => { void loadSession() }, [user.uid])
+  useEffect(() => { void loadSession() }, [loadSession])
   useEffect(() => { setActiveOrganizationId(activeOrganizationId || null) }, [activeOrganizationId])
 
   if (sessionLoading) return <AuthLoading />
   if (sessionError) return <SessionError message={sessionError} onRetry={() => void loadSession()} />
   if (!session) return <SessionError message="認証情報を読み込めませんでした。" onRetry={() => void loadSession()} />
+  if (session.mustChangePassword) return <InitialPasswordChangePage onCompleted={(nextSession) => { setSession(nextSession); const nextOrganizationId = nextSession.organizations[0]?.organizationId ?? ''; setLocalActiveOrganizationId(nextOrganizationId); setActiveOrganizationId(nextOrganizationId || null) }} onSignOut={() => void signOutCurrentUser()} />
   if (!session.organizations.length && session.setupAvailable) return <OrganizationSetupPage user={user} onCompleted={(nextSession) => { setSession(nextSession); setLocalActiveOrganizationId(nextSession.organizations[0]?.organizationId ?? '') }} />
   if (!session.organizations.length) return <NoOrganizationPage onSignOut={() => void signOutCurrentUser()} />
 
   const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
   return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} />
+}
+
+function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (session: AuthSession) => void; onSignOut: () => void }) {
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    if (password.length < 8) {
+      setError('パスワードは8文字以上で設定してください。')
+      return
+    }
+    if (password !== confirmation) {
+      setError('パスワードが一致しません。')
+      return
+    }
+    setLoading(true)
+    try {
+      await changeCurrentPassword(password)
+      onCompleted(await completeInitialPasswordChange())
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">FIRST SIGN IN</span><h1>パスワードを設定</h1><p>管理者から発行された初期パスワードを、あなた専用のパスワードへ変更してください。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>新しいパスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={loading} /></label><label className="form-field"><span>新しいパスワード（確認）</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="もう一度入力" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '設定しています…' : 'パスワードを設定して開始'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
 }
 
 function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void }) {
@@ -114,7 +148,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage user={user} />}
         </div>
       </main>
     </div>

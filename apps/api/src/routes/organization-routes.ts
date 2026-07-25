@@ -1,5 +1,5 @@
 import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
-import { completeInitialOrganizationSetup, loadAuthSession } from '../auth/organization'
+import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -7,7 +7,8 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const isSessionRoute = pathname === '/api/auth/me'
   const isSetupRoute = pathname === '/api/setup/organization'
-  if (!isSessionRoute && !isSetupRoute) return null
+  const isPasswordCompleteRoute = pathname === '/api/auth/password/complete'
+  if (!isSessionRoute && !isSetupRoute && !isPasswordCompleteRoute) return null
 
   try {
     const user = await requireAuthenticatedUser(request, env)
@@ -17,6 +18,10 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
       const body = await readJson(request)
       const organizationId = await completeInitialOrganizationSetup(database, env, user, stringValue(body, 'name'), stringValue(body, 'setupKey'))
       return jsonResponse({ session: await loadAuthSession(database, env, user), organizationId }, 201, env)
+    }
+    if (isPasswordCompleteRoute && request.method === 'POST') {
+      await completeInitialPasswordChange(database, user.uid)
+      return jsonResponse({ session: await loadAuthSession(database, env, user) }, 200, env)
     }
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {

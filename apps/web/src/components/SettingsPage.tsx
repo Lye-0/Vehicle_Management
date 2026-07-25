@@ -1,18 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Banknote, Building2, Download, FileText, Plus, ReceiptText, Save, Settings2, Table2, Trash2 } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import type { User } from 'firebase/auth'
+import { Banknote, Building2, Copy, Download, FileText, KeyRound, Link2, Plus, ReceiptText, Save, Settings2, ShieldCheck, Table2, Trash2, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { apiFetchBlob } from '../lib/api'
+import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
+import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 
-type SettingsTab = 'shop' | 'tax' | 'masters'
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗・帳票', description: '店舗情報と帳票に表示する内容', icon: Building2 },
   { id: 'tax', label: '税・端数処理', description: '消費税と請求期限の初期値', icon: ReceiptText },
   { id: 'masters', label: '明細候補', description: '販売・整備で選べる項目', icon: Settings2 },
+  { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
 ]
 
-export function SettingsPage() {
+export function SettingsPage({ user }: { user: User }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
   const [loading, setLoading] = useState(true)
@@ -111,10 +115,234 @@ export function SettingsPage() {
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /></section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /></section>
       </div>
     </>
   )
+}
+
+function MemberSettingsPanel({ user }: { user: User }) {
+  const [currentUser, setCurrentUser] = useState(user)
+  const [displayName, setDisplayName] = useState(user.displayName ?? '')
+  const [newEmail, setNewEmail] = useState(user.email ?? '')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [linkEmail, setLinkEmail] = useState(user.email ?? '')
+  const [linkPasswordValue, setLinkPasswordValue] = useState('')
+  const [loading, setLoading] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [members, setMembers] = useState<MemberRecord[]>([])
+  const [currentRole, setCurrentRole] = useState<MemberRole>('employee')
+  const [membersLoading, setMembersLoading] = useState(true)
+  const [memberLoading, setMemberLoading] = useState('')
+  const [memberError, setMemberError] = useState('')
+  const [memberMessage, setMemberMessage] = useState('')
+  const [showAddMember, setShowAddMember] = useState(false)
+  const [newMemberName, setNewMemberName] = useState('')
+  const [newMemberEmail, setNewMemberEmail] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
+
+  const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
+  const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
+  const isAnonymous = currentUser.isAnonymous
+  const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
+
+  useEffect(() => {
+    let cancelled = false
+    setMembersLoading(true)
+    fetchMembers()
+      .then((response) => {
+        if (cancelled) return
+        setMembers(response.members)
+        setCurrentRole(response.currentRole)
+        setMemberError('')
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setMemberError(getMemberError(reason))
+      })
+      .finally(() => {
+        if (!cancelled) setMembersLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  async function refreshUser() {
+    const nextUser = await refreshCurrentUser()
+    if (nextUser) {
+      setCurrentUser(nextUser)
+      setDisplayName(nextUser.displayName ?? '')
+      setNewEmail(nextUser.email ?? '')
+      setLinkEmail(nextUser.email ?? '')
+    }
+  }
+
+  async function runAction(action: string, callback: () => Promise<void>) {
+    setLoading(action)
+    setError('')
+    setMessage('')
+    try {
+      await callback()
+      await refreshUser()
+    } catch (reason) {
+      setError(getSettingsAuthError(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function saveDisplayName() {
+    if (!displayName.trim()) {
+      setError('表示名を入力してください。')
+      return
+    }
+    await runAction('displayName', async () => {
+      await changeCurrentDisplayName(displayName)
+      setMessage('表示名を更新しました。')
+    })
+  }
+
+  async function saveEmail() {
+    if (!newEmail.trim()) {
+      setError('メールアドレスを入力してください。')
+      return
+    }
+    await runAction('email', async () => {
+      await changeCurrentEmail(newEmail)
+      await sendCurrentEmailVerification()
+      setMessage('メールアドレスを更新し、確認メールを送信しました。')
+    })
+  }
+
+  async function savePassword() {
+    if (newPassword.length < 8) {
+      setError('パスワードは8文字以上で設定してください。')
+      return
+    }
+    if (newPassword !== passwordConfirmation) {
+      setError('パスワードが一致しません。')
+      return
+    }
+    await runAction('password', async () => {
+      await changeCurrentPassword(newPassword)
+      setNewPassword('')
+      setPasswordConfirmation('')
+      setMessage('パスワードを更新しました。')
+    })
+  }
+
+  async function linkPassword() {
+    if (!linkEmail.trim() || linkPasswordValue.length < 8) {
+      setError('メールアドレスと8文字以上のパスワードを入力してください。')
+      return
+    }
+    await runAction('link-password', async () => {
+      await addEmailPasswordLogin(linkEmail, linkPasswordValue)
+      setLinkPasswordValue('')
+      setMessage('メールアドレス＋パスワードを追加しました。')
+    })
+  }
+
+  async function linkGoogle() {
+    await runAction('link-google', async () => {
+      await addGoogleLogin()
+      setMessage('Googleログインを追加しました。')
+    })
+  }
+
+  async function unlinkProvider(providerId: string) {
+    if (!window.confirm('このログイン方法を解除しますか？')) return
+    await runAction(`unlink-${providerId}`, async () => {
+      await removeLoginProvider(providerId)
+      setMessage('ログイン方法を解除しました。')
+    })
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!newMemberName.trim() || !newMemberEmail.trim()) {
+      setMemberError('表示名とメールアドレスを入力してください。')
+      return
+    }
+    setMemberLoading('create')
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
+      if (response.member) setMembers((current) => [...current, response.member])
+      setTemporaryPassword(response.temporaryPassword)
+      setNewMemberName('')
+      setNewMemberEmail('')
+      setShowAddMember(false)
+      setMemberMessage('従業員を登録しました。初期パスワードはこの画面を閉じると再表示できません。')
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function changeMember(uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) {
+    setMemberLoading(uid)
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await updateMember(uid, input)
+      setMembers(response.members)
+      setMemberMessage('所属情報を更新しました。')
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function resetMemberPassword(uid: string) {
+    if (!window.confirm('このユーザーにパスワード再設定メールを送信しますか？')) return
+    setMemberLoading(`reset-${uid}`)
+    setMemberError('')
+    setMemberMessage('')
+    try {
+      const response = await sendMemberPasswordReset(uid)
+      setMemberMessage(response.message)
+    } catch (reason: unknown) {
+      setMemberError(getMemberError(reason))
+    } finally {
+      setMemberLoading('')
+    }
+  }
+
+  async function copyTemporaryPassword() {
+    if (!temporaryPassword) return
+    if (!navigator.clipboard) {
+      setMemberMessage('この環境では自動コピーできません。表示されたパスワードを安全に控えてください。')
+      return
+    }
+    await navigator.clipboard.writeText(temporaryPassword)
+    setMemberMessage('初期パスワードをコピーしました。')
+  }
+
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={UsersRound} title="管理者・従業員" description="自分のプロフィールとログイン方法を管理します。" /><section className="panel settings-panel"><div className="account-summary"><span className="account-avatar"><UserRound size={24} /></span><div><strong>{currentUser.displayName || currentUser.email || 'ログインユーザー'}</strong><small>{isAnonymous ? '開発用匿名アカウント' : currentUser.email || 'メールアドレス未設定'}</small></div></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<div className="settings-form-grid account-form-grid"><SettingsField label="表示名" value={displayName} onChange={setDisplayName} /><div className="account-action-field"><span>プロフィール</span><button className="button button-secondary" type="button" disabled={Boolean(loading) || isAnonymous} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '保存中…' : '表示名を保存'}</button></div></div></section>{!isAnonymous && <section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>ログイン方法</h2><p>同じアカウントに複数のログイン方法を連携できます。</p></div></div><div className="provider-list">{currentUser.providerData.map((provider) => <div className="provider-row" key={provider.providerId}><span><strong>{provider.providerId === 'google.com' ? 'Google' : provider.providerId === 'password' ? 'メール＋パスワード' : provider.providerId}</strong><small>{provider.email || currentUser.email || '登録済み'}</small></span><span className="provider-actions"><span className="provider-badge">連携済み</span>{currentUser.providerData.length > 1 && <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider(provider.providerId)}>解除</button>}</span></div>)}</div>{!hasGoogle && <button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void linkGoogle()}>{loading === 'link-google' ? 'Googleを確認しています…' : 'Googleログインを追加'}</button>}{!hasPassword && <div className="account-link-form"><strong>メール＋パスワードを追加</strong><div className="settings-form-grid"><SettingsField label="メールアドレス" value={linkEmail} onChange={setLinkEmail} /><SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === 'link-password' ? '追加しています…' : 'メール認証を追加'}</button></div>}</section>}{!isAnonymous && <section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>アカウント情報</h2><p>メールアドレスやパスワードを変更できます。</p></div></div><div className="settings-form-grid"><SettingsField label="メールアドレス" value={newEmail} onChange={setNewEmail} /><div className="account-action-field"><span>メール確認</span>{currentUser.emailVerified ? <small className="verified-label">確認済み</small> : <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}</div></div><button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '更新中…' : 'メールアドレスを更新'}</button>{hasPassword && <div className="account-password-form"><strong>パスワード変更</strong><div className="settings-form-grid"><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '更新中…' : 'パスワードを変更'}</button></div>}</section>}<section className="panel settings-panel"><div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError('') }}><UserPlus size={15} />従業員を追加</button>}</div>{memberError && <div className="auth-error" role="alert">{memberError}</div>}{memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}{temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword('')}>閉じる</button></div></div>}{showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}{membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}</section></div>
+}
+
+function MemberRow({ member, currentRole, loading, onChange, onReset }: { member: MemberRecord; currentRole: MemberRole; loading: string; onChange: (uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) => void; onReset: (uid: string) => void }) {
+  const canEdit = !member.isSelf && member.role !== 'owner' && (currentRole === 'owner' || (currentRole === 'admin' && member.role === 'employee'))
+  const canReset = canEdit
+  return <article className="member-row"><div className="member-avatar"><UserRound size={18} /></div><div className="member-main"><div className="member-heading"><strong>{member.displayName}</strong>{member.isSelf && <span className="member-self-badge">自分</span>}{member.mustChangePassword && <span className="member-pending-badge">初回変更待ち</span>}</div><small>{member.email || 'メールアドレス未設定'}</small></div><div className="member-role-control">{member.role === 'owner' ? <span className="member-role-badge"><ShieldCheck size={13} />オーナー</span> : canEdit ? <select aria-label={`${member.displayName}の権限`} value={member.role} disabled={Boolean(loading)} onChange={(event) => onChange(member.uid, { role: event.target.value as Exclude<MemberRole, 'owner'> })}><option value="employee">従業員</option><option value="admin">管理者</option></select> : <span className="member-role-badge">{member.role === 'admin' ? '管理者' : '従業員'}</span>}</div><div className="member-status-control">{canEdit ? <button className={`member-status-button is-${member.status}`} type="button" disabled={Boolean(loading)} onClick={() => onChange(member.uid, { status: member.status === 'active' ? 'suspended' : 'active' })}>{member.status === 'active' ? '利用中' : '停止中'}</button> : <span className={`member-status-badge is-${member.status}`}>{member.status === 'active' ? '利用中' : '停止中'}</span>}</div>{canReset && <button className="text-button member-reset-button" type="button" disabled={Boolean(loading)} onClick={() => onReset(member.uid)}>{loading === `reset-${member.uid}` ? '送信中…' : '再設定メール'}</button>}</article>
+}
+
+function getMemberError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  return '管理者・従業員情報の処理に失敗しました。'
+}
+
+function getSettingsAuthError(error: unknown) {
+  if (!(error instanceof Error) || !error.message) return 'アカウント情報の更新に失敗しました。'
+  if (error.message.includes('auth/requires-recent-login')) return '安全のため、いったんログアウトして再ログインしてからお試しください。'
+  if (error.message.includes('auth/credential-already-in-use') || error.message.includes('auth/email-already-in-use')) return 'この認証情報は別のアカウントで使用されています。'
+  if (error.message.includes('auth/weak-password')) return 'パスワードは8文字以上で設定してください。'
+  if (error.message.includes('auth/popup-closed-by-user')) return 'Googleの認証画面が閉じられました。'
+  return error.message
 }
 
 function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
@@ -150,8 +378,8 @@ function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof 
   return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
 }
 
-function SettingsField({ label, value, onChange, placeholder, required, wide }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean }) {
-  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password' }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
 function PresetPanel({ title, description, items, kind, onUpdate, onAdd, onRemove }: { title: string; description: string; items: string[]; kind: 'salesItemPresets' | 'maintenanceItemPresets'; onUpdate: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) => void; onAdd: (kind: 'salesItemPresets' | 'maintenanceItemPresets') => void; onRemove: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) => void }) {

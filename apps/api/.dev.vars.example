@@ -1,6 +1,7 @@
 APP_ENV=development
 FIREBASE_PROJECT_ID=vehicle-management-64
 FIREBASE_AUTH_EMULATOR=true
+FIREBASE_WEB_API_KEY=
 CORS_ORIGIN=http://localhost:5173
 
 B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com

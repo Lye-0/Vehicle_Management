@@ -16,6 +16,7 @@ import {
   signOut,
   unlink,
   updateEmail,
+  updateProfile,
   updatePassword,
   type User,
 } from 'firebase/auth'
@@ -51,6 +52,10 @@ export async function changeCurrentPassword(password: string) {
 
 export async function changeCurrentEmail(email: string) {
   return updateEmail(requireCurrentUser(), normalizeEmail(email))
+}
+
+export async function changeCurrentDisplayName(displayName: string) {
+  return updateProfile(requireCurrentUser(), { displayName: displayName.trim() || null })
 }
 
 export async function sendCurrentEmailVerification() {

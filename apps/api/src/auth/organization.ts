@@ -37,6 +37,14 @@ export async function requireOrganizationContext(request: Request, env: Env, dat
   return { user, organization }
 }
 
+export async function requireAdminOrganizationContext(request: Request, env: Env, database: Database): Promise<OrganizationContext> {
+  const context = await requireOrganizationContext(request, env, database)
+  if (context.organization.role !== 'owner' && context.organization.role !== 'admin') {
+    throw new HttpError(403, 'この操作には管理者権限が必要です。')
+  }
+  return context
+}
+
 export async function loadMemberships(database: Database, uid: string): Promise<OrganizationMembership[]> {
   const [membershipRows, organizationRows] = await Promise.all([
     database.select().from(organizationMemberships).where(eq(organizationMemberships.uid, uid)).orderBy(asc(organizationMemberships.createdAt)).all(),
@@ -94,16 +102,23 @@ export async function completeInitialOrganizationSetup(database: Database, env: 
   return target.id
 }
 
+export async function completeInitialPasswordChange(database: Database, uid: string) {
+  const account = await database.select({ uid: authAccounts.uid, mustChangePassword: authAccounts.mustChangePassword }).from(authAccounts).where(eq(authAccounts.uid, uid)).get()
+  if (!account) throw new HttpError(404, '認証アカウント情報が見つかりません。')
+  if (!account.mustChangePassword) return
+  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(eq(authAccounts.uid, uid)).run()
+}
+
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {
   if (!(env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true')) return
   const organization = await database.select({ id: organizations.id }).from(organizations).where(eq(organizations.id, defaultOrganizationId)).get()
   if (!organization) return
-  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, defaultOrganizationId), eq(organizationMemberships.uid, user.uid))).get()
+  const existingMembership = await database.select({ id: organizationMemberships.id, role: organizationMemberships.role }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, defaultOrganizationId), eq(organizationMemberships.uid, user.uid))).get()
   const now = new Date().toISOString()
   if (!existingMembership) {
     await database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId: defaultOrganizationId, uid: user.uid, role: 'owner', status: 'active', updatedAt: now }).run()
   }
-  await upsertProfile(database, user, 'owner')
+  await upsertProfile(database, user, existingMembership ? normalizeRole(existingMembership.role) : 'owner')
   await ensureAuthAccount(database, user.uid)
 }
 
