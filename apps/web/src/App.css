@@ -40,9 +40,9 @@
 .auth-form input { width: 100%; min-height: 44px; padding: 10px 12px; color: var(--text); border: 1px solid var(--border); border-radius: 9px; background: var(--surface); font: inherit; font-size: 13px; outline: none; }
 .auth-form input:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .auth-form input:disabled { color: var(--text-muted); background: var(--surface-subtle); }
-.auth-input-wrap { position: relative; display: flex; align-items: center; }
-.auth-input-wrap > svg { position: absolute; left: 12px; color: var(--text-muted); pointer-events: none; }
-.auth-input-wrap input { padding-left: 37px; }
+.auth-input-wrap { position: relative; display: block; width: 100%; }
+.auth-input-wrap > svg { position: absolute; z-index: 1; top: 50%; left: 14px; color: var(--text-muted); pointer-events: none; transform: translateY(-50%); }
+.auth-input-wrap input { display: block; width: 100%; min-width: 0; padding: 10px 12px 10px 42px; }
 .auth-signin-button { width: 100%; min-height: 46px; }
 .auth-error { padding: 11px 13px; color: var(--danger); border: 1px solid #ffcaca; border-radius: 8px; background: var(--danger-soft); font-size: 12px; line-height: 1.6; }
 .auth-reset-button, .auth-back-button { justify-self: center; }
