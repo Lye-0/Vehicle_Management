@@ -95,6 +95,7 @@
 .data-list-row, .activity-row { display: grid; align-items: center; gap: 12px; padding: 15px 0; border-bottom: 1px solid #edf1f5; }
 .data-list-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 .data-list-row:last-child, .activity-row:last-child { border-bottom: 0; }
+.dashboard-empty { padding: 28px 0; color: var(--text-muted); font-size: 11px; text-align: center; }
 .row-icon, .activity-icon, .placeholder-icon, .quick-action-icon { display: grid; place-items: center; border-radius: 10px; }
 .row-icon { width: 36px; height: 36px; }
 .row-copy { min-width: 0; display: grid; gap: 5px; }

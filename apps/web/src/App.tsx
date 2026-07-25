@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowUpRight,
@@ -20,6 +20,7 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
+import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'payments' | 'settings'
@@ -48,24 +49,6 @@ const pageMeta: Record<SectionId, PageMeta> = {
   payments: { title: '入金管理', description: '請求に対する入金状況を確認し、未入金を管理します。', actionLabel: '入金を登録', icon: CircleDollarSign },
   settings: { title: '設定', description: '帳票、税金・保険料、作業項目などの共通設定を管理します。', actionLabel: '設定を追加', icon: Settings },
 }
-
-const inspectionRows = [
-  { customer: '佐藤 太郎', vehicle: 'トヨタ プリウス', plate: '品川 500 あ 1234', date: '2026/10/15', tone: 'normal' },
-  { customer: '田中 花子', vehicle: 'ホンダ フィット', plate: '横浜 300 い 5678', date: '2026/08/20', tone: 'warning' },
-  { customer: '鈴木 一郎', vehicle: 'ニッサン ノート', plate: '大宮 400 う 9012', date: '2025/12/01', tone: 'danger' },
-]
-
-const paymentRows = [
-  { customer: '高橋 美咲', document: '販売請求書 #S-2026-041', amount: '¥1,280,000', due: '期限まで8日', tone: 'warning' },
-  { customer: '伊藤 雄介', document: '整備請求書 #M-2026-118', amount: '¥86,420', due: '期限超過', tone: 'danger' },
-  { customer: '山田 恵子', document: '販売請求書 #S-2026-039', amount: '¥420,000', due: '期限まで15日', tone: 'normal' },
-]
-
-const recentActivities = [
-  { label: '販売見積書を作成', detail: '佐藤 太郎・トヨタ プリウス', time: '10分前', icon: FileText },
-  { label: '車両情報を更新', detail: '田中 花子・ホンダ フィット', time: '1時間前', icon: CarFront },
-  { label: '入金を登録', detail: '山田 恵子・¥120,000', time: '昨日', icon: CircleDollarSign },
-]
 
 function App() {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
@@ -124,24 +107,49 @@ function Topbar({ currentPage }: { currentPage: PageMeta }) {
 }
 
 function Dashboard() {
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchDashboard()
+      .then((nextDashboard) => {
+        if (!cancelled) {
+          setDashboard(nextDashboard)
+          setError('')
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : 'ダッシュボードを読み込めませんでした。')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const summary = dashboard?.summary
   return (
     <>
       <PageHeader eyebrow="本日の状況" title="ダッシュボード" description="店舗の状況をひと目で確認できます。" action={<button className="button button-primary" type="button"><Plus size={18} />クイック操作</button>} />
+      {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
+      {loading && <div className="customer-sync-status"><span>店舗データを集計しています。</span></div>}
       <section className="stats-grid" aria-label="概要">
-        <StatCard label="登録車両" value="128" suffix="台" note="先月比 +6台" icon={CarFront} tone="blue" />
-        <StatCard label="今月の売上" value="¥8,420,000" note="先月比 +12.4%" icon={ArrowUpRight} tone="green" />
-        <StatCard label="車検期限30日以内" value="12" suffix="台" note="要確認 3台" icon={CalendarDays} tone="orange" />
-        <StatCard label="未入金の請求" value="3" suffix="件" note="合計 ¥1,786,420" icon={CircleDollarSign} tone="red" />
+        <StatCard label="登録車両" value={String(summary?.registeredVehicles ?? 0)} suffix="台" note="現在の登録台数" icon={CarFront} tone="blue" />
+        <StatCard label="今月の売上" value={formatYen(summary?.monthlySales ?? 0)} note="販売・整備の合計" icon={ArrowUpRight} tone="green" />
+        <StatCard label="車検期限30日以内" value={String(summary?.inspectionsWithin30Days ?? 0)} suffix="台" note={`期限超過 ${summary?.overdueInspections ?? 0}台`} icon={CalendarDays} tone="orange" />
+        <StatCard label="未入金の請求" value={String(summary?.unpaidInvoices ?? 0)} suffix="件" note={`合計 ${formatYen(summary?.unpaidAmount ?? 0)}`} icon={CircleDollarSign} tone="red" />
       </section>
       <section className="dashboard-grid">
         <Panel title="車検・点検期限が近い車両" action="一覧を見る">
-          <div className="data-list">{inspectionRows.map((row) => <div className="data-list-row" key={`${row.customer}-${row.date}`}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></div>)}</div>
+          <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row) => <div className="data-list-row" key={`${row.customer}-${row.date}-${row.plate}`}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
         </Panel>
         <Panel title="未入金の請求" action="入金管理を見る">
-          <div className="data-list">{paymentRows.map((row) => <div className="data-list-row" key={row.document}><span className="row-icon row-icon-orange"><CircleDollarSign size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.document}</small></span><span className="row-trailing row-trailing-payment"><strong>{row.amount}</strong><StatusBadge tone={row.tone}>{row.due}</StatusBadge></span></div>)}</div>
+          <div className="data-list">{dashboard?.unpaidInvoices.length ? dashboard.unpaidInvoices.map((row) => <div className="data-list-row" key={row.document}><span className="row-icon row-icon-orange"><CircleDollarSign size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.document}</small></span><span className="row-trailing row-trailing-payment"><strong>{formatYen(row.amount)}</strong><StatusBadge tone={row.tone}>{row.due}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>未入金の請求はありません。</DashboardEmpty>}</div>
         </Panel>
         <Panel title="最近の更新" action="履歴を見る">
-          <div className="activity-list">{recentActivities.map(({ label, detail, time, icon: Icon }) => <div className="activity-row" key={`${label}-${time}`}><span className="activity-icon"><Icon size={17} /></span><span className="row-copy"><strong>{label}</strong><small>{detail}</small></span><small className="activity-time">{time}</small></div>)}</div>
+          <div className="activity-list">{dashboard?.recentActivities.length ? dashboard.recentActivities.map((activity) => <div className="activity-row" key={`${activity.kind}-${activity.label}-${activity.at}`}><span className="activity-icon"><RecentActivityIcon kind={activity.kind} /></span><span className="row-copy"><strong>{activity.label}</strong><small>{activity.detail}</small></span><small className="activity-time">{formatRelativeTime(activity.at)}</small></div>) : <DashboardEmpty loading={loading}>最近の更新はありません。</DashboardEmpty>}</div>
         </Panel>
         <Panel title="クイック操作" className="quick-panel">
           <div className="quick-actions"><QuickAction icon={Search} label="顧客・車両を検索" /><QuickAction icon={FileText} label="販売書類を作成" /><QuickAction icon={ClipboardCheck} label="整備書類を作成" /><QuickAction icon={CircleDollarSign} label="入金を登録" /></div>
@@ -149,6 +157,30 @@ function Dashboard() {
       </section>
     </>
   )
+}
+
+function DashboardEmpty({ loading, children }: { loading: boolean; children: ReactNode }) {
+  return <div className="dashboard-empty">{loading ? '読み込み中…' : children}</div>
+}
+
+function RecentActivityIcon({ kind }: { kind: DashboardData['recentActivities'][number]['kind'] }) {
+  const Icon = kind === 'sales' ? FileText : kind === 'vehicle' ? CarFront : CircleDollarSign
+  return <Icon size={17} />
+}
+
+function formatYen(amount: number) {
+  return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}`
+}
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z'))
+  if (Number.isNaN(date.getTime())) return '日時不明'
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
+  if (diffMinutes < 1) return 'たった今'
+  if (diffMinutes < 60) return `${diffMinutes}分前`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}時間前`
+  return `${Math.floor(diffHours / 24)}日前`
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {

@@ -26,6 +26,11 @@ describe("Vehicle Management API", () => {
 		expect(response.status).toBe(401);
 	});
 
+	it("protects dashboard routes with authentication", async () => {
+		const response = await SELF.fetch("https://example.com/api/dashboard");
+		expect(response.status).toBe(401);
+	});
+
 	it("returns 404 for unknown routes", async () => {
 		const response = await SELF.fetch("https://example.com/unknown");
 		expect(response.status).toBe(404);
