@@ -202,7 +202,8 @@ export function CustomerVehiclePage() {
   }
 
   async function openAttachment(vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') {
-    const previewWindow = mode === 'preview' ? window.open('', '_blank', 'noopener,noreferrer') : null
+    const previewWindow = mode === 'preview' ? window.open('', '_blank') : null
+    if (previewWindow) previewWindow.opener = null
     setSaving(true)
     setError('')
     try {
