@@ -12,7 +12,7 @@ export function jsonResponse(body: unknown, status: number, env: Env) {
 export function corsHeaders(env: Env) {
   return {
     'Access-Control-Allow-Origin': env.CORS_ORIGIN ?? 'http://localhost:5173',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Organization-Id',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     'Vary': 'Origin',
   }

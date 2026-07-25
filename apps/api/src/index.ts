@@ -1,4 +1,3 @@
-import { requireFirebaseUser, UnauthorizedError } from './auth/firebase'
 import { handleCustomerRoutes } from './routes/customer-routes'
 import { handleDashboardRoutes } from './routes/dashboard-routes'
 import { handleExportRoutes } from './routes/export-routes'
@@ -6,6 +5,7 @@ import { handleMaintenanceRoutes } from './routes/maintenance-routes'
 import { handlePaymentRoutes } from './routes/payment-routes'
 import { handleSalesRoutes } from './routes/sales-routes'
 import { handleSettingsRoutes } from './routes/settings-routes'
+import { handleOrganizationRoutes } from './routes/organization-routes'
 import { corsHeaders, jsonResponse } from './http'
 
 export default {
@@ -15,6 +15,9 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(env) })
     }
+
+    const organizationRouteResponse = await handleOrganizationRoutes(request, env)
+    if (organizationRouteResponse) return organizationRouteResponse
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
@@ -46,17 +49,6 @@ export default {
           objectStorage: isB2Configured(env) ? "configured" : "missing",
         },
       }, 200, env)
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/auth/me") {
-      try {
-        const allowEmulatorToken = env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true'
-        const user = await requireFirebaseUser(request, env.FIREBASE_PROJECT_ID, allowEmulatorToken)
-        return jsonResponse({ user }, 200, env)
-      } catch (error) {
-        if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
-        return jsonResponse({ error: "認証設定を確認してください。" }, 500, env)
-      }
     }
 
     return jsonResponse({ error: "Not Found" }, 404, env)

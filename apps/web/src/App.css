@@ -62,6 +62,8 @@
 .branch-card { display: grid; gap: 6px; padding: 21px 20px 23px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 .branch-card span { color: #8297b3; font-size: 12px; font-weight: 700; }
 .branch-card strong { color: #eaf0f8; font-size: 17px; letter-spacing: 0.02em; }
+.branch-card select { max-width: 100%; padding: 0; color: #eaf0f8; border: 0; background: transparent; font: inherit; font-size: 17px; font-weight: 700; letter-spacing: 0.02em; outline: none; }
+.branch-card select option { color: var(--text); background: var(--surface); }
 .sidebar-nav { display: grid; gap: 6px; padding: 22px 12px; }
 .nav-item { width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px; color: var(--sidebar-text); border: 0; border-radius: 10px; background: transparent; font-size: 15px; font-weight: 700; text-align: left; transition: color 160ms ease, background 160ms ease, transform 160ms ease; }
 .nav-item:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }

@@ -1,6 +1,15 @@
 import { getCurrentIdToken } from './auth'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+let activeOrganizationId: string | null = null
+
+export function setActiveOrganizationId(organizationId: string | null) {
+  activeOrganizationId = organizationId
+}
+
+export function getActiveOrganizationId() {
+  return activeOrganizationId
+}
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers: await createApiHeaders(init) })
@@ -19,6 +28,7 @@ async function createApiHeaders(init: RequestInit) {
   if (typeof init.body === 'string' && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const token = await getCurrentIdToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (activeOrganizationId) headers.set('X-Organization-Id', activeOrganizationId)
   return headers
 }
 

@@ -23,7 +23,9 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
-import { observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { setActiveOrganizationId } from './lib/api'
+import { completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
@@ -71,11 +73,44 @@ function App() {
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
+  const [session, setSession] = useState<AuthSession | null>(null)
+  const [sessionError, setSessionError] = useState('')
+  const [sessionLoading, setSessionLoading] = useState(true)
+  const [activeOrganizationId, setLocalActiveOrganizationId] = useState('')
+
+  async function loadSession() {
+    setSessionLoading(true)
+    try {
+      const nextSession = await fetchAuthSession()
+      setSession(nextSession)
+      setSessionError('')
+      setLocalActiveOrganizationId((current) => nextSession.organizations.some((organization) => organization.organizationId === current) ? current : nextSession.organizations[0]?.organizationId ?? '')
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : '認証情報を読み込めませんでした。')
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadSession() }, [user.uid])
+  useEffect(() => { setActiveOrganizationId(activeOrganizationId || null) }, [activeOrganizationId])
+
+  if (sessionLoading) return <AuthLoading />
+  if (sessionError) return <SessionError message={sessionError} onRetry={() => void loadSession()} />
+  if (!session) return <SessionError message="認証情報を読み込めませんでした。" onRetry={() => void loadSession()} />
+  if (!session.organizations.length && session.setupAvailable) return <OrganizationSetupPage user={user} onCompleted={(nextSession) => { setSession(nextSession); setLocalActiveOrganizationId(nextSession.organizations[0]?.organizationId ?? '') }} />
+  if (!session.organizations.length) return <NoOrganizationPage onSignOut={() => void signOutCurrentUser()} />
+
+  const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
+  return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} />
+}
+
+function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
 
   return (
     <div className="app-shell">
-      <Sidebar user={user} activeSection={activeSection} onSelect={setActiveSection} onSignOut={() => void signOutCurrentUser()} />
+      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={setActiveSection} onSignOut={onSignOut} />
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
@@ -86,6 +121,37 @@ function AuthenticatedApp({ user }: { user: User }) {
   )
 }
 
+function SessionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div className="auth-page"><section className="auth-card"><span className="page-eyebrow">SESSION ERROR</span><h1>利用情報を読み込めません</h1><div className="auth-error" role="alert">{message}</div><button className="button button-primary auth-signin-button" type="button" onClick={onRetry}>再読み込み</button></section></div>
+}
+
+function NoOrganizationPage({ onSignOut }: { onSignOut: () => void }) {
+  return <div className="auth-page"><section className="auth-card"><span className="page-eyebrow">NO ORGANIZATION</span><h1>利用組織がありません</h1><p>管理者にアカウント登録を依頼してください。</p><button className="button button-secondary auth-signin-button" type="button" onClick={onSignOut}>ログアウト</button></section></div>
+}
+
+function OrganizationSetupPage({ user, onCompleted }: { user: User; onCompleted: (session: AuthSession) => void }) {
+  const [name, setName] = useState('')
+  const [setupKey, setSetupKey] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const session = await completeOrganizationSetup(name, setupKey)
+      onCompleted(session)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '組織を作成できませんでした。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">INITIAL SETUP</span><h1>組織をセットアップ</h1><p>{user.email ?? '認証済みユーザー'}を最初の管理者として登録します。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>組織名・店舗名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="東京都心支店" disabled={loading} /></label><label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="管理者から発行されたキー" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '作成しています…' : '管理者としてセットアップ'}</button></form></section></div>
+}
+
 function AuthLoading() {
   return <div className="auth-page"><div className="auth-card auth-loading"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><strong>車両管理を起動しています</strong><span>認証状態を確認しています。</span></div></div>
 }
@@ -94,8 +160,12 @@ function LoginPage({ initialError }: { initialError?: string }) {
   const [error, setError] = useState(initialError ?? '')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [organizationName, setOrganizationName] = useState('')
+  const [setupKey, setSetupKey] = useState('')
   const [resetMode, setResetMode] = useState(false)
-  const [loading, setLoading] = useState<'email' | 'google' | 'anonymous' | 'reset' | ''>('')
+  const [setupMode, setSetupMode] = useState(false)
+  const [loading, setLoading] = useState<'email' | 'google' | 'anonymous' | 'reset' | 'setup' | ''>('')
 
   async function runEmailSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -116,6 +186,24 @@ function LoginPage({ initialError }: { initialError?: string }) {
     setLoading('google')
     try {
       await signInWithGoogle()
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runInitialSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    if (!organizationName.trim() || !email.trim() || !password || password !== passwordConfirmation) {
+      setError(!organizationName.trim() ? '組織名を入力してください。' : !email.trim() || !password ? 'メールアドレスとパスワードを入力してください。' : 'パスワードが一致しません。')
+      return
+    }
+    setLoading('setup')
+    try {
+      await createAccountWithEmailPassword(email, password)
+      await completeOrganizationSetup(organizationName, setupKey)
     } catch (reason) {
       setError(getAuthErrorMessage(reason))
     } finally {
@@ -157,14 +245,26 @@ function LoginPage({ initialError }: { initialError?: string }) {
       <section className="auth-card">
         <div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div>
         <span className="page-eyebrow">SECURE SIGN IN</span>
-        <h1>{resetMode ? 'パスワードを再設定' : '業務画面にログイン'}</h1>
-        <p>{resetMode ? '登録済みのメールアドレスに再設定用のメールを送信します。' : '顧客・車両、販売、整備、入金の情報を安全に管理します。'}</p>
+        <h1>{resetMode ? 'パスワードを再設定' : setupMode ? '管理者セットアップ' : '業務画面にログイン'}</h1>
+        <p>{resetMode ? '登録済みのメールアドレスに再設定用のメールを送信します。' : setupMode ? '最初の組織と管理者アカウントを作成します。' : '顧客・車両、販売、整備、入金の情報を安全に管理します。'}</p>
         {error && <div className="auth-error" role="alert">{error}</div>}
         {resetMode ? <form className="auth-form" onSubmit={(event) => void runPasswordReset(event)}>
           <label className="form-field"><span>メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="example@shop.jp" disabled={Boolean(loading)} /></span></label>
           <button className="button button-primary auth-signin-button" type="submit" disabled={Boolean(loading)}>{loading === 'reset' ? '送信しています…' : '再設定メールを送信'}</button>
           <button className="text-button auth-back-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setResetMode(false) }}>ログイン画面に戻る</button>
-        </form> : <>
+        </form> : setupMode ? <>
+          <form className="auth-form" onSubmit={(event) => void runInitialSetup(event)}>
+            <label className="form-field"><span>組織名・店舗名</span><input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder="東京都心支店" disabled={Boolean(loading)} /></label>
+            <label className="form-field"><span>管理者メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@shop.jp" disabled={Boolean(loading)} /></span></label>
+            <label className="form-field"><span>パスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={Boolean(loading)} /></label>
+            <label className="form-field"><span>パスワード（確認）</span><input type="password" autoComplete="new-password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} placeholder="もう一度入力" disabled={Boolean(loading)} /></label>
+            <label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="本番環境では必須" disabled={Boolean(loading)} /></label>
+            <button className="button button-primary auth-signin-button" type="submit" disabled={Boolean(loading)}>{loading === 'setup' ? '作成しています…' : '管理者アカウントを作成'}</button>
+          </form>
+          <div className="auth-divider" aria-hidden="true"><span>または</span></div>
+          <button className="button button-secondary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runGoogleSignIn()}>{loading === 'google' ? '認証しています…' : 'Googleで管理者を登録'}</button>
+          <button className="text-button auth-back-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setSetupMode(false) }}>ログイン画面に戻る</button>
+        </> : <>
           <form className="auth-form" onSubmit={(event) => void runEmailSignIn(event)}>
             <label className="form-field"><span>メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="example@shop.jp" disabled={Boolean(loading)} /></span></label>
             <label className="form-field"><span>パスワード</span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="パスワードを入力" disabled={Boolean(loading)} /></label>
@@ -175,6 +275,7 @@ function LoginPage({ initialError }: { initialError?: string }) {
           <button className="button button-secondary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runGoogleSignIn()}>
             {loading === 'google' ? 'ログインしています…' : 'Googleでログイン'}
           </button>
+          <button className="text-button auth-setup-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setSetupMode(true) }}>初めて利用する方（管理者セットアップ）</button>
         </>}
         <small className="auth-hint">{isDevelopment ? '現在はFirebase Auth Emulatorに接続しています。' : 'ログインには登録済みのメールアドレスまたはGoogleアカウントを使用してください。'}</small>
       </section>
@@ -191,21 +292,23 @@ function getAuthErrorMessage(error: unknown) {
     if (error.message.includes('auth/invalid-email')) return 'メールアドレスの形式を確認してください。'
     if (error.message.includes('auth/too-many-requests')) return '試行回数が多すぎます。時間を置いてから再度お試しください。'
     if (error.message.includes('auth/user-disabled')) return 'このアカウントは現在利用できません。管理者に確認してください。'
+    if (error.message.includes('auth/email-already-in-use')) return 'このメールアドレスはすでに登録されています。ログインをお試しください。'
+    if (error.message.includes('auth/weak-password')) return 'パスワードは8文字以上で設定してください。'
     return error.message
   }
   return 'ログインに失敗しました。設定と接続を確認してください。'
 }
 
-function Sidebar({ user, activeSection, onSelect, onSignOut }: { user: User; activeSection: SectionId; onSelect: (section: SectionId) => void; onSignOut: () => void }) {
+function Sidebar({ user, organizations, activeOrganization, onOrganizationChange, activeSection, onSelect, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; activeSection: SectionId; onSelect: (section: SectionId) => void; onSignOut: () => void }) {
   const profileName = user.displayName || user.email || 'ログインユーザー'
-  const profileRole = user.isAnonymous ? '開発用アカウント' : 'サービスアドバイザー'
+  const profileRole = user.isAnonymous ? '開発用アカウント' : activeOrganization.role === 'employee' ? '従業員' : '管理者'
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
         <span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span>
         <span className="brand-copy"><strong>車両管理</strong><small>ABACUS Refresh</small></span>
       </div>
-      <div className="branch-card"><span>店舗</span><strong>東京都心支店</strong></div>
+      <div className="branch-card"><span>組織</span>{organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}</div>
       <nav className="sidebar-nav" aria-label="メインメニュー">
         {navItems.map(({ id, label, icon: Icon }) => {
           const isActive = activeSection === id
