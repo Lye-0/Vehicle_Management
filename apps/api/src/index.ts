@@ -8,6 +8,7 @@ import { handleSettingsRoutes } from './routes/settings-routes'
 import { handleOrganizationRoutes } from './routes/organization-routes'
 import { handleMemberRoutes } from './routes/member-routes'
 import { handleImportRoutes } from './routes/import-routes'
+import { handleBackupRoutes } from './routes/backup-routes'
 import { corsHeaders, jsonResponse } from './http'
 
 export default {
@@ -26,6 +27,9 @@ export default {
 
     const importRouteResponse = await handleImportRoutes(request, env)
     if (importRouteResponse) return importRouteResponse
+
+    const backupRouteResponse = await handleBackupRoutes(request, env)
+    if (backupRouteResponse) return backupRouteResponse
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse

@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
-import { Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Link2, Plus, ReceiptText, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Link2, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
+import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
 
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
@@ -116,7 +117,7 @@ export function SettingsPage({ user }: { user: User }) {
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /><CsvImportPanel /></section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /><CsvImportPanel /><BackupPanel /></section>
       </div>
     </>
   )
@@ -424,6 +425,81 @@ function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function BackupPanel() {
+  const [backups, setBackups] = useState<BackupRecord[]>([])
+  const [canManage, setCanManage] = useState(false)
+  const [loading, setLoading] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  async function load() {
+    try {
+      const response = await fetchBackups()
+      setBackups(response.backups)
+      setCanManage(response.canManage)
+      setError('')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップ一覧を読み込めませんでした。')
+    }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  async function runBackup() {
+    setLoading('create')
+    setError('')
+    setMessage('')
+    try {
+      await createBackup()
+      setMessage('バックアップを作成しました。')
+      await load()
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを作成できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runRestore(backup: BackupRecord) {
+    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）で現在の組織データを置き換えます。続行しますか？`)) return
+    setLoading(`restore-${backup.id}`)
+    setError('')
+    setMessage('')
+    try {
+      const response = await restoreBackup(backup.id)
+      setMessage(`${response.rowCount}件のデータを復元しました。画面を再読み込みします。`)
+      window.setTimeout(() => window.location.reload(), 800)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを復元できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runDelete(backup: BackupRecord) {
+    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）を削除しますか？`)) return
+    setLoading(`delete-${backup.id}`)
+    setError('')
+    setMessage('')
+    try {
+      await deleteBackup(backup.id)
+      setBackups((current) => current.filter((item) => item.id !== backup.id))
+      setMessage('バックアップを削除しました。')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'バックアップを削除できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  return <section className="panel settings-panel backup-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>バックアップ・復元</h2><p>D1の組織データとB2の車両添付ファイルをまとめて保存します。</p></div>{canManage && <button className="button button-secondary settings-add-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackup()}>{loading === 'create' ? '作成中…' : '今すぐバックアップ'}</button>}</div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{!canManage && !error && <div className="backup-notice">バックアップの作成・復元は管理者のみ実行できます。</div>}{backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}><span className="backup-icon"><Archive size={17} /></span><span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件</small></span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : '削除'}</button></span>}</div>)}</div>}</section>
+}
+
+function formatBackupDate(value: string) {
+  const date = new Date(value.replace(' ', 'T'))
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP')
 }
 
 function ShopSettingsPanel({ settings, onUpdate, onUpdateDocument }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {

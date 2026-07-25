@@ -231,6 +231,19 @@ export const appSettings = sqliteTable('app_settings', {
   index('app_settings_organization_id_idx').on(table.organizationId),
 ])
 
+export const backupRecords = sqliteTable('backup_records', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  manifestKey: text('manifest_key').notNull(),
+  fileCount: integer('file_count').notNull().default(0),
+  rowCount: integer('row_count').notNull().default(0),
+  status: text('status').notNull().default('completed'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('backup_records_manifest_key_uq').on(table.manifestKey),
+  index('backup_records_organization_id_idx').on(table.organizationId),
+])
+
 export const databaseSchema = {
   staffProfiles,
   organizations,
@@ -246,4 +259,5 @@ export const databaseSchema = {
   paymentRecords,
   inspectionSchedules,
   appSettings,
+  backupRecords,
 }

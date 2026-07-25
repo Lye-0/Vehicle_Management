@@ -26,6 +26,20 @@ export function createB2Storage(env: Env) {
       await assertSuccessfulResponse(response, 'B2へのファイル保存に失敗しました。')
     },
 
+    async putText(key: string, body: string, contentType = 'application/json; charset=utf-8') {
+      const encoded = new TextEncoder().encode(body)
+      const bytes = new Uint8Array(encoded)
+      await this.putObject({ key, body: bytes.buffer as ArrayBuffer, contentType })
+    },
+
+    async copyObject(sourceKey: string, destinationKey: string) {
+      const response = await client.fetch(`${bucketUrl}/${encodeObjectKey(destinationKey)}`, {
+        method: 'PUT',
+        headers: { 'x-amz-copy-source': `/${config.bucket}/${encodeObjectKey(sourceKey)}` },
+      })
+      await assertSuccessfulResponse(response, 'B2のバックアップファイルコピーに失敗しました。')
+    },
+
     async deleteObject(key: string) {
       const response = await client.fetch(`${bucketUrl}/${encodeObjectKey(key)}`, { method: 'DELETE' })
       await assertSuccessfulResponse(response, 'B2のファイル削除に失敗しました。')
