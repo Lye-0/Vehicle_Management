@@ -937,3 +937,60 @@
   .payment-amount-panel,
   .payment-form-panel { break-inside: avoid; }
 }
+.vehicle-free-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.vehicle-history-panel { margin-top: 20px; padding: 0; overflow: hidden; }
+.vehicle-history-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border); background: var(--surface-subtle); }
+.vehicle-history-header h3 { margin: 3px 0 0; color: var(--text); font-size: 18px; }
+.vehicle-history-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; }
+.vehicle-history-header > svg { color: var(--primary); }
+.vehicle-history-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; padding: 18px 24px 22px; }
+.vehicle-history-group { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.vehicle-history-group-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; color: var(--text); font-size: 12px; }
+.vehicle-history-group-header span { color: var(--text-muted); font-size: 10px; }
+.vehicle-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); }
+.vehicle-history-row:first-of-type { border-top: 0; }
+.vehicle-history-row span { display: grid; gap: 3px; min-width: 0; }
+.vehicle-history-row strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.vehicle-history-row small, .vehicle-history-none { color: var(--text-muted); font-size: 10px; }
+.vehicle-history-row b { flex: 0 0 auto; color: var(--text-secondary); font-size: 10px; }
+.vehicle-history-empty { padding: 22px 24px; color: var(--text-muted); font-size: 12px; }
+.vehicle-history-empty.is-error { color: var(--danger); }
+.inspection-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.inspection-search { min-width: 220px; flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 13px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.inspection-search input { width: 100%; padding: 12px 0; color: var(--text); border: 0; outline: 0; background: transparent; font: inherit; font-size: 12px; }
+.inspection-filter-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.inspection-filter-tabs button { padding: 7px 10px; color: var(--text-muted); border: 0; border-radius: 6px; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.inspection-filter-tabs button.is-active { color: var(--primary); background: var(--surface); box-shadow: 0 1px 4px rgba(23, 46, 84, 0.08); font-weight: 700; }
+.inspection-result-summary { display: grid; gap: 2px; flex: 0 0 auto; color: var(--text-muted); font-size: 11px; text-align: right; }
+.inspection-result-summary strong { color: var(--text); font-size: 17px; }
+.inspection-schedule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.inspection-schedule-card { padding: 18px; }
+.inspection-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inspection-type-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: var(--primary); border-radius: 6px; background: var(--primary-soft); font-size: 10px; font-weight: 800; }
+.inspection-state { padding: 4px 7px; border-radius: 5px; color: var(--text-muted); background: var(--surface-subtle); font-size: 10px; font-weight: 700; }
+.inspection-state-完了 { color: var(--success); background: var(--success-soft); }
+.inspection-state-キャンセル { color: var(--danger); background: var(--danger-soft); }
+.inspection-schedule-card h2 { margin: 18px 0 4px; color: var(--text); font-size: 17px; }
+.inspection-schedule-card > p { margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.inspection-card-date { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.inspection-card-date span { color: var(--text-muted); font-size: 10px; }
+.inspection-card-date strong { color: var(--text); font-size: 16px; }
+.inspection-card-date strong.is-warning { color: var(--warning); }
+.inspection-card-date strong.is-danger { color: var(--danger); }
+.inspection-card-note { margin-top: 12px; padding: 9px 10px; color: var(--text-secondary); border-radius: 7px; background: var(--surface-subtle); font-size: 11px; line-height: 1.6; }
+.inspection-card-actions { display: flex; align-items: center; gap: 7px; margin-top: 15px; }
+.inspection-card-actions .button { min-height: 32px; padding: 7px 10px; font-size: 10px; }
+.inspection-card-actions .icon-button { width: 32px; height: 32px; margin-left: auto; }
+.inspection-card-actions .icon-button + .icon-button { margin-left: 0; }
+.icon-button.danger { color: var(--danger); }
+.inspection-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
+.inspection-empty strong { color: var(--text); font-size: 13px; }
+@media (max-width: 1100px) {
+  .vehicle-history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .inspection-schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .vehicle-free-items, .vehicle-history-grid, .inspection-schedule-grid { grid-template-columns: 1fr; }
+  .inspection-toolbar { align-items: stretch; flex-direction: column; }
+  .inspection-result-summary { text-align: left; }
+}

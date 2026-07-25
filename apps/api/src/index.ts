@@ -9,6 +9,7 @@ import { handleOrganizationRoutes } from './routes/organization-routes'
 import { handleMemberRoutes } from './routes/member-routes'
 import { handleImportRoutes } from './routes/import-routes'
 import { handleBackupRoutes } from './routes/backup-routes'
+import { handleInspectionRoutes } from './routes/inspection-routes'
 import { corsHeaders, jsonResponse } from './http'
 import { getEnvironmentIssues } from './environment'
 
@@ -40,6 +41,9 @@ export default {
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
+
+    const inspectionRouteResponse = await handleInspectionRoutes(request, env)
+    if (inspectionRouteResponse) return inspectionRouteResponse
 
     const exportRouteResponse = await handleExportRoutes(request, env)
     if (exportRouteResponse) return exportRouteResponse

@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   ArrowUpRight,
   Bell,
+  CalendarClock,
   CalendarDays,
   CarFront,
   ChevronRight,
@@ -19,6 +20,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { CustomerVehiclePage } from './components/CustomerVehiclePage'
+import { InspectionSchedulesPage } from './components/InspectionSchedulesPage'
 import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
@@ -29,7 +31,7 @@ import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSess
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
-type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'payments' | 'settings'
+type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'inspections' | 'payments' | 'settings'
 
 type PageMeta = {
   title: string
@@ -43,6 +45,7 @@ const navItems: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'customers', label: '顧客・車両', icon: CarFront },
   { id: 'sales', label: '販売', icon: FileText },
   { id: 'maintenance', label: '車検・点検・一般', icon: ClipboardCheck },
+  { id: 'inspections', label: '点検予定', icon: CalendarClock },
   { id: 'payments', label: '入金管理', icon: CircleDollarSign },
   { id: 'settings', label: '設定', icon: Settings },
 ]
@@ -52,6 +55,7 @@ const pageMeta: Record<SectionId, PageMeta> = {
   customers: { title: '顧客・車両', description: '顧客情報と、顧客に紐づく複数の車両を管理します。', actionLabel: '顧客を登録', icon: CarFront },
   sales: { title: '販売', description: '見積書・注文書・請求書を車両情報と連動して管理します。', actionLabel: '販売書類を作成', icon: FileText },
   maintenance: { title: '車検・点検・一般', description: '整備の受付から作業明細、納品書・請求書まで管理します。', actionLabel: '整備書類を作成', icon: ClipboardCheck },
+  inspections: { title: '点検予定', description: '車検・定期点検の予定と完了状態を管理します。', actionLabel: '点検予定を登録', icon: CalendarClock },
   payments: { title: '入金管理', description: '請求に対する入金状況を確認し、未入金を管理します。', actionLabel: '入金を登録', icon: CircleDollarSign },
   settings: { title: '設定', description: '帳票、税金・保険料、作業項目などの共通設定を管理します。', actionLabel: '設定を追加', icon: Settings },
 }
@@ -148,7 +152,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage user={user} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'inspections' ? <InspectionSchedulesPage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage user={user} />}
         </div>
       </main>
     </div>

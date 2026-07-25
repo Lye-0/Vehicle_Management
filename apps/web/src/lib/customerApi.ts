@@ -13,6 +13,7 @@ export type Vehicle = {
   id: string
   maker: string
   model: string
+  modelType: string
   plate: string
   vin: string
   year: string
@@ -22,6 +23,9 @@ export type Vehicle = {
   displacement: string
   transmission: string
   note: string
+  freeItem1: string
+  freeItem2: string
+  freeItem3: string
   attachments: Attachment[]
 }
 
@@ -50,12 +54,19 @@ export type CustomerInput = {
 export type VehicleInput = {
   maker: string
   model: string
+  modelType: string
   plate: string
   vin: string
   year: string
   inspectionDate: string
   mileage: string
   color: string
+  displacement: string
+  transmission: string
+  note: string
+  freeItem1: string
+  freeItem2: string
+  freeItem3: string
 }
 
 type ApiCustomer = {
@@ -74,6 +85,8 @@ type ApiVehicle = {
   id: string
   maker: string | null
   name: string
+  modelType?: string | null
+  model?: string | null
   registrationNumber: string | null
   chassisNumber: string | null
   modelYear: number | null
@@ -83,6 +96,9 @@ type ApiVehicle = {
   displacement: number | null
   transmission: string | null
   memo: string | null
+  freeItem1: string | null
+  freeItem2: string | null
+  freeItem3: string | null
   files: ApiAttachment[]
 }
 
@@ -134,6 +150,38 @@ export async function fetchVehicleFile(vehicleId: string, fileId: string) {
   return apiFetchBlob(`/api/vehicles/${vehicleId}/files/${fileId}`)
 }
 
+export type VehicleHistory = {
+  vehicle: {
+    id: string
+    customerId: string
+    customerName: string
+    maker: string | null
+    name: string
+    modelType: string | null
+    registrationNumber: string | null
+    chassisNumber: string | null
+    modelYear: number | null
+    inspectionDate: string | null
+    mileage: number | null
+    bodyColor: string | null
+    displacement: number | null
+    transmission: string | null
+    memo: string | null
+    freeItem1: string | null
+    freeItem2: string | null
+    freeItem3: string | null
+  }
+  sales: Array<{ id: string; number: string; type: string; status: string; issuedAt: string; dueDate: string | null; total: number }>
+  maintenance: Array<{ id: string; number: string; type: string; category: string; status: string; issuedAt: string; intakeDate: string | null; completionDate: string | null; total: number }>
+  inspections: Array<{ id: string; inspectionType: string; dueDate: string; status: string; note: string; notifiedAt: string | null }>
+  payments: Array<{ id: string; documentType: string; documentId: string; documentNumber: string; paidAmount: number; paymentDate: string | null; method: string | null; note: string | null }>
+  attachments: ApiAttachment[]
+}
+
+export async function fetchVehicleHistory(vehicleId: string) {
+  return apiFetch<VehicleHistory>(`/api/vehicles/${vehicleId}/history`)
+}
+
 function mapCustomer(customer: ApiCustomer): Customer {
   return {
     id: customer.id,
@@ -153,6 +201,7 @@ function mapVehicle(vehicle: ApiVehicle): Vehicle {
     id: vehicle.id,
     maker: vehicle.maker ?? '',
     model: vehicle.name,
+    modelType: vehicle.modelType ?? vehicle.model ?? '',
     plate: vehicle.registrationNumber ?? '',
     vin: vehicle.chassisNumber ?? '',
     year: vehicle.modelYear ? `${vehicle.modelYear}年` : '',
@@ -162,6 +211,9 @@ function mapVehicle(vehicle: ApiVehicle): Vehicle {
     displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
     transmission: vehicle.transmission ?? '',
     note: vehicle.memo ?? '',
+    freeItem1: vehicle.freeItem1 ?? '',
+    freeItem2: vehicle.freeItem2 ?? '',
+    freeItem3: vehicle.freeItem3 ?? '',
     attachments: vehicle.files.map(mapAttachment),
   }
 }
@@ -181,13 +233,20 @@ function toCustomerPayload(input: CustomerInput) {
 function toVehiclePayload(input: VehicleInput) {
   return {
     maker: input.maker,
-    model: input.model,
+    name: input.model,
+    modelType: input.modelType,
     registrationNumber: input.plate,
     chassisNumber: input.vin,
     modelYear: parseNumber(input.year),
     inspectionDate: input.inspectionDate,
     mileage: parseNumber(input.mileage),
     bodyColor: input.color,
+    displacement: parseNumber(input.displacement),
+    transmission: input.transmission,
+    memo: input.note,
+    freeItem1: input.freeItem1,
+    freeItem2: input.freeItem2,
+    freeItem3: input.freeItem3,
   }
 }
 

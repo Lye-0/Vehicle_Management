@@ -1,5 +1,5 @@
-import { and, asc, eq } from 'drizzle-orm'
-import { customers, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { and, asc, desc, eq } from 'drizzle-orm'
+import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -41,6 +41,12 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     const vehicleFileCollectionMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/files$/)
     if (vehicleFileCollectionMatch) {
       if (request.method === 'POST') return await uploadVehicleFile(request, env, database, vehicleFileCollectionMatch[1], organizationId)
+      throw new HttpError(405, 'この操作には対応していません。')
+    }
+
+    const vehicleHistoryMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/history$/)
+    if (vehicleHistoryMatch) {
+      if (request.method === 'GET') return await getVehicleHistory(env, database, vehicleHistoryMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
@@ -105,6 +111,10 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, 
       displacement: vehicle.displacement,
       transmission: vehicle.transmission,
       memo: vehicle.memo,
+      modelType: vehicle.model,
+      freeItem1: vehicle.freeItem1,
+      freeItem2: vehicle.freeItem2,
+      freeItem3: vehicle.freeItem3,
       files: (filesByVehicle.get(vehicle.id) ?? []).map(serializeFile),
     })),
   }))
@@ -169,6 +179,12 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
     inspectionDate: nullableString(body, 'inspectionDate'),
     mileage: nullableInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
+    displacement: nullableInteger(body, 'displacement'),
+    transmission: nullableString(body, 'transmission'),
+    memo: nullableString(body, 'memo'),
+    freeItem1: nullableString(body, 'freeItem1'),
+    freeItem2: nullableString(body, 'freeItem2'),
+    freeItem3: nullableString(body, 'freeItem3'),
   }).run()
   return jsonResponse({ customer: await findCustomer(database, customerId, organizationId), vehicleId: id }, 201, env)
 }
@@ -182,12 +198,19 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
   await database.update(vehicles).set({
     maker,
     name,
+    model: nullableString(body, 'modelType'),
     registrationNumber: nullableString(body, 'registrationNumber'),
     chassisNumber: nullableString(body, 'chassisNumber'),
     modelYear: nullableInteger(body, 'modelYear'),
     inspectionDate: nullableString(body, 'inspectionDate'),
     mileage: nullableInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
+    displacement: nullableInteger(body, 'displacement'),
+    transmission: nullableString(body, 'transmission'),
+    memo: nullableString(body, 'memo'),
+    freeItem1: nullableString(body, 'freeItem1'),
+    freeItem2: nullableString(body, 'freeItem2'),
+    freeItem3: nullableString(body, 'freeItem3'),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).run()
   return jsonResponse({ vehicleId }, 200, env)
@@ -252,6 +275,52 @@ async function downloadVehicleFile(_request: Request, env: Env, database: Return
 async function findCustomer(database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
   const records = await loadCustomerRecords(database, organizationId)
   return records.find((customer) => customer.id === customerId) ?? null
+}
+
+async function getVehicleHistory(env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
+  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+  if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
+
+  const [customer, sales, maintenance, schedules, files, payments] = await Promise.all([
+    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId))).orderBy(desc(salesDocuments.issuedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
+    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
+    database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).orderBy(desc(vehicleFiles.createdAt)).all(),
+    database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all(),
+  ])
+  const documentKeys = new Set([...sales.map((document) => `販売請求書:${document.id}`), ...maintenance.map((document) => `整備請求書:${document.id}`)])
+  const relatedPayments = payments.filter((payment) => documentKeys.has(`${payment.documentType}:${payment.documentId}`))
+  const salesById = new Map(sales.map((document) => [document.id, document]))
+  const maintenanceById = new Map(maintenance.map((document) => [document.id, document]))
+
+  return jsonResponse({
+    vehicle: {
+      id: vehicle.id,
+      customerId: vehicle.customerId,
+      customerName: customer?.name ?? '',
+      maker: vehicle.maker,
+      name: vehicle.name,
+      modelType: vehicle.model,
+      registrationNumber: vehicle.registrationNumber,
+      chassisNumber: vehicle.chassisNumber,
+      modelYear: vehicle.modelYear,
+      inspectionDate: vehicle.inspectionDate,
+      mileage: vehicle.mileage,
+      bodyColor: vehicle.bodyColor,
+      displacement: vehicle.displacement,
+      transmission: vehicle.transmission,
+      memo: vehicle.memo,
+      freeItem1: vehicle.freeItem1,
+      freeItem2: vehicle.freeItem2,
+      freeItem3: vehicle.freeItem3,
+    },
+    sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
+    maintenance: maintenance.map((document) => ({ id: document.id, number: document.number, type: document.type, category: document.category, status: document.status, issuedAt: document.issuedAt, intakeDate: document.intakeDate, completionDate: document.completionDate, total: document.total })),
+    inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
+    payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
+    attachments: files.map(serializeFile),
+  }, 200, env)
 }
 
 function groupBy<T>(items: T[], getKey: (item: T) => string) {

@@ -23,6 +23,7 @@ describe("CLI authenticated workflow", () => {
 		let vehicleId: string | undefined;
 		let salesDocumentId: string | undefined;
 		let maintenanceDocumentId: string | undefined;
+		let inspectionScheduleId: string | undefined;
 		let attachmentId: string | undefined;
 		let backupId: string | undefined;
 
@@ -78,6 +79,12 @@ describe("CLI authenticated workflow", () => {
 				inspectionDate: "2027-07-26",
 				mileage: 12345,
 				bodyColor: "パールホワイト",
+				displacement: 1800,
+				transmission: "CVT",
+				memo: `${marker} 車両メモ`,
+				freeItem1: "4WD",
+				freeItem2: "禁煙",
+				freeItem3: "ワンオーナー",
 			});
 			expect(createdVehicle.response.status).toBe(201);
 			vehicleId = stringValue(createdVehicle.body.vehicleId);
@@ -92,6 +99,13 @@ describe("CLI authenticated workflow", () => {
 				inspectionDate: "2027-08-01",
 				mileage: 13000,
 				bodyColor: "ブラック",
+				modelType: "6AA-ZVW60-UPDATED",
+				displacement: 1800,
+				transmission: "CVT",
+				memo: `${marker} 車両メモ 更新`,
+				freeItem1: "2WD",
+				freeItem2: "禁煙",
+				freeItem3: "整備履歴あり",
 			});
 			expect(updatedVehicle.response.status).toBe(200);
 
@@ -100,8 +114,27 @@ describe("CLI authenticated workflow", () => {
 			const searchedCustomer = arrayValue(customerSearch.body.customers).find((customer) => objectValue(customer).id === customerId);
 			expect(searchedCustomer).toEqual(expect.objectContaining({ name: `${marker} 顧客 更新` }));
 			expect(arrayValue(objectValue(searchedCustomer).vehicles)).toEqual(expect.arrayContaining([
-				expect.objectContaining({ id: vehicleId, mileage: 13000, bodyColor: "ブラック" }),
-		]));
+				expect.objectContaining({ id: vehicleId, mileage: 13000, bodyColor: "ブラック", modelType: "6AA-ZVW60-UPDATED", displacement: 1800, transmission: "CVT", freeItem1: "2WD" }),
+			]));
+
+			const createdSchedule = await requestJson<JsonObject>('/api/inspection-schedules', 'POST', {
+				customerId,
+				vehicleId,
+				inspectionType: '12か月点検',
+				dueDate: '2026-08-20',
+				note: `${marker} 点検予定`,
+			});
+			expect(createdSchedule.response.status).toBe(201);
+			inspectionScheduleId = stringValue(objectValue(createdSchedule.body.schedule).id);
+			expect(objectValue(createdSchedule.body.schedule)).toEqual(expect.objectContaining({ inspectionType: '12か月点検', status: '予定', vehicleId }));
+
+			const listedSchedules = await requestJson<JsonObject>(`/api/inspection-schedules?vehicleId=${vehicleId}`);
+			expect(listedSchedules.response.status).toBe(200);
+			expect(arrayValue(listedSchedules.body.schedules)).toEqual(expect.arrayContaining([expect.objectContaining({ id: inspectionScheduleId, dueDate: '2026-08-20' })]));
+
+			const updatedSchedule = await requestJson<JsonObject>(`/api/inspection-schedules/${inspectionScheduleId}`, 'PATCH', { status: '完了', note: `${marker} 点検完了` });
+			expect(updatedSchedule.response.status).toBe(200);
+			expect(objectValue(updatedSchedule.body.schedule)).toEqual(expect.objectContaining({ status: '完了', note: `${marker} 点検完了` }));
 
 			const sales = await requestJson<JsonObject>("/api/sales-documents", "POST", {
 				type: "請求書",
@@ -173,6 +206,13 @@ describe("CLI authenticated workflow", () => {
 			expect(arrayValue(payments.body.records)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 }),
 			]));
+
+			const vehicleHistory = await requestJson<JsonObject>(`/api/vehicles/${vehicleId}/history`);
+			expect(vehicleHistory.response.status).toBe(200);
+			expect(arrayValue(vehicleHistory.body.sales)).toEqual(expect.arrayContaining([expect.objectContaining({ id: salesDocumentId, number: expect.any(String) })]));
+			expect(arrayValue(vehicleHistory.body.maintenance)).toEqual(expect.arrayContaining([expect.objectContaining({ id: maintenanceDocumentId, category: '車検' })]));
+			expect(arrayValue(vehicleHistory.body.inspections)).toEqual(expect.arrayContaining([expect.objectContaining({ id: inspectionScheduleId, status: '完了' })]));
+			expect(arrayValue(vehicleHistory.body.payments)).toEqual(expect.arrayContaining([expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 })]));
 
 			const settings = await requestJson<JsonObject>("/api/settings", "PATCH", {
 				settings: {
