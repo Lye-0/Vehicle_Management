@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, FileText, Plus, ReceiptText, Save, Settings2, Trash2 } from 'lucide-react'
+import { Banknote, Building2, Download, FileText, Plus, ReceiptText, Save, Settings2, Table2, Trash2 } from 'lucide-react'
+import { apiFetchBlob } from '../lib/api'
 import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 
 type SettingsTab = 'shop' | 'tax' | 'masters'
+type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗・帳票', description: '店舗情報と帳票に表示する内容', icon: Building2 },
@@ -17,6 +19,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [exporting, setExporting] = useState<CsvResource | ''>('')
 
   useEffect(() => {
     let cancelled = false
@@ -82,16 +85,53 @@ export function SettingsPage() {
     }
   }
 
+  async function exportCsv(resource: CsvResource) {
+    setExporting(resource)
+    setError('')
+    try {
+      const blob = await apiFetchBlob(`/api/export/${resource}`)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${csvResourceLabel(resource)}-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'CSVを出力できませんでした。')
+    } finally {
+      setExporting('')
+    }
+  }
+
   return (
     <>
       <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} />}</section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /></section>
       </div>
     </>
   )
+}
+
+function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
+  const resources: Array<{ id: CsvResource; label: string; description: string }> = [
+    { id: 'customers', label: '顧客一覧', description: '顧客情報を出力' },
+    { id: 'vehicles', label: '車両一覧', description: '車両情報を出力' },
+    { id: 'sales', label: '販売書類', description: '販売書類と明細を出力' },
+    { id: 'maintenance', label: '整備書類', description: '整備書類と明細を出力' },
+    { id: 'payments', label: '入金管理', description: '請求・入金状況を出力' },
+  ]
+  return <section className="panel settings-panel csv-export-panel"><div className="settings-section-heading"><Table2 size={18} /><div><h2>データ出力</h2><p>Excelで開けるUTF-8 CSVとして現在のデータをダウンロードします。</p></div></div><div className="csv-export-grid">{resources.map((resource) => <button className="csv-export-card" type="button" key={resource.id} disabled={Boolean(exporting)} onClick={() => onExport(resource.id)}><span className="csv-export-icon"><Download size={17} /></span><span><strong>{resource.label}</strong><small>{exporting === resource.id ? '出力中…' : resource.description}</small></span><ChevronRightIcon /></button>)}</div></section>
+}
+
+function ChevronRightIcon() { return <span className="csv-export-arrow">›</span> }
+
+function csvResourceLabel(resource: CsvResource) {
+  return resource === 'customers' ? '顧客一覧' : resource === 'vehicles' ? '車両一覧' : resource === 'sales' ? '販売書類' : resource === 'maintenance' ? '整備書類' : '入金管理'
 }
 
 function ShopSettingsPanel({ settings, onUpdate, onUpdateDocument }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {

@@ -1,6 +1,7 @@
 import { requireFirebaseUser, UnauthorizedError } from './auth/firebase'
 import { handleCustomerRoutes } from './routes/customer-routes'
 import { handleDashboardRoutes } from './routes/dashboard-routes'
+import { handleExportRoutes } from './routes/export-routes'
 import { handleMaintenanceRoutes } from './routes/maintenance-routes'
 import { handlePaymentRoutes } from './routes/payment-routes'
 import { handleSalesRoutes } from './routes/sales-routes'
@@ -17,6 +18,9 @@ export default {
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
+
+    const exportRouteResponse = await handleExportRoutes(request, env)
+    if (exportRouteResponse) return exportRouteResponse
 
     const dashboardRouteResponse = await handleDashboardRoutes(request, env)
     if (dashboardRouteResponse) return dashboardRouteResponse

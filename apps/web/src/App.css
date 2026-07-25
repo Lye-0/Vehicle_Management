@@ -628,6 +628,16 @@
 .settings-preset-row .icon-button { width: 34px; height: 34px; color: var(--text-muted); }
 .settings-preset-row .icon-button:hover { color: var(--danger); background: var(--danger-soft); }
 .settings-preset-empty, .settings-empty { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 150px; color: var(--text-muted); text-align: center; }
+.csv-export-panel { margin-top: 16px; }
+.csv-export-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.csv-export-card { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 11px 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); text-align: left; }
+.csv-export-card:hover:not(:disabled) { color: var(--primary); border-color: #bfd0ee; background: var(--primary-soft); }
+.csv-export-card:disabled { cursor: wait; opacity: 0.65; }
+.csv-export-card > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.csv-export-card strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.csv-export-card small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.csv-export-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 30px; color: var(--primary); border-radius: 8px; background: #fff; }
+.csv-export-arrow { margin-left: auto; color: var(--text-muted); font-size: 22px; line-height: 1; }
 .settings-empty strong { color: var(--text); font-size: 14px; }
 .settings-empty span { font-size: 11px; }
 
@@ -684,6 +694,7 @@
   .vehicle-detail-body { padding-left: 18px; padding-right: 18px; }
   .vehicle-detail-hero { padding: 20px 18px; }
   .form-grid { grid-template-columns: 1fr; }
+  .csv-export-grid { grid-template-columns: 1fr; }
   .modal-form, .modal-header { padding-left: 18px; padding-right: 18px; }
   .sales-toolbar { align-items: stretch; flex-direction: column; }
   .sales-search { min-width: 0; }
