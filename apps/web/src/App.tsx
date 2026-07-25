@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import type { User } from 'firebase/auth'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -12,6 +12,7 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
+  Mail,
   Plus,
   Search,
   Settings,
@@ -22,7 +23,7 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
-import { observeAuthState, signInAnonymouslyForDevelopment, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import './App.css'
 
@@ -91,14 +92,58 @@ function AuthLoading() {
 
 function LoginPage({ initialError }: { initialError?: string }) {
   const [error, setError] = useState(initialError ?? '')
-  const [loading, setLoading] = useState<'google' | 'anonymous' | ''>('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [resetMode, setResetMode] = useState(false)
+  const [loading, setLoading] = useState<'email' | 'google' | 'anonymous' | 'reset' | ''>('')
 
-  async function runSignIn(kind: 'google' | 'anonymous') {
+  async function runEmailSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     setError('')
-    setLoading(kind)
+    setLoading('email')
     try {
-      if (kind === 'google') await signInWithGoogle()
-      else await signInAnonymouslyForDevelopment()
+      if (!email.trim() || !password) throw new Error('メールアドレスとパスワードを入力してください。')
+      await signInWithEmailPassword(email, password)
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runGoogleSignIn() {
+    setError('')
+    setLoading('google')
+    try {
+      await signInWithGoogle()
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setLoading('reset')
+    try {
+      if (!email.trim()) throw new Error('メールアドレスを入力してください。')
+      await sendPasswordReset(email)
+      window.alert('パスワード再設定メールを送信しました。メールをご確認ください。')
+      setResetMode(false)
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runAnonymousSignIn() {
+    setError('')
+    setLoading('anonymous')
+    try {
+      await signInAnonymouslyForDevelopment()
     } catch (reason) {
       setError(getAuthErrorMessage(reason))
     } finally {
@@ -112,17 +157,28 @@ function LoginPage({ initialError }: { initialError?: string }) {
       <section className="auth-card">
         <div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div>
         <span className="page-eyebrow">SECURE SIGN IN</span>
-        <h1>業務画面にログイン</h1>
-        <p>顧客・車両、販売、整備、入金の情報を安全に管理します。</p>
+        <h1>{resetMode ? 'パスワードを再設定' : '業務画面にログイン'}</h1>
+        <p>{resetMode ? '登録済みのメールアドレスに再設定用のメールを送信します。' : '顧客・車両、販売、整備、入金の情報を安全に管理します。'}</p>
         {error && <div className="auth-error" role="alert">{error}</div>}
-        <button className="button button-primary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runSignIn('google')}>
-          {loading === 'google' ? 'ログインしています…' : 'Googleアカウントでログイン'}
-        </button>
-        {isDevelopment && <button className="button button-secondary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runSignIn('anonymous')}>
-          {loading === 'anonymous' ? '接続しています…' : '開発用匿名ログイン'}
-        </button>}
-        <small className="auth-hint">{isDevelopment ? '現在はFirebase Auth Emulatorに接続しています。' : 'ログインには店舗から発行されたGoogleアカウントを使用してください。'}</small>
+        {resetMode ? <form className="auth-form" onSubmit={(event) => void runPasswordReset(event)}>
+          <label className="form-field"><span>メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="example@shop.jp" disabled={Boolean(loading)} /></span></label>
+          <button className="button button-primary auth-signin-button" type="submit" disabled={Boolean(loading)}>{loading === 'reset' ? '送信しています…' : '再設定メールを送信'}</button>
+          <button className="text-button auth-back-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setResetMode(false) }}>ログイン画面に戻る</button>
+        </form> : <>
+          <form className="auth-form" onSubmit={(event) => void runEmailSignIn(event)}>
+            <label className="form-field"><span>メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="example@shop.jp" disabled={Boolean(loading)} /></span></label>
+            <label className="form-field"><span>パスワード</span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="パスワードを入力" disabled={Boolean(loading)} /></label>
+            <button className="button button-primary auth-signin-button" type="submit" disabled={Boolean(loading)}>{loading === 'email' ? 'ログインしています…' : 'メールアドレスでログイン'}</button>
+          </form>
+          <button className="text-button auth-reset-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setResetMode(true) }}>パスワードを忘れた場合</button>
+          <div className="auth-divider" aria-hidden="true"><span>または</span></div>
+          <button className="button button-secondary auth-signin-button" type="button" disabled={Boolean(loading)} onClick={() => void runGoogleSignIn()}>
+            {loading === 'google' ? 'ログインしています…' : 'Googleでログイン'}
+          </button>
+        </>}
+        <small className="auth-hint">{isDevelopment ? '現在はFirebase Auth Emulatorに接続しています。' : 'ログインには登録済みのメールアドレスまたはGoogleアカウントを使用してください。'}</small>
       </section>
+      {isDevelopment && <button className="auth-dev-login" type="button" disabled={Boolean(loading)} onClick={() => void runAnonymousSignIn()}>{loading === 'anonymous' ? '接続しています…' : '開発用匿名ログイン'}</button>}
     </div>
   )
 }
@@ -131,6 +187,10 @@ function getAuthErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     if (error.message.includes('popup-closed-by-user')) return 'ログイン画面が閉じられました。もう一度お試しください。'
     if (error.message.includes('auth/network-request-failed')) return '認証サーバーに接続できません。Auth Emulatorまたはネットワークを確認してください。'
+    if (error.message.includes('auth/invalid-credential') || error.message.includes('auth/invalid-login-credentials') || error.message.includes('auth/wrong-password') || error.message.includes('auth/user-not-found')) return 'メールアドレスまたはパスワードが正しくありません。'
+    if (error.message.includes('auth/invalid-email')) return 'メールアドレスの形式を確認してください。'
+    if (error.message.includes('auth/too-many-requests')) return '試行回数が多すぎます。時間を置いてから再度お試しください。'
+    if (error.message.includes('auth/user-disabled')) return 'このアカウントは現在利用できません。管理者に確認してください。'
     return error.message
   }
   return 'ログインに失敗しました。設定と接続を確認してください。'

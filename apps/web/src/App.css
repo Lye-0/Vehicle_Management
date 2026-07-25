@@ -34,8 +34,22 @@
 .auth-brand small { color: var(--text-muted); font-size: 11px; }
 .auth-card h1 { margin: 0; color: var(--text); font-size: 26px; letter-spacing: -0.03em; }
 .auth-card > p { margin: -3px 0 8px; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.auth-form { display: grid; gap: 13px; }
+.auth-form .form-field { gap: 7px; }
+.auth-form .form-field > span:first-child { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.auth-form input { width: 100%; min-height: 44px; padding: 10px 12px; color: var(--text); border: 1px solid var(--border); border-radius: 9px; background: var(--surface); font: inherit; font-size: 13px; outline: none; }
+.auth-form input:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.auth-form input:disabled { color: var(--text-muted); background: var(--surface-subtle); }
+.auth-input-wrap { position: relative; display: flex; align-items: center; }
+.auth-input-wrap > svg { position: absolute; left: 12px; color: var(--text-muted); pointer-events: none; }
+.auth-input-wrap input { padding-left: 37px; }
 .auth-signin-button { width: 100%; min-height: 46px; }
 .auth-error { padding: 11px 13px; color: var(--danger); border: 1px solid #ffcaca; border-radius: 8px; background: var(--danger-soft); font-size: 12px; line-height: 1.6; }
+.auth-reset-button, .auth-back-button { justify-self: center; }
+.auth-divider { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 11px; }
+.auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--border); }
+.auth-dev-login { position: fixed; right: 20px; bottom: 16px; padding: 7px 10px; color: var(--text-muted); border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.72); font-size: 11px; cursor: pointer; }
+.auth-dev-login:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.95); }
 .auth-hint { margin-top: 3px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 
 .app-shell { min-height: 100vh; display: flex; background: var(--app-bg); }
