@@ -673,3 +673,21 @@
   .vehicle-summary-header { padding: 20px 18px; }
   .vehicle-summary-body, .attachments-panel { padding-left: 18px; padding-right: 18px; }
 }
+
+@media print {
+  body { background: #fff; }
+  .sidebar,
+  .topbar,
+  .page-header,
+  .customer-sync-status,
+  .sales-toolbar,
+  .sales-list-panel,
+  .sales-detail-actions,
+  .sales-items-header .text-button,
+  .sales-item-remove { display: none !important; }
+  .app-shell { display: block; }
+  .app-main { width: 100%; }
+  .page-content { padding: 0; }
+  .sales-workspace { display: block; }
+  .sales-detail-panel { border: 0; box-shadow: none; }
+}

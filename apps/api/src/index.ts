@@ -1,5 +1,6 @@
 import { requireFirebaseUser, UnauthorizedError } from './auth/firebase'
 import { handleCustomerRoutes } from './routes/customer-routes'
+import { handleSalesRoutes } from './routes/sales-routes'
 import { corsHeaders, jsonResponse } from './http'
 
 export default {
@@ -12,6 +13,9 @@ export default {
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
+
+    const salesRouteResponse = await handleSalesRoutes(request, env)
+    if (salesRouteResponse) return salesRouteResponse
 
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/health")) {
       return jsonResponse({
