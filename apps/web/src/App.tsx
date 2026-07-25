@@ -5,13 +5,11 @@ import {
   Bell,
   CalendarDays,
   CarFront,
-  CheckCircle2,
   ChevronRight,
   CircleDollarSign,
   ClipboardCheck,
   FileText,
   LayoutDashboard,
-  Paperclip,
   Plus,
   Search,
   Settings,
@@ -21,6 +19,7 @@ import { CustomerVehiclePage } from './components/CustomerVehiclePage'
 import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
+import { SettingsPage } from './components/SettingsPage'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'payments' | 'settings'
@@ -77,7 +76,7 @@ function App() {
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SectionPlaceholder section={activeSection} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage />}
         </div>
       </main>
     </div>
@@ -170,17 +169,6 @@ function StatusBadge({ tone, children }: { tone: string; children: ReactNode }) 
 
 function QuickAction({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return <button className="quick-action" type="button"><span className="quick-action-icon"><Icon size={19} /></span><span>{label}</span><ChevronRight size={16} /></button>
-}
-
-function SectionPlaceholder({ section }: { section: SectionId }) {
-  const currentPage = pageMeta[section]
-  const Icon = currentPage.icon
-  return (
-    <>
-      <PageHeader eyebrow="業務メニュー" title={currentPage.title} description={currentPage.description} action={<button className="button button-primary" type="button"><Plus size={18} />{currentPage.actionLabel}</button>} />
-      <section className="placeholder-card"><span className="placeholder-icon"><Icon size={30} /></span><div><span className="page-eyebrow">UI基盤</span><h2>{currentPage.title}の画面を準備中です</h2><p>共通のレイアウトと操作部品を確認するための仮画面です。各業務機能は設計順に実装します。</p><div className="placeholder-items"><span><CheckCircle2 size={16} />画面レイアウト</span><span><CheckCircle2 size={16} />入力・一覧部品</span><span><Paperclip size={16} />添付ファイル対応</span></div></div></section>
-    </>
-  )
 }
 
 export default App
