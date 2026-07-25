@@ -6,13 +6,15 @@ import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
 const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
-const salesStatuses = new Set(['下書き', '発行済み', '入金待ち'])
+const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
+const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const isCollection = pathname === '/api/sales-documents'
+  const restoreMatch = pathname.match(/^\/api\/sales-documents\/([^/]+)\/restore$/)
   const documentMatch = pathname.match(/^\/api\/sales-documents\/([^/]+)$/)
-  if (!isCollection && !documentMatch) return null
+  if (!isCollection && !documentMatch && !restoreMatch) return null
 
   try {
     const database = createDatabase(env.DB)
@@ -25,8 +27,14 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
+    if (restoreMatch) {
+      if (request.method !== 'POST') throw new HttpError(405, 'この操作には対応していません。')
+      return await restoreSalesDocument(env, database, restoreMatch[1], organizationId)
+    }
+
     if (!documentMatch) throw new HttpError(404, '販売書類のAPIが見つかりません。')
     if (request.method === 'PATCH') return await updateSalesDocument(request, env, database, documentMatch[1], organizationId)
+    if (request.method === 'DELETE') return await archiveSalesDocument(env, database, documentMatch[1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -40,7 +48,7 @@ async function listSalesDocuments(request: Request, env: Env, database: ReturnTy
   const url = new URL(request.url)
   const query = url.searchParams.get('q')?.trim().toLocaleLowerCase() ?? ''
   const type = url.searchParams.get('type')?.trim() ?? ''
-  const documents = await loadSalesDocuments(database, organizationId)
+  const documents = await loadSalesDocuments(database, organizationId, url.searchParams.get('includeArchived') === 'true')
   const filtered = documents.filter((document) => {
     const matchesType = !type || type === 'すべて' || document.type === type
     const searchable = `${document.number} ${document.customerName} ${document.vehicle} ${document.plate}`.toLocaleLowerCase()
@@ -53,7 +61,8 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   const body = await readJson(request)
   const input = await parseSalesDocumentInput(body, database, organizationId)
   const id = crypto.randomUUID()
-  const number = await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
+  const number = input.number ?? await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
+  await ensureSalesDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.insert(salesDocuments).values({
@@ -90,14 +99,17 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     vehicleId: body.vehicleId === undefined ? current.vehicleId : body.vehicleId,
     issuedAt: body.issuedAt ?? current.issuedAt,
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
+    number: body.number === undefined ? current.number : body.number,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
   }, database, organizationId)
+  await ensureSalesDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
   const totals = calculateTotals(input.items, input.taxRate, input.rounding)
 
   await database.update(salesDocuments).set({
     type: input.type,
+    number: input.number ?? current.number,
     status: input.status,
     customerId: input.customerId,
     vehicleId: input.vehicleId,
@@ -117,7 +129,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
   return jsonResponse({ document: await findSalesDocument(database, documentId, organizationId) }, 200, env)
 }
 
-async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, organizationId: string) {
+async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, organizationId: string, includeArchived = false) {
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.issuedAt), desc(salesDocuments.number)).all(),
     database.select().from(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).orderBy(asc(salesDocumentItems.sortOrder)).all(),
@@ -128,7 +140,7 @@ async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, o
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
 
-  return documentRows.map((document) => serializeSalesDocument(
+  return documentRows.filter((document) => includeArchived || !document.archivedAt).map((document) => serializeSalesDocument(
     document,
     customersById.get(document.customerId),
     document.vehicleId ? vehiclesById.get(document.vehicleId) : undefined,
@@ -151,6 +163,7 @@ async function insertSalesItems(database: ReturnType<typeof createDatabase>, doc
     id: crypto.randomUUID(),
     organizationId,
     documentId,
+    itemType: item.itemType,
     description: item.description,
     quantity: item.quantity,
     unit: item.unit,
@@ -181,8 +194,9 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   const rounding = body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
   const issuedAt = dateValue(body.issuedAt) || today()
   const dueDate = nullableDate(body.dueDate)
+  const number = nullableString(body, 'number')
   const items = parseItems(body.items)
-  return { type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), items }
+  return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), items }
 }
 
 function serializeSalesDocument(
@@ -209,8 +223,10 @@ function serializeSalesDocument(
     tax: document.tax,
     total: document.total,
     note: document.note ?? '',
+    archivedAt: document.archivedAt,
     items: items.map((item) => ({
       id: item.id,
+      itemType: item.itemType,
       description: item.description,
       quantity: item.quantity,
       unit: item.unit,
@@ -242,7 +258,9 @@ function parseItems(value: unknown): SalesItemInput[] {
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
+    const itemTypeValue = stringValue(item, 'itemType')
     return {
+      itemType: salesItemTypes.has(itemTypeValue) ? itemTypeValue : 'その他',
       description: stringValue(item, 'description'),
       quantity,
       unit: stringValue(item, 'unit') || '式',
@@ -250,6 +268,25 @@ function parseItems(value: unknown): SalesItemInput[] {
       amount: Math.round(quantity * unitPrice),
     }
   })
+}
+
+async function ensureSalesDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {
+  const duplicate = await database.select({ id: salesDocuments.id }).from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.number, number))).get()
+  if (duplicate && duplicate.id !== exceptId) throw new HttpError(409, '同じ書類番号の販売書類がすでに存在します。')
+}
+
+async function archiveSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select({ id: salesDocuments.id }).from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '販売書類が見つかりません。')
+  await database.update(salesDocuments).set({ status: 'アーカイブ済み', archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+  return jsonResponse({ archived: true }, 200, env)
+}
+
+async function restoreSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '販売書類が見つかりません。')
+  await database.update(salesDocuments).set({ status: '下書き', archivedAt: null, updatedAt: new Date().toISOString() }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+  return jsonResponse({ restored: true }, 200, env)
 }
 
 function groupBy<T>(items: T[], getKey: (item: T) => string) {
@@ -302,6 +339,7 @@ function today() {
 }
 
 type SalesItemInput = {
+  itemType: string
   description: string
   quantity: number
   unit: string
@@ -310,6 +348,7 @@ type SalesItemInput = {
 }
 
 type SalesDocumentInput = {
+  number: string | null
   type: string
   status: string
   customerId: string

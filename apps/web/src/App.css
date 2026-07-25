@@ -325,11 +325,11 @@
 .sales-items-header h3 { margin: 0; color: var(--text); font-size: 14px; }
 .sales-items-header span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .sales-items-table { overflow-x: auto; }
-.sales-items-head, .sales-item-row { display: grid; grid-template-columns: minmax(170px, 1fr) 60px 42px 100px 108px 28px; align-items: center; gap: 9px; min-width: 620px; }
+.sales-items-head, .sales-item-row { display: grid; grid-template-columns: 150px minmax(170px, 1fr) 60px 42px 100px 108px 28px; align-items: center; gap: 9px; min-width: 820px; }
 .sales-items-head { padding: 9px 8px; color: var(--text-muted); background: var(--surface-subtle); font-size: 10px; font-weight: 800; }
 .sales-item-row { padding: 8px; border-bottom: 1px solid #edf1f5; color: var(--text-secondary); font-size: 11px; }
 .sales-item-row:last-child { border-bottom: 0; }
-.sales-item-row input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11px; }
+.sales-item-row input, .sales-item-row select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11px; }
 .sales-item-row input:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .sales-item-row strong { color: var(--text); font-size: 11px; text-align: right; white-space: nowrap; }
 .sales-number-input, .sales-price-input { text-align: right; }
@@ -908,7 +908,7 @@
   .sales-items-table,
   .maintenance-items-table { overflow: visible; }
   .sales-items-head,
-  .sales-item-row { min-width: 0; grid-template-columns: minmax(150px, 1fr) 48px 38px 82px 90px; gap: 6px; }
+  .sales-item-row { min-width: 0; grid-template-columns: 110px minmax(150px, 1fr) 48px 38px 82px 90px 24px; gap: 6px; }
   .maintenance-items-head,
   .maintenance-item-row { min-width: 0; grid-template-columns: 55px minmax(130px, 1fr) 45px 36px 76px 82px; gap: 5px; }
   .sales-item-row input,
@@ -994,3 +994,13 @@
   .inspection-toolbar { align-items: stretch; flex-direction: column; }
   .inspection-result-summary { text-align: left; }
 }
+.button-danger { color: var(--danger); border: 1px solid #f2c4c4; background: var(--danger-soft); }
+.button-danger:hover { background: #ffe8e8; }
+.document-header-editor { margin-bottom: 18px; padding: 18px; }
+.document-header-editor-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.document-header-editor-title h3 { margin: 0; color: var(--text); font-size: 14px; }
+.document-header-editor-title span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
+.document-header-editor .form-grid { margin-bottom: 0; }
+.maintenance-header-editor { margin: 20px 0; }
+.sales-items-head, .sales-item-row { grid-template-columns: 150px minmax(170px, 1fr) 60px 42px 100px 108px 28px; }
+.sales-item-row select { width: 100%; min-width: 0; height: 32px; padding: 0 6px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 10px; }

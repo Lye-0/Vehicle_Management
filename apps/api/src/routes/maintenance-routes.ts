@@ -6,7 +6,7 @@ import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
 const maintenanceDocumentTypes = new Set(['整備見積書', '納品書', '整備請求書'])
-const maintenanceStatuses = new Set(['受付中', '作業中', '完了', '下書き', '入金待ち'])
+const maintenanceStatuses = new Set(['受付中', '作業中', '完了', '下書き', '入金待ち', 'アーカイブ済み'])
 const maintenanceCategories = new Set(['車検', '法定点検', '一般整備'])
 const feeNames = ['自賠責', '重量税', '印紙代', 'リサイクル料金'] as const
 type FeeName = typeof feeNames[number]
@@ -14,8 +14,9 @@ type FeeName = typeof feeNames[number]
 export async function handleMaintenanceRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const isCollection = pathname === '/api/maintenance-documents'
+  const restoreMatch = pathname.match(/^\/api\/maintenance-documents\/([^/]+)\/restore$/)
   const documentMatch = pathname.match(/^\/api\/maintenance-documents\/([^/]+)$/)
-  if (!isCollection && !documentMatch) return null
+  if (!isCollection && !documentMatch && !restoreMatch) return null
 
   try {
     const database = createDatabase(env.DB)
@@ -23,12 +24,18 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
     const organizationId = context.organization.organizationId
 
     if (isCollection) {
-      if (request.method === 'GET') return await listMaintenanceDocuments(env, database, organizationId)
+      if (request.method === 'GET') return await listMaintenanceDocuments(request, env, database, organizationId)
       if (request.method === 'POST') return await createMaintenanceDocument(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
+    if (restoreMatch) {
+      if (request.method !== 'POST') throw new HttpError(405, 'この操作には対応していません。')
+      return await restoreMaintenanceDocument(env, database, restoreMatch[1], organizationId)
+    }
+
     if (request.method === 'PATCH') return await updateMaintenanceDocument(request, env, database, documentMatch![1], organizationId)
+    if (request.method === 'DELETE') return await archiveMaintenanceDocument(env, database, documentMatch![1], organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -38,14 +45,15 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
   }
 }
 
-async function listMaintenanceDocuments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
-  return jsonResponse({ documents: await loadMaintenanceDocuments(database, organizationId) }, 200, env)
+async function listMaintenanceDocuments(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  return jsonResponse({ documents: await loadMaintenanceDocuments(database, organizationId, new URL(request.url).searchParams.get('includeArchived') === 'true') }, 200, env)
 }
 
 async function createMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const input = await parseMaintenanceInput(await readJson(request), database, organizationId)
   const id = crypto.randomUUID()
-  const number = await nextMaintenanceDocumentNumber(database, input.issuedAt, organizationId)
+  const number = input.number ?? await nextMaintenanceDocumentNumber(database, input.issuedAt, organizationId)
+  await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.insert(maintenanceDocuments).values({
@@ -58,6 +66,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     customerId: input.customerId,
     vehicleId: input.vehicleId,
     intakeDate: input.intakeDate,
+    plannedReleaseDate: input.plannedReleaseDate,
     completionDate: input.completionDate,
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
@@ -83,9 +92,11 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     type: body.type ?? current.type,
     status: body.status ?? current.status,
     category: body.category ?? current.category,
+    number: body.number === undefined ? current.number : body.number,
     customerId: body.customerId ?? current.customerId,
     vehicleId: body.vehicleId ?? current.vehicleId,
     intakeDate: body.intakeDate === undefined ? current.intakeDate : body.intakeDate,
+    plannedReleaseDate: body.plannedReleaseDate === undefined ? current.plannedReleaseDate ?? current.completionDate : body.plannedReleaseDate,
     completionDate: body.completionDate === undefined ? current.completionDate : body.completionDate,
     issuedAt: body.issuedAt ?? current.issuedAt,
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
@@ -95,15 +106,18 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
+  await ensureMaintenanceDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.update(maintenanceDocuments).set({
+    number: input.number ?? current.number,
     type: input.type,
     category: input.category,
     status: input.status,
     customerId: input.customerId,
     vehicleId: input.vehicleId,
     intakeDate: input.intakeDate,
+    plannedReleaseDate: input.plannedReleaseDate,
     completionDate: input.completionDate,
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
@@ -120,7 +134,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   return jsonResponse({ document: await findMaintenanceDocument(database, documentId, organizationId) }, 200, env)
 }
 
-async function loadMaintenanceDocuments(database: ReturnType<typeof createDatabase>, organizationId: string) {
+async function loadMaintenanceDocuments(database: ReturnType<typeof createDatabase>, organizationId: string, includeArchived = false) {
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
@@ -131,7 +145,7 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
 
-  return documentRows.map((document) => serializeMaintenanceDocument(
+  return documentRows.filter((document) => includeArchived || !document.archivedAt).map((document) => serializeMaintenanceDocument(
     document,
     customersById.get(document.customerId),
     vehiclesById.get(document.vehicleId),
@@ -183,13 +197,15 @@ async function parseMaintenanceInputAsync(body: Record<string, unknown>, databas
   const taxRate = parseTaxRate(body.taxRate)
   const rounding = body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
   return {
+    number: nullableString(body, 'number'),
     type,
     status,
     category,
     customerId,
     vehicleId,
     intakeDate: nullableDate(body.intakeDate),
-    completionDate: nullableDate(body.completionDate ?? body.plannedReleaseDate),
+    plannedReleaseDate: nullableDate(body.plannedReleaseDate),
+    completionDate: nullableDate(body.completionDate),
     issuedAt: dateValue(body.issuedAt) || today(),
     dueDate: nullableDate(body.dueDate),
     taxRate,
@@ -219,7 +235,8 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     plate: vehicle?.registrationNumber ?? '',
     mileage: vehicle?.mileage === null || vehicle?.mileage === undefined ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
     intakeDate: document.intakeDate,
-    plannedReleaseDate: document.completionDate,
+    plannedReleaseDate: document.plannedReleaseDate ?? document.completionDate,
+    completionDate: document.completionDate,
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
@@ -229,6 +246,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     fees,
     adjustment,
     note: document.note ?? '',
+    archivedAt: document.archivedAt,
     items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice })),
   }
 }
@@ -250,6 +268,25 @@ function calculateTotals(items: MaintenanceItemInput[], fees: Record<FeeName, nu
   return { subtotal, tax, total: subtotal + Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment + tax }
 }
 
+async function ensureMaintenanceDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {
+  const duplicate = await database.select({ id: maintenanceDocuments.id }).from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.number, number))).get()
+  if (duplicate && duplicate.id !== exceptId) throw new HttpError(409, '同じ書類番号の整備書類がすでに存在します。')
+}
+
+async function archiveMaintenanceDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select({ id: maintenanceDocuments.id }).from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '整備書類が見つかりません。')
+  await database.update(maintenanceDocuments).set({ status: 'アーカイブ済み', archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
+  return jsonResponse({ archived: true }, 200, env)
+}
+
+async function restoreMaintenanceDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const current = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '整備書類が見つかりません。')
+  await database.update(maintenanceDocuments).set({ status: '受付中', archivedAt: null, updatedAt: new Date().toISOString() }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
+  return jsonResponse({ restored: true }, 200, env)
+}
+
 function parseItems(value: unknown): MaintenanceItemInput[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
@@ -261,7 +298,7 @@ function parseItems(value: unknown): MaintenanceItemInput[] {
 
 function parseFees(value: unknown): Record<FeeName, number> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-  return { 自賠責: integerNumber(source.自賠責, 0), 重量税: integerNumber(source.重量税, 0), 印紙代: integerNumber(source.印紙代, 0), リサイクル料金: integerNumber(source.リサイクル料金, 0) }
+  return { 自賠責: nonNegativeInteger(source.自賠責, 0), 重量税: nonNegativeInteger(source.重量税, 0), 印紙代: nonNegativeInteger(source.印紙代, 0), リサイクル料金: nonNegativeInteger(source.リサイクル料金, 0) }
 }
 
 function extractFees(rows: Array<{ itemType: string; description: string; amount: number }>): Record<FeeName, number> {
@@ -291,7 +328,8 @@ function nullableDate(value: unknown) { return dateValue(value) || null }
 function parseTaxRate(value: unknown) { const number = typeof value === 'number' ? value : Number(value); const normalized = number > 0 && number < 1 ? number * 100 : number; return Number.isFinite(normalized) && normalized >= 0 && normalized <= 100 ? Math.round(normalized) : 10 }
 function nonNegativeNumber(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) && number >= 0 ? number : fallback }
 function integerNumber(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) ? Math.round(number) : fallback }
+function nonNegativeInteger(value: unknown, fallback: number) { return Math.max(0, integerNumber(value, fallback)) }
 function today() { return new Date().toISOString().slice(0, 10) }
 
 type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; amount: number }
-type MaintenanceInput = { type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }
+type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }

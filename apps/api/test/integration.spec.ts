@@ -139,6 +139,7 @@ describe("CLI authenticated workflow", () => {
 			const sales = await requestJson<JsonObject>("/api/sales-documents", "POST", {
 				type: "請求書",
 				status: "下書き",
+				number: `${marker}-SALE-001`,
 				customerId,
 				vehicleId,
 				issuedAt: "2026-07-26",
@@ -146,26 +147,40 @@ describe("CLI authenticated workflow", () => {
 				taxRate: 10,
 				rounding: "切り捨て",
 				note: marker,
-				items: [{ description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 }],
+				items: [{ itemType: "車両本体価格", description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 }],
 			});
 			expect(sales.response.status).toBe(201);
 			const salesDocument = objectValue(sales.body.document);
 			salesDocumentId = stringValue(salesDocument.id);
-			expect(salesDocument).toEqual(expect.objectContaining({ subtotal: 100001, tax: 10000, total: 110001, status: "下書き" }));
+			expect(salesDocument).toEqual(expect.objectContaining({ number: `${marker}-SALE-001`, subtotal: 100001, tax: 10000, total: 110001, status: "下書き" }));
+
+			const duplicateSales = await requestJson<JsonObject>("/api/sales-documents", "POST", {
+				type: "請求書",
+				status: "下書き",
+				number: `${marker}-SALE-001`,
+				customerId,
+				vehicleId,
+				issuedAt: "2026-07-26",
+				items: [{ itemType: "その他", description: "重複確認", quantity: 1, unit: "式", unitPrice: 1 }],
+			});
+			expect(duplicateSales.response.status).toBe(409);
 
 			const updatedSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", {
 				status: "入金待ち",
+				number: `${marker}-SALE-EDITED`,
+				note: `${marker} 販売ヘッダー更新`,
 				items: [
-					{ description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 },
-					{ description: "登録代行費用", quantity: 1, unit: "式", unitPrice: 999 },
+					{ itemType: "車両本体価格", description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 },
+					{ itemType: "登録費用", description: "登録代行費用", quantity: 1, unit: "式", unitPrice: 999 },
 				],
 			});
 			expect(updatedSales.response.status).toBe(200);
-			expect(objectValue(updatedSales.body.document)).toEqual(expect.objectContaining({ status: "入金待ち", subtotal: 101000, tax: 10100, total: 111100 }));
+			expect(objectValue(updatedSales.body.document)).toEqual(expect.objectContaining({ number: `${marker}-SALE-EDITED`, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
 
 			const maintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
 				type: "整備請求書",
 				status: "入金待ち",
+				number: `${marker}-MAINT-001`,
 				category: "車検",
 				customerId,
 				vehicleId,
@@ -185,12 +200,24 @@ describe("CLI authenticated workflow", () => {
 			maintenanceDocumentId = stringValue(maintenanceDocument.id);
 			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
 
+			const duplicateMaintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
+				type: "整備請求書",
+				status: "下書き",
+				number: `${marker}-MAINT-001`,
+				category: "一般整備",
+				customerId,
+				vehicleId,
+				issuedAt: "2026-07-26",
+				items: [{ kind: "作業", description: "重複確認", quantity: 1, unit: "式", unitPrice: 1 }],
+			});
+			expect(duplicateMaintenance.response.status).toBe(409);
+
 			const updatedMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", {
 				status: "完了",
 				completionDate: "2026-07-27",
 			});
 			expect(updatedMaintenance.response.status).toBe(200);
-			expect(objectValue(updatedMaintenance.body.document)).toEqual(expect.objectContaining({ status: "完了", plannedReleaseDate: "2026-07-27" }));
+			expect(objectValue(updatedMaintenance.body.document)).toEqual(expect.objectContaining({ status: "完了", plannedReleaseDate: "2026-07-27", completionDate: "2026-07-27" }));
 
 			const payment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}`, "PATCH", {
 				paidAmount: 50000,
@@ -206,6 +233,20 @@ describe("CLI authenticated workflow", () => {
 			expect(arrayValue(payments.body.records)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 }),
 			]));
+
+			const archivedSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "DELETE");
+			expect(archivedSales.response.status).toBe(200);
+			const hiddenArchivedSales = await requestJson<JsonObject>("/api/sales-documents");
+			expect(arrayValue(hiddenArchivedSales.body.documents).some((document) => objectValue(document).id === salesDocumentId)).toBe(false);
+			const visibleArchivedSales = await requestJson<JsonObject>("/api/sales-documents?includeArchived=true");
+			expect(arrayValue(visibleArchivedSales.body.documents)).toEqual(expect.arrayContaining([expect.objectContaining({ id: salesDocumentId, status: "アーカイブ済み" })]));
+			const restoredSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}/restore`, "POST");
+			expect(restoredSales.response.status).toBe(200);
+
+			const archivedMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "DELETE");
+			expect(archivedMaintenance.response.status).toBe(200);
+			const restoredMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}/restore`, "POST");
+			expect(restoredMaintenance.response.status).toBe(200);
 
 			const vehicleHistory = await requestJson<JsonObject>(`/api/vehicles/${vehicleId}/history`);
 			expect(vehicleHistory.response.status).toBe(200);
