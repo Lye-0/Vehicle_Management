@@ -10,12 +10,15 @@ const firebaseConfig: FirebaseOptions = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
+const appEnvironment = import.meta.env.VITE_APP_ENV ?? (import.meta.env.DEV ? 'development' : 'production')
+
 let firebaseApp: FirebaseApp | undefined
 let auth: Auth | undefined
 let authEmulatorConnected = false
 
 export function getFirebaseApp() {
   if (firebaseApp) return firebaseApp
+  validateFirebaseEnvironment()
   const missingKeys = ['apiKey', 'authDomain', 'projectId', 'appId'].filter((key) => !firebaseConfig[key as keyof FirebaseOptions])
   if (missingKeys.length > 0) throw new Error(`Firebaseの環境変数が不足しています: ${missingKeys.join(', ')}`)
   firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)
@@ -25,9 +28,33 @@ export function getFirebaseApp() {
 export function getFirebaseAuth() {
   if (!auth) auth = getAuth(getFirebaseApp())
   const emulatorUrl = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL
-  if (import.meta.env.DEV && emulatorUrl && !authEmulatorConnected) {
+  if (import.meta.env.DEV && appEnvironment === 'development' && emulatorUrl && !authEmulatorConnected) {
     connectAuthEmulator(auth, emulatorUrl, { disableWarnings: true })
     authEmulatorConnected = true
   }
   return auth
+}
+
+function validateFirebaseEnvironment() {
+  const issues: string[] = []
+  const projectId = firebaseConfig.projectId?.trim()
+  const emulatorUrl = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL?.trim()
+
+  if (appEnvironment !== 'development' && appEnvironment !== 'production') {
+    issues.push(`VITE_APP_ENVの値が不正です: ${appEnvironment}`)
+  }
+  if (import.meta.env.PROD && appEnvironment !== 'production') {
+    issues.push('本番ビルドではVITE_APP_ENV=productionが必要です。')
+  }
+  if (appEnvironment === 'development' && import.meta.env.DEV && !emulatorUrl) {
+    issues.push('開発環境ではVITE_FIREBASE_AUTH_EMULATOR_URLが必要です。')
+  }
+  if (appEnvironment === 'production') {
+    if (emulatorUrl) issues.push('本番環境ではFirebase Auth Emulator URLを設定できません。')
+    if (projectId === 'vehicle-management-64' || projectId?.includes('REPLACE_WITH')) {
+      issues.push('本番環境では開発用とは別のFirebaseプロジェクトを指定してください。')
+    }
+  }
+
+  if (issues.length > 0) throw new Error(`Firebaseの環境設定が不正です: ${issues.join(' ')}`)
 }

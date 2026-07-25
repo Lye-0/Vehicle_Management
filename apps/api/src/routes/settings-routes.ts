@@ -7,7 +7,7 @@ import { HttpError, jsonResponse, readJson } from '../http'
 
 const defaultSettings: AppSettings = {
   shop: {
-    name: '東京都心支店',
+    name: '',
     postalCode: '',
     address: '',
     phone: '',

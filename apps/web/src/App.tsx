@@ -183,7 +183,7 @@ function OrganizationSetupPage({ user, onCompleted }: { user: User; onCompleted:
     }
   }
 
-  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">INITIAL SETUP</span><h1>組織をセットアップ</h1><p>{user.email ?? '認証済みユーザー'}を最初の管理者として登録します。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>組織名・店舗名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="東京都心支店" disabled={loading} /></label><label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="管理者から発行されたキー" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '作成しています…' : '管理者としてセットアップ'}</button></form></section></div>
+  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">INITIAL SETUP</span><h1>組織をセットアップ</h1><p>{user.email ?? '認証済みユーザー'}を最初の管理者として登録します。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>組織名・店舗名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例：東京都心支店" disabled={loading} /></label><label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="管理者から発行されたキー" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '作成しています…' : '管理者としてセットアップ'}</button></form></section></div>
 }
 
 function AuthLoading() {
@@ -273,7 +273,7 @@ function LoginPage({ initialError }: { initialError?: string }) {
     }
   }
 
-  const isDevelopment = import.meta.env.DEV && Boolean(import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL)
+  const isDevelopment = import.meta.env.DEV && (import.meta.env.VITE_APP_ENV ?? 'development') === 'development' && Boolean(import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL)
   return (
     <div className="auth-page">
       <section className="auth-card">
@@ -288,7 +288,7 @@ function LoginPage({ initialError }: { initialError?: string }) {
           <button className="text-button auth-back-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setResetMode(false) }}>ログイン画面に戻る</button>
         </form> : setupMode ? <>
           <form className="auth-form" onSubmit={(event) => void runInitialSetup(event)}>
-            <label className="form-field"><span>組織名・店舗名</span><input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder="東京都心支店" disabled={Boolean(loading)} /></label>
+            <label className="form-field"><span>組織名・店舗名</span><input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder="例：東京都心支店" disabled={Boolean(loading)} /></label>
             <label className="form-field"><span>管理者メールアドレス</span><span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@shop.jp" disabled={Boolean(loading)} /></span></label>
             <label className="form-field"><span>パスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={Boolean(loading)} /></label>
             <label className="form-field"><span>パスワード（確認）</span><input type="password" autoComplete="new-password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} placeholder="もう一度入力" disabled={Boolean(loading)} /></label>

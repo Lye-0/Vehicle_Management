@@ -32,7 +32,7 @@ export type AppSettings = {
 }
 
 export const defaultSettings: AppSettings = {
-  shop: { name: '東京都心支店', postalCode: '', address: '', phone: '', representative: '', registrationNumber: '', bankName: '', bankAccount: '' },
+  shop: { name: '', postalCode: '', address: '', phone: '', representative: '', registrationNumber: '', bankName: '', bankAccount: '' },
   document: { defaultDueDays: 14, footerNote: '', paymentNote: '' },
   tax: { consumptionTaxRate: 10, display: '税込', rounding: '切り捨て' },
   salesItemPresets: ['車両本体価格', '付属品・特別仕様', '登録代行費用', '納車費用', 'リサイクル料金', '値引き'],

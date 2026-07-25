@@ -10,10 +10,17 @@ import { handleMemberRoutes } from './routes/member-routes'
 import { handleImportRoutes } from './routes/import-routes'
 import { handleBackupRoutes } from './routes/backup-routes'
 import { corsHeaders, jsonResponse } from './http'
+import { getEnvironmentIssues } from './environment'
 
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+
+    const environmentIssues = getEnvironmentIssues(env)
+    if (environmentIssues.length > 0) {
+      console.error(`[environment] ${environmentIssues.join(' ')}`)
+      return jsonResponse({ error: 'サーバーの環境設定が不正です。', code: 'INVALID_ENVIRONMENT' }, 500, env)
+    }
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(env) })

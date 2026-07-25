@@ -1,3 +1,8 @@
+-- このファイルは tools/seed-development.mjs からローカルD1へだけ適用する開発用シードです。
+-- 本番環境の初期データや移行データとして使用しないでください。
+INSERT OR IGNORE INTO organizations (id, name, owner_uid, setup_completed)
+VALUES ('org-default', '東京都心支店', NULL, 1);
+
 INSERT OR IGNORE INTO customers (id, customer_number, name, name_kana, postal_code, address, phone, email, memo)
 VALUES ('customer-sato', 'C-DEMO001', '佐藤 太郎', 'さとう たろう', '100-0001', '東京都千代田区千代田1-1', '090-1234-5678', 'sato.taro@example.com', '土曜午前の来店が多い。メールより電話を希望。');
 INSERT OR IGNORE INTO customers (id, customer_number, name, name_kana, postal_code, address, phone, email, memo)

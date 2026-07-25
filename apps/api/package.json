@@ -4,14 +4,16 @@
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
+		"deploy:production": "wrangler deploy --env production",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
-		"db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-		"db:seed:local": "wrangler d1 execute DB --local --file seed/dev.sql"
+		"db:migrate:production": "wrangler d1 migrations apply DB --remote --env production",
+		"db:seed:development": "node ../../tools/seed-development.mjs",
+		"db:seed:local": "pnpm run db:seed:development"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
