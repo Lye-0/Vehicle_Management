@@ -140,7 +140,7 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
     }
   }
 
-  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">FIRST SIGN IN</span><h1>パスワードを設定</h1><p>管理者から発行された初期パスワードを、あなた専用のパスワードへ変更してください。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>新しいパスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={loading} /></label><label className="form-field"><span>新しいパスワード（確認）</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="もう一度入力" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '設定しています…' : 'パスワードを設定して開始'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
+  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong></div></div><span className="page-eyebrow">FIRST SIGN IN</span><h1>パスワードを設定</h1><p>管理者から発行された初期パスワードを、あなた専用のパスワードへ変更してください。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>新しいパスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={loading} /></label><label className="form-field"><span>新しいパスワード（確認）</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="もう一度入力" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '設定しています…' : 'パスワードを設定して開始'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
 }
 
 function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void }) {
@@ -187,7 +187,7 @@ function OrganizationSetupPage({ user, onCompleted }: { user: User; onCompleted:
     }
   }
 
-  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div><span className="page-eyebrow">INITIAL SETUP</span><h1>組織をセットアップ</h1><p>{user.email ?? '認証済みユーザー'}を最初の管理者として登録します。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>組織名・店舗名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例：東京都心支店" disabled={loading} /></label><label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="管理者から発行されたキー" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '作成しています…' : '管理者としてセットアップ'}</button></form></section></div>
+  return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong></div></div><span className="page-eyebrow">INITIAL SETUP</span><h1>組織をセットアップ</h1><p>{user.email ?? '認証済みユーザー'}を最初の管理者として登録します。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>組織名・店舗名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例：東京都心支店" disabled={loading} /></label><label className="form-field"><span>セットアップキー</span><input value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="管理者から発行されたキー" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '作成しています…' : '管理者としてセットアップ'}</button></form></section></div>
 }
 
 function AuthLoading() {
@@ -281,7 +281,7 @@ function LoginPage({ initialError }: { initialError?: string }) {
   return (
     <div className="auth-page">
       <section className="auth-card">
-        <div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong><small>ABACUS Refresh</small></div></div>
+        <div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong></div></div>
         <span className="page-eyebrow">SECURE SIGN IN</span>
         <h1>{resetMode ? 'パスワードを再設定' : setupMode ? '管理者セットアップ' : '業務画面にログイン'}</h1>
         <p>{resetMode ? '登録済みのメールアドレスに再設定用のメールを送信します。' : setupMode ? '最初の組織と管理者アカウントを作成します。' : '顧客・車両、販売、整備、入金の情報を安全に管理します。'}</p>
@@ -344,7 +344,7 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
     <aside className="sidebar">
       <div className="sidebar-brand">
         <span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span>
-        <span className="brand-copy"><strong>車両管理</strong><small>ABACUS Refresh</small></span>
+        <span className="brand-copy"><strong>車両管理</strong></span>
       </div>
       <div className="branch-card"><span>組織</span>{organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}</div>
       <nav className="sidebar-nav" aria-label="メインメニュー">
@@ -370,7 +370,7 @@ function Topbar({ currentPage }: { currentPage: PageMeta }) {
   const Icon = currentPage.icon
   return (
     <header className="topbar">
-      <div className="breadcrumb"><span>車両管理</span><ChevronRight size={16} /><strong>{currentPage.title}</strong></div>
+      <div className="breadcrumb"><strong>{currentPage.title}</strong></div>
       <div className="topbar-actions">
         <button className="search-trigger" type="button"><Search size={18} /><span>顧客・車両を検索</span><kbd>⌘ K</kbd></button>
         <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
