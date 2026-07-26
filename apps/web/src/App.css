@@ -352,6 +352,15 @@
 .form-field input, .form-field textarea { width: 100%; min-height: 40px; padding: 10px 11px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
 .form-field textarea { min-height: 66px; resize: vertical; }
 .form-field input:focus, .form-field textarea:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.sales-create-select-row { display: flex; align-items: stretch; gap: 8px; }
+.sales-create-select-row select { min-width: 0; flex: 1 1 auto; }
+.sales-create-inline-action { min-height: 40px; padding: 0 11px; font-size: 11px; box-shadow: none; }
+.sales-create-inline-panel { display: grid; gap: 14px; margin-top: 16px; padding: 16px; border: 1px solid #cddcf2; border-radius: 10px; background: #f8fbff; }
+.sales-create-inline-panel h3 { margin: 0; color: var(--text); font-size: 13px; }
+.sales-create-inline-panel p { margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.sales-create-inline-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.sales-create-inline-actions .button { min-height: 36px; padding: 0 12px; font-size: 11px; box-shadow: none; }
+.sales-create-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .button-secondary { color: var(--text-secondary); border-color: var(--border); background: var(--surface); }
 .button-secondary:hover { color: var(--text); border-color: #c3d0de; background: var(--surface-subtle); }
@@ -1064,6 +1073,8 @@
   .csv-export-grid { grid-template-columns: 1fr; }
   .csv-import-controls { grid-template-columns: 1fr; align-items: stretch; }
   .modal-form, .modal-header { padding-left: 18px; padding-right: 18px; }
+  .sales-create-select-row { flex-direction: column; }
+  .sales-create-inline-action { width: 100%; }
   .attachment-preview-modal { width: 100%; max-height: calc(100vh - 24px); }
   .attachment-preview-modal .modal-header { padding-top: 16px; padding-bottom: 16px; }
   .attachment-preview-content { padding: 10px; }

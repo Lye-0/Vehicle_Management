@@ -15,7 +15,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomers, type Customer, type Vehicle } from '../lib/customerApi'
+import { createCustomer, createVehicle, fetchCustomers, type Customer, type CustomerInput, type Vehicle, type VehicleInput } from '../lib/customerApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
   createSalesDocument,
@@ -52,11 +52,13 @@ type SalesCreateForm = {
   customerId: string
   vehicleId: string
   dueDate: string
-  note: string
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
   initialItemDescription: string
 }
+
+const emptySalesCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }
+const emptySalesVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
 
 export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<SalesDocument[]>([])
@@ -214,8 +216,22 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function openCreateDialog() {
     const customer = customers[0]
-    setCreateForm({ type: '見積書', customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '', dueDate: dateAfter(settings.document.defaultDueDays), note: '', taxRate: settings.tax.consumptionTaxRate, taxRounding: settings.tax.rounding, initialItemDescription: settings.salesItemPresets[0] ?? '車両本体価格' })
+    setCreateForm({ type: '見積書', customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '', dueDate: dateAfter(settings.document.defaultDueDays), taxRate: settings.tax.consumptionTaxRate, taxRounding: settings.tax.rounding, initialItemDescription: settings.salesItemPresets[0] ?? '車両本体価格' })
     setCreateDialogOpen(true)
+  }
+
+  async function registerCustomer(input: CustomerInput) {
+    const customer = await createCustomer(input)
+    setCustomers((current) => [...current, customer])
+    return customer
+  }
+
+  async function registerVehicle(customerId: string, input: VehicleInput) {
+    const result = await createVehicle(customerId, input)
+    setCustomers((current) => current.some((customer) => customer.id === result.customer.id)
+      ? current.map((customer) => customer.id === result.customer.id ? result.customer : customer)
+      : [...current, result.customer])
+    return result
   }
 
   async function createDocument(event: FormEvent<HTMLFormElement>) {
@@ -223,7 +239,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     if (creating || !createForm.customerId) return
     setCreating(true)
     try {
-      const newDocument = await createSalesDocument({ ...createForm, vehicleId: createForm.vehicleId || null })
+      const newDocument = await createSalesDocument({ ...createForm, vehicleId: createForm.vehicleId || null, note: '' })
       setDocuments((current) => [newDocument, ...current])
       setSelectedDocumentId(newDocument.id)
       setCreateDialogOpen(false)
@@ -244,7 +260,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><div className="sales-filter-tabs" aria-label="書類種別"><button className={filterType === 'すべて' ? 'is-active' : ''} type="button" onClick={() => setFilterType('すべて')}>すべて</button>{(['見積書', '注文書', '請求書'] as SalesDocumentType[]).map((type) => <button className={filterType === type ? 'is-active' : ''} key={type} type="button" onClick={() => setFilterType(type)}>{type}</button>)}</div></div>
       <div className="sales-workspace"><SalesDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} rounding={settings.tax.rounding} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または書類種別を変更してください。'}</span></div>}</div>
-      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} />}
+      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
     </>
   )
 }
@@ -374,14 +390,86 @@ function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicle
   return { maker: vehicle.maker, name: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, inspectionRecordAvailable: vehicle.inspectionRecordAvailable }
 }
 
-function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onSubmit }: { form: SalesCreateForm; customers: Customer[]; creating: boolean; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onSubmit, onCreateCustomer, onCreateVehicle }: { form: SalesCreateForm; customers: Customer[]; creating: boolean; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCreateCustomer: (input: CustomerInput) => Promise<Customer>; onCreateVehicle: (customerId: string, input: VehicleInput) => Promise<{ customer: Customer; vehicleId: string }> }) {
   const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
   const vehicles = selectedCustomer?.vehicles ?? []
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して、下書きの販売書類を作成します。詳細項目は作成後の入力画面で追加できます。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>注文書</option><option>請求書</option></select></label><label className="form-field"><span>顧客<em>必須</em></span><select required value={form.customerId} onChange={(event) => { const customer = customers.find((item) => item.id === event.target.value); onChange({ ...form, customerId: event.target.value, vehicleId: customer?.vehicles[0]?.id ?? '' }) }}><option value="" disabled>顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={form.vehicleId} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を指定しない</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</select></label><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div><label className="form-field"><span>備考</span><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="販売書類に関するメモ" /></label><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || customers.length === 0}><Plus size={16} />{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
+  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ ...emptySalesCustomerForm })
+  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ ...emptySalesVehicleForm })
+  const [registeringCustomer, setRegisteringCustomer] = useState(false)
+  const [registeringVehicle, setRegisteringVehicle] = useState(false)
+  const [dialogError, setDialogError] = useState('')
+
+  function selectCustomer(customerId: string) {
+    const customer = customers.find((item) => item.id === customerId)
+    onChange({ ...form, customerId, vehicleId: customer?.vehicles[0]?.id ?? '' })
+    setNewVehicleOpen(false)
+    setDialogError('')
+  }
+
+  function openNewCustomerForm() {
+    setNewCustomerForm({ ...emptySalesCustomerForm })
+    setNewCustomerOpen(true)
+    setNewVehicleOpen(false)
+    setDialogError('')
+  }
+
+  function openNewVehicleForm() {
+    if (!selectedCustomer) return
+    setNewVehicleForm({ ...emptySalesVehicleForm })
+    setNewVehicleOpen(true)
+    setNewCustomerOpen(false)
+    setDialogError('')
+  }
+
+  async function saveNewCustomer() {
+    const name = newCustomerForm.name.trim()
+    if (!name) {
+      setDialogError('顧客名を入力してください。')
+      return
+    }
+    setRegisteringCustomer(true)
+    setDialogError('')
+    try {
+      const customer = await onCreateCustomer({ ...newCustomerForm, name, memo: '' })
+      onChange({ ...form, customerId: customer.id, vehicleId: customer.vehicles[0]?.id ?? '' })
+      setNewCustomerForm({ ...emptySalesCustomerForm })
+      setNewCustomerOpen(false)
+    } catch (error: unknown) {
+      setDialogError(error instanceof Error ? error.message : '顧客を登録できませんでした。')
+    } finally {
+      setRegisteringCustomer(false)
+    }
+  }
+
+  async function saveNewVehicle() {
+    if (!selectedCustomer) return
+    const maker = newVehicleForm.maker.trim()
+    const model = newVehicleForm.model.trim()
+    if (!maker || !model) {
+      setDialogError('メーカーと車名を入力してください。')
+      return
+    }
+    setRegisteringVehicle(true)
+    setDialogError('')
+    try {
+      const result = await onCreateVehicle(selectedCustomer.id, { ...newVehicleForm, maker, model })
+      onChange({ ...form, vehicleId: result.vehicleId })
+      setNewVehicleForm({ ...emptySalesVehicleForm })
+      setNewVehicleOpen(false)
+    } catch (error: unknown) {
+      setDialogError(error instanceof Error ? error.message : '車両を登録できませんでした。')
+    } finally {
+      setRegisteringVehicle(false)
+    }
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して、下書きの販売書類を作成します。未登録の場合はこの画面から追加できます。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>注文書</option><option>請求書</option></select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required aria-label="顧客" value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled>顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div><div className="form-field sales-create-related-field"><span>対象車両</span><div className="sales-create-select-row"><select aria-label="対象車両" disabled={!selectedCustomer} value={form.vehicleId} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を指定しない</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={!selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div>{newCustomerOpen && <div className="sales-create-inline-panel"><div><h3>新しい顧客を登録</h3><p>顧客名を登録すると、この販売書類の顧客として選択されます。</p></div><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringCustomer} onClick={() => setNewCustomerOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringCustomer} onClick={() => void saveNewCustomer()}><Plus size={15} />{registeringCustomer ? '登録中…' : '顧客を登録'}</button></div></div>}{newVehicleOpen && <div className="sales-create-inline-panel"><div><h3>新しい車両を登録</h3><p>{selectedCustomer?.name} の車両情報を登録します。メーカーと車名は必須です。</p></div><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, vin: event.target.value })} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：30000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringVehicle} onClick={() => setNewVehicleOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringVehicle} onClick={() => void saveNewVehicle()}><Plus size={15} />{registeringVehicle ? '登録中…' : '車両を登録'}</button></div></div>}{dialogError && <p className="sales-create-error" role="alert">{dialogError}</p>}<div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || registeringCustomer || registeringVehicle || !form.customerId}><Plus size={16} />{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
 }
 
 function emptyCreateForm(): SalesCreateForm {
-  return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(14), note: '', taxRate: 10, taxRounding: '切り捨て', initialItemDescription: '車両本体価格' }
+  return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(14), taxRate: 10, taxRounding: '切り捨て', initialItemDescription: '車両本体価格' }
 }
 
 function dateAfter(days: number) {
