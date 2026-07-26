@@ -7,4 +7,5 @@ allowBuilds:
   esbuild: true
   protobufjs: false
   sharp: true
+  tesseract.js: false
   workerd: true

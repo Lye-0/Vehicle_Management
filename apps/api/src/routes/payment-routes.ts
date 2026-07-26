@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -34,8 +34,8 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
 
 async function listPayments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [salesRows, maintenanceRows, paymentRows, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'))).orderBy(desc(salesDocuments.issuedAt)).all(),
-    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),

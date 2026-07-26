@@ -120,6 +120,7 @@ export const salesDocuments = sqliteTable('sales_documents', {
   tax: integer('tax').notNull().default(0),
   total: integer('total').notNull().default(0),
   note: text('note'),
+  archivedAt: text('archived_at'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('sales_documents_organization_number_uq').on(table.organizationId, table.number),
@@ -133,6 +134,7 @@ export const salesDocumentItems = sqliteTable('sales_document_items', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id').notNull().default('org-default'),
   documentId: text('document_id').notNull().references(() => salesDocuments.id, { onDelete: 'cascade' }),
+  itemType: text('item_type').notNull().default('その他'),
   description: text('description').notNull(),
   quantity: real('quantity').notNull().default(1),
   unit: text('unit').notNull().default('式'),
@@ -154,6 +156,7 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   customerId: text('customer_id').notNull().references(() => customers.id),
   vehicleId: text('vehicle_id').notNull().references(() => vehicles.id),
   intakeDate: text('intake_date'),
+  plannedReleaseDate: text('planned_release_date'),
   completionDate: text('completion_date'),
   issuedAt: text('issued_at').notNull(),
   dueDate: text('due_date'),
@@ -162,6 +165,7 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   tax: integer('tax').notNull().default(0),
   total: integer('total').notNull().default(0),
   note: text('note'),
+  archivedAt: text('archived_at'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('maintenance_documents_organization_number_uq').on(table.organizationId, table.number),

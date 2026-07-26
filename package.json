@@ -14,6 +14,7 @@
     "test": "pnpm --filter api test --run",
     "lint": "pnpm --filter web lint",
     "build:production": "pnpm --filter web build:production",
+    "migrate:local": "pnpm --filter api db:migrate:local",
     "deploy:production": "pnpm --filter api deploy:production",
     "migrate:production": "pnpm --filter api db:migrate:production"
   },

@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -26,8 +26,8 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
   const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
-    database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.updatedAt)).all(),
-    database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.updatedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
   ])
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))

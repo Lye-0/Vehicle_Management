@@ -1,7 +1,7 @@
 import { apiFetch } from './api'
 
 export type MaintenanceDocumentType = '整備見積書' | '納品書' | '整備請求書'
-export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金待ち'
+export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金待ち' | '下書き' | 'アーカイブ済み'
 export type IntakeCategory = '車検' | '法定点検' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
@@ -21,6 +21,7 @@ export type MaintenanceDocument = {
   mileage: string
   intakeDate: string
   plannedReleaseDate: string
+  completionDate: string
   issuedAt: string
   dueDate: string
   taxRate: number
@@ -31,6 +32,7 @@ export type MaintenanceDocument = {
 }
 
 export type MaintenanceDocumentInput = {
+  number?: string
   type: MaintenanceDocumentType
   status: MaintenanceStatus
   category: IntakeCategory
@@ -38,6 +40,7 @@ export type MaintenanceDocumentInput = {
   vehicleId: string
   intakeDate: string
   plannedReleaseDate: string
+  completionDate: string
   dueDate: string
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
@@ -47,7 +50,7 @@ export type MaintenanceDocumentInput = {
   items: Array<Omit<MaintenanceLineItem, 'id'>>
 }
 
-type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate'> & { taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; issuedAt: string; dueDate: string | null }
+type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
 
 export async function fetchMaintenanceDocuments() {
   const response = await apiFetch<{ documents: ApiMaintenanceDocument[] }>('/api/maintenance-documents')
@@ -64,12 +67,20 @@ export async function updateMaintenanceDocument(id: string, input: MaintenanceDo
   return mapMaintenanceDocument(response.document)
 }
 
+export async function archiveMaintenanceDocument(id: string) {
+  await apiFetch(`/api/maintenance-documents/${id}`, { method: 'DELETE' })
+}
+
+export async function restoreMaintenanceDocument(id: string) {
+  await apiFetch(`/api/maintenance-documents/${id}/restore`, { method: 'POST' })
+}
+
 function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDocument {
-  return { ...document, intakeDate: formatDate(document.intakeDate), plannedReleaseDate: formatDate(document.plannedReleaseDate), issuedAt: formatDate(document.issuedAt), dueDate: formatDate(document.dueDate), taxRate: document.taxRate / 100, note: document.note ?? '', items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) })) }
+  return { ...document, intakeDate: formatDate(document.intakeDate), plannedReleaseDate: formatDate(document.plannedReleaseDate), completionDate: formatDate(document.completionDate), issuedAt: formatDate(document.issuedAt), dueDate: formatDate(document.dueDate), taxRate: document.taxRate / 100, note: document.note ?? '', items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) })) }
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  return { ...input, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice }) => ({ description, kind, quantity, unit, unitPrice })) }
+  return { ...input, number: input.number || undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice }) => ({ description, kind, quantity, unit, unitPrice })) }
 }
 
 function formatDate(value: string | null) { return value ? value.slice(0, 10).replaceAll('-', '/') : '' }

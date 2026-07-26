@@ -1,10 +1,11 @@
 import { apiFetch } from './api'
 
 export type SalesDocumentType = '見積書' | '注文書' | '請求書'
-export type SalesStatus = '下書き' | '発行済み' | '入金待ち'
+export type SalesStatus = '下書き' | '発行済み' | '入金待ち' | 'アーカイブ済み'
 
 export type SalesLineItem = {
   id: string
+  itemType: string
   description: string
   quantity: number
   unit: string
@@ -26,6 +27,7 @@ export type SalesDocument = {
   dueDate: string
   taxRate: number
   note: string
+  archivedAt: string | null
   items: SalesLineItem[]
 }
 
@@ -75,6 +77,7 @@ export async function updateSalesDocument(document: SalesDocument, taxRounding: 
     method: 'PATCH',
     body: JSON.stringify({
       type: document.type,
+      number: document.number,
       status: document.status,
       customerId: document.customerId,
       vehicleId: document.vehicleId,
@@ -84,6 +87,7 @@ export async function updateSalesDocument(document: SalesDocument, taxRounding: 
       rounding: taxRounding,
       note: document.note,
       items: document.items.map((item) => ({
+        itemType: item.itemType,
         description: item.description,
         quantity: item.quantity,
         unit: item.unit,
@@ -94,6 +98,14 @@ export async function updateSalesDocument(document: SalesDocument, taxRounding: 
   return mapSalesDocument(response.document)
 }
 
+export async function archiveSalesDocument(id: string) {
+  await apiFetch(`/api/sales-documents/${id}`, { method: 'DELETE' })
+}
+
+export async function restoreSalesDocument(id: string) {
+  await apiFetch(`/api/sales-documents/${id}/restore`, { method: 'POST' })
+}
+
 function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
   return {
     ...document,
@@ -101,7 +113,7 @@ function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
     dueDate: formatDate(document.dueDate),
     taxRate: document.taxRate / 100,
     note: document.note ?? '',
-    items: document.items.map(({ id, description, quantity, unit, unitPrice }) => ({ id, description, quantity, unit, unitPrice })),
+    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice })),
   }
 }
 
