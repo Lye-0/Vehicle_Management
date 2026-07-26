@@ -271,8 +271,8 @@
 .attachment-preview-image { max-width: 100%; max-height: calc(100vh - 190px); object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 8px 28px rgba(15, 27, 46, 0.16); }
 .attachment-image-stage .attachment-preview-image { display: block; }
 .attachment-ocr-layer { position: absolute; inset: 0; user-select: text; }
-.attachment-ocr-line { position: absolute; display: block; overflow: hidden; color: transparent; cursor: text; line-height: 1; white-space: pre; user-select: text; }
-.attachment-ocr-line::selection { color: #1f2937; background: rgba(96, 165, 250, 0.55); }
+.attachment-ocr-token { position: absolute; display: block; overflow: hidden; color: transparent; cursor: text; line-height: 1; text-align: center; white-space: pre; user-select: text; }
+.attachment-ocr-token::selection { color: transparent; -webkit-text-fill-color: transparent; background: rgba(96, 165, 250, 0.55); }
 .attachment-ocr-status { color: var(--text-secondary); font-size: 11px; text-align: center; }
 .attachment-ocr-status.is-error { color: var(--danger); }
 .attachment-preview-frame { width: 100%; height: min(72vh, 720px); border: 1px solid #d6dee9; border-radius: 7px; background: #fff; }
