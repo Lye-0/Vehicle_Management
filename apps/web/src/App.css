@@ -1229,6 +1229,8 @@
 .document-header-editor-title h3 { margin: 0; color: var(--text); font-size: 14px; }
 .document-header-editor-title span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .document-header-editor .form-grid { margin-bottom: 0; }
+.sales-detail-content .document-header-editor .form-grid > .form-field:first-child { display: none; }
+.sales-estimate-meta-table input[aria-label="書類番号"] { pointer-events: none; cursor: default; }
 .maintenance-header-editor { margin: 20px 0; }
 .sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
 .sales-item-row select { width: 100%; min-width: 0; height: 32px; padding: 0 6px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 10px; }

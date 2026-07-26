@@ -126,7 +126,7 @@ export function SalesPage() {
   }
 
   function updateHeader(field: SalesHeaderField, value: string) {
-    if (!selectedDocument) return
+    if (!selectedDocument || field === 'number') return
     const nextCustomer = customers.find((customer) => customer.id === (field === 'customerId' ? value : selectedDocument.customerId))
     const nextVehicleId = field === 'customerId' ? nextCustomer?.vehicles[0]?.id ?? null : field === 'vehicleId' ? value || null : selectedDocument.vehicleId
     const nextVehicle = nextCustomer?.vehicles.find((vehicle) => vehicle.id === nextVehicleId)
