@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import fontUrl from '../assets/fonts/NotoSansCJKjp-Regular.otf?url'
 import type { MaintenanceDocument } from './maintenanceApi'
@@ -23,6 +23,7 @@ const colors = {
 type PageState = {
   pdf: PDFDocument
   font: PDFFont
+  latinFont: PDFFont
   page: PDFPage
   pageNumber: number
   title: string
@@ -70,12 +71,12 @@ async function createSalesDocumentPdf(document: SalesDocument, settings: AppSett
 
   drawSectionTitle(state, '販売明細')
   const columns: TableColumn[] = [
-    { label: '区分', width: 112 },
-    { label: '内容', width: 198 },
-    { label: '数量', width: 46, align: 'right' },
+    { label: '区分', width: 94 },
+    { label: '内容', width: 180 },
+    { label: '数量', width: 45, align: 'right' },
     { label: '単位', width: 42, align: 'center' },
     { label: '単価', width: 72, align: 'right' },
-    { label: '金額', width: 83, align: 'right' },
+    { label: '金額', width: 78, align: 'right' },
   ]
   drawTable(state, columns, document.items.map((item) => [
     item.itemType,
@@ -114,11 +115,11 @@ async function createMaintenanceDocumentPdf(document: MaintenanceDocument, setti
   drawSectionTitle(state, '作業・部品明細')
   const columns: TableColumn[] = [
     { label: '区分', width: 60 },
-    { label: '作業内容・部品名', width: 214 },
-    { label: '数量', width: 46, align: 'right' },
+    { label: '作業内容・部品名', width: 208 },
+    { label: '数量', width: 45, align: 'right' },
     { label: '単位', width: 42, align: 'center' },
     { label: '単価', width: 72, align: 'right' },
-    { label: '金額', width: 83, align: 'right' },
+    { label: '金額', width: 84, align: 'right' },
   ]
   drawTable(state, columns, document.items.map((item) => [
     item.kind,
@@ -151,8 +152,9 @@ async function createPageState(title: string, number: string, issuedAt: string, 
     if (!response.ok) throw new Error('帳票用フォントを読み込めませんでした。')
     return new Uint8Array(await response.arrayBuffer())
   })
-  const font = await pdf.embedFont(fontBytes, { subset: true })
-  const state: PageState = { pdf, font, page: pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]), pageNumber: 1, title, number, issuedAt, settings, y: PAGE_HEIGHT - MARGIN }
+  const font = await pdf.embedFont(fontBytes, { subset: false })
+  const latinFont = await pdf.embedFont(StandardFonts.Helvetica)
+  const state: PageState = { pdf, font, latinFont, page: pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]), pageNumber: 1, title, number, issuedAt, settings, y: PAGE_HEIGHT - MARGIN }
   drawPageHeader(state)
   return state
 }
@@ -161,19 +163,26 @@ function drawPageHeader(state: PageState) {
   const { page, settings } = state
   const shop = settings.shop
   const shopLines = [
-    shop.name || '店舗名未設定',
     shop.postalCode ? `〒${shop.postalCode}` : '',
     shop.address,
     shop.phone ? `TEL ${shop.phone}` : '',
     shop.representative ? `担当 ${shop.representative}` : '',
     shop.registrationNumber ? `登録番号 ${shop.registrationNumber}` : '',
   ].filter(Boolean)
-  drawTextTop(page, state.font, state.title, MARGIN, PAGE_HEIGHT - MARGIN + 2, 21, colors.ink)
-  drawTextTop(page, state.font, `No. ${state.number}`, PAGE_WIDTH - MARGIN - 155, PAGE_HEIGHT - MARGIN + 2, 10, colors.ink, 155, 'right')
-  drawTextTop(page, state.font, `発行日 ${state.issuedAt || '未設定'}`, PAGE_WIDTH - MARGIN - 155, PAGE_HEIGHT - MARGIN - 16, 9, colors.muted, 155, 'right')
-  shopLines.slice(0, 6).forEach((line, index) => drawTextTop(page, state.font, line, PAGE_WIDTH - MARGIN - 205, PAGE_HEIGHT - MARGIN - index * 12, 8.5, index === 0 ? colors.ink : colors.muted, 205, 'right'))
-  page.drawLine({ start: { x: MARGIN, y: PAGE_HEIGHT - 105 }, end: { x: PAGE_WIDTH - MARGIN, y: PAGE_HEIGHT - 105 }, thickness: 1, color: colors.line })
-  state.y = PAGE_HEIGHT - 125
+  const top = PAGE_HEIGHT - MARGIN
+  const rightX = PAGE_WIDTH - MARGIN - 205
+  const rightWidth = 205
+  drawTextTop(page, state.font, state.title, MARGIN, top + 2, 21, colors.ink, 190)
+  const numberLabel = truncateText(`No. ${state.number}`, state.latinFont, 10, rightWidth)
+  drawTextTop(page, state.latinFont, numberLabel, rightX + rightWidth - state.latinFont.widthOfTextAtSize(numberLabel, 10), top + 2, 10, colors.ink)
+  drawTextTop(page, state.font, truncateText(shop.name || '店舗名未設定', state.font, 11, rightWidth), rightX, top - 16, 11, colors.ink, rightWidth, 'right')
+  drawTextTop(page, state.font, `発行日 ${state.issuedAt || '未設定'}`, rightX, top - 32, 9, colors.muted, rightWidth, 'right')
+  const detailLines = shopLines.slice(0, 4)
+  const detailTop = top - 47
+  detailLines.forEach((line, index) => drawTextTop(page, state.font, truncateText(line, state.font, 8.5, rightWidth), rightX, detailTop - index * 11, 8.5, colors.muted, rightWidth, 'right'))
+  const ruleY = detailTop - detailLines.length * 11 - 4
+  page.drawLine({ start: { x: MARGIN, y: ruleY }, end: { x: PAGE_WIDTH - MARGIN, y: ruleY }, thickness: 1, color: colors.line })
+  state.y = ruleY - 20
 }
 
 function drawCustomerAndVehicle(state: PageState, customerName: string, phone: string, category: string, vehicle: string, vehicleExtra: string) {
@@ -189,7 +198,10 @@ function drawCustomerAndVehicle(state: PageState, customerName: string, phone: s
 function drawInfoBox(state: PageState, x: number, top: number, width: number, label: string, values: string[]) {
   state.page.drawRectangle({ x, y: top - 58, width, height: 58, color: colors.soft, borderColor: colors.line, borderWidth: 0.8 })
   drawTextTop(state.page, state.font, label, x + 10, top - 9, 8.5, colors.primary)
-  values.forEach((value, index) => drawTextTop(state.page, state.font, value, x + 10, top - 25 - index * 14, index === 0 ? 11 : 8.5, index === 0 ? colors.ink : colors.muted, width - 20))
+  values.forEach((value, index) => {
+    const size = index === 0 ? 11 : 8.5
+    drawTextTop(state.page, state.font, truncateText(value, state.font, size, width - 20), x + 10, top - 25 - index * 14, size, index === 0 ? colors.ink : colors.muted, width - 20)
+  })
 }
 
 function drawMetaGrid(state: PageState, entries: Array<[string, string]>) {
@@ -204,7 +216,7 @@ function drawMetaGrid(state: PageState, entries: Array<[string, string]>) {
     const x = MARGIN + column * width
     const top = state.y - row * rowHeight
     drawTextTop(state.page, state.font, label, x + 4, top, 8.5, colors.muted)
-    drawTextTop(state.page, state.font, value, x + width / 2, top, 9, colors.ink, width / 2 - 6, 'right')
+    drawTextTop(state.page, state.font, truncateText(value, state.font, 9, width / 2 - 6), x + width / 2, top, 9, colors.ink, width / 2 - 6, 'right')
     state.page.drawLine({ start: { x, y: top - 16 }, end: { x: x + width - 8, y: top - 16 }, thickness: 0.5, color: colors.line })
   })
   state.y -= rows * rowHeight + 14
@@ -273,8 +285,10 @@ function drawTotals(state: PageState, entries: Array<[string, string]>) {
     const rowTop = top - 7 - index * rowHeight
     const isTotal = index === entries.length - 1
     if (isTotal) state.page.drawRectangle({ x: x + 0.5, y: rowTop - rowHeight + 1, width: width - 1, height: rowHeight, color: colors.primary })
-    drawTextTop(state.page, state.font, label, x + 10, rowTop, isTotal ? 10 : 8.5, isTotal ? colors.white : colors.muted, width - 105)
-    drawTextTop(state.page, state.font, value, x + width - 10, rowTop, isTotal ? 11 : 9, isTotal ? colors.white : colors.ink, width - 112, 'right')
+    const labelSize = isTotal ? 10 : 8.5
+    const valueSize = isTotal ? 11 : 9
+    drawTextTop(state.page, state.font, truncateText(label, state.font, labelSize, width - 105), x + 10, rowTop, labelSize, isTotal ? colors.white : colors.muted, width - 105)
+    drawTextTop(state.page, state.font, truncateText(value, state.font, valueSize, width - 112), x + width - 10, rowTop, valueSize, isTotal ? colors.white : colors.ink, width - 112, 'right')
   })
   state.y -= height + 14
 }
@@ -328,6 +342,21 @@ function drawTextTop(page: PDFPage, font: PDFFont, text: string, x: number, top:
   const boxWidth = width ?? textWidth
   const offset = align === 'right' ? boxWidth - textWidth : align === 'center' ? (boxWidth - textWidth) / 2 : 0
   page.drawText(safeText, { x: x + Math.max(0, offset), y: top - size, size, font, color, maxWidth: width })
+}
+
+function truncateText(value: string, font: PDFFont, size: number, maxWidth: number) {
+  const text = Array.from(value, (character) => {
+    const code = character.charCodeAt(0)
+    return code < 32 && code !== 9 && code !== 10 ? ' ' : character
+  }).join('')
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text
+  let output = ''
+  for (const character of Array.from(text)) {
+    const next = `${output}${character}…`
+    if (font.widthOfTextAtSize(next, size) > maxWidth) break
+    output += character
+  }
+  return output ? `${output}…` : '…'
 }
 
 function wrapText(value: string, font: PDFFont, size: number, maxWidth: number) {
