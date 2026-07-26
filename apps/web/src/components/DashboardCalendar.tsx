@@ -48,11 +48,6 @@ export function DashboardCalendar({ events, loading }: { events: DashboardCalend
             <h2 id="dashboard-calendar-title">業務カレンダー</h2>
             <p>車検・点検、販売・整備書類、支払期限と入金日を表示しています。</p>
           </div>
-          <div className="calendar-controls" aria-label="カレンダー操作">
-            <button className="button button-secondary calendar-today-button" type="button" onClick={selectToday}>今日</button>
-            <button className="calendar-icon-button" type="button" aria-label="前月" title="前月" onClick={() => changeMonth(-1)}><ChevronLeft size={18} /></button>
-            <button className="calendar-icon-button" type="button" aria-label="次月" title="次月" onClick={() => changeMonth(1)}><ChevronRight size={18} /></button>
-          </div>
         </div>
         <div className="calendar-legend" aria-label="予定の種類">
           {legendCategories.map(({ category, label }) => <span key={category}><i className={`calendar-legend-dot calendar-event-${category}`} />{label}</span>)}
@@ -63,7 +58,11 @@ export function DashboardCalendar({ events, loading }: { events: DashboardCalend
         <div className="dashboard-calendar-board">
           <div className="dashboard-calendar-monthbar">
             <div><h3>{formatMonth(viewDate)}</h3><span>{monthEventCount}件の予定</span></div>
-            <span className="calendar-selection-hint">日付を選択すると詳細を表示</span>
+            <div className="calendar-controls" aria-label="カレンダー操作">
+              <button className="button button-secondary calendar-today-button" type="button" onClick={selectToday}>今日</button>
+              <button className="calendar-icon-button" type="button" aria-label="前月" title="前月" onClick={() => changeMonth(-1)}><ChevronLeft size={18} /></button>
+              <button className="calendar-icon-button" type="button" aria-label="次月" title="次月" onClick={() => changeMonth(1)}><ChevronRight size={18} /></button>
+            </div>
           </div>
           <div className="dashboard-calendar-scroll">
             <div className="dashboard-calendar-grid" role="grid" aria-label={`${formatMonth(viewDate)}のカレンダー`}>
