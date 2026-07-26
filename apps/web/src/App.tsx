@@ -378,15 +378,10 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
 }
 
 function Topbar({ currentPage }: { currentPage: PageMeta }) {
-  const Icon = currentPage.icon
   return (
     <header className="topbar">
       <div className="breadcrumb"><strong>{currentPage.title}</strong></div>
-      <div className="topbar-actions">
-        <button className="search-trigger" type="button"><Search size={18} /><span>顧客・車両を検索</span><kbd>⌘ K</kbd></button>
-        <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
-        <span className="topbar-page-icon" aria-hidden="true"><Icon size={20} /></span>
-      </div>
+      <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
     </header>
   )
 }
