@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   CarFront,
@@ -15,7 +15,6 @@ import {
   Plus,
   Search,
   Trash2,
-  Upload,
   UserRound,
   X,
 } from 'lucide-react'
@@ -39,10 +38,38 @@ import {
 
 const emptyCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }
 const emptyVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
+const customerSearchFields = ['すべて', '顧客名', 'ふりがな', 'メールアドレス', '電話番号', '住所', '車名', '登録番号', '車台番号'] as const
+type CustomerSearchField = (typeof customerSearchFields)[number]
+const customerSearchPlaceholders: Record<CustomerSearchField, string> = {
+  すべて: '顧客名、ふりがな、メールアドレス、電話番号、住所、車名、登録番号、車台番号で検索',
+  顧客名: '顧客名で検索',
+  ふりがな: 'ふりがなで検索',
+  メールアドレス: 'メールアドレスで検索',
+  電話番号: '電話番号で検索',
+  住所: '住所で検索',
+  車名: '車名で検索',
+  登録番号: '登録番号で検索',
+  車台番号: '車台番号で検索',
+}
+
+function getCustomerSearchText(customer: Customer, field: CustomerSearchField) {
+  const values = {
+    顧客名: customer.name,
+    ふりがな: customer.kana,
+    メールアドレス: customer.email,
+    電話番号: customer.phone,
+    住所: `${customer.postalCode} ${customer.address}`,
+    車名: customer.vehicles.map((vehicle) => `${vehicle.maker} ${vehicle.model}`).join(' '),
+    登録番号: customer.vehicles.map((vehicle) => vehicle.plate).join(' '),
+    車台番号: customer.vehicles.map((vehicle) => vehicle.vin).join(' '),
+  }
+  return field === 'すべて' ? Object.values(values).join(' ') : values[field]
+}
 
 export function CustomerVehiclePage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [query, setQuery] = useState('')
+  const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedVehicleId, setSelectedVehicleId] = useState('')
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false)
@@ -73,16 +100,11 @@ export function CustomerVehiclePage() {
   const filteredCustomers = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     if (!normalizedQuery) return customers
-    return customers.filter((customer) => {
-      const customerText = `${customer.name} ${customer.kana} ${customer.phone} ${customer.address}`.toLocaleLowerCase()
-      const vehicleText = customer.vehicles.map((vehicle) => `${vehicle.maker} ${vehicle.model} ${vehicle.plate} ${vehicle.vin}`).join(' ').toLocaleLowerCase()
-      return `${customerText} ${vehicleText}`.includes(normalizedQuery)
-    })
-  }, [customers, query])
+    return customers.filter((customer) => getCustomerSearchText(customer, searchField).toLocaleLowerCase().includes(normalizedQuery))
+  }, [customers, query, searchField])
 
   const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
-  const filteredVehicleCount = filteredCustomers.reduce((count, customer) => count + customer.vehicles.length, 0)
 
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
@@ -172,9 +194,7 @@ export function CustomerVehiclePage() {
     }
   }
 
-  async function handleAttachments(event: ChangeEvent<HTMLInputElement>, vehicleId: string) {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ''
+  async function handleAttachmentFiles(files: File[], vehicleId: string) {
     if (!files.length) return
     setSaving(true)
     setError('')
@@ -188,6 +208,18 @@ export function CustomerVehiclePage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleAttachments(event: ChangeEvent<HTMLInputElement>, vehicleId: string) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    void handleAttachmentFiles(files, vehicleId)
+  }
+
+  function handleAttachmentDrop(event: DragEvent<HTMLLabelElement>, vehicleId: string) {
+    event.preventDefault()
+    event.currentTarget.classList.remove('is-dragging')
+    void handleAttachmentFiles(Array.from(event.dataTransfer.files), vehicleId)
   }
 
   async function removeAttachment(vehicleId: string, attachmentId: string) {
@@ -241,13 +273,13 @@ export function CustomerVehiclePage() {
       {(loading || error || saving) && <div className={`customer-sync-status${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}><span>{loading ? '顧客・車両データを読み込んでいます…' : saving ? '変更を保存しています…' : error}</span>{error && <button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button>}</div>}
 
       <div className="customer-toolbar">
-        <label className="customer-search"><Search size={19} /><span className="sr-only">顧客・車両を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="顧客名、電話番号、車名、登録番号で検索" /></label>
-        <span className="customer-result-summary"><strong>{filteredVehicleCount}台</strong><span>{filteredCustomers.length}名の顧客</span></span>
+        <label className="customer-search"><Search size={19} /><span className="sr-only">顧客・車両を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={customerSearchPlaceholders[searchField]} /></label>
+        <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as CustomerSearchField)}>{customerSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
       </div>
 
       <div className="customer-directory">
         <CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} />
-        <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} />
+        <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} />
       </div>
 
       {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} onChange={setCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
@@ -257,13 +289,13 @@ export function CustomerVehiclePage() {
 }
 
 function CustomerList({ customers, selectedCustomerId, onSelect }: { customers: Customer[]; selectedCustomerId: string; onSelect: (customer: Customer) => void }) {
-  return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div><span className="results-count">{customers.length}名</span></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone || '電話番号未登録'}</small><em>{customer.vehicles.length}台所有</em></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>顧客を登録するか、検索条件を変更してください。</span></div>}</div></section>
+  return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone || '電話番号未登録'}</small></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>顧客を登録するか、検索条件を変更してください。</span></div>}</div></section>
 }
 
-function CustomerProfile({ customer, vehicle, onSelectVehicle, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onPreviewAttachment, onRemoveAttachment }: { customer: Customer | null; vehicle: Vehicle | null; onSelectVehicle: (vehicle: Vehicle) => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
+function CustomerProfile({ customer, vehicle, onSelectVehicle, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment }: { customer: Customer | null; vehicle: Vehicle | null; onSelectVehicle: (vehicle: Vehicle) => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
   if (!customer) return <section className="panel customer-profile-empty"><UserRound size={30} /><strong>顧客を登録してください</strong><span>登録した顧客の情報がここに表示されます。</span></section>
 
-  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両 <small>{customer.vehicles.length}台</small></h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${item.inspectionDate.startsWith('2025') ? 'is-danger' : item.inspectionDate.startsWith('2026/08') ? 'is-warning' : ''}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} /></>}</section>
+  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両</h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${item.inspectionDate.startsWith('2025') ? 'is-danger' : item.inspectionDate.startsWith('2026/08') ? 'is-warning' : ''}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onAttachmentDrop={onAttachmentDrop} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} /></>}</section>
 }
 
 function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
@@ -311,8 +343,22 @@ function DetailField({ label, value }: { label: string; value: string }) {
   return <div className="detail-field"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function AttachmentSection({ vehicle, onAttachments, onPreviewAttachment, onRemoveAttachment }: { vehicle: Vehicle; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
-  return <section className="attachments-section"><div className="attachments-header"><div><h3>添付ファイル</h3><span>写真・車検証PDFなどを車両ごとに保存</span></div><label className="attachment-add-button"><Upload size={16} />追加<input className="hidden-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple onChange={(event) => onAttachments(event, vehicle.id)} /></label></div>{vehicle.attachments.length ? <div className="attachments-grid">{vehicle.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}><span className={`attachment-icon attachment-icon-${attachment.type}`}>{attachment.type === 'image' ? <ImageIcon size={19} /> : <FileText size={19} />}</span><span className="attachment-card-copy"><strong title={attachment.name}>{attachment.name}</strong><small>{formatFileSize(attachment.size)} ・ {attachment.createdAt}</small></span><span className="attachment-actions"><button className="attachment-action" type="button" aria-label={`${attachment.name}をプレビュー`} title="プレビュー" onClick={() => onPreviewAttachment(vehicle.id, attachment, 'preview')}><Eye size={15} /></button><button className="attachment-action" type="button" aria-label={`${attachment.name}をダウンロード`} title="ダウンロード" onClick={() => onPreviewAttachment(vehicle.id, attachment, 'download')}><Download size={15} /></button><button className="attachment-remove" type="button" aria-label={`${attachment.name}を削除`} onClick={() => onRemoveAttachment(vehicle.id, attachment.id)}><Trash2 size={15} /></button></span></div>)}</div> : <label className="attachment-dropzone"><Paperclip size={21} /><strong>ファイルを追加</strong><span>JPEG・PNG・PDFに対応</span><input className="hidden-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple onChange={(event) => onAttachments(event, vehicle.id)} /></label>}</section>
+function AttachmentSection({ vehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment }: { vehicle: Vehicle; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void }) {
+  return (
+    <section className="attachments-section">
+      <div className="attachments-header">
+        <div><h3>添付ファイル</h3><span>写真・車検証PDFなどを車両ごとに保存</span></div>
+        <label className="attachment-add-button"><Plus size={16} />追加<input className="hidden-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple onChange={(event) => onAttachments(event, vehicle.id)} /></label>
+      </div>
+      {vehicle.attachments.length > 0 && <div className="attachments-grid">{vehicle.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}><span className={`attachment-icon attachment-icon-${attachment.type}`}>{attachment.type === 'image' ? <ImageIcon size={19} /> : <FileText size={19} />}</span><span className="attachment-card-copy"><strong title={attachment.name}>{attachment.name}</strong><small>{formatFileSize(attachment.size)} ・ {attachment.createdAt}</small></span><span className="attachment-actions"><button className="attachment-action" type="button" aria-label={`${attachment.name}をプレビュー`} title="プレビュー" onClick={() => onPreviewAttachment(vehicle.id, attachment, 'preview')}><Eye size={15} /></button><button className="attachment-action" type="button" aria-label={`${attachment.name}をダウンロード`} title="ダウンロード" onClick={() => onPreviewAttachment(vehicle.id, attachment, 'download')}><Download size={15} /></button><button className="attachment-remove" type="button" aria-label={`${attachment.name}を削除`} onClick={() => onRemoveAttachment(vehicle.id, attachment.id)}><Trash2 size={15} /></button></span></div>)}</div>}
+      <label className="attachment-dropzone" onDragEnter={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragLeave={(event) => event.currentTarget.classList.remove('is-dragging')} onDrop={(event) => onAttachmentDrop(event, vehicle.id)}>
+        <Paperclip size={21} />
+        <strong>ファイルをドロップ</strong>
+        <span>ここにドラッグ＆ドロップ、またはクリックして選択（JPEG・PNG・PDF）</span>
+        <input className="hidden-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple onChange={(event) => onAttachments(event, vehicle.id)} />
+      </label>
+    </section>
+  )
 }
 
 function CustomerDialog({ form, title, submitLabel, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {

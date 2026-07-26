@@ -172,8 +172,9 @@
 .customer-search:focus-within { color: var(--primary); border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .customer-search input { width: 100%; min-width: 0; padding: 0; color: var(--text); outline: 0; border: 0; background: transparent; font-size: 13px; }
 .customer-search input::placeholder { color: var(--text-muted); }
-.customer-result-summary { display: flex; align-items: baseline; gap: 7px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.customer-result-summary strong { color: var(--text); font-size: 16px; }
+.customer-search-filter { flex: 0 0 176px; }
+.customer-search-filter select { width: 100%; min-height: 45px; padding: 0 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-card); font-size: 12px; font-weight: 700; cursor: pointer; }
+.customer-search-filter:focus-within select { border-color: #9eb9eb; outline: 0; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .customer-workspace { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(370px, 0.85fr); align-items: start; gap: 20px; }
 .customer-results-panel { min-width: 0; padding: 0; overflow: hidden; }
 .customer-panel-header { padding: 22px 24px 16px; }
@@ -245,8 +246,9 @@
 .attachment-remove:hover { color: var(--danger); background: var(--danger-soft); }
 .attachment-dropzone { min-height: 118px; display: grid; place-items: center; align-content: center; gap: 5px; color: var(--primary); border: 1px dashed #afc6ed; border-radius: 9px; background: #f8fbff; cursor: pointer; }
 .attachment-dropzone:hover { border-color: var(--primary); background: var(--primary-soft); }
+.attachment-dropzone.is-dragging { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .attachment-dropzone strong { color: var(--text-secondary); font-size: 12px; }
-.attachment-dropzone span { color: var(--text-muted); font-size: 10px; }
+.attachment-dropzone span { color: var(--text-muted); font-size: 10px; text-align: center; }
 .detail-empty-vehicle { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 12px; color: var(--text-muted); text-align: center; }
 .detail-empty-vehicle strong { color: var(--text); font-size: 13px; }
 .detail-empty-vehicle .button { margin-top: 4px; }
@@ -788,7 +790,7 @@
   .quick-actions { grid-template-columns: 1fr; }
   .customer-toolbar { align-items: stretch; flex-direction: column; }
   .customer-search { min-width: 0; }
-  .customer-result-summary { justify-content: flex-end; }
+  .customer-search-filter { flex-basis: auto; }
   .customer-panel-header { padding-left: 18px; padding-right: 18px; }
   .customer-table-head, .customer-table-row { padding-left: 18px; padding-right: 18px; }
   .vehicle-detail-body { padding-left: 18px; padding-right: 18px; }
