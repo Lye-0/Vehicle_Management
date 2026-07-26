@@ -20,6 +20,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { CustomerVehiclePage } from './components/CustomerVehiclePage'
+import { DashboardCalendar } from './components/DashboardCalendar'
 import { InspectionSchedulesPage } from './components/InspectionSchedulesPage'
 import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
@@ -415,6 +416,7 @@ function Dashboard() {
         <StatCard label="車検期限30日以内" value={String(summary?.inspectionsWithin30Days ?? 0)} suffix="台" note={`期限超過 ${summary?.overdueInspections ?? 0}台`} icon={CalendarDays} tone="orange" />
         <StatCard label="未入金の請求" value={String(summary?.unpaidInvoices ?? 0)} suffix="件" note={`合計 ${formatYen(summary?.unpaidAmount ?? 0)}`} icon={CircleDollarSign} tone="red" />
       </section>
+      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} />
       <section className="dashboard-grid">
         <Panel title="車検・点検期限が近い車両" action="一覧を見る">
           <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row) => <div className="data-list-row" key={`${row.customer}-${row.date}-${row.plate}`}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
