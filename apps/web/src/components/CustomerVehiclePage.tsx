@@ -385,7 +385,9 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
   const [ocrError, setOcrError] = useState('')
   const [ocrRegions, setOcrRegions] = useState<OcrTextRegion[]>([])
   const [imageSize, setImageSize] = useState<OcrImageSize | null>(null)
+  const [selectedOcrRegionIndexes, setSelectedOcrRegionIndexes] = useState<Set<number>>(() => new Set())
   const imageRef = useRef<HTMLImageElement | null>(null)
+  const ocrLayerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setOcrStatus('idle')
@@ -393,7 +395,38 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
     setOcrError('')
     setOcrRegions([])
     setImageSize(null)
+    setSelectedOcrRegionIndexes(new Set())
   }, [preview.url])
+
+  useEffect(() => {
+    const layer = ocrLayerRef.current
+    if (!layer || ocrRegions.length === 0) return
+
+    const updateSelectionHighlight = () => {
+      const selection = window.getSelection()
+      const hasLayerEndpoint = Boolean(selection?.anchorNode && layer.contains(selection.anchorNode)) || Boolean(selection?.focusNode && layer.contains(selection.focusNode))
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !hasLayerEndpoint) {
+        setSelectedOcrRegionIndexes((current) => current.size === 0 ? current : new Set())
+        return
+      }
+
+      const range = selection.getRangeAt(0)
+      const nextIndexes = new Set<number>()
+      layer.querySelectorAll<HTMLElement>('[data-ocr-region-index]').forEach((region) => {
+        if (range.intersectsNode(region)) {
+          const index = Number(region.dataset.ocrRegionIndex)
+          if (Number.isInteger(index)) nextIndexes.add(index)
+        }
+      })
+      setSelectedOcrRegionIndexes((current) => {
+        if (current.size === nextIndexes.size && [...current].every((index) => nextIndexes.has(index))) return current
+        return nextIndexes
+      })
+    }
+
+    document.addEventListener('selectionchange', updateSelectionHighlight)
+    return () => document.removeEventListener('selectionchange', updateSelectionHighlight)
+  }, [ocrRegions.length, preview.url])
 
   useEffect(() => {
     const image = imageRef.current
@@ -439,7 +472,7 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
   const isImage = preview.attachment.type === 'image'
   const ocrButtonLabel = ocrStatus === 'running' ? `文字を認識中… ${ocrProgress}%` : ocrStatus === 'ready' ? '再認識する' : '文字を認識する'
 
-  return <div className="modal-backdrop attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="attachment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="attachment-preview-title"><div className="modal-header"><div><h2 id="attachment-preview-title">{preview.attachment.name}</h2><span className="attachment-preview-meta">{isImage ? '画像' : preview.attachment.type === 'pdf' ? 'PDF' : '添付ファイル'} ・ {formatFileSize(preview.attachment.size)}</span></div><div className="attachment-preview-header-actions">{isImage && <button className="button button-secondary" type="button" disabled={ocrStatus === 'running'} onClick={() => void recognizeText()}><FileText size={16} />{ocrButtonLabel}</button>}<button className="modal-close" type="button" aria-label="プレビューを閉じる" onClick={onClose}><X size={19} /></button></div></div><div className="attachment-preview-content">{isImage ? <div className="attachment-image-preview"><div className="attachment-image-stage"><img ref={imageRef} className="attachment-preview-image" src={preview.url} alt={preview.attachment.name} onLoad={(event) => { const image = event.currentTarget; const { width: renderedWidth, height: renderedHeight } = image.getBoundingClientRect(); setImageSize({ width: image.naturalWidth, height: image.naturalHeight, renderedWidth, renderedHeight }) }} />{ocrRegions.length > 0 && imageSize && <div className="attachment-ocr-layer" aria-label="OCRで認識した文字">{ocrRegions.map((region, index) => { const renderedRegionHeight = Math.max(1, ((region.y1 - region.y0) / imageSize.height) * imageSize.renderedHeight); return <span className="attachment-ocr-token" data-confidence={region.confidence} key={`${region.x0}-${region.y0}-${index}`} style={{ left: `${(region.x0 / imageSize.width) * 100}%`, top: `${(region.y0 / imageSize.height) * 100}%`, width: `${((region.x1 - region.x0) / imageSize.width) * 100}%`, height: `${((region.y1 - region.y0) / imageSize.height) * 100}%`, fontSize: `${renderedRegionHeight}px`, lineHeight: `${renderedRegionHeight}px` }}>{region.text}</span> })}</div>}</div>{ocrStatus === 'ready' && <span className="attachment-ocr-status" role="status">認識した文字をカーソルや指でなぞって選択できます。</span>}{ocrStatus === 'running' && <span className="attachment-ocr-status" role="status">画像内の文字を解析しています。初回は少し時間がかかります。</span>}{ocrStatus === 'empty' && <span className="attachment-ocr-status">文字を認識できませんでした。画像を拡大して再認識してください。</span>}{ocrStatus === 'error' && <span className="attachment-ocr-status is-error" role="alert">{ocrError}</span>}</div> : preview.attachment.type === 'pdf' ? <iframe className="attachment-preview-frame" src={`${preview.url}#toolbar=1`} title={`${preview.attachment.name}のプレビュー`} /> : <div className="attachment-preview-empty"><FileText size={30} /><strong>このファイル形式は画面表示に対応していません</strong><a className="button button-secondary" href={preview.url} download={preview.attachment.name}>ファイルをダウンロード</a></div>}</div></section></div>
+  return <div className="modal-backdrop attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="attachment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="attachment-preview-title"><div className="modal-header"><div><h2 id="attachment-preview-title">{preview.attachment.name}</h2><span className="attachment-preview-meta">{isImage ? '画像' : preview.attachment.type === 'pdf' ? 'PDF' : '添付ファイル'} ・ {formatFileSize(preview.attachment.size)}</span></div><div className="attachment-preview-header-actions">{isImage && <button className="button button-secondary" type="button" disabled={ocrStatus === 'running'} onClick={() => void recognizeText()}><FileText size={16} />{ocrButtonLabel}</button>}<button className="modal-close" type="button" aria-label="プレビューを閉じる" onClick={onClose}><X size={19} /></button></div></div><div className="attachment-preview-content">{isImage ? <div className="attachment-image-preview"><div className="attachment-image-stage"><img ref={imageRef} className="attachment-preview-image" src={preview.url} alt={preview.attachment.name} onLoad={(event) => { const image = event.currentTarget; const { width: renderedWidth, height: renderedHeight } = image.getBoundingClientRect(); setImageSize({ width: image.naturalWidth, height: image.naturalHeight, renderedWidth, renderedHeight }) }} />{ocrRegions.length > 0 && imageSize && <div ref={ocrLayerRef} className="attachment-ocr-layer" aria-label="OCRで認識した文字">{ocrRegions.map((region, index) => { const renderedRegionHeight = Math.max(1, ((region.y1 - region.y0) / imageSize.height) * imageSize.renderedHeight); return <span className={`attachment-ocr-token${selectedOcrRegionIndexes.has(index) ? ' is-selected' : ''}`} data-confidence={region.confidence} data-ocr-region-index={index} key={`${region.x0}-${region.y0}-${index}`} style={{ left: `${(region.x0 / imageSize.width) * 100}%`, top: `${(region.y0 / imageSize.height) * 100}%`, width: `${((region.x1 - region.x0) / imageSize.width) * 100}%`, height: `${((region.y1 - region.y0) / imageSize.height) * 100}%`, fontSize: `${renderedRegionHeight}px`, lineHeight: `${renderedRegionHeight}px` }}>{region.text}</span> })}</div>}</div>{ocrStatus === 'ready' && <span className="attachment-ocr-status" role="status">認識した文字をカーソルや指でなぞって選択できます。</span>}{ocrStatus === 'running' && <span className="attachment-ocr-status" role="status">画像内の文字を解析しています。初回は少し時間がかかります。</span>}{ocrStatus === 'empty' && <span className="attachment-ocr-status">文字を認識できませんでした。画像を拡大して再認識してください。</span>}{ocrStatus === 'error' && <span className="attachment-ocr-status is-error" role="alert">{ocrError}</span>}</div> : preview.attachment.type === 'pdf' ? <iframe className="attachment-preview-frame" src={`${preview.url}#toolbar=1`} title={`${preview.attachment.name}のプレビュー`} /> : <div className="attachment-preview-empty"><FileText size={30} /><strong>このファイル形式は画面表示に対応していません</strong><a className="button button-secondary" href={preview.url} download={preview.attachment.name}>ファイルをダウンロード</a></div>}</div></section></div>
 }
 
 function CustomerDialog({ form, title, submitLabel, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
