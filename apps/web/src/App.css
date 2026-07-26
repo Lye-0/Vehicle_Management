@@ -262,9 +262,19 @@
 .attachment-preview-modal { width: min(100%, 960px); max-height: min(880px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 70px rgba(15, 27, 46, 0.3); }
 .attachment-preview-modal .modal-header > div { min-width: 0; }
 .attachment-preview-modal .modal-header h2 { overflow: hidden; max-width: min(720px, calc(100vw - 150px)); text-overflow: ellipsis; white-space: nowrap; }
+.attachment-preview-header-actions { display: flex; align-items: center; gap: 8px; }
+.attachment-preview-header-actions .button { min-height: 34px; padding: 0 10px; font-size: 11px; box-shadow: none; }
 .attachment-preview-meta { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .attachment-preview-content { min-height: 0; display: grid; place-items: center; overflow: auto; padding: 18px; background: #f2f5f9; }
+.attachment-image-preview { max-width: 100%; display: grid; justify-items: center; gap: 10px; }
+.attachment-image-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
 .attachment-preview-image { max-width: 100%; max-height: calc(100vh - 190px); object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 8px 28px rgba(15, 27, 46, 0.16); }
+.attachment-image-stage .attachment-preview-image { display: block; }
+.attachment-ocr-layer { position: absolute; inset: 0; user-select: text; }
+.attachment-ocr-line { position: absolute; display: block; overflow: hidden; color: transparent; cursor: text; line-height: 1; white-space: pre; user-select: text; }
+.attachment-ocr-line::selection { color: #1f2937; background: rgba(96, 165, 250, 0.55); }
+.attachment-ocr-status { color: var(--text-secondary); font-size: 11px; text-align: center; }
+.attachment-ocr-status.is-error { color: var(--danger); }
 .attachment-preview-frame { width: 100%; height: min(72vh, 720px); border: 1px solid #d6dee9; border-radius: 7px; background: #fff; }
 .attachment-preview-empty { display: grid; place-items: center; align-content: center; gap: 12px; min-height: 220px; color: var(--text-muted); text-align: center; }
 .attachment-preview-empty strong { color: var(--text); font-size: 13px; }
@@ -866,6 +876,8 @@
   .attachment-preview-content { padding: 10px; }
   .attachment-preview-image { max-height: calc(100vh - 145px); }
   .attachment-preview-frame { height: calc(100vh - 145px); }
+  .attachment-preview-header-actions { gap: 4px; }
+  .attachment-preview-header-actions .button { max-width: 150px; overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
   .sales-toolbar { align-items: stretch; flex-direction: column; }
   .sales-search { min-width: 0; }
   .sales-filter-tabs { justify-content: space-between; }
