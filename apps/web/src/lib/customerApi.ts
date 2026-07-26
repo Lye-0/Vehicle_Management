@@ -22,6 +22,7 @@ export type Vehicle = {
   color: string
   displacement: string
   transmission: string
+  inspectionRecordAvailable: boolean
   note: string
   freeItem1: string
   freeItem2: string
@@ -95,6 +96,7 @@ type ApiVehicle = {
   bodyColor: string | null
   displacement: number | null
   transmission: string | null
+  inspectionRecordAvailable?: boolean
   memo: string | null
   freeItem1: string | null
   freeItem2: string | null
@@ -210,6 +212,7 @@ function mapVehicle(vehicle: ApiVehicle): Vehicle {
     color: vehicle.bodyColor ?? '',
     displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
     transmission: vehicle.transmission ?? '',
+    inspectionRecordAvailable: Boolean(vehicle.inspectionRecordAvailable),
     note: vehicle.memo ?? '',
     freeItem1: vehicle.freeItem1 ?? '',
     freeItem2: vehicle.freeItem2 ?? '',

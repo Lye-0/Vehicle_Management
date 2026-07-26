@@ -437,6 +437,106 @@
 .sales-empty { min-height: 440px; display: grid; place-items: center; align-content: center; gap: 9px; color: var(--text-muted); text-align: center; }
 .sales-empty strong { color: var(--text); font-size: 14px; }
 .sales-empty span { font-size: 12px; }
+.sales-editor-note { margin-top: 16px; }
+.sales-estimate-input-panel { display: grid; gap: 18px; margin: 20px 0 24px; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: #f8fafc; }
+.sales-estimate-input-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sales-estimate-input-heading h3 { margin: 0; color: var(--text); font-size: 14px; }
+.sales-estimate-input-heading span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
+.sales-estimate-input-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sales-estimate-input-grid .form-field { min-width: 0; }
+.sales-estimate-fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 14px; border: 1px solid #d9e2ec; border-radius: 8px; background: var(--surface); }
+.sales-estimate-fieldset legend { padding: 0 6px; color: var(--text); font-size: 11px; font-weight: 800; }
+.sales-estimate-tradein-grid { grid-template-columns: 2fr repeat(4, minmax(0, 1fr)); }
+.sales-estimate-credit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sales-checkbox-field { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; color: var(--text-secondary); font-size: 11px; }
+.sales-checkbox-field input { accent-color: var(--primary); }
+.sales-required-documents { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+.sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
+.sales-item-row .sales-other-input { text-align: right; }
+.sales-item-row select { min-width: 0; }
+
+.sales-estimate-paper { width: min(100%, 920px); padding: 34px 38px 28px; border-color: #aebbc9; border-radius: 2px; box-shadow: 0 10px 26px rgba(31, 48, 71, 0.08); }
+.sales-estimate-paper-header { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(340px, 1.7fr); align-items: start; gap: 18px; }
+.sales-estimate-title-block { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.sales-estimate-title { width: 100%; max-width: 290px; padding: 5px 0 8px; color: #172338; outline: 0; border: 0; border-bottom: 2px solid #1f2937; background: #dcecff; font-size: 25px; font-weight: 800; text-align: center; }
+.sales-estimate-title-block > span { color: #53677e; font-size: 11px; font-weight: 700; }
+.sales-estimate-meta-table { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid #263443; }
+.sales-estimate-meta-table > div { display: grid; grid-template-rows: 24px 31px; min-width: 0; border-right: 1px solid #263443; }
+.sales-estimate-meta-table > div:last-child { border-right: 0; }
+.sales-estimate-meta-table span { display: grid; place-items: center; padding: 0 4px; color: #172338; background: #dcecff; border-bottom: 1px solid #263443; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.sales-estimate-meta-table strong, .sales-estimate-meta-table input { display: grid; place-items: center; width: 100%; min-width: 0; padding: 0 3px; box-sizing: border-box; color: #273448; outline: 0; border: 0; background: #fff; font: inherit; font-size: 10px; text-align: center; }
+.sales-estimate-meta-table input:focus { box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.25); }
+.sales-estimate-customer-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 0; margin-top: 20px; border: 1px solid #263443; }
+.sales-estimate-customer-box { display: grid; grid-template-columns: 68px minmax(0, 1fr) 68px minmax(0, 1fr); min-width: 0; border-right: 1px solid #263443; }
+.sales-estimate-contact-box { display: grid; grid-template-columns: 72px minmax(0, 1fr); min-width: 0; }
+.sales-estimate-customer-box > *, .sales-estimate-contact-box > * { min-width: 0; min-height: 27px; box-sizing: border-box; padding: 5px 7px; border-bottom: 1px solid #aebbc9; font-size: 10px; }
+.sales-estimate-customer-box > :nth-last-child(-n + 2), .sales-estimate-contact-box > :nth-last-child(-n + 2) { border-bottom: 0; }
+.sales-estimate-cell-label { display: flex; align-items: center; justify-content: center; color: #172338; background: #dcecff; font-weight: 800; }
+.sales-estimate-cell-value { display: grid; align-content: center; gap: 2px; overflow: hidden; color: #273448; }
+.sales-estimate-cell-value strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-cell-value small { color: #607086; font-size: 9px; }
+.sales-estimate-contact-box > div:nth-child(even) { overflow: hidden; color: #273448; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-vehicle-table, .sales-estimate-tradein-table { overflow: hidden; margin-top: 13px; border: 1px solid #263443; }
+.sales-estimate-vehicle-row { display: grid; grid-template-columns: 55px minmax(130px, 1.7fr) 58px 70px 72px 1fr; min-width: 0; }
+.sales-estimate-vehicle-row > span { display: flex; align-items: center; min-width: 0; min-height: 25px; padding: 4px 6px; overflow: hidden; border-right: 1px solid #aebbc9; border-bottom: 1px solid #aebbc9; color: #273448; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-vehicle-row > span:last-child { border-right: 0; }
+.sales-estimate-vehicle-row:last-child > span { border-bottom: 0; }
+.sales-estimate-vehicle-labels > span { justify-content: center; color: #172338; background: #dcecff; font-weight: 800; }
+.sales-estimate-tradein-table > div { display: grid; grid-template-columns: 1.8fr 0.65fr 0.85fr 1fr 1.05fr; }
+.sales-estimate-tradein-table > div > * { min-width: 0; min-height: 24px; padding: 4px 6px; overflow: hidden; border-right: 1px solid #aebbc9; border-bottom: 1px solid #aebbc9; color: #273448; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-tradein-table > div > *:last-child { border-right: 0; }
+.sales-estimate-tradein-table > div:last-child > * { border-bottom: 0; }
+.sales-estimate-tradein-table > div:first-child > * { color: #172338; background: #dcecff; font-weight: 800; text-align: center; }
+.sales-estimate-summary-top { display: grid; grid-template-columns: minmax(210px, 0.9fr) minmax(260px, 1.1fr); gap: 20px; align-items: stretch; margin-top: 16px; }
+.sales-estimate-amount-card { display: grid; grid-template-columns: 1fr 1.5fr; align-items: center; min-height: 42px; border: 2px solid #263443; }
+.sales-estimate-amount-card span { display: grid; place-items: center; height: 100%; color: #172338; background: #dcecff; font-size: 11px; font-weight: 800; }
+.sales-estimate-amount-card strong { padding: 0 12px; color: #172338; font-size: 19px; text-align: right; white-space: nowrap; }
+.sales-estimate-tax-card { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #263443; }
+.sales-estimate-tax-card > div { display: grid; grid-template-rows: 24px 1fr; min-width: 0; border-right: 1px solid #aebbc9; }
+.sales-estimate-tax-card > div:last-child { border-right: 0; }
+.sales-estimate-tax-card span { display: grid; place-items: center; padding: 0 3px; color: #172338; background: #dcecff; border-bottom: 1px solid #aebbc9; font-size: 9px; font-weight: 800; }
+.sales-estimate-tax-card strong { display: grid; place-items: center; padding: 4px; color: #273448; font-size: 10px; white-space: nowrap; }
+.sales-estimate-section-title { display: grid; grid-template-columns: auto minmax(20px, 1fr) auto; align-items: center; gap: 10px; margin: 16px 0 8px; }
+.sales-estimate-section-title h3 { margin: 0; color: #172338; font-size: 15px; }
+.sales-estimate-section-title > span { height: 1px; background: #aebbc9; }
+.sales-estimate-section-title .text-button { color: #2563eb; font-size: 10px; white-space: nowrap; }
+.sales-estimate-items-table { overflow-x: auto; border: 1px solid #263443; }
+.sales-estimate-items-head, .sales-estimate-item-row { display: grid; grid-template-columns: 24px minmax(180px, 1fr) 42px 34px 70px 70px 65px 70px; align-items: center; min-width: 610px; }
+.sales-estimate-items-head { min-height: 27px; color: #172338; background: #dcecff; font-size: 9px; font-weight: 800; }
+.sales-estimate-items-head > span { min-width: 0; padding: 4px; border-right: 1px solid #aebbc9; text-align: center; }
+.sales-estimate-items-head > span:last-child { border-right: 0; }
+.sales-estimate-item-row { position: relative; min-height: 28px; border-top: 1px solid #aebbc9; color: #273448; font-size: 9px; }
+.sales-estimate-item-row > span, .sales-estimate-item-row > input, .sales-estimate-item-row > strong { min-width: 0; height: 100%; box-sizing: border-box; padding: 5px 5px; overflow: hidden; border-right: 1px solid #aebbc9; color: #273448; background: transparent; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-item-row > span:first-child { text-align: center; }
+.sales-estimate-item-row > input { width: 100%; outline: 0; border-top: 0; border-bottom: 0; border-left: 0; }
+.sales-estimate-item-row > input:focus { box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2); }
+.sales-estimate-item-row > strong { text-align: right; }
+.sales-estimate-item-row > input:nth-of-type(1), .sales-estimate-item-row > input:nth-of-type(4), .sales-estimate-item-row > input:nth-of-type(5) { text-align: right; }
+.sales-estimate-item-row > input:last-of-type { border-right: 0; }
+.sales-estimate-item-remove { position: absolute; right: 2px; top: 50%; z-index: 1; display: grid; place-items: center; width: 22px; height: 22px; transform: translateY(-50%); color: #718096; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.85); }
+.sales-estimate-item-remove:hover { color: var(--danger); background: var(--danger-soft); }
+.sales-estimate-items-total { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto; align-items: center; gap: 0; margin-top: 8px; border: 1px solid #aebbc9; }
+.sales-estimate-items-total > * { min-height: 26px; padding: 5px 8px; box-sizing: border-box; border-right: 1px solid #aebbc9; font-size: 10px; }
+.sales-estimate-items-total > :nth-child(3n) { color: #172338; background: #dcecff; font-weight: 800; }
+.sales-estimate-items-total > :nth-child(3n + 2) { color: #273448; text-align: right; }
+.sales-estimate-items-total > :last-child { border-right: 0; }
+.sales-estimate-bottom-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 24px; margin-top: 16px; }
+.sales-estimate-recycle { display: grid; grid-template-columns: 1fr 0.9fr; min-height: 31px; border: 1px solid #263443; }
+.sales-estimate-recycle span, .sales-estimate-recycle strong { display: grid; align-items: center; padding: 5px 8px; font-size: 10px; }
+.sales-estimate-recycle span { color: #172338; background: #dcecff; font-weight: 800; }
+.sales-estimate-recycle strong { color: #273448; text-align: right; }
+.sales-estimate-credit, .sales-estimate-required { margin-top: 10px; border: 1px solid #aebbc9; }
+.sales-estimate-credit h4, .sales-estimate-required h4 { margin: 0; padding: 5px 8px; color: #172338; background: #dcecff; font-size: 10px; }
+.sales-estimate-credit div { display: flex; flex-wrap: wrap; gap: 7px 14px; padding: 7px 8px; color: #273448; font-size: 9px; }
+.sales-estimate-credit p, .sales-estimate-required p { margin: 0; padding: 7px 8px; color: #607086; font-size: 9px; }
+.sales-estimate-company { display: grid; align-content: start; gap: 3px; color: #273448; text-align: right; }
+.sales-estimate-company > strong { margin-bottom: 4px; color: #172338; font-size: 16px; }
+.sales-estimate-company > span { color: #607086; font-size: 9px; }
+.sales-estimate-company-payment { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 4px 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #aebbc9; text-align: left; }
+.sales-estimate-company-payment span { color: #607086; font-size: 9px; }
+.sales-estimate-company-payment p { margin: 0; color: #273448; font-size: 9px; white-space: pre-wrap; }
+.sales-estimate-paper .sales-paper-footer { margin-top: 20px; padding-top: 8px; font-size: 9px; }
+
 .form-field select { width: 100%; min-height: 40px; padding: 0 11px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
 .form-field select:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 
@@ -958,6 +1058,20 @@
   .vehicle-summary-body, .attachments-panel { padding-left: 18px; padding-right: 18px; }
 }
 
+@media (max-width: 640px) {
+  .sales-estimate-input-grid, .sales-estimate-tradein-grid, .sales-estimate-credit-grid, .sales-required-documents { grid-template-columns: 1fr; }
+  .sales-estimate-paper { padding: 20px 12px 18px; }
+  .sales-estimate-paper-header, .sales-estimate-customer-grid, .sales-estimate-summary-top, .sales-estimate-bottom-grid { grid-template-columns: 1fr; }
+  .sales-estimate-customer-box { border-right: 0; border-bottom: 1px solid #263443; }
+  .sales-estimate-meta-table { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sales-estimate-meta-table > div:nth-child(2n) { border-right: 0; }
+  .sales-estimate-meta-table > div:last-child { grid-column: 1 / -1; border-top: 1px solid #263443; }
+  .sales-estimate-vehicle-row { grid-template-columns: 55px minmax(115px, 1.7fr) 58px 70px 72px 1fr; min-width: 520px; }
+  .sales-estimate-summary-top, .sales-estimate-bottom-grid { gap: 12px; }
+  .sales-estimate-company { text-align: left; }
+  .sales-estimate-company-payment { text-align: left; }
+}
+
 @media (max-width: 820px) {
   .member-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .member-role-control, .member-status-control, .member-reset-button { grid-column: 2 / -1; }
@@ -1108,5 +1222,5 @@
 .document-header-editor-title span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .document-header-editor .form-grid { margin-bottom: 0; }
 .maintenance-header-editor { margin: 20px 0; }
-.sales-items-head, .sales-item-row { grid-template-columns: 150px minmax(170px, 1fr) 60px 42px 100px 108px 28px; }
+.sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
 .sales-item-row select { width: 100%; min-width: 0; height: 32px; padding: 0 6px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 10px; }
