@@ -30,6 +30,7 @@ type PageState = {
   number: string
   issuedAt: string
   settings: AppSettings
+  salesDocument?: SalesDocument
   y: number
 }
 
@@ -59,42 +60,32 @@ export async function previewMaintenanceDocumentPdf(document: MaintenanceDocumen
   await previewPdf(() => createMaintenanceDocumentPdf(document, settings))
 }
 
-async function createSalesDocumentPdf(document: SalesDocument, settings: AppSettings) {
-  const state = await createPageState(document.type, document.number, document.issuedAt, settings)
-  drawCustomerAndVehicle(state, document.customerName, document.phone, '', document.vehicle, document.plate)
-  drawMetaGrid(state, [
-    ['書類日付', document.issuedAt || '未設定'],
-    ['支払期限', document.dueDate || '未設定'],
-    ['状態', document.status],
-    ['消費税・端数', `${formatPercent(document.taxRate)} / ${settings.tax.rounding}`],
-  ])
-
-  drawSectionTitle(state, '販売明細')
+export async function createSalesDocumentPdf(document: SalesDocument, settings: AppSettings) {
+  const state = await createPageState(salesDocumentTitle(document.type), document.number, document.issuedAt, settings, document)
+  drawSalesDocumentIntro(state, document)
+  drawSectionTitle(state, '明細')
   const columns: TableColumn[] = [
-    { label: '区分', width: 94 },
-    { label: '内容', width: 180 },
-    { label: '数量', width: 45, align: 'right' },
-    { label: '単位', width: 42, align: 'center' },
-    { label: '単価', width: 72, align: 'right' },
-    { label: '金額', width: 78, align: 'right' },
+    { label: 'No.', width: 22, align: 'center' },
+    { label: '作業内容／部品名等', width: 195 },
+    { label: '数量', width: 35, align: 'right' },
+    { label: '単位', width: 28, align: 'center' },
+    { label: '部品単価', width: 66, align: 'right' },
+    { label: '部品金額', width: 66, align: 'right' },
+    { label: '技術料・他', width: 62, align: 'right' },
+    { label: '摘要・課税', width: 37, align: 'left' },
   ]
-  drawTable(state, columns, document.items.map((item) => [
-    item.itemType,
+  drawTable(state, columns, document.items.map((item, index) => [
+    String(index + 1),
     item.description || '（明細未入力）',
     formatNumber(item.quantity),
     item.unit,
     formatYen(item.unitPrice),
-    formatYen(item.quantity * item.unitPrice),
-  ]))
+    formatYen(Math.round(item.quantity * item.unitPrice)),
+    formatYen(item.otherAmount),
+    [item.summary, item.taxCategory].filter(Boolean).join(' / '),
+  ]), colors.soft)
 
-  const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
-  const tax = calculateTax(subtotal, document.taxRate, settings.tax.rounding)
-  drawTotals(state, [
-    ['小計', formatYen(subtotal)],
-    [`消費税（${formatPercent(document.taxRate)}）`, formatYen(tax)],
-    ['合計金額', formatYen(subtotal + tax)],
-  ])
-  drawDocumentNotes(state, document.note, settings)
+  drawSalesDocumentBottom(state, document, settings)
   finishPage(state)
   return state.pdf.save()
 }
@@ -145,7 +136,7 @@ async function createMaintenanceDocumentPdf(document: MaintenanceDocument, setti
   return state.pdf.save()
 }
 
-async function createPageState(title: string, number: string, issuedAt: string, settings: AppSettings): Promise<PageState> {
+async function createPageState(title: string, number: string, issuedAt: string, settings: AppSettings, salesDocument?: SalesDocument): Promise<PageState> {
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
   const fontBytes = await fetch(fontUrl).then(async (response) => {
@@ -154,8 +145,9 @@ async function createPageState(title: string, number: string, issuedAt: string, 
   })
   const font = await pdf.embedFont(fontBytes, { subset: false })
   const latinFont = await pdf.embedFont(StandardFonts.Helvetica)
-  const state: PageState = { pdf, font, latinFont, page: pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]), pageNumber: 1, title, number, issuedAt, settings, y: PAGE_HEIGHT - MARGIN }
-  drawPageHeader(state)
+  const state: PageState = { pdf, font, latinFont, page: pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]), pageNumber: 1, title, number, issuedAt, settings, salesDocument, y: PAGE_HEIGHT - MARGIN }
+  if (salesDocument) drawSalesPageHeader(state, salesDocument)
+  else drawPageHeader(state)
   return state
 }
 
@@ -184,6 +176,148 @@ function drawPageHeader(state: PageState) {
   page.drawLine({ start: { x: MARGIN, y: ruleY }, end: { x: PAGE_WIDTH - MARGIN, y: ruleY }, thickness: 1, color: colors.line })
   state.y = ruleY - 20
 }
+
+function salesDocumentTitle(type: SalesDocument['type']) {
+  return type === '見積書' ? 'お見積書' : type
+}
+
+function drawSalesPageHeader(state: PageState, document: SalesDocument) {
+  const top = PAGE_HEIGHT - MARGIN
+  const titleWidth = 190
+  state.page.drawRectangle({ x: MARGIN, y: top - 28, width: titleWidth, height: 24, color: rgb(0.86, 0.93, 1), borderColor: colors.ink, borderWidth: 0.8 })
+  drawTextTop(state.page, state.font, salesDocumentTitle(document.type), MARGIN + 4, top - 5, 14, colors.ink, titleWidth - 8, 'center')
+
+  const metaX = PAGE_WIDTH - MARGIN - 280
+  const metaWidths = [56, 56, 56, 70, 42]
+  const metaLabels = ['日付', '販売区分', '担当', '見積番号', 'ページ']
+  const metaValues = [document.issuedAt || '未設定', document.details.salesCategory || '未設定', document.details.staffName || '未設定', document.number || '未設定', String(state.pageNumber)]
+  drawSalesGridRow(state, metaX, top, metaWidths, metaLabels.map((text) => ({ text, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.6 })), 18)
+  drawSalesGridRow(state, metaX, top - 18, metaWidths, metaValues.map((text) => ({ text, align: 'center', size: 7.5 })), 22)
+  const ruleY = top - 50
+  state.page.drawLine({ start: { x: MARGIN, y: ruleY }, end: { x: PAGE_WIDTH - MARGIN, y: ruleY }, thickness: 0.8, color: colors.line })
+  state.y = ruleY - 14
+}
+
+function drawSalesDocumentIntro(state: PageState, document: SalesDocument) {
+  const customer = document.customerDetails
+  const vehicle = document.vehicleDetails
+  const details = document.details
+  const top = state.y
+  const gap = 12
+  const leftWidth = 302
+  const rightWidth = CONTENT_WIDTH - leftWidth - gap
+  ensureSpace(state, 72 + 12 + 90 + 12 + 44 + 12 + 52)
+
+  drawSalesGridBlock(state, MARGIN, top, [68, 234], [
+    [{ text: 'お名前', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.name || '未設定'} ${details.customerHonorific || '様'}\n${customer.kana || ''}`, size: 9.2 }],
+    [{ text: 'ご住所', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.postalCode ? `〒${customer.postalCode}\n` : ''}${customer.address || '住所未登録'}`, size: 8.5 }],
+  ], [32, 40])
+  drawSalesGridBlock(state, MARGIN + leftWidth + gap, top, [72, rightWidth - 72], [
+    [{ text: '生年月日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.6 }, { text: details.customerBirthDate || '未設定', size: 8 }],
+    [{ text: '電話番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.6 }, { text: customer.phone || '未登録', size: 8 }],
+    [{ text: '勤務先等', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.6 }, { text: details.customerEmployer || '未設定', size: 8 }],
+    [{ text: '連絡先TEL', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.6 }, { text: details.customerContactPhone || '未設定', size: 8 }],
+  ], [18, 18, 18, 18])
+  state.y = top - 72 - 12
+
+  const vehicleValues = vehicle ?? emptySalesVehicleDetails()
+  drawSalesGridBlock(state, MARGIN, state.y, [55, 174, 58, 70, 72, 82], [
+    [{ text: 'メーカー', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車名・仕様', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '年式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '排気量', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: 'ミッション', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車体色', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: vehicleValues.maker || '未設定' }, { text: [vehicleValues.name, vehicleValues.modelType].filter(Boolean).join(' / ') || '未設定' }, { text: vehicleValues.year || '未設定' }, { text: vehicleValues.displacement || '未設定' }, { text: vehicleValues.transmission || '未設定' }, { text: vehicleValues.color || '未設定' }],
+    [{ text: '型式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車台番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '登録番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '走行距離', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車検日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '記録簿', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: vehicleValues.modelType || '未設定' }, { text: vehicleValues.vin || '未設定' }, { text: vehicleValues.plate || '未設定' }, { text: vehicleValues.mileage || '未設定' }, { text: vehicleValues.inspectionDate || '未設定' }, { text: vehicleValues.inspectionRecordAvailable ? 'あり' : 'なし' }],
+  ], [18, 24, 18, 24])
+  state.y -= 90 + 12
+
+  drawSalesGridBlock(state, MARGIN, state.y, [176, 63, 82, 92, 98], [
+    [{ text: '下取車名（型式等）', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '年式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車検日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '走行距離', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車体色', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: details.tradeIn.name || 'なし' }, { text: details.tradeIn.modelYear || '-' }, { text: details.tradeIn.inspectionDate || '-' }, { text: details.tradeIn.mileage || '-' }, { text: details.tradeIn.color || '-' }],
+  ], [20, 24])
+  state.y -= 44 + 12
+
+  const totals = calculateSalesTotals(document, state.settings.tax.rounding)
+  const summaryTop = state.y
+  drawSalesGridBlock(state, MARGIN, summaryTop, [112, 93], [[{ text: 'お見積金額', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8.5 }, { text: formatYen(totals.total), bold: true, align: 'right', size: 12 }]], [34])
+  const taxX = MARGIN + 205 + 12
+  drawSalesGridBlock(state, taxX, summaryTop, [98, 98, 98], [[{ text: '課税対象額', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '消費税', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '非課税・対象外', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }], [{ text: formatYen(totals.taxableSubtotal), align: 'right' }, { text: formatYen(totals.tax), align: 'right' }, { text: formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal), align: 'right' }]], [18, 22])
+  state.y = summaryTop - 34 - 14
+  drawTextTop(state.page, state.font, `支払期限：${document.dueDate || '未設定'}　状態：${document.status}`, MARGIN, state.y, 8, colors.muted, CONTENT_WIDTH, 'right')
+  state.y -= 14
+}
+
+function drawSalesDocumentBottom(state: PageState, document: SalesDocument, settings: AppSettings) {
+  const details = document.details
+  const totals = calculateSalesTotals(document, settings.tax.rounding)
+  const blockHeight = 215
+  ensureSpace(state, blockHeight)
+  const top = state.y
+  const leftWidth = 235
+  const gap = 16
+  const rightX = MARGIN + leftWidth + gap
+  const rightWidth = CONTENT_WIDTH - leftWidth - gap
+  drawSalesGridBlock(state, MARGIN, top, [130, 105], [[{ text: 'リサイクル料金（預託金）', fill: rgb(0.86, 0.93, 1), bold: true, size: 7.8 }, { text: formatYen(details.recycleFee), align: 'right', size: 8.5 }]], [22])
+  drawSalesGridBlock(state, MARGIN, top - 28, [70, 48, 70, 47], [[{ text: '頭金・現金', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: formatYen(details.downPayment ?? 0), align: 'right', size: 7.8 }, { text: '残金・所要', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: formatYen(details.remainingPayment ?? 0), align: 'right', size: 7.8 }]], [22])
+  const creditText = details.credit.enabled
+    ? `${details.credit.paymentCount || '回数未設定'}　手数料 ${formatYen(details.credit.fee)}　月々 ${formatYen(details.credit.monthlyPayment)}\n初回 ${formatYen(details.credit.initialPayment)}　賞与 ${details.credit.bonusMonths || '月未設定'} / ${formatYen(details.credit.bonusPayment)}`
+    : '利用なし'
+  drawSalesGridBlock(state, MARGIN, top - 56, [235], [[{ text: 'クレジットお支払いプラン', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.8 }], [{ text: creditText, size: 7.2 }]], [18, 34])
+  drawSalesGridBlock(state, MARGIN, top - 116, [80, 155], [[{ text: '備考', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8 }, { text: document.note || '特になし', size: 7.8 }]], [40])
+  const required = requiredSalesDocumentLabels(details).join(' ／ ') || '未確認'
+  drawSalesGridBlock(state, MARGIN, top - 162, [80, 155], [[{ text: '必要書類', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8 }, { text: required, size: 7.5 }]], [38])
+
+  drawTextTop(state.page, state.font, settings.shop.name || '店舗名未設定', rightX, top - 6, 12, colors.ink, rightWidth, 'right')
+  const shopLines = [settings.shop.postalCode ? `〒${settings.shop.postalCode}` : '', settings.shop.address, settings.shop.phone ? `TEL ${settings.shop.phone}` : '', settings.shop.representative ? `担当 ${settings.shop.representative}` : ''].filter(Boolean)
+  shopLines.forEach((line, index) => drawTextTop(state.page, state.font, line, rightX, top - 24 - index * 11, 8, colors.muted, rightWidth, 'right'))
+  const paymentTop = top - 116
+  drawTextTop(state.page, state.font, 'お支払いについて', rightX, paymentTop, 8, colors.muted, rightWidth)
+  drawTextTop(state.page, state.font, settings.document.paymentNote || '店頭または指定口座へお支払いください。', rightX, paymentTop - 13, 7.8, colors.ink, rightWidth)
+  drawTextTop(state.page, state.font, '振込先', rightX, paymentTop - 34, 8, colors.muted, rightWidth)
+  drawTextTop(state.page, state.font, [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定', rightX, paymentTop - 47, 7.8, colors.ink, rightWidth)
+  drawTextTop(state.page, state.font, `課税対象 ${formatYen(totals.taxableSubtotal)}　消費税 ${formatYen(totals.tax)}`, rightX, top - 162, 7.8, colors.muted, rightWidth, 'right')
+}
+
+function drawSalesGridBlock(state: PageState, x: number, top: number, widths: number[], rows: SalesGridCell[][], rowHeights: number[]) {
+  let rowTop = top
+  rows.forEach((row, rowIndex) => {
+    drawSalesGridRow(state, x, rowTop, widths, row, rowHeights[rowIndex] ?? 22)
+    rowTop -= rowHeights[rowIndex] ?? 22
+  })
+  return rowTop
+}
+
+function drawSalesGridRow(state: PageState, x: number, top: number, widths: number[], cells: SalesGridCell[], height: number) {
+  let cellX = x
+  widths.forEach((width, index) => {
+    const cell = cells[index] ?? { text: '' }
+    state.page.drawRectangle({ x: cellX, y: top - height, width, height, color: cell.fill, borderColor: colors.line, borderWidth: 0.55 })
+    const size = cell.size ?? (cell.fill ? 8 : 8.3)
+    const font = cell.font ?? (/[\u3040-\u30ff\u3400-\u9fff]/.test(cell.text) ? state.font : state.latinFont)
+    const lines = wrapText(cell.text, font, size, Math.max(width - 8, 10))
+    const lineHeight = size + 2
+    const visibleLines = Math.max(1, Math.floor((height - 5) / lineHeight))
+    lines.slice(0, visibleLines).forEach((line, lineIndex) => drawTextTop(state.page, font, line, cellX + 4, top - 3 - lineIndex * lineHeight, size, cell.color ?? (cell.fill ? colors.ink : colors.ink), width - 8, cell.align ?? 'left'))
+    cellX += width
+  })
+}
+
+function requiredSalesDocumentLabels(details: SalesDocument['details']) {
+  const labels = [
+    details.requiredDocuments.sealCertificate ? '印鑑証明' : '',
+    details.requiredDocuments.residentCard ? '住民票' : '',
+    details.requiredDocuments.lightVehicleCertificate ? '軽自動車住所証明' : '',
+    details.requiredDocuments.transferCertificate ? '譲渡証明' : '',
+    details.requiredDocuments.taxPaymentCertificate ? '納税証明' : '',
+    details.requiredDocuments.warrantyCertificate ? '保証書・承諾書' : '',
+    details.requiredDocuments.other,
+  ]
+  return labels.filter(Boolean)
+}
+
+function emptySalesVehicleDetails(): NonNullable<SalesDocument['vehicleDetails']> {
+  return { maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false }
+}
+
+type SalesGridCell = { text: string; fill?: ReturnType<typeof rgb>; color?: ReturnType<typeof rgb>; font?: PDFFont; bold?: boolean; align?: 'left' | 'right' | 'center'; size?: number }
 
 function drawCustomerAndVehicle(state: PageState, customerName: string, phone: string, category: string, vehicle: string, vehicleExtra: string) {
   ensureSpace(state, 68)
@@ -229,15 +363,15 @@ function drawSectionTitle(state: PageState, title: string) {
   state.y -= 22
 }
 
-function drawTable(state: PageState, columns: TableColumn[], rows: Cell[][]) {
+function drawTable(state: PageState, columns: TableColumn[], rows: Cell[][], headerColor = colors.soft) {
   const headerHeight = 27
-  drawTableHeader(state, columns, headerHeight)
+  drawTableHeader(state, columns, headerHeight, headerColor)
   rows.forEach((row) => {
     const wrapped = row.map((cell, index) => wrapText(String(cell), state.font, 8.5, columns[index].width - 10))
     const rowHeight = Math.max(25, ...wrapped.map((lines) => lines.length * 11 + 8))
     if (state.y - rowHeight < FOOTER_HEIGHT + MARGIN) {
       nextPage(state)
-      drawTableHeader(state, columns, headerHeight)
+      drawTableHeader(state, columns, headerHeight, headerColor)
     }
     const rowTop = state.y
     let x = MARGIN
@@ -257,12 +391,12 @@ function drawTable(state: PageState, columns: TableColumn[], rows: Cell[][]) {
   state.y -= 16
 }
 
-function drawTableHeader(state: PageState, columns: TableColumn[], headerHeight: number) {
+function drawTableHeader(state: PageState, columns: TableColumn[], headerHeight: number, headerColor = colors.soft) {
   if (state.y - headerHeight < FOOTER_HEIGHT + MARGIN) nextPage(state)
   const top = state.y
   let x = MARGIN
   columns.forEach((column) => {
-    state.page.drawRectangle({ x, y: top - headerHeight, width: column.width, height: headerHeight, color: colors.soft, borderColor: colors.line, borderWidth: 0.5 })
+    state.page.drawRectangle({ x, y: top - headerHeight, width: column.width, height: headerHeight, color: headerColor, borderColor: colors.line, borderWidth: 0.5 })
     drawTextTop(state.page, state.font, column.label, x + 5, top - 8, 8.5, colors.muted, column.width - 10, column.align ?? 'left')
     x += column.width
   })
@@ -324,7 +458,8 @@ function nextPage(state: PageState) {
   finishPage(state)
   state.page = state.pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT])
   state.pageNumber += 1
-  drawPageHeader(state)
+  if (state.salesDocument) drawSalesPageHeader(state, state.salesDocument)
+  else drawPageHeader(state)
 }
 
 function finishPage(state: PageState) {
@@ -376,6 +511,17 @@ function wrapText(value: string, font: PDFFont, size: number, maxWidth: number) 
     output.push(line || ' ')
   })
   return output
+}
+
+function calculateSalesTotals(document: SalesDocument, rounding: AppSettings['tax']['rounding']) {
+  const amountOf = (item: SalesDocument['items'][number]) => Math.round(item.quantity * item.unitPrice + item.otherAmount)
+  const subtotal = document.items.reduce((sum, item) => sum + amountOf(item), 0)
+  const taxableSubtotal = document.items.filter((item) => item.taxCategory === '課税').reduce((sum, item) => sum + amountOf(item), 0)
+  const nonTaxableSubtotal = document.items.filter((item) => item.taxCategory === '非課税').reduce((sum, item) => sum + amountOf(item), 0)
+  const outOfScopeSubtotal = document.items.filter((item) => item.taxCategory === '対象外').reduce((sum, item) => sum + amountOf(item), 0)
+  const taxValue = Math.max(0, taxableSubtotal) * document.taxRate
+  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
+  return { subtotal, taxableSubtotal, nonTaxableSubtotal, outOfScopeSubtotal, tax, total: subtotal + tax }
 }
 
 function calculateTax(base: number, rate: number, rounding: AppSettings['tax']['rounding']) {

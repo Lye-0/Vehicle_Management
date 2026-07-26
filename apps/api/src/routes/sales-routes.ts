@@ -332,6 +332,8 @@ function parseSalesDetails(value: unknown): SalesDocumentDetails {
       color: limitedString(tradeIn.color, '', 100),
     },
     recycleFee: nonNegativeInteger(record.recycleFee, 0),
+    downPayment: nonNegativeInteger(record.downPayment, 0),
+    remainingPayment: nonNegativeInteger(record.remainingPayment, 0),
     credit: {
       enabled: record.creditEnabled === true || credit.enabled === true,
       paymentCount: limitedString(credit.paymentCount, '', 50),
@@ -476,6 +478,8 @@ type SalesDocumentDetails = {
   customerContactPhone: string
   tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
   recycleFee: number
+  downPayment: number
+  remainingPayment: number
   credit: { enabled: boolean; paymentCount: string; fee: number; monthlyPayment: number; initialPayment: number; bonusMonths: string; bonusPayment: number }
   requiredDocuments: { sealCertificate: boolean; residentCard: boolean; lightVehicleCertificate: boolean; transferCertificate: boolean; taxPaymentCertificate: boolean; warrantyCertificate: boolean; other: string }
 }

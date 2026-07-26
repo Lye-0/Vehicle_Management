@@ -45,6 +45,8 @@ export type SalesDocumentDetails = {
     color: string
   }
   recycleFee: number
+  downPayment: number
+  remainingPayment: number
   credit: {
     enabled: boolean
     paymentCount: string
@@ -74,6 +76,8 @@ export const defaultSalesDocumentDetails: SalesDocumentDetails = {
   customerContactPhone: '',
   tradeIn: { name: '', modelYear: '', inspectionDate: '', mileage: '', color: '' },
   recycleFee: 0,
+  downPayment: 0,
+  remainingPayment: 0,
   credit: { enabled: false, paymentCount: '', fee: 0, monthlyPayment: 0, initialPayment: 0, bonusMonths: '', bonusPayment: 0 },
   requiredDocuments: { sealCertificate: false, residentCard: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, warrantyCertificate: false, other: '' },
 }
