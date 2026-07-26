@@ -287,6 +287,13 @@ describe("CLI authenticated workflow", () => {
 			const dashboardSummary = objectValue(objectValue(dashboard.body.dashboard).summary);
 			const dashboardVehicleCount = Number(dashboardSummary.registeredVehicles);
 			if (dashboardVehicleCount !== 1) throw new Error(`ダッシュボードの車両件数が不正です: ${dashboardVehicleCount}`);
+			const calendarEvents = arrayValue(objectValue(dashboard.body.dashboard).calendarEvents);
+			expect(calendarEvents).toEqual(expect.arrayContaining([
+				expect.objectContaining({ date: "2026-07-26", category: "payment" }),
+				expect.objectContaining({ date: "2027-08-01", category: "vehicle-inspection" }),
+				expect.objectContaining({ date: "2026-08-09", category: "payment-due" }),
+				expect.objectContaining({ date: "2026-08-20", category: "inspection" }),
+			]));
 
 			const invalidAttachment = new FormData();
 			invalidAttachment.append("file", new File(["not an allowed file"], "invalid.txt", { type: "text/plain" }));
