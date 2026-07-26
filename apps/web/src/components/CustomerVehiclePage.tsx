@@ -51,6 +51,7 @@ const customerSearchPlaceholders: Record<CustomerSearchField, string> = {
   登録番号: '登録番号で検索',
   車台番号: '車台番号で検索',
 }
+type AttachmentPreview = { vehicleId: string; attachment: Attachment; url: string }
 
 function getCustomerSearchText(customer: Customer, field: CustomerSearchField) {
   const values = {
@@ -81,6 +82,7 @@ export function CustomerVehiclePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null)
 
   useEffect(() => {
     let active = true
@@ -96,6 +98,18 @@ export function CustomerVehiclePage() {
     })
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (!attachmentPreview) return
+    function handlePreviewKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAttachmentPreview(null)
+    }
+    window.addEventListener('keydown', handlePreviewKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handlePreviewKeyDown)
+      URL.revokeObjectURL(attachmentPreview.url)
+    }
+  }, [attachmentPreview])
 
   const filteredCustomers = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -236,16 +250,13 @@ export function CustomerVehiclePage() {
   }
 
   async function openAttachment(vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') {
-    const previewWindow = mode === 'preview' ? window.open('', '_blank') : null
-    if (previewWindow) previewWindow.opener = null
     setSaving(true)
     setError('')
     try {
       const blob = await fetchVehicleFile(vehicleId, attachment.id)
       const url = URL.createObjectURL(blob)
       if (mode === 'preview') {
-        if (!previewWindow) throw new Error('プレビュー画面を開けませんでした。ポップアップを許可してください。')
-        previewWindow.location.href = url
+        setAttachmentPreview({ vehicleId, attachment, url })
       } else {
         const link = document.createElement('a')
         link.href = url
@@ -253,14 +264,17 @@ export function CustomerVehiclePage() {
         document.body.appendChild(link)
         link.click()
         link.remove()
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
       }
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (reason: unknown) {
-      previewWindow?.close()
       setError(getErrorMessage(reason))
     } finally {
       setSaving(false)
     }
+  }
+
+  function closeAttachmentPreview() {
+    setAttachmentPreview(null)
   }
 
   return (
@@ -284,6 +298,7 @@ export function CustomerVehiclePage() {
 
       {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} onChange={setCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
       {vehicleDialogOpen && selectedCustomer && <VehicleDialog form={vehicleForm} title={editingVehicleId ? '車両情報を編集' : '車両を追加'} submitLabel={editingVehicleId ? '変更を保存' : '車両を追加'} customerName={selectedCustomer.name} onChange={setVehicleForm} onClose={closeVehicleDialog} onSubmit={handleVehicleSubmit} />}
+      {attachmentPreview && <AttachmentPreviewModal preview={attachmentPreview} onClose={closeAttachmentPreview} />}
     </>
   )
 }
@@ -359,6 +374,10 @@ function AttachmentSection({ vehicle, onAttachments, onAttachmentDrop, onPreview
       </label>
     </section>
   )
+}
+
+function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPreview; onClose: () => void }) {
+  return <div className="modal-backdrop attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="attachment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="attachment-preview-title"><div className="modal-header"><div><h2 id="attachment-preview-title">{preview.attachment.name}</h2><span className="attachment-preview-meta">{preview.attachment.type === 'image' ? '画像' : preview.attachment.type === 'pdf' ? 'PDF' : '添付ファイル'} ・ {formatFileSize(preview.attachment.size)}</span></div><button className="modal-close" type="button" aria-label="プレビューを閉じる" onClick={onClose}><X size={19} /></button></div><div className="attachment-preview-content">{preview.attachment.type === 'image' ? <img className="attachment-preview-image" src={preview.url} alt={preview.attachment.name} /> : preview.attachment.type === 'pdf' ? <iframe className="attachment-preview-frame" src={`${preview.url}#toolbar=1`} title={`${preview.attachment.name}のプレビュー`} /> : <div className="attachment-preview-empty"><FileText size={30} /><strong>このファイル形式は画面表示に対応していません</strong><a className="button button-secondary" href={preview.url} download={preview.attachment.name}>ファイルをダウンロード</a></div>}</div></section></div>
 }
 
 function CustomerDialog({ form, title, submitLabel, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
