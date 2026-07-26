@@ -58,13 +58,13 @@ type SalesCreateForm = {
   initialItemDescription: string
 }
 
-export function SalesPage() {
+export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<SalesDocument[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [query, setQuery] = useState('')
   const [filterType, setFilterType] = useState<DocumentFilter>('すべて')
-  const [selectedDocumentId, setSelectedDocumentId] = useState('')
+  const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<SalesCreateForm>(emptyCreateForm())
   const [loading, setLoading] = useState(true)

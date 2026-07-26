@@ -19,7 +19,7 @@ import {
   Settings,
   UserRound,
 } from 'lucide-react'
-import { CustomerVehiclePage } from './components/CustomerVehiclePage'
+import { CustomerVehiclePage, type VehicleHistoryNavigation } from './components/CustomerVehiclePage'
 import { DashboardCalendar } from './components/DashboardCalendar'
 import { InspectionSchedulesPage } from './components/InspectionSchedulesPage'
 import { MaintenancePage } from './components/MaintenancePage'
@@ -146,6 +146,16 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
 
 function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
+  const [navigationTarget, setNavigationTarget] = useState<VehicleHistoryNavigation | null>(null)
+
+  useEffect(() => {
+    if (navigationTarget?.section === activeSection) setNavigationTarget(null)
+  }, [activeSection, navigationTarget])
+
+  function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
+    setNavigationTarget(target)
+    setActiveSection(target.section)
+  }
 
   return (
     <div className="app-shell">
@@ -153,7 +163,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'inspections' ? <InspectionSchedulesPage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage user={user} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage initialScheduleId={navigationTarget?.section === 'inspections' ? navigationTarget.recordId : undefined} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} /> : <SettingsPage user={user} />}
         </div>
       </main>
     </div>

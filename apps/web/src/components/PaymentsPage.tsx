@@ -19,11 +19,11 @@ import { printDocument } from '../lib/print'
 type PaymentStatus = '未入金' | '一部入金' | '入金済み'
 type PaymentFilter = 'すべて' | PaymentStatus
 
-export function PaymentsPage() {
+export function PaymentsPage({ initialRecordId }: { initialRecordId?: string } = {}) {
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<PaymentFilter>('すべて')
-  const [selectedRecordId, setSelectedRecordId] = useState('')
+  const [selectedRecordId, setSelectedRecordId] = useState(initialRecordId ?? '')
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -32,7 +32,7 @@ export function PaymentsPage() {
   useEffect(() => {
     let cancelled = false
     fetchPayments()
-      .then((nextRecords) => { if (!cancelled) { setRecords(nextRecords); setSelectedRecordId(nextRecords[0]?.id ?? ''); setError('') } })
+      .then((nextRecords) => { if (!cancelled) { setRecords(nextRecords); setSelectedRecordId((current) => nextRecords.some((record) => record.id === current) ? current : nextRecords[0]?.id ?? ''); setError('') } })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '入金データを読み込めませんでした。') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }

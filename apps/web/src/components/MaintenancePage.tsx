@@ -39,13 +39,13 @@ type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCa
 const emptyFees: MandatoryFees = { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }
 const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerId: '', vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(14) }
 
-export function MaintenancePage() {
+export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<MaintenanceDocument[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('すべて')
-  const [selectedDocumentId, setSelectedDocumentId] = useState('')
+  const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<MaintenanceCreateForm>(emptyCreateForm)
   const [loading, setLoading] = useState(true)
@@ -61,7 +61,7 @@ export function MaintenancePage() {
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        setSelectedDocumentId(nextDocuments[0]?.id ?? '')
+        setSelectedDocumentId((current) => nextDocuments.some((document) => document.id === current) ? current : nextDocuments[0]?.id ?? '')
         setCreateForm(createFormForCustomers(nextCustomers, nextSettings.document.defaultDueDays))
         setError('')
       })

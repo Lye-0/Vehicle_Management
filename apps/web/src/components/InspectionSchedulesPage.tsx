@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { CalendarClock, Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { fetchCustomers, type Customer } from '../lib/customerApi'
 import { createInspectionSchedule, deleteInspectionSchedule, fetchInspectionSchedules, updateInspectionSchedule, type InspectionSchedule, type InspectionScheduleInput, type InspectionStatus, type InspectionType } from '../lib/inspectionApi'
@@ -10,7 +10,7 @@ type ScheduleForm = InspectionScheduleInput
 
 const emptyForm: ScheduleForm = { customerId: '', vehicleId: '', inspectionType: '車検', dueDate: today(), status: '予定', note: '' }
 
-export function InspectionSchedulesPage() {
+export function InspectionSchedulesPage({ initialScheduleId }: { initialScheduleId?: string } = {}) {
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [query, setQuery] = useState('')
@@ -21,6 +21,7 @@ export function InspectionSchedulesPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const initialScheduleIdRef = useRef(initialScheduleId)
 
   useEffect(() => {
     let active = true
@@ -29,6 +30,12 @@ export function InspectionSchedulesPage() {
       if (!active) return
       setSchedules(nextSchedules)
       setCustomers(nextCustomers)
+      const targetSchedule = initialScheduleIdRef.current ? nextSchedules.find((schedule) => schedule.id === initialScheduleIdRef.current) : undefined
+      if (targetSchedule) {
+        setEditingId(targetSchedule.id)
+        setForm({ customerId: targetSchedule.customerId, vehicleId: targetSchedule.vehicleId, inspectionType: targetSchedule.inspectionType, dueDate: toDisplayDate(targetSchedule.dueDate), status: targetSchedule.status, note: targetSchedule.note })
+        setDialogOpen(true)
+      }
       setError('')
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '点検予定を読み込めませんでした。')

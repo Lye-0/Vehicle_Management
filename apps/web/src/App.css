@@ -1250,6 +1250,8 @@
 .vehicle-history-group-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; color: var(--text); font-size: 12px; }
 .vehicle-history-group-header span { color: var(--text-muted); font-size: 10px; }
 .vehicle-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); }
+.vehicle-history-row.is-action { width: 100%; color: inherit; font: inherit; text-align: left; border-right: 0; border-bottom: 0; border-left: 0; background: transparent; cursor: pointer; }
+.vehicle-history-row.is-action:hover { background: var(--primary-soft); }
 .vehicle-history-row:first-of-type { border-top: 0; }
 .vehicle-history-row span { display: grid; gap: 3px; min-width: 0; }
 .vehicle-history-row strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
