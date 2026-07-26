@@ -2,6 +2,81 @@ import { apiFetch } from './api'
 
 export type SalesDocumentType = '見積書' | '注文書' | '請求書'
 export type SalesStatus = '下書き' | '発行済み' | '入金待ち' | 'アーカイブ済み'
+export type SalesTaxCategory = '課税' | '非課税' | '対象外'
+
+export type SalesCustomerDetails = {
+  name: string
+  kana: string
+  phone: string
+  postalCode: string
+  address: string
+  birthDate: string
+  employer: string
+  contactPhone: string
+}
+
+export type SalesVehicleDetails = {
+  maker: string
+  name: string
+  modelType: string
+  plate: string
+  vin: string
+  year: string
+  inspectionDate: string
+  mileage: string
+  color: string
+  displacement: string
+  transmission: string
+  inspectionRecordAvailable: boolean
+}
+
+export type SalesDocumentDetails = {
+  salesCategory: string
+  staffName: string
+  customerHonorific: string
+  customerBirthDate: string
+  customerEmployer: string
+  customerContactPhone: string
+  tradeIn: {
+    name: string
+    modelYear: string
+    inspectionDate: string
+    mileage: string
+    color: string
+  }
+  recycleFee: number
+  credit: {
+    enabled: boolean
+    paymentCount: string
+    fee: number
+    monthlyPayment: number
+    initialPayment: number
+    bonusMonths: string
+    bonusPayment: number
+  }
+  requiredDocuments: {
+    sealCertificate: boolean
+    residentCard: boolean
+    lightVehicleCertificate: boolean
+    transferCertificate: boolean
+    taxPaymentCertificate: boolean
+    warrantyCertificate: boolean
+    other: string
+  }
+}
+
+export const defaultSalesDocumentDetails: SalesDocumentDetails = {
+  salesCategory: '中古車',
+  staffName: '',
+  customerHonorific: '様',
+  customerBirthDate: '',
+  customerEmployer: '',
+  customerContactPhone: '',
+  tradeIn: { name: '', modelYear: '', inspectionDate: '', mileage: '', color: '' },
+  recycleFee: 0,
+  credit: { enabled: false, paymentCount: '', fee: 0, monthlyPayment: 0, initialPayment: 0, bonusMonths: '', bonusPayment: 0 },
+  requiredDocuments: { sealCertificate: false, residentCard: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, warrantyCertificate: false, other: '' },
+}
 
 export type SalesLineItem = {
   id: string
@@ -10,6 +85,9 @@ export type SalesLineItem = {
   quantity: number
   unit: string
   unitPrice: number
+  taxCategory: SalesTaxCategory
+  otherAmount: number
+  summary: string
 }
 
 export type SalesDocument = {
@@ -23,6 +101,9 @@ export type SalesDocument = {
   vehicleId: string | null
   vehicle: string
   plate: string
+  customerDetails: SalesCustomerDetails
+  vehicleDetails: SalesVehicleDetails | null
+  details: SalesDocumentDetails
   issuedAt: string
   dueDate: string
   taxRate: number
@@ -40,6 +121,7 @@ export type SalesCreateInput = {
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
   initialItemDescription: string
+  details?: SalesDocumentDetails
 }
 
 type ApiSalesDocument = Omit<SalesDocument, 'taxRate' | 'issuedAt' | 'dueDate' | 'items'> & {
@@ -66,6 +148,7 @@ export async function createSalesDocument(input: SalesCreateInput) {
       taxRate: input.taxRate,
       rounding: input.taxRounding,
       note: input.note,
+      details: input.details,
       items: [{ description: input.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0 }],
     }),
   })
@@ -86,12 +169,16 @@ export async function updateSalesDocument(document: SalesDocument, taxRounding: 
       taxRate: Math.round(document.taxRate * 100),
       rounding: taxRounding,
       note: document.note,
+      details: document.details,
       items: document.items.map((item) => ({
         itemType: item.itemType,
         description: item.description,
         quantity: item.quantity,
         unit: item.unit,
         unitPrice: item.unitPrice,
+        taxCategory: item.taxCategory,
+        otherAmount: item.otherAmount,
+        summary: item.summary,
       })),
     }),
   })
@@ -109,11 +196,25 @@ export async function restoreSalesDocument(id: string) {
 function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
   return {
     ...document,
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
+    vehicleDetails: document.vehicleDetails ?? null,
+    details: normalizeDetails(document.details),
     issuedAt: formatDate(document.issuedAt),
     dueDate: formatDate(document.dueDate),
     taxRate: document.taxRate / 100,
     note: document.note ?? '',
-    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice })),
+    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '' })),
+  }
+}
+
+function normalizeDetails(value: SalesDocumentDetails | null | undefined): SalesDocumentDetails {
+  const details = value ?? defaultSalesDocumentDetails
+  return {
+    ...defaultSalesDocumentDetails,
+    ...details,
+    tradeIn: { ...defaultSalesDocumentDetails.tradeIn, ...details.tradeIn },
+    credit: { ...defaultSalesDocumentDetails.credit, ...details.credit },
+    requiredDocuments: { ...defaultSalesDocumentDetails.requiredDocuments, ...details.requiredDocuments },
   }
 }
 

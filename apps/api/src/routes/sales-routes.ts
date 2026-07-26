@@ -8,6 +8,7 @@ import { HttpError, jsonResponse, readJson } from '../http'
 const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
 const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
 const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
+const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -80,6 +81,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
   }).run()
   await insertSalesItems(database, id, input.items, organizationId)
 
@@ -102,6 +104,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     number: body.number === undefined ? current.number : body.number,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
+    details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
   }, database, organizationId)
   await ensureSalesDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
@@ -120,6 +123,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
 
@@ -168,6 +172,9 @@ async function insertSalesItems(database: ReturnType<typeof createDatabase>, doc
     quantity: item.quantity,
     unit: item.unit,
     unitPrice: item.unitPrice,
+    taxCategory: item.taxCategory,
+    otherAmount: item.otherAmount,
+    summary: item.summary,
     amount: item.amount,
     sortOrder: index,
   }))).run()
@@ -195,8 +202,9 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   const issuedAt = dateValue(body.issuedAt) || today()
   const dueDate = nullableDate(body.dueDate)
   const number = nullableString(body, 'number')
+  const details = parseSalesDetails(body.details)
   const items = parseItems(body.items)
-  return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), items }
+  return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), details, items }
 }
 
 function serializeSalesDocument(
@@ -213,9 +221,34 @@ function serializeSalesDocument(
     customerId: document.customerId,
     customerName: customer?.name ?? '',
     phone: customer?.phone ?? '',
+    customerDetails: {
+      name: customer?.name ?? '',
+      kana: customer?.nameKana ?? '',
+      phone: customer?.phone ?? '',
+      postalCode: customer?.postalCode ?? '',
+      address: customer?.address ?? '',
+      birthDate: '',
+      employer: '',
+      contactPhone: '',
+    },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
     plate: vehicle?.registrationNumber ?? '',
+    vehicleDetails: vehicle ? {
+      maker: vehicle.maker ?? '',
+      name: vehicle.name,
+      modelType: vehicle.model ?? '',
+      plate: vehicle.registrationNumber ?? '',
+      vin: vehicle.chassisNumber ?? '',
+      year: vehicle.modelYear ? `${vehicle.modelYear}年` : '',
+      inspectionDate: vehicle.inspectionDate ?? '',
+      mileage: vehicle.mileage === null ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+      color: vehicle.bodyColor ?? '',
+      displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
+      transmission: vehicle.transmission ?? '',
+      inspectionRecordAvailable: Boolean(vehicle.inspectionRecordAvailable),
+    } : null,
+    details: parseSalesDetails(document.detailsJson),
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
@@ -231,6 +264,9 @@ function serializeSalesDocument(
       quantity: item.quantity,
       unit: item.unit,
       unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
       amount: item.amount,
     })),
   }
@@ -248,7 +284,8 @@ async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabas
 
 function calculateTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const taxValue = Math.max(0, subtotal) * taxRate / 100
+  const taxableSubtotal = items.filter((item) => item.taxCategory === '課税').reduce((sum, item) => sum + item.amount, 0)
+  const taxValue = Math.max(0, taxableSubtotal) * taxRate / 100
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + tax }
 }
@@ -258,16 +295,81 @@ function parseItems(value: unknown): SalesItemInput[] {
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
+    const otherAmount = integerNumber(item.otherAmount, 0)
     const itemTypeValue = stringValue(item, 'itemType')
+    const taxCategoryValue = stringValue(item, 'taxCategory')
     return {
       itemType: salesItemTypes.has(itemTypeValue) ? itemTypeValue : 'その他',
       description: stringValue(item, 'description'),
       quantity,
       unit: stringValue(item, 'unit') || '式',
       unitPrice,
-      amount: Math.round(quantity * unitPrice),
+      taxCategory: salesTaxCategories.has(taxCategoryValue) ? taxCategoryValue : '課税',
+      otherAmount,
+      summary: stringValue(item, 'summary'),
+      amount: Math.round(quantity * unitPrice) + otherAmount,
     }
   })
+}
+
+function parseSalesDetails(value: unknown): SalesDocumentDetails {
+  const record = parseRecord(value)
+  const tradeIn = parseRecord(record.tradeIn)
+  const credit = parseRecord(record.credit)
+  const requiredDocuments = parseRecord(record.requiredDocuments)
+  return {
+    salesCategory: limitedString(record.salesCategory, '中古車', 100),
+    staffName: limitedString(record.staffName, '', 100),
+    customerHonorific: limitedString(record.customerHonorific, '様', 20),
+    customerBirthDate: dateValue(record.customerBirthDate),
+    customerEmployer: limitedString(record.customerEmployer, '', 200),
+    customerContactPhone: limitedString(record.customerContactPhone, '', 50),
+    tradeIn: {
+      name: limitedString(tradeIn.name, '', 200),
+      modelYear: limitedString(tradeIn.modelYear, '', 50),
+      inspectionDate: dateValue(tradeIn.inspectionDate),
+      mileage: limitedString(tradeIn.mileage, '', 50),
+      color: limitedString(tradeIn.color, '', 100),
+    },
+    recycleFee: nonNegativeInteger(record.recycleFee, 0),
+    credit: {
+      enabled: record.creditEnabled === true || credit.enabled === true,
+      paymentCount: limitedString(credit.paymentCount, '', 50),
+      fee: integerNumber(credit.fee, 0),
+      monthlyPayment: nonNegativeInteger(credit.monthlyPayment, 0),
+      initialPayment: nonNegativeInteger(credit.initialPayment, 0),
+      bonusMonths: limitedString(credit.bonusMonths, '', 50),
+      bonusPayment: nonNegativeInteger(credit.bonusPayment, 0),
+    },
+    requiredDocuments: {
+      sealCertificate: booleanValue(requiredDocuments.sealCertificate),
+      residentCard: booleanValue(requiredDocuments.residentCard),
+      lightVehicleCertificate: booleanValue(requiredDocuments.lightVehicleCertificate),
+      transferCertificate: booleanValue(requiredDocuments.transferCertificate),
+      taxPaymentCertificate: booleanValue(requiredDocuments.taxPaymentCertificate),
+      warrantyCertificate: booleanValue(requiredDocuments.warrantyCertificate),
+      other: limitedString(requiredDocuments.other, '', 200),
+    },
+  }
+}
+
+function parseRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try { return parseRecord(JSON.parse(value)) } catch { return {} }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function limitedString(value: unknown, fallback: string, maxLength: number) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : fallback
+}
+
+function nonNegativeInteger(value: unknown, fallback: number) {
+  return Math.max(0, integerNumber(value, fallback))
+}
+
+function booleanValue(value: unknown) {
+  return value === true || value === 'true' || value === 1
 }
 
 async function ensureSalesDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {
@@ -344,6 +446,9 @@ type SalesItemInput = {
   quantity: number
   unit: string
   unitPrice: number
+  taxCategory: string
+  otherAmount: number
+  summary: string
   amount: number
 }
 
@@ -358,5 +463,19 @@ type SalesDocumentInput = {
   taxRate: number
   rounding: '切り捨て' | '四捨五入'
   note: string | null
+  details: SalesDocumentDetails
   items: SalesItemInput[]
+}
+
+type SalesDocumentDetails = {
+  salesCategory: string
+  staffName: string
+  customerHonorific: string
+  customerBirthDate: string
+  customerEmployer: string
+  customerContactPhone: string
+  tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
+  recycleFee: number
+  credit: { enabled: boolean; paymentCount: string; fee: number; monthlyPayment: number; initialPayment: number; bonusMonths: string; bonusPayment: number }
+  requiredDocuments: { sealCertificate: boolean; residentCard: boolean; lightVehicleCertificate: boolean; transferCertificate: boolean; taxPaymentCertificate: boolean; warrantyCertificate: boolean; other: string }
 }

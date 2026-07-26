@@ -31,7 +31,7 @@ import { defaultSettings, fetchSettings, type AppSettings } from '../lib/setting
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesDocumentView = 'edit' | 'preview'
 type SalesHeaderField = 'number' | 'type' | 'status' | 'customerId' | 'vehicleId' | 'issuedAt' | 'dueDate' | 'note'
-type SalesItemField = 'itemType' | 'description' | 'quantity' | 'unit' | 'unitPrice'
+type SalesItemField = 'itemType' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'taxCategory' | 'otherAmount' | 'summary'
 const salesLineItemTypes = ['車両本体価格', '付属品・特別仕様', '取付工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他']
 
 type SalesCreateForm = {
@@ -97,7 +97,7 @@ export function SalesPage() {
 
   function updateLineItem(itemId: string, field: SalesItemField, value: string) {
     if (!selectedDocument) return
-    const nextValue = field === 'description' || field === 'itemType' || field === 'unit' ? value : Number(value)
+    const nextValue = field === 'description' || field === 'itemType' || field === 'unit' || field === 'taxCategory' || field === 'summary' ? value : Number(value)
     setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item) }))
     setDirty(true)
     setSaved(false)
@@ -105,7 +105,7 @@ export function SalesPage() {
 
   function addLineItem() {
     if (!selectedDocument) return
-    const newItem: SalesLineItem = { id: `item-${Date.now()}`, itemType: 'その他', description: '', quantity: 1, unit: '式', unitPrice: 0 }
+    const newItem: SalesLineItem = { id: `item-${Date.now()}`, itemType: 'その他', description: '', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }
     setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
     setDirty(true)
     setSaved(false)
@@ -292,14 +292,19 @@ function StatusTag({ status }: { status: SalesDocument['status'] }) {
 type SalesTotals = { subtotal: number; tax: number; total: number }
 
 function calculateTotals(document: SalesDocument, rounding: AppSettings['tax']['rounding']): SalesTotals {
-  const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
-  const taxValue = Math.max(0, subtotal) * document.taxRate
+  const subtotal = document.items.reduce((sum, item) => sum + calculateLineAmount(item), 0)
+  const taxableSubtotal = document.items.filter((item) => item.taxCategory === '課税').reduce((sum, item) => sum + calculateLineAmount(item), 0)
+  const taxValue = Math.max(0, taxableSubtotal) * document.taxRate
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + tax }
 }
 
 function formatYen(amount: number) {
   return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}`
+}
+
+function calculateLineAmount(item: SalesLineItem) {
+  return Math.round(item.quantity * item.unitPrice + item.otherAmount)
 }
 
 function formatPercent(value: number) {

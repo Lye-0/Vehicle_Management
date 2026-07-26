@@ -211,7 +211,7 @@ async function importSales(database: ReturnType<typeof createDatabase>, organiza
   const number = requiredText(row, '書類番号')
   const id = value(row, '書類ID')
   const existing = await findSalesDocument(database, organizationId, id, number)
-  const items = parseSalesItems(value(row, '明細'))
+  const items = parseSalesItems(value(row, '明細'), value(row, '明細詳細'))
   const totals = documentTotals(row, items)
   const data = {
     organizationId,
@@ -227,6 +227,7 @@ async function importSales(database: ReturnType<typeof createDatabase>, organiza
     tax: totals.tax,
     total: totals.total,
     note: nullableText(row, '備考'),
+    detailsJson: parseDetailsJson(value(row, '帳票詳細')),
     updatedAt: new Date().toISOString(),
   }
   const documentId = existing?.id ?? id ?? crypto.randomUUID()
@@ -340,7 +341,7 @@ async function findMaintenanceDocument(database: ReturnType<typeof createDatabas
 
 async function replaceSalesItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[]) {
   await database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.organizationId, organizationId), eq(salesDocumentItems.documentId, documentId))).run()
-  for (const [index, item] of items.entries()) await database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }).run()
+  for (const [index, item] of items.entries()) await database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? 'その他', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, taxCategory: item.taxCategory ?? '課税', otherAmount: item.otherAmount ?? 0, summary: item.summary ?? '', amount: item.amount, sortOrder: index }).run()
 }
 
 async function replaceMaintenanceItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[]) {
@@ -348,7 +349,18 @@ async function replaceMaintenanceItems(database: ReturnType<typeof createDatabas
   for (const [index, item] of items.entries()) await database.insert(maintenanceItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }).run()
 }
 
-function parseSalesItems(text: string): ImportItem[] {
+function parseSalesItems(text: string, detailText: string): ImportItem[] {
+  if (detailText) {
+    try {
+      const details = JSON.parse(detailText)
+      if (Array.isArray(details)) return details.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
+        const quantity = numberValue(item.quantity, 1)
+        const unitPrice = integerValueObject(item.unitPrice, 0)
+        const otherAmount = integerValueObject(item.otherAmount, 0)
+        return { itemType: stringObject(item.itemType) || 'その他', description: stringObject(item.description), quantity, unit: stringObject(item.unit) || '式', unitPrice, taxCategory: ['課税', '非課税', '対象外'].includes(stringObject(item.taxCategory)) ? stringObject(item.taxCategory) : '課税', otherAmount, summary: stringObject(item.summary), amount: Math.round(quantity * unitPrice) + otherAmount }
+      })
+    } catch { /* fall back to the legacy readable column */ }
+  }
   return text ? text.split(/\s+\/\s+/).map((item) => parseItem(item)) : []
 }
 
@@ -358,10 +370,15 @@ function parseMaintenanceItems(text: string): ImportItem[] {
 
 function parseItem(text: string): ImportItem {
   const match = text.trim().match(/^(.*?)\s+x(-?[0-9]+(?:\.[0-9]+)?)\s+(\S+)\s+¥?(-?[0-9,]+)$/)
-  if (!match) return { description: text.trim().slice(0, 500), quantity: 1, unit: '式', unitPrice: 0, amount: 0 }
+  if (!match) return { itemType: 'その他', description: text.trim().slice(0, 500), quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '', amount: 0 }
   const quantity = Number(match[2]) || 1
   const amount = integerText(match[4])
-  return { description: match[1].trim().slice(0, 500), quantity, unit: match[3].trim().slice(0, 20), unitPrice: quantity ? Math.round(amount / quantity) : 0, amount }
+  return { itemType: 'その他', description: match[1].trim().slice(0, 500), quantity, unit: match[3].trim().slice(0, 20), unitPrice: quantity ? Math.round(amount / quantity) : 0, taxCategory: '課税', otherAmount: 0, summary: '', amount }
+}
+
+function parseDetailsJson(value: string) {
+  if (!value) return '{}'
+  try { return typeof JSON.parse(value) === 'object' ? value : '{}' } catch { return '{}' }
 }
 
 function documentTotals(row: CsvRow, items: ImportItem[]) {
@@ -392,4 +409,8 @@ function parseDate(text: string) { return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(t
 function value(row: CsvRow, key: string) { return typeof row[key] === 'string' ? row[key].trim() : '' }
 
 type CsvRow = Record<string, string>
-type ImportItem = { itemType?: string; description: string; quantity: number; unit: string; unitPrice: number; amount: number }
+type ImportItem = { itemType?: string; description: string; quantity: number; unit: string; unitPrice: number; taxCategory?: string; otherAmount?: number; summary?: string; amount: number }
+
+function stringObject(value: unknown) { return typeof value === 'string' ? value.trim().slice(0, 500) : '' }
+function numberValue(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) && number >= 0 ? number : fallback }
+function integerValueObject(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) ? Math.round(number) : fallback }
