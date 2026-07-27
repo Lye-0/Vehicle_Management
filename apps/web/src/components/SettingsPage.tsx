@@ -8,13 +8,14 @@ import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
 
-type SettingsTab = 'shop' | 'tax' | 'masters' | 'members'
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'data' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗・帳票', description: '店舗情報と帳票に表示する内容', icon: Building2 },
   { id: 'tax', label: '税・端数処理', description: '消費税と請求期限の初期値', icon: ReceiptText },
   { id: 'masters', label: '明細候補', description: '販売・整備で選べる項目', icon: Settings2 },
+  { id: 'data', label: 'データ', description: 'データの入出力とバックアップ', icon: Table2 },
   { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
 ]
 
@@ -117,10 +118,14 @@ export function SettingsPage({ user }: { user: User }) {
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : <MemberSettingsPanel user={user} />}<CsvExportPanel exporting={exporting} onExport={exportCsv} /><CsvImportPanel /><BackupPanel /></section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} />}</section>
       </div>
     </>
   )
+}
+
+function DataSettingsPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
+  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupPanel /></>
 }
 
 function MemberSettingsPanel({ user }: { user: User }) {
