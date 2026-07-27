@@ -4,6 +4,7 @@ import fontUrl from '../assets/fonts/NotoSansCJKjp-Regular.otf?url'
 import { fetchVehicleFile } from './customerApi'
 import type { MaintenanceDocument } from './maintenanceApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, type SalesTotals } from './salesEstimate'
+import { buildSalesEstimateSheetSvg } from './salesEstimateSheet'
 import type { AppSettings } from './settingsApi'
 import type { SalesDocument } from './salesApi'
 
@@ -63,16 +64,65 @@ export async function previewMaintenanceDocumentPdf(document: MaintenanceDocumen
 }
 
 export async function createSalesDocumentPdf(document: SalesDocument, settings: AppSettings) {
-  const state = await createPageState(salesDocumentTitle(document.type), document.number, document.issuedAt, settings, document)
-  const image = await embedSalesImage(state.pdf, document)
-  const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
-  drawSalesDocumentIntro(state, document, image)
-  drawSectionTitle(state, '見積金額内訳')
-  drawSalesEstimateBreakdown(state, document, totals)
+  // Retained temporarily for maintenance of older exported documents while the fixed sheet settles.
+  void [embedSalesImage, drawSalesDocumentIntro, drawSalesEstimateBreakdown, drawSalesDocumentBottom]
+  const pdf = await PDFDocument.create()
+  const imageHref = await loadSalesImageDataUrl(document)
+  const svg = buildSalesEstimateSheetSvg(document, settings, { imageHref })
+  const pngBytes = await renderSvgToPng(svg, 2110, 2982)
+  const sheet = await pdf.embedPng(pngBytes)
+  const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+  page.drawImage(sheet, { x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT })
+  return pdf.save()
+}
 
-  drawSalesDocumentBottom(state, document, settings)
-  finishPage(state)
-  return state.pdf.save()
+async function loadSalesImageDataUrl(document: SalesDocument) {
+  if (!document.vehicleId || !document.details.selectedImageAttachmentId) return ''
+  try {
+    const blob = await fetchVehicleFile(document.vehicleId, document.details.selectedImageAttachmentId)
+    if (!blob.type.startsWith('image/')) return ''
+    return await blobToDataUrl(blob)
+  } catch {
+    return ''
+  }
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('画像を読み込めませんでした。'))
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function renderSvgToPng(svg: string, width: number, height: number) {
+  if (document.fonts?.ready) await document.fonts.ready
+  const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))
+  try {
+    const image = await loadImage(svgUrl)
+    const canvas = window.document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('PDF描画用のCanvasを作成できませんでした。')
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, width, height)
+    context.drawImage(image, 0, 0, width, height)
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('PDF用画像を生成できませんでした。')), 'image/png'))
+    return new Uint8Array(await blob.arrayBuffer())
+  } finally {
+    URL.revokeObjectURL(svgUrl)
+  }
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('見積書レイアウトを画像化できませんでした。'))
+    image.src = src
+  })
 }
 
 async function embedSalesImage(pdf: PDFDocument, document: SalesDocument): Promise<PDFImage | null> {
