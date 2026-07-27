@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
-import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
@@ -154,7 +154,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
 
   const [memberError, setMemberError] = useState('')
   const [memberMessage, setMemberMessage] = useState('')
-  const [showAddMember, setShowAddMember] = useState(false)
+  const [memberModal, setMemberModal] = useState<'add' | 'temporaryPassword' | null>(null)
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
@@ -172,6 +172,24 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [accountModal, loading])
+
+  useEffect(() => {
+    if (!memberModal) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !memberLoading) {
+        setMemberModal(null)
+        setTemporaryPassword('')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [memberModal, memberLoading])
+
+  function closeMemberModal() {
+    if (memberLoading) return
+    setMemberModal(null)
+    setTemporaryPassword('')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -315,8 +333,8 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       setTemporaryPassword(response.temporaryPassword)
       setNewMemberName('')
       setNewMemberEmail('')
-      setShowAddMember(false)
-      setMemberMessage('従業員を登録しました。初期パスワードはこの画面を閉じると再表示できません。')
+      setMemberModal('temporaryPassword')
+      setMemberMessage('従業員を登録しました。')
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
     } finally {
@@ -390,11 +408,9 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
         {message && <div className="settings-success" role="status">{message}</div>}
       </section>
       <section className="panel settings-panel">
-        <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError('') }}><UserPlus size={15} />従業員を追加</button>}</div>
-        {memberError && <div className="auth-error" role="alert">{memberError}</div>}
-        {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
-        {temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword('')}>閉じる</button></div></div>}
-        {showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}
+        <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setMemberError(''); setMemberMessage(''); setMemberModal('add') }}><UserPlus size={15} />従業員を追加</button>}</div>
+        {memberError && !memberModal && <div className="auth-error" role="alert">{memberError}</div>}
+        {memberMessage && !memberModal && <div className="settings-success" role="status">{memberMessage}</div>}
         {membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}
       </section>
       {accountModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) setAccountModal(null) }}>
@@ -422,6 +438,26 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
           {accountModal === 'google' && hasGoogle && <div className="account-modal-content">
             <p className="account-modal-note">このアカウントに連携しているGoogleログインを管理します。</p>
             {currentUser.providerData.length > 1 ? <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider('google.com')}>{loading === 'unlink-google.com' ? '解除しています…' : 'Googleログインを解除'}</button></div> : <><p className="account-modal-note">ログイン方法を1つ以上残す必要があるため、Googleログインは解除できません。</p><div className="account-modal-actions"><button className="button button-primary" type="button" onClick={() => setAccountModal(null)}>閉じる</button></div></>}
+          </div>}
+        </section>
+      </div>}
+
+      {memberModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMemberModal() }}>
+        <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="account-modal-header">
+            <div><span className="page-eyebrow">組織ユーザー</span><h2 id="member-modal-title">{memberModal === 'add' ? '従業員を追加' : '初期パスワード'}</h2></div>
+            <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>×</button>
+          </div>
+          {memberError && <div className="auth-error" role="alert">{memberError}</div>}
+          {memberModal === 'add' ? <form className="account-modal-content" onSubmit={(event) => void addMember(event)}>
+            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。登録後に初期パスワードが表示されます。</p>
+            <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
+          </form> : <div className="account-modal-content">
+            <p className="account-modal-note">従業員へ安全な方法で伝えてください。このパスワードはこの画面を閉じると再表示できません。</p>
+            <div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button></div>
+            {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
+            <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
           </div>}
         </section>
       </div>}
