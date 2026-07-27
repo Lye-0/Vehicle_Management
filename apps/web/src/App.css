@@ -902,11 +902,15 @@
 .settings-number-input { display: flex; align-items: center; gap: 8px; }
 .settings-number-input input { min-width: 0; flex: 1; }
 .settings-number-input span { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
-.settings-preset-list { display: grid; gap: 8px; }
-.settings-preset-row { display: flex; align-items: center; gap: 9px; }
-.settings-preset-row input { min-width: 0; flex: 1; }
-.settings-preset-index { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 25px; color: var(--text-secondary); border-radius: 7px; background: var(--surface-subtle); font-size: 10px; font-weight: 800; }
-.settings-preset-row .icon-button { width: 34px; height: 34px; color: var(--text-muted); }
+.settings-preset-list { display: grid; gap: 9px; padding-top: 2px; }
+.settings-preset-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 7px; border: 1px solid #e1e8f1; border-radius: 10px; background: linear-gradient(180deg, #fff 0%, #f8fafc 100%); box-shadow: 0 2px 5px rgba(37, 63, 97, 0.04); transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.settings-preset-row:hover { border-color: #c9d8eb; background: #fbfdff; box-shadow: 0 4px 12px rgba(37, 63, 97, 0.07); }
+.settings-preset-row:focus-within { border-color: #9eb9eb; background: #f8fbff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08), 0 4px 12px rgba(37, 63, 97, 0.06); }
+.settings-preset-row input { width: 100%; min-width: 0; height: 38px; padding: 0 11px; color: var(--text); outline: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; font: inherit; font-size: 12px; }
+.settings-preset-row input::placeholder { color: var(--text-muted); }
+.settings-preset-row input:focus { border-color: #c3d5ef; background: #fff; box-shadow: inset 0 1px 2px rgba(37, 63, 97, 0.03); }
+.settings-preset-index { display: grid; place-items: center; width: 32px; height: 32px; color: var(--primary); border: 1px solid #d8e5f8; border-radius: 9px; background: #eef4ff; font-size: 10px; font-weight: 800; }
+.settings-preset-row .icon-button { width: 34px; height: 34px; color: var(--text-muted); border: 1px solid transparent; }
 .settings-preset-row .icon-button:hover { color: var(--danger); background: var(--danger-soft); }
 .settings-preset-empty, .settings-empty { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 150px; color: var(--text-muted); text-align: center; }
 .account-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
