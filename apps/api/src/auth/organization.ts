@@ -141,11 +141,11 @@ export async function ensureDevelopmentMembership(database: Database, env: Env, 
 }
 
 async function upsertProfile(database: Database, user: FirebaseUser, role: OrganizationRole) {
-  const existing = await database.select({ uid: staffProfiles.uid }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
+  const existing = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName, email: staffProfiles.email }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const now = new Date().toISOString()
   const displayName = user.displayName || user.email || 'ログインユーザー'
   if (existing) {
-    await database.update(staffProfiles).set({ displayName, email: user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
+    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: existing.email ?? user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
   } else {
     await database.insert(staffProfiles).values({ uid: user.uid, displayName, email: user.email, role, updatedAt: now }).run()
   }

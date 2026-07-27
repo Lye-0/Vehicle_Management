@@ -45,11 +45,28 @@ describe("CLI authenticated workflow", () => {
 				expect.objectContaining({ organizationId, role: "owner", status: "active" }),
 		]));
 
+			const updatedProfile = await requestJson<JsonObject>("/api/auth/profile", "PATCH", {
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			});
+			expect(updatedProfile.response.status).toBe(200);
+			expect(updatedProfile.body.profile).toEqual({
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			});
+
+			const refreshedSession = await requestJson<JsonObject>("/api/auth/me");
+			expect(refreshedSession.body.profile).toEqual(expect.objectContaining({
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			}));
+
 			const members = await requestJson<JsonObject>("/api/organization/members");
 			expect(members.response.status).toBe(200);
 			expect(members.body.currentRole).toBe("owner");
 			expect(members.body.members).toEqual(expect.arrayContaining([
 				expect.objectContaining({ uid: employeeUid, role: "employee", status: "active" }),
+				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${marker.toLowerCase()}-profile@example.com` }),
 		]));
 
 			const createdCustomer = await requestJson<JsonObject>("/api/customers", "POST", {
