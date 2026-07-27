@@ -329,12 +329,17 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setMemberMessage('')
     try {
       const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
-      if (response.member) setMembers((current) => [...current, response.member])
-      setTemporaryPassword(response.temporaryPassword)
+      if (response.member) setMembers((current) => current.some((member) => member.uid === response.member.uid) ? current.map((member) => member.uid === response.member.uid ? response.member : member) : [...current, response.member])
+      setTemporaryPassword(response.temporaryPassword ?? '')
       setNewMemberName('')
       setNewMemberEmail('')
-      setMemberModal('temporaryPassword')
-      setMemberMessage('従業員を登録しました。')
+      if (response.temporaryPassword) {
+        setMemberModal('temporaryPassword')
+        setMemberMessage('従業員を登録しました。')
+      } else {
+        setMemberModal(null)
+        setMemberMessage('既存のアカウントを組織に再追加しました。初期パスワードは再発行されないため、本人は現在のログイン情報を使用します。')
+      }
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
     } finally {
@@ -452,7 +457,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
           </div>
           {memberError && <div className="auth-error" role="alert">{memberError}</div>}
           {memberModal === 'add' ? <form className="account-modal-content" onSubmit={(event) => void addMember(event)}>
-            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。登録後に初期パスワードが表示されます。</p>
+            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。新規アカウントの場合は初期パスワードが表示され、過去に削除したアカウントは既存のログイン情報で再追加されます。</p>
             <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
           </form> : <div className="account-modal-content">

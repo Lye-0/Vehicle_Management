@@ -23,7 +23,7 @@ export async function fetchMembers() {
 }
 
 export async function createMember(input: { displayName: string; email: string }) {
-  return apiFetch<{ member: MemberRecord; temporaryPassword: string }>('/api/organization/members', {
+  return apiFetch<{ member: MemberRecord; temporaryPassword?: string }>('/api/organization/members', {
     method: 'POST',
     body: JSON.stringify(input),
   })

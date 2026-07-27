@@ -40,32 +40,57 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
   const body = await readJson(request)
   const displayName = requiredDisplayName(body.displayName)
   const email = requiredEmail(body.email)
-  const temporaryPassword = createTemporaryPassword()
+  const existingProfile = await findStaffProfileByEmail(database, email)
+  const existingMembership = existingProfile
+    ? await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, existingProfile.uid))).get()
+    : undefined
+  if (existingMembership) throw new HttpError(409, 'そのユーザーはすでにこの組織に所属しています。')
 
-  let createdUser: { uid: string; idToken: string } | null = null
+  const temporaryPassword = existingProfile ? undefined : createTemporaryPassword()
   const membershipId = crypto.randomUUID()
+  let createdUser: { uid: string; idToken: string } | null = null
+  let memberUid = existingProfile?.uid
+  let membershipCreated = false
   try {
-    createdUser = await createEmailPasswordUser(env, email, temporaryPassword)
     const now = new Date().toISOString()
-    await database.insert(organizationMemberships).values({
-      id: membershipId,
-      organizationId: context.organization.organizationId,
-      uid: createdUser.uid,
-      role: 'employee',
-      status: 'active',
-      updatedAt: now,
-    }).run()
-    await database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }).run()
-    await database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, updatedAt: now }).run()
+    if (existingProfile) {
+      await database.insert(organizationMemberships).values({
+        id: membershipId,
+        organizationId: context.organization.organizationId,
+        uid: existingProfile.uid,
+        role: 'employee',
+        status: 'active',
+        updatedAt: now,
+      }).run()
+      membershipCreated = true
+      await database.update(staffProfiles).set({ displayName, email, updatedAt: now }).where(eq(staffProfiles.uid, existingProfile.uid)).run()
+    } else {
+      createdUser = await createEmailPasswordUser(env, email, temporaryPassword!)
+      memberUid = createdUser.uid
+      await database.insert(organizationMemberships).values({
+        id: membershipId,
+        organizationId: context.organization.organizationId,
+        uid: createdUser.uid,
+        role: 'employee',
+        status: 'active',
+        updatedAt: now,
+      }).run()
+      membershipCreated = true
+      await database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }).run()
+      await database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, updatedAt: now }).run()
+    }
   } catch (error) {
-    if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
-      throw new HttpError(409, 'そのメールアドレスは既に登録されています。既存アカウントの所属追加は次の段階で対応します。')
+    if (membershipCreated && memberUid) {
+      try {
+        await database.delete(organizationMemberships).where(eq(organizationMemberships.id, membershipId)).run()
+      } catch (databaseCleanupError) {
+        console.error(databaseCleanupError)
+      }
     }
     if (createdUser) {
       try {
         await database.delete(authAccounts).where(eq(authAccounts.uid, createdUser.uid)).run()
         await database.delete(staffProfiles).where(eq(staffProfiles.uid, createdUser.uid)).run()
-        await database.delete(organizationMemberships).where(eq(organizationMemberships.id, membershipId)).run()
       } catch (databaseCleanupError) {
         console.error(databaseCleanupError)
       }
@@ -75,12 +100,15 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
         console.error(cleanupError)
       }
     }
+    if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
+      throw new HttpError(409, 'そのメールアドレスの認証アカウントは既に存在します。既存ユーザーの情報を確認してから再登録してください。')
+    }
     throw error
   }
 
   const members = await listMembers(database, context.organization.organizationId, context.user.uid)
-  const member = members.find((item) => item.uid === createdUser!.uid)
-  return jsonResponse({ member, temporaryPassword }, 201, env)
+  const member = members.find((item) => item.uid === memberUid)
+  return jsonResponse({ member, ...(temporaryPassword ? { temporaryPassword } : {}) }, 201, env)
 }
 
 async function updateMember(request: Request, env: Env, database: ReturnType<typeof createDatabase>, uid: string) {
@@ -121,6 +149,11 @@ async function removeMember(request: Request, env: Env, database: ReturnType<typ
 
   await database.delete(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).run()
   return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
+}
+
+async function findStaffProfileByEmail(database: ReturnType<typeof createDatabase>, email: string) {
+  const profiles = await database.select().from(staffProfiles).all()
+  return profiles.find((profile) => profile.email?.trim().toLowerCase() === email)
 }
 
 async function listMembers(database: ReturnType<typeof createDatabase>, organizationId: string, currentUid: string) {

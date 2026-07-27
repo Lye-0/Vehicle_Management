@@ -421,6 +421,12 @@ describe("CLI authenticated workflow", () => {
 
 			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(removedEmployeeAccess.response.status).toBe(400);
+			const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: `${marker} 再追加従業員`, email: `${employeeUid}@example.com` });
+			expect(readdedEmployee.response.status).toBe(201);
+			expect(readdedEmployee.body.temporaryPassword).toBeUndefined();
+			expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: `${marker} 再追加従業員`, role: "employee", status: "active" }));
+			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
+			expect(readdedEmployeeAccess.response.status).toBe(200);
 
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);
