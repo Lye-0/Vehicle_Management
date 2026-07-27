@@ -162,8 +162,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
   const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
-  const isAnonymous = currentUser.isAnonymous
-  const canManageMembers = !isAnonymous && (currentRole === 'owner' || currentRole === 'admin')
+  const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
 
   useEffect(() => {
     if (!accountModal) return
