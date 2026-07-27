@@ -525,6 +525,14 @@
 .sales-item-row select { min-width: 0; }
 
 .sales-estimate-paper { width: min(100%, 920px); padding: 34px 38px 28px; border-color: #aebbc9; border-radius: 2px; box-shadow: 0 10px 26px rgba(31, 48, 71, 0.08); }
+.sales-estimate-sheet-frame { width: min(100%, 1055px); margin: 0 auto; overflow: hidden; background: #fff; border: 1px solid #c8d5e6; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.12); }
+.sales-estimate-sheet { width: 100%; aspect-ratio: 1055 / 1491; background: #fff; }
+.sales-estimate-sheet svg { display: block; width: 100%; height: 100%; }
+.sales-estimate-exact-editor { width: min(100%, 1055px); margin: 18px auto 0; }
+.sales-estimate-quick-edit { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.sales-estimate-item-description { display: grid; min-width: 0; gap: 5px; }
+.sales-estimate-item-description select,
+.sales-estimate-item-description input { width: 100%; min-width: 0; }
 .sales-estimate-paper-header { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(340px, 1.7fr); align-items: start; gap: 18px; }
 .sales-estimate-title-block { display: grid; align-content: start; gap: 8px; min-width: 0; }
 .sales-estimate-title { width: 100%; max-width: 290px; padding: 5px 0 8px; color: #172338; outline: 0; border: 0; border-bottom: 2px solid #1f2937; background: #dcecff; font-size: 25px; font-weight: 800; text-align: center; }

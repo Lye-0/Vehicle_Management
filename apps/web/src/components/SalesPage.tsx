@@ -32,6 +32,7 @@ import {
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
+import { buildSalesEstimateSheetSvg } from '../lib/salesEstimateSheet'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesDocumentView = 'edit' | 'preview'
@@ -324,7 +325,7 @@ type SalesPreviewProps = {
 }
 
 function SalesEstimatePreview(props: SalesPreviewProps) {
-  return <SalesEstimatePreviewLayout {...props} />
+  return <SalesEstimateExactPreview {...props} />
   /*
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
@@ -336,6 +337,64 @@ function SalesEstimatePreview(props: SalesPreviewProps) {
   const bankAccount = [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定'
   return <div className="sales-preview-area"><div className="sales-preview-toolbar"><div><strong>見積書プレビュー</strong><span>実際のPDFと同じ情報配置で確認できます。基本項目と明細はこの画面から編集できます。</span></div><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button></div><article className="sales-document-paper sales-estimate-paper"><header className="sales-estimate-paper-header"><div className="sales-estimate-title-block"><select className="sales-estimate-title" aria-label="書類種別" value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>注文書</option><option>請求書</option></select><span>{details.salesCategory || '販売書類'}</span></div><div className="sales-estimate-meta-table"><div><span>日付</span><input type="date" aria-label="発行日" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></div><div><span>販売区分</span><strong>{details.salesCategory || '未設定'}</strong></div><div><span>担当</span><strong>{details.staffName || '未設定'}</strong></div><div><span>見積番号</span><input aria-label="書類番号" value={document.number} onChange={(event) => onUpdateHeader('number', event.target.value)} /></div><div><span>ページ</span><strong>1</strong></div></div></header><section className="sales-estimate-customer-grid"><div className="sales-estimate-customer-box"><div className="sales-estimate-cell-label">お名前</div><div className="sales-estimate-cell-value"><strong>{customer.name || '未設定'} {details.customerHonorific}</strong><small>{customer.kana || 'ふりがな未登録'}</small></div><div className="sales-estimate-cell-label">ご住所</div><div className="sales-estimate-cell-value"><span>{customer.postalCode ? `〒${customer.postalCode}` : ''}</span><span>{customer.address || '住所未登録'}</span></div></div><div className="sales-estimate-contact-box"><div className="sales-estimate-cell-label">生年月日</div><div>{details.customerBirthDate || '未設定'}</div><div className="sales-estimate-cell-label">電話番号</div><div>{customer.phone || '未登録'}</div><div className="sales-estimate-cell-label">勤務先等</div><div>{details.customerEmployer || '未設定'}</div><div className="sales-estimate-cell-label">連絡先TEL</div><div>{details.customerContactPhone || '未設定'}</div></div></section><EstimateVehicleTable vehicle={vehicle} /><EstimateTradeInTable details={details} /><section className="sales-estimate-summary-top"><div className="sales-estimate-amount-card"><span>お見積金額</span><strong>{formatYen(totals.total)}</strong></div><div className="sales-estimate-tax-card"><div><span>課税対象額</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div><span>非課税・対象外</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div></div></section><div className="sales-estimate-status-line"><span>支払期限：{document.dueDate || '未設定'}</span><span>状態：{document.status}</span></div><div className="sales-estimate-section-title"><h3>明細</h3><span /><button className="text-button" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button></div><div className="sales-estimate-items-table"><div className="sales-estimate-items-head"><span>No.</span><span>作業内容／部品名等</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要・課税</span></div>{document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}><span>{index + 1}</span><input list="sales-preview-item-presets" aria-label="プレビューの明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /><input aria-label="プレビューの数量" type="number" min="0" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} /><input aria-label="プレビューの単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} /><input aria-label="プレビューの単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} /><strong>{formatYen(Math.round(item.quantity * item.unitPrice))}</strong><strong>{formatYen(item.otherAmount)}</strong><div className="sales-estimate-summary-cell"><input aria-label="プレビューの摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="プレビューの課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div><button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button></div>)}</div><datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist><div className="sales-estimate-items-total"><span>明細合計</span><strong>{formatYen(totals.subtotal)}</strong><span>消費税</span><strong>{formatYen(totals.tax)}</strong><span>合計</span><strong>{formatYen(totals.total)}</strong></div><section className="sales-estimate-bottom-grid"><div><div className="sales-estimate-recycle"><span>リサイクル料金（預託金）</span><strong>{formatYen(details.recycleFee)}</strong></div><div className="sales-estimate-payment-summary"><span>頭金・現金・他</span><strong>{formatYen(details.downPayment)}</strong><span>残金・所要資金</span><strong>{formatYen(details.remainingPayment)}</strong></div><div className="sales-estimate-credit"><h4>クレジットお支払いプラン</h4>{details.credit.enabled ? <div><span>{details.credit.paymentCount || '回数未設定'}</span><span>手数料 {formatYen(details.credit.fee)}</span><span>月々 {formatYen(details.credit.monthlyPayment)}</span><span>初回 {formatYen(details.credit.initialPayment)}</span><span>ボーナス {details.credit.bonusMonths || '月未設定'} / {formatYen(details.credit.bonusPayment)}</span></div> : <p>利用なし</p>}</div><div className="sales-estimate-required"><h4>必要書類</h4><p>{requiredDocumentLabels(details).join(' ／ ') || '未確認'}</p></div></div><div className="sales-estimate-company"><strong>{settings.shop.name || '店舗名未設定'}</strong>{shopLines.slice(0, 4).map((line) => <span key={line}>{line}</span>)}<div className="sales-estimate-company-payment"><span>お支払いについて</span><p>{paymentNote}</p><span>振込先</span><p>{bankAccount}</p></div></div></section><footer className="sales-paper-footer"><span>{document.note || settings.document.footerNote || '見積条件は担当者へご確認ください。'}</span><span>ページ 1</span></footer></article></div>
   */
+}
+
+function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview, settings }: SalesPreviewProps) {
+  const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
+  const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
+  const imageAttachments = selectedVehicle?.attachments.filter((attachment) => attachment.type === 'image') ?? []
+  const selectedAttachment = imageAttachments.find((attachment) => attachment.id === document.details.selectedImageAttachmentId)
+  const imageState = useVehicleAttachmentUrl(document.vehicleId, selectedAttachment?.id ?? '')
+  const sheetSvg = buildSalesEstimateSheetSvg(document, settings, { imageHref: imageState.url })
+  // Keep the previous implementation available while the new fixed A4 sheet is stabilized.
+  void SalesEstimatePreviewLayout
+
+  return <div className="sales-preview-area">
+    <div className="sales-preview-toolbar">
+      <div><strong>見積書プレビュー</strong><span>表示中のA4帳票を、そのまま同じ配置でPDFへ出力します。</span></div>
+      <button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button>
+    </div>
+    <div className="sales-estimate-image-control">
+      <div><strong><ImageIcon size={16} />帳票に表示する車両画像</strong><span>{selectedVehicle ? `${selectedVehicle.maker} ${selectedVehicle.model}の添付画像から選択できます。` : '対象車両を選択すると添付画像を選択できます。'}</span></div>
+      <div className="sales-estimate-image-select">
+        <select aria-label="帳票に表示する車両画像" value={document.details.selectedImageAttachmentId} disabled={!imageAttachments.length} onChange={(event) => onUpdateDetails({ selectedImageAttachmentId: event.target.value })}>
+          <option value="">画像なし（顧客情報を拡張）</option>
+          {imageAttachments.map((attachment) => <option key={attachment.id} value={attachment.id}>{attachment.name}</option>)}
+        </select>
+        {imageState.loading && <small><RefreshCw size={13} className="is-spinning" />画像を読み込んでいます…</small>}
+        {imageState.error && <small className="is-error">画像を表示できないため、顧客情報表示に切り替えています。</small>}
+        {!imageAttachments.length && <small>画像ファイルが登録されていません。</small>}
+      </div>
+    </div>
+    <div className="sales-estimate-sheet-frame">
+      <div className="sales-estimate-sheet" dangerouslySetInnerHTML={{ __html: sheetSvg }} />
+    </div>
+    <details className="sales-estimate-edit-details sales-estimate-exact-editor">
+      <summary><FileText size={15} />帳票の内容・金額を編集</summary>
+      <div className="sales-estimate-quick-edit">
+        <label className="form-field"><span>見積日</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label>
+        <label className="form-field"><span>販売区分</span><input value={document.details.salesCategory} onChange={(event) => onUpdateDetails({ salesCategory: event.target.value })} /></label>
+        <label className="form-field"><span>担当者</span><input value={document.details.staffName} onChange={(event) => onUpdateDetails({ staffName: event.target.value })} /></label>
+        <label className="form-field"><span>備考</span><input value={document.note} onChange={(event) => onUpdateHeader('note', event.target.value)} /></label>
+      </div>
+      <div className="sales-estimate-items-table">
+        <div className="sales-estimate-items-head"><span>No.</span><span>区分・内容</span><span>数量</span><span>単位</span><span>単価</span><span>金額</span><span>技術料・他</span><span>摘要・課税</span></div>
+        {document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}>
+          <span>{index + 1}</span>
+          <div className="sales-estimate-item-description"><select aria-label="明細区分" value={item.itemType} onChange={(event) => onUpdateItem(item.id, 'itemType', event.target.value)}>{salesLineItemTypes.map((type) => <option key={type}>{type}</option>)}</select><input list="sales-preview-item-presets" aria-label="明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /></div>
+          <input aria-label="数量" type="number" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} />
+          <input aria-label="単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} />
+          <input aria-label="単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} />
+          <strong>{formatYen(calculateSalesLineAmount(item))}</strong>
+          <input aria-label="技術料・他" type="number" value={item.otherAmount} onChange={(event) => onUpdateItem(item.id, 'otherAmount', event.target.value)} />
+          <div className="sales-estimate-summary-cell"><input aria-label="摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div>
+          <button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button>
+        </div>)}
+      </div>
+      <datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist>
+      <div className="sales-estimate-edit-actions"><button className="button button-secondary" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button><span>入力・プレビュー・PDFは同じ保存データと計算結果を使用します。</span></div>
+    </details>
+  </div>
 }
 
 function SalesEstimatePreviewLayout({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview }: SalesPreviewProps) {
