@@ -613,6 +613,62 @@
 .sales-estimate-company-payment span { color: #607086; font-size: 9px; }
 .sales-estimate-company-payment p { margin: 0; color: #273448; font-size: 9px; white-space: pre-wrap; }
 .sales-estimate-paper .sales-paper-footer { margin-top: 20px; padding-top: 8px; font-size: 9px; }
+.sales-estimate-image-control { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 12px 14px; color: var(--text-secondary); border: 1px solid #c9d8ed; border-radius: 9px; background: #f7faff; }
+.sales-estimate-image-control > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.sales-estimate-image-control strong { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; }
+.sales-estimate-image-control span { color: var(--text-muted); font-size: 10px; }
+.sales-estimate-image-select { min-width: 235px; display: grid; gap: 4px; }
+.sales-estimate-image-select select { width: 100%; min-height: 34px; padding: 0 9px; color: var(--text); outline: 0; border: 1px solid #b9cbe7; border-radius: 6px; background: #fff; font-size: 11px; }
+.sales-estimate-image-select small { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; }
+.sales-estimate-image-select small.is-error { color: var(--danger); }
+.sales-estimate-paper.has-selected-image .sales-estimate-customer-grid { grid-template-columns: 1.08fr 0.92fr; }
+.sales-estimate-paper.has-selected-image .sales-estimate-customer-box { grid-template-columns: 72px minmax(0, 1fr); }
+.sales-estimate-paper.has-expanded-customer .sales-estimate-customer-box > :nth-child(n + 5) { display: none; }
+.sales-estimate-photo-box { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 5px; padding: 8px; border-left: 1px solid #263443; background: #f5f8fc; }
+.sales-estimate-photo-box img { width: 100%; height: 151px; display: block; object-fit: contain; border-radius: 5px; background: #e9eef5; }
+.sales-estimate-photo-box small { overflow: hidden; color: #607086; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-breakdown-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr) minmax(0, 1.05fr); gap: 12px; align-items: start; }
+.sales-estimate-breakdown-card { min-width: 0; overflow: hidden; border: 1px solid #263443; background: #fff; }
+.sales-estimate-breakdown-card h4 { margin: 0; padding: 7px 8px; color: #fff; background: #123f8c; font-size: 12px; text-align: center; }
+.sales-estimate-breakdown-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 25px; border-bottom: 1px solid #aebbc9; }
+.sales-estimate-breakdown-row > span, .sales-estimate-breakdown-row > strong { min-width: 0; padding: 5px 7px; overflow: hidden; color: #273448; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-breakdown-row > strong { text-align: right; }
+.sales-estimate-breakdown-row.is-emphasis { background: #eef5ff; }
+.sales-estimate-breakdown-row.is-emphasis > span { color: #123f8c; font-weight: 800; }
+.sales-estimate-breakdown-row.is-emphasis > strong { color: #172338; font-size: 10px; }
+.sales-estimate-breakdown-row.is-discount > strong { color: #d92d20; }
+.sales-estimate-breakdown-subtable { margin: 6px; border: 1px solid #aebbc9; }
+.sales-estimate-breakdown-heading { display: grid; grid-template-columns: minmax(0, 1fr) 92px; color: #123f8c; background: #dcecff; font-size: 9px; font-weight: 800; }
+.sales-estimate-breakdown-heading > span { padding: 5px 7px; border-right: 1px solid #aebbc9; text-align: center; }
+.sales-estimate-breakdown-heading > span:last-child { border-right: 0; }
+.sales-estimate-tax-breakdown { margin: 6px; border: 1px solid #aebbc9; }
+.sales-estimate-tax-breakdown-heading, .sales-estimate-tax-breakdown-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr) minmax(0, .8fr); }
+.sales-estimate-tax-breakdown-heading { color: #123f8c; background: #dcecff; font-size: 8px; font-weight: 800; }
+.sales-estimate-tax-breakdown-heading > span, .sales-estimate-tax-breakdown-row > span, .sales-estimate-tax-breakdown-row > strong { min-width: 0; padding: 5px 6px; overflow: hidden; border-right: 1px solid #aebbc9; text-overflow: ellipsis; white-space: nowrap; }
+.sales-estimate-tax-breakdown-heading > span:not(:first-child), .sales-estimate-tax-breakdown-row > strong { text-align: right; }
+.sales-estimate-tax-breakdown-heading > span:last-child, .sales-estimate-tax-breakdown-row > strong:last-child { border-right: 0; }
+.sales-estimate-tax-breakdown-row { min-height: 23px; border-top: 1px solid #aebbc9; color: #273448; font-size: 9px; }
+.sales-estimate-tax-breakdown-total { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); align-items: center; min-height: 27px; color: #fff; background: #1e55ad; font-size: 11px; font-weight: 800; }
+.sales-estimate-tax-breakdown-total > span, .sales-estimate-tax-breakdown-total > strong { padding: 5px 7px; }
+.sales-estimate-tax-breakdown-total > strong { text-align: center; }
+.sales-estimate-breakdown-empty { padding: 7px; color: #718096; font-size: 9px; text-align: center; }
+.sales-estimate-fee-group { margin: 6px; border: 1px solid #aebbc9; }
+.sales-estimate-fee-group h5 { margin: 0; padding: 5px 7px; color: #123f8c; background: #eef5ff; font-size: 9px; }
+.sales-estimate-fee-group .sales-estimate-breakdown-row { min-height: 23px; }
+.sales-estimate-fee-subtotal, .sales-estimate-fee-total, .sales-estimate-accessory-total { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; color: #172338; background: #dcecff; font-size: 9px; font-weight: 800; }
+.sales-estimate-fee-subtotal { padding: 5px 7px; }
+.sales-estimate-fee-subtotal strong, .sales-estimate-fee-total strong, .sales-estimate-accessory-total strong { text-align: right; }
+.sales-estimate-fee-total { margin-top: 5px; padding: 7px 8px; color: #fff; background: #123f8c; font-size: 10px; }
+.sales-estimate-accessory-total { margin-top: 7px; padding: 8px; }
+.sales-estimate-edit-details { margin-top: 14px; border: 1px solid #c8d5e5; border-radius: 7px; background: #fbfdff; }
+.sales-estimate-edit-details > summary { display: flex; align-items: center; gap: 6px; padding: 9px 11px; color: #123f8c; cursor: pointer; font-size: 11px; font-weight: 800; }
+.sales-estimate-edit-details[open] > summary { border-bottom: 1px solid #d5dfeb; }
+.sales-estimate-edit-details .sales-estimate-items-table { margin: 10px; }
+.sales-estimate-edit-actions { display: flex; align-items: center; gap: 10px; padding: 0 10px 10px; }
+.sales-estimate-edit-actions span { color: #718096; font-size: 10px; }
+.document-header-editor > .form-grid > .form-field:first-child, .sales-estimate-input-panel > .sales-estimate-input-grid > .form-field:nth-child(9) { display: none; }
+.is-spinning { animation: sales-estimate-spin 1s linear infinite; }
+@keyframes sales-estimate-spin { to { transform: rotate(360deg); } }
 
 .form-field select { width: 100%; min-height: 40px; padding: 0 11px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
 .form-field select:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
@@ -1359,3 +1415,16 @@
 .maintenance-header-editor { margin: 20px 0; }
 .sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
 .sales-item-row select { width: 100%; min-width: 0; height: 32px; padding: 0 6px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 10px; }
+@media (max-width: 900px) {
+  .sales-estimate-breakdown-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sales-estimate-accessory-breakdown { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .sales-estimate-image-control { align-items: stretch; flex-direction: column; }
+  .sales-estimate-image-select { min-width: 0; }
+  .sales-estimate-paper.has-selected-image .sales-estimate-customer-grid, .sales-estimate-paper.has-expanded-customer .sales-estimate-customer-grid { grid-template-columns: 1fr; }
+  .sales-estimate-paper.has-selected-image .sales-estimate-photo-box { border-top: 1px solid #263443; border-left: 0; }
+  .sales-estimate-breakdown-grid { grid-template-columns: 1fr; }
+  .sales-estimate-accessory-breakdown { grid-column: auto; }
+  .sales-estimate-edit-actions { align-items: flex-start; flex-direction: column; }
+}

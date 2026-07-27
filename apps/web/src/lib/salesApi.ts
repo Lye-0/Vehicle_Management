@@ -37,6 +37,7 @@ export type SalesDocumentDetails = {
   customerBirthDate: string
   customerEmployer: string
   customerContactPhone: string
+  selectedImageAttachmentId: string
   tradeIn: {
     name: string
     modelYear: string
@@ -74,6 +75,7 @@ export const defaultSalesDocumentDetails: SalesDocumentDetails = {
   customerBirthDate: '',
   customerEmployer: '',
   customerContactPhone: '',
+  selectedImageAttachmentId: '',
   tradeIn: { name: '', modelYear: '', inspectionDate: '', mileage: '', color: '' },
   recycleFee: 0,
   downPayment: 0,

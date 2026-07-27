@@ -1,7 +1,9 @@
-import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib'
+import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import fontUrl from '../assets/fonts/NotoSansCJKjp-Regular.otf?url'
+import { fetchVehicleFile } from './customerApi'
 import type { MaintenanceDocument } from './maintenanceApi'
+import { buildSalesEstimateSections, calculateSalesEstimateTotals, type SalesTotals } from './salesEstimate'
 import type { AppSettings } from './settingsApi'
 import type { SalesDocument } from './salesApi'
 
@@ -62,32 +64,28 @@ export async function previewMaintenanceDocumentPdf(document: MaintenanceDocumen
 
 export async function createSalesDocumentPdf(document: SalesDocument, settings: AppSettings) {
   const state = await createPageState(salesDocumentTitle(document.type), document.number, document.issuedAt, settings, document)
-  drawSalesDocumentIntro(state, document)
-  drawSectionTitle(state, '明細')
-  const columns: TableColumn[] = [
-    { label: 'No.', width: 22, align: 'center' },
-    { label: '作業内容／部品名等', width: 195 },
-    { label: '数量', width: 35, align: 'right' },
-    { label: '単位', width: 28, align: 'center' },
-    { label: '部品単価', width: 66, align: 'right' },
-    { label: '部品金額', width: 66, align: 'right' },
-    { label: '技術料・他', width: 62, align: 'right' },
-    { label: '摘要・課税', width: 37, align: 'left' },
-  ]
-  drawTable(state, columns, document.items.map((item, index) => [
-    String(index + 1),
-    item.description || '（明細未入力）',
-    formatNumber(item.quantity),
-    item.unit,
-    formatYen(item.unitPrice),
-    formatYen(Math.round(item.quantity * item.unitPrice)),
-    formatYen(item.otherAmount),
-    [item.summary, item.taxCategory].filter(Boolean).join(' / '),
-  ]), colors.soft)
+  const image = await embedSalesImage(state.pdf, document)
+  const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
+  drawSalesDocumentIntro(state, document, image)
+  drawSectionTitle(state, '見積金額内訳')
+  drawSalesEstimateBreakdown(state, document, totals)
 
   drawSalesDocumentBottom(state, document, settings)
   finishPage(state)
   return state.pdf.save()
+}
+
+async function embedSalesImage(pdf: PDFDocument, document: SalesDocument): Promise<PDFImage | null> {
+  if (!document.vehicleId || !document.details.selectedImageAttachmentId) return null
+  try {
+    const blob = await fetchVehicleFile(document.vehicleId, document.details.selectedImageAttachmentId)
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    if (blob.type === 'image/png') return await pdf.embedPng(bytes)
+    if (blob.type === 'image/jpeg') return await pdf.embedJpg(bytes)
+  } catch {
+    return null
+  }
+  return null
 }
 
 async function createMaintenanceDocumentPdf(document: MaintenanceDocument, settings: AppSettings) {
@@ -198,7 +196,9 @@ function drawSalesPageHeader(state: PageState, document: SalesDocument) {
   state.y = ruleY - 14
 }
 
-function drawSalesDocumentIntro(state: PageState, document: SalesDocument) {
+function drawSalesDocumentIntro(state: PageState, document: SalesDocument, image: PDFImage | null) {
+  drawSalesDocumentIntroLayout(state, document, image)
+  /*
   const customer = document.customerDetails
   const vehicle = document.vehicleDetails
   const details = document.details
@@ -243,37 +243,242 @@ function drawSalesDocumentIntro(state: PageState, document: SalesDocument) {
   state.y = summaryTop - 34 - 14
   drawTextTop(state.page, state.font, `支払期限：${document.dueDate || '未設定'}　状態：${document.status}`, MARGIN, state.y, 8, colors.muted, CONTENT_WIDTH, 'right')
   state.y -= 14
+  */
+}
+
+function drawSalesDocumentIntroLayout(state: PageState, document: SalesDocument, image: PDFImage | null) {
+  const customer = document.customerDetails
+  const vehicle = document.vehicleDetails
+  const details = document.details
+  const top = state.y
+  const gap = 8
+  const customerHeight = image ? 60 : 70
+  ensureSpace(state, customerHeight + gap + 64 + gap + 33 + gap + 30 + gap + 10)
+
+  if (image) {
+    const imageLeftWidth = (CONTENT_WIDTH - gap) / 2
+    drawSalesGridBlock(state, MARGIN, top, [68, imageLeftWidth - 68], [
+      [{ text: 'お名前', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.name || '未設定'} ${details.customerHonorific || '様'}\n${customer.kana || ''}`, size: 9.2 }],
+      [{ text: 'ご住所', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.postalCode ? `〒${customer.postalCode}\n` : ''}${customer.address || '住所未登録'}`, size: 8.5 }],
+      [{ text: '電話番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: customer.phone || '未登録', size: 8.5 }],
+    ], [22, 22, 16])
+    drawSalesPdfImage(state, image, MARGIN + imageLeftWidth + gap, top, imageLeftWidth, customerHeight)
+  } else {
+    drawSalesGridBlock(state, MARGIN, top, [CONTENT_WIDTH - 68 - 68 - 98, 68, 68, 98], [
+      [{ text: 'お名前', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.name || '未設定'} ${details.customerHonorific || '様'}\n${customer.kana || ''}`, size: 9.2 }, { text: '生年月日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.4 }, { text: details.customerBirthDate || '未設定', size: 8 }],
+      [{ text: 'ご住所', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center' }, { text: `${customer.postalCode ? `〒${customer.postalCode}\n` : ''}${customer.address || '住所未登録'}`, size: 8.5 }, { text: '電話番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.4 }, { text: customer.phone || '未登録', size: 8 }],
+      [{ text: '', fill: rgb(0.86, 0.93, 1) }, { text: '' }, { text: '勤務先等', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.4 }, { text: details.customerEmployer || '未設定', size: 8 }],
+      [{ text: '', fill: rgb(0.86, 0.93, 1) }, { text: '' }, { text: '連絡先TEL', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.4 }, { text: details.customerContactPhone || '未設定', size: 8 }],
+    ], [22, 22, 13, 13])
+  }
+  state.y = top - customerHeight - gap
+
+  const vehicleValues = vehicle ?? emptySalesVehicleDetails()
+  drawSalesGridBlock(state, MARGIN, state.y, [55, 174, 58, 70, 72, 82], [
+    [{ text: 'メーカー', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車名・仕様', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '年式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '排気量', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: 'ミッション', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車体色', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: vehicleValues.maker || '未設定' }, { text: vehicleValues.name || '未設定' }, { text: vehicleValues.year || '未設定' }, { text: vehicleValues.displacement || '未設定' }, { text: vehicleValues.transmission || '未設定' }, { text: vehicleValues.color || '未設定' }],
+    [{ text: '型式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車台番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '登録番号', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '走行距離', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車検日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '記録簿', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: vehicleValues.modelType || '未設定' }, { text: vehicleValues.vin || '未設定' }, { text: vehicleValues.plate || '未設定' }, { text: vehicleValues.mileage || '未設定' }, { text: vehicleValues.inspectionDate || '未設定' }, { text: vehicleValues.inspectionRecordAvailable ? 'あり' : 'なし' }],
+  ], [14, 18, 14, 18])
+  state.y -= 64 + gap
+
+  drawSalesGridBlock(state, MARGIN, state.y, [176, 63, 82, 92, 98], [
+    [{ text: '下取車名（型式等）', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '年式', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車検日', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '走行距離', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: '車体色', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }],
+    [{ text: details.tradeIn.name || 'なし' }, { text: details.tradeIn.modelYear || '-' }, { text: details.tradeIn.inspectionDate || '-' }, { text: details.tradeIn.mileage || '-' }, { text: details.tradeIn.color || '-' }],
+  ], [16, 17])
+  state.y -= 33 + gap
+
+  const totals = calculateSalesEstimateTotals(document, state.settings.tax.rounding)
+  const summaryTop = state.y
+  drawSalesGridBlock(state, MARGIN, summaryTop, [112, 93], [[{ text: 'お見積金額（税込）', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8.2 }, { text: formatYen(totals.total), bold: true, align: 'right', size: 12 }]], [30])
+  const taxX = MARGIN + 205 + 12
+  drawSalesGridBlock(state, taxX, summaryTop, [98, 98, 98], [[{ text: `課税対象額（${formatPercent(document.taxRate)}）`, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }, { text: `消費税（${formatPercent(document.taxRate)}）`, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }, { text: '非課税対象額', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }], [{ text: formatYen(totals.taxableSubtotal), align: 'right' }, { text: formatYen(totals.tax), align: 'right' }, { text: formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal), align: 'right' }]], [14, 16])
+  state.y = summaryTop - 30 - 8
+  drawTextTop(state.page, state.font, `支払期限：${document.dueDate || '未設定'}　状態：${document.status}`, MARGIN, state.y, 8, colors.muted, CONTENT_WIDTH, 'right')
+  state.y -= 10
+}
+
+function drawSalesPdfImage(state: PageState, image: PDFImage, x: number, top: number, width: number, height: number) {
+  state.page.drawRectangle({ x, y: top - height, width, height, color: colors.soft, borderColor: colors.line, borderWidth: 0.8 })
+  // pdf-lib does not clip drawImage to the surrounding rectangle. Contain the image
+  // so an attachment can never bleed into the metadata or vehicle tables.
+  const scale = Math.min(width / image.width, height / image.height)
+  const drawWidth = image.width * scale
+  const drawHeight = image.height * scale
+  state.page.drawImage(image, { x: x + (width - drawWidth) / 2, y: top - height + (height - drawHeight) / 2, width: drawWidth, height: drawHeight, opacity: 1 })
+}
+
+type SalesPdfBreakdownRow = { label: string; amount: number; emphasis?: boolean; discount?: boolean }
+type SalesPdfTaxBreakdown = { taxRate: number; taxableSubtotal: number; nonTaxableSubtotal: number; tax: number; total: number }
+
+function drawSalesEstimateBreakdown(state: PageState, document: SalesDocument, totals: SalesTotals) {
+  const sections = buildSalesEstimateSections(document)
+  const gap = 8
+  const width = (CONTENT_WIDTH - gap * 2) / 3
+  const vehicleRowsBeforeTax: SalesPdfBreakdownRow[] = [
+    { label: '車両本体価格', amount: totals.vehicleBasePrice },
+    { label: '値引等', amount: totals.discount, discount: true },
+    { label: '本体課税対象額', amount: totals.vehicleTaxableAmount },
+    { label: '付属品／特別仕様', amount: totals.accessoryTotal },
+    ...(totals.vehicleSideLabor ? [{ label: '車両販売側工賃', amount: totals.vehicleSideLabor }] : []),
+    { label: '車両販売合計', amount: totals.vehicleSalesTotal, emphasis: true },
+    { label: '諸費用合計', amount: totals.feesTotal, emphasis: true },
+  ]
+  const vehicleRowsAfterTax: SalesPdfBreakdownRow[] = [
+    { label: '下取車価格', amount: totals.tradeInPrice },
+    { label: '頭金／現金／他', amount: totals.downPayment },
+    { label: '残金／所要資金', amount: totals.remainingPayment, emphasis: true },
+  ]
+  const feeGroups = [
+    { title: '法定費用（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
+    { title: '手続代行費用（課税）', lines: sections.taxableFees, total: totals.taxableFeeTotal },
+    { title: '実費・預託金（非課税）', lines: sections.nonTaxableFees, total: totals.nonTaxableFeeTotal },
+  ]
+  const accessoryRows = sections.accessories.map((line) => ({ label: line.label, amount: line.amount }))
+  const taxBreakdownHeight = 6 + 13 + 12 + 12 + 14 + 6
+  const vehicleHeight = 18 + vehicleRowsBeforeTax.length * 12 + taxBreakdownHeight + vehicleRowsAfterTax.length * 12
+  const feeHeight = 18 + feeGroups.reduce((total, group) => total + 13 + Math.max(1, group.lines.length) * 11 + 12, 0) + 14
+  const accessoryHeight = 18 + 13 + Math.max(1, accessoryRows.length) * 11 + 14
+  const height = Math.max(vehicleHeight, feeHeight, accessoryHeight)
+  ensureSpace(state, height + 8)
+  const top = state.y
+  drawSalesPdfBreakdownCard(state, MARGIN, top, width, height, '車両販売価格内訳', vehicleRowsBeforeTax, {
+    taxRate: document.taxRate,
+    taxableSubtotal: totals.taxableSubtotal,
+    nonTaxableSubtotal: totals.nonTaxableSubtotal + totals.outOfScopeSubtotal,
+    tax: totals.tax,
+    total: totals.total,
+  }, vehicleRowsAfterTax)
+  drawSalesPdfFeeCard(state, MARGIN + width + gap, top, width, height, feeGroups, totals.feesTotal)
+  drawSalesPdfAccessoryCard(state, MARGIN + (width + gap) * 2, top, width, height, accessoryRows, totals.accessoryTotal)
+  state.y = top - height - 14
+}
+
+function drawSalesPdfBreakdownCard(state: PageState, x: number, top: number, width: number, height: number, title: string, rows: SalesPdfBreakdownRow[], taxBreakdown: SalesPdfTaxBreakdown, trailingRows: SalesPdfBreakdownRow[]) {
+  state.page.drawRectangle({ x, y: top - height, width, height, borderColor: colors.ink, borderWidth: 0.7 })
+  state.page.drawRectangle({ x, y: top - 18, width, height: 18, color: colors.primary })
+  drawTextTop(state.page, state.font, title, x, top - 4, 8, colors.white, width, 'center')
+  let rowTop = top - 18
+  rows.forEach((row) => {
+    const rowHeight = 12
+    if (row.emphasis) state.page.drawRectangle({ x: x + 0.5, y: rowTop - rowHeight, width: width - 1, height: rowHeight, color: rgb(0.86, 0.93, 1) })
+    state.page.drawLine({ start: { x, y: rowTop - rowHeight }, end: { x: x + width, y: rowTop - rowHeight }, thickness: 0.35, color: colors.line })
+    drawTextTop(state.page, state.font, row.label, x + 5, rowTop - 3, row.emphasis ? 7.1 : 6.8, row.emphasis ? colors.primary : colors.ink, width * 0.64 - 5)
+    drawTextTop(state.page, state.latinFont, formatYen(row.amount), x + width - 5 - width * 0.34, rowTop - 3, row.emphasis ? 7.2 : 6.9, row.discount ? rgb(0.85, 0.12, 0.08) : colors.ink, width * 0.34, 'right')
+    rowTop -= rowHeight
+  })
+  rowTop -= 6
+  const taxColumns = [width * 0.42, width * 0.29, width - width * 0.71]
+  drawSalesGridRow(state, x + 1, rowTop, taxColumns, [
+    { text: '', fill: rgb(0.86, 0.93, 1), size: 6.2 },
+    { text: `課税対象${formatPercent(taxBreakdown.taxRate)}`, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 5.8 },
+    { text: '非課税対象', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 6.2 },
+  ], 13)
+  rowTop -= 13
+  drawSalesGridRow(state, x + 1, rowTop, taxColumns, [
+    { text: '対象額合計', size: 6.3 },
+    { text: formatYen(taxBreakdown.taxableSubtotal), align: 'right', size: 6.3 },
+    { text: formatYen(taxBreakdown.nonTaxableSubtotal), align: 'right', size: 6.3 },
+  ], 12)
+  rowTop -= 12
+  drawSalesGridRow(state, x + 1, rowTop, taxColumns, [
+    { text: `消費税（${formatPercent(taxBreakdown.taxRate)}）`, size: 6.3 },
+    { text: formatYen(taxBreakdown.tax), align: 'right', size: 6.3 },
+    { text: '-', align: 'right', size: 6.3 },
+  ], 12)
+  rowTop -= 12
+  state.page.drawRectangle({ x: x + 1, y: rowTop - 14, width: width - 2, height: 14, color: colors.primary })
+  drawTextTop(state.page, state.font, '総額', x + 5, rowTop - 4, 7.2, colors.white, width * 0.4 - 5)
+  drawTextTop(state.page, state.latinFont, formatYen(taxBreakdown.total), x + width * 0.4, rowTop - 4, 7.4, colors.white, width * 0.56, 'center')
+  rowTop -= 14 + 6
+  trailingRows.forEach((row) => {
+    const rowHeight = 12
+    if (row.emphasis) state.page.drawRectangle({ x: x + 0.5, y: rowTop - rowHeight, width: width - 1, height: rowHeight, color: rgb(0.86, 0.93, 1) })
+    state.page.drawLine({ start: { x, y: rowTop - rowHeight }, end: { x: x + width, y: rowTop - rowHeight }, thickness: 0.35, color: colors.line })
+    drawTextTop(state.page, state.font, row.label, x + 5, rowTop - 3, row.emphasis ? 7.1 : 6.8, row.emphasis ? colors.primary : colors.ink, width * 0.64 - 5)
+    drawTextTop(state.page, state.latinFont, formatYen(row.amount), x + width - 5 - width * 0.34, rowTop - 3, row.emphasis ? 7.2 : 6.9, colors.ink, width * 0.34, 'right')
+    rowTop -= rowHeight
+  })
+}
+
+function drawSalesPdfFeeCard(state: PageState, x: number, top: number, width: number, height: number, groups: Array<{ title: string; lines: Array<{ label: string; amount: number }>; total: number }>, total: number) {
+  state.page.drawRectangle({ x, y: top - height, width, height, borderColor: colors.ink, borderWidth: 0.7 })
+  state.page.drawRectangle({ x, y: top - 18, width, height: 18, color: colors.primary })
+  drawTextTop(state.page, state.font, '諸費用内訳', x, top - 4, 8, colors.white, width, 'center')
+  let rowTop = top - 18
+  groups.forEach((group) => {
+    state.page.drawRectangle({ x: x + 1, y: rowTop - 13, width: width - 2, height: 13, color: rgb(0.86, 0.93, 1) })
+    drawTextTop(state.page, state.font, group.title, x + 5, rowTop - 3, 6.6, colors.primary, width - 10)
+    rowTop -= 13
+    const lines = group.lines.length ? group.lines : [{ label: 'なし', amount: 0 }]
+    lines.forEach((line) => {
+      drawTextTop(state.page, state.font, line.label, x + 5, rowTop - 2.5, 6.4, colors.ink, width * 0.66 - 5)
+      drawTextTop(state.page, state.latinFont, formatYen(line.amount), x + width - 5 - width * 0.32, rowTop - 2.5, 6.4, colors.ink, width * 0.32, 'right')
+      rowTop -= 11
+    })
+    state.page.drawLine({ start: { x, y: rowTop - 1 }, end: { x: x + width, y: rowTop - 1 }, thickness: 0.35, color: colors.line })
+    drawTextTop(state.page, state.font, '小計', x + 5, rowTop - 4, 6.6, colors.primary, width * 0.66 - 5)
+    drawTextTop(state.page, state.latinFont, formatYen(group.total), x + width - 5 - width * 0.32, rowTop - 4, 6.6, colors.ink, width * 0.32, 'right')
+    rowTop -= 12
+  })
+  state.page.drawRectangle({ x: x + 1, y: top - height + 1, width: width - 2, height: 14, color: colors.primary })
+  drawTextTop(state.page, state.font, '諸費用合計', x + 5, top - height + 12, 7, colors.white, width * 0.66 - 5)
+  drawTextTop(state.page, state.latinFont, formatYen(total), x + width - 5 - width * 0.32, top - height + 12, 7.2, colors.white, width * 0.32, 'right')
+}
+
+function drawSalesPdfAccessoryCard(state: PageState, x: number, top: number, width: number, height: number, rows: Array<{ label: string; amount: number }>, total: number) {
+  state.page.drawRectangle({ x, y: top - height, width, height, borderColor: colors.ink, borderWidth: 0.7 })
+  state.page.drawRectangle({ x, y: top - 18, width, height: 18, color: colors.primary })
+  drawTextTop(state.page, state.font, '付属品・特別仕様明細', x, top - 4, 7.8, colors.white, width, 'center')
+  const headingTop = top - 18
+  state.page.drawRectangle({ x: x + 1, y: headingTop - 13, width: width - 2, height: 13, color: rgb(0.86, 0.93, 1) })
+  drawTextTop(state.page, state.font, '品名', x + 5, headingTop - 3, 6.6, colors.primary, width * 0.66 - 5)
+  drawTextTop(state.page, state.font, '金額', x + width - 5 - width * 0.32, headingTop - 3, 6.6, colors.primary, width * 0.32, 'right')
+  let rowTop = headingTop - 13
+  const visibleRows = rows.length ? rows : [{ label: '登録なし', amount: 0 }]
+  visibleRows.forEach((row) => {
+    drawTextTop(state.page, state.font, row.label, x + 5, rowTop - 2.5, 6.6, colors.ink, width * 0.66 - 5)
+    drawTextTop(state.page, state.latinFont, formatYen(row.amount), x + width - 5 - width * 0.32, rowTop - 2.5, 6.6, colors.ink, width * 0.32, 'right')
+    state.page.drawLine({ start: { x, y: rowTop - 11 }, end: { x: x + width, y: rowTop - 11 }, thickness: 0.35, color: colors.line })
+    rowTop -= 11
+  })
+  state.page.drawRectangle({ x: x + 1, y: top - height + 1, width: width - 2, height: 14, color: rgb(0.86, 0.93, 1) })
+  drawTextTop(state.page, state.font, '付属品・特別仕様合計', x + 5, top - height + 12, 6.8, colors.primary, width * 0.66 - 5)
+  drawTextTop(state.page, state.latinFont, formatYen(total), x + width - 5 - width * 0.32, top - height + 12, 7.2, colors.ink, width * 0.32, 'right')
 }
 
 function drawSalesDocumentBottom(state: PageState, document: SalesDocument, settings: AppSettings) {
   const details = document.details
-  const totals = calculateSalesTotals(document, settings.tax.rounding)
-  const blockHeight = 215
+  const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
+  const creditContentHeight = details.credit.enabled ? 28 : 18
+  const blockHeight = 18 + 4 + 18 + 4 + 15 + creditContentHeight + 4 + 24 + 4 + 24
   ensureSpace(state, blockHeight)
   const top = state.y
   const leftWidth = 235
   const gap = 16
   const rightX = MARGIN + leftWidth + gap
   const rightWidth = CONTENT_WIDTH - leftWidth - gap
-  drawSalesGridBlock(state, MARGIN, top, [130, 105], [[{ text: 'リサイクル料金（預託金）', fill: rgb(0.86, 0.93, 1), bold: true, size: 7.8 }, { text: formatYen(details.recycleFee), align: 'right', size: 8.5 }]], [22])
-  drawSalesGridBlock(state, MARGIN, top - 28, [70, 48, 70, 47], [[{ text: '頭金・現金', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: formatYen(details.downPayment ?? 0), align: 'right', size: 7.8 }, { text: '残金・所要', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.5 }, { text: formatYen(details.remainingPayment ?? 0), align: 'right', size: 7.8 }]], [22])
+  drawSalesGridBlock(state, MARGIN, top, [130, 105], [[{ text: 'リサイクル料金（預託金）', fill: rgb(0.86, 0.93, 1), bold: true, size: 7.2 }, { text: formatYen(totals.recycleFee), align: 'right', size: 8 }]], [18])
+  drawSalesGridBlock(state, MARGIN, top - 22, [70, 48, 70, 47], [[{ text: '頭金・現金', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7 }, { text: formatYen(totals.downPayment), align: 'right', size: 7.2 }, { text: '残金・所要', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7 }, { text: formatYen(totals.remainingPayment), align: 'right', size: 7.2 }]], [18])
   const creditText = details.credit.enabled
     ? `${details.credit.paymentCount || '回数未設定'}　手数料 ${formatYen(details.credit.fee)}　月々 ${formatYen(details.credit.monthlyPayment)}\n初回 ${formatYen(details.credit.initialPayment)}　賞与 ${details.credit.bonusMonths || '月未設定'} / ${formatYen(details.credit.bonusPayment)}`
     : '利用なし'
-  drawSalesGridBlock(state, MARGIN, top - 56, [235], [[{ text: 'クレジットお支払いプラン', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.8 }], [{ text: creditText, size: 7.2 }]], [18, 34])
-  drawSalesGridBlock(state, MARGIN, top - 116, [80, 155], [[{ text: '備考', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8 }, { text: document.note || '特になし', size: 7.8 }]], [40])
+  drawSalesGridBlock(state, MARGIN, top - 44, [235], [[{ text: 'クレジットお支払いプラン', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.2 }], [{ text: creditText, size: 6.8 }]], [15, creditContentHeight])
+  drawSalesGridBlock(state, MARGIN, top - 44 - 15 - creditContentHeight - 4, [70, 165], [[{ text: '備考', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.2 }, { text: document.note || '特になし', size: 7.2 }]], [24])
   const required = requiredSalesDocumentLabels(details).join(' ／ ') || '未確認'
-  drawSalesGridBlock(state, MARGIN, top - 162, [80, 155], [[{ text: '必要書類', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8 }, { text: required, size: 7.5 }]], [38])
+  const requiredTop = top - 44 - 15 - creditContentHeight - 4 - 28
+  drawSalesGridBlock(state, MARGIN, requiredTop, [70, 165], [[{ text: '必要書類', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.2 }, { text: required, size: 7 }]], [24])
 
-  drawTextTop(state.page, state.font, settings.shop.name || '店舗名未設定', rightX, top - 6, 12, colors.ink, rightWidth, 'right')
+  drawTextTop(state.page, state.font, settings.shop.name || '店舗名未設定', rightX, top - 4, 11, colors.ink, rightWidth, 'right')
   const shopLines = [settings.shop.postalCode ? `〒${settings.shop.postalCode}` : '', settings.shop.address, settings.shop.phone ? `TEL ${settings.shop.phone}` : '', settings.shop.representative ? `担当 ${settings.shop.representative}` : ''].filter(Boolean)
-  shopLines.forEach((line, index) => drawTextTop(state.page, state.font, line, rightX, top - 24 - index * 11, 8, colors.muted, rightWidth, 'right'))
-  const paymentTop = top - 116
-  drawTextTop(state.page, state.font, 'お支払いについて', rightX, paymentTop, 8, colors.muted, rightWidth)
-  drawTextTop(state.page, state.font, settings.document.paymentNote || '店頭または指定口座へお支払いください。', rightX, paymentTop - 13, 7.8, colors.ink, rightWidth)
-  drawTextTop(state.page, state.font, '振込先', rightX, paymentTop - 34, 8, colors.muted, rightWidth)
-  drawTextTop(state.page, state.font, [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定', rightX, paymentTop - 47, 7.8, colors.ink, rightWidth)
-  drawTextTop(state.page, state.font, `課税対象 ${formatYen(totals.taxableSubtotal)}　消費税 ${formatYen(totals.tax)}`, rightX, top - 162, 7.8, colors.muted, rightWidth, 'right')
+  shopLines.forEach((line, index) => drawTextTop(state.page, state.font, line, rightX, top - 20 - index * 10, 7.2, colors.muted, rightWidth, 'right'))
+  const paymentTop = top - 72
+  drawTextTop(state.page, state.font, 'お支払いについて', rightX, paymentTop, 7.5, colors.muted, rightWidth)
+  drawTextTop(state.page, state.font, settings.document.paymentNote || '店頭または指定口座へお支払いください。', rightX, paymentTop - 12, 7.2, colors.ink, rightWidth)
+  drawTextTop(state.page, state.font, '振込先', rightX, paymentTop - 29, 7.5, colors.muted, rightWidth)
+  drawTextTop(state.page, state.font, [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定', rightX, paymentTop - 41, 7.2, colors.ink, rightWidth)
+  drawTextTop(state.page, state.font, `課税対象 ${formatYen(totals.taxableSubtotal)}　消費税 ${formatYen(totals.tax)}`, rightX, top - 112, 7.2, colors.muted, rightWidth, 'right')
+  state.y = top - blockHeight
 }
 
 function drawSalesGridBlock(state: PageState, x: number, top: number, widths: number[], rows: SalesGridCell[][], rowHeights: number[]) {
@@ -511,17 +716,6 @@ function wrapText(value: string, font: PDFFont, size: number, maxWidth: number) 
     output.push(line || ' ')
   })
   return output
-}
-
-function calculateSalesTotals(document: SalesDocument, rounding: AppSettings['tax']['rounding']) {
-  const amountOf = (item: SalesDocument['items'][number]) => Math.round(item.quantity * item.unitPrice + item.otherAmount)
-  const subtotal = document.items.reduce((sum, item) => sum + amountOf(item), 0)
-  const taxableSubtotal = document.items.filter((item) => item.taxCategory === '課税').reduce((sum, item) => sum + amountOf(item), 0)
-  const nonTaxableSubtotal = document.items.filter((item) => item.taxCategory === '非課税').reduce((sum, item) => sum + amountOf(item), 0)
-  const outOfScopeSubtotal = document.items.filter((item) => item.taxCategory === '対象外').reduce((sum, item) => sum + amountOf(item), 0)
-  const taxValue = Math.max(0, taxableSubtotal) * document.taxRate
-  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
-  return { subtotal, taxableSubtotal, nonTaxableSubtotal, outOfScopeSubtotal, tax, total: subtotal + tax }
 }
 
 function calculateTax(base: number, rate: number, rounding: AppSettings['tax']['rounding']) {
