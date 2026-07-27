@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
+import { customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -7,7 +7,7 @@ import { HttpError, jsonResponse, readJson } from '../http'
 
 const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
 const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
-const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
+const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
@@ -64,7 +64,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   const id = crypto.randomUUID()
   const number = input.number ?? await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
   await ensureSalesDocumentNumberAvailable(database, number, organizationId)
-  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
+  const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
   await database.insert(salesDocuments).values({
     id,
@@ -108,7 +108,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
   }, database, organizationId)
   await ensureSalesDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
-  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
+  const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
   await database.update(salesDocuments).set({
     type: input.type,
@@ -203,6 +203,11 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   const dueDate = nullableDate(body.dueDate)
   const number = nullableString(body, 'number')
   const details = parseSalesDetails(body.details)
+  if (details.selectedImageAttachmentId) {
+    if (!vehicleId) throw new HttpError(400, '画像を選択するには対象車両が必要です。')
+    const image = await database.select({ id: vehicleFiles.id }).from(vehicleFiles).where(and(eq(vehicleFiles.id, details.selectedImageAttachmentId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId), eq(vehicleFiles.fileKind, 'image'))).get()
+    if (!image) throw new HttpError(400, '選択した画像が対象車両に紐づいていません。')
+  }
   const items = parseItems(body.items)
   return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), details, items }
 }
@@ -282,12 +287,46 @@ async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabas
   return `${prefix}${String(sequence).padStart(3, '0')}`
 }
 
-function calculateTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入') {
-  const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const taxableSubtotal = items.filter((item) => item.taxCategory === '課税').reduce((sum, item) => sum + item.amount, 0)
+export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {
+  const buckets = { vehicleBase: 0, discount: 0, accessories: 0, vehicleSideLabor: 0, legalNonTaxable: 0, taxableFees: 0, nonTaxableFees: 0, outOfScope: 0, tradeIn: 0, payments: 0, recycle: 0 }
+  let hasRecycleLine = false
+  items.forEach((item) => {
+    const bucket = classifySalesItem(item)
+    buckets[bucket] += item.amount
+    if (bucket === 'recycle') hasRecycleLine = true
+  })
+  const recycleFee = hasRecycleLine ? buckets.recycle : Math.max(0, details.recycleFee)
+  const vehicleSalesTotal = buckets.vehicleBase + buckets.discount + buckets.accessories + buckets.vehicleSideLabor
+  const taxableSubtotal = vehicleSalesTotal + buckets.taxableFees
+  const nonTaxableSubtotal = buckets.legalNonTaxable + buckets.nonTaxableFees + recycleFee
+  const subtotal = taxableSubtotal + nonTaxableSubtotal + buckets.outOfScope
   const taxValue = Math.max(0, taxableSubtotal) * taxRate / 100
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + tax }
+}
+
+type SalesItemBucket = keyof ReturnType<typeof emptySalesCalculationBuckets>
+
+function emptySalesCalculationBuckets() {
+  return { vehicleBase: 0, discount: 0, accessories: 0, vehicleSideLabor: 0, legalNonTaxable: 0, taxableFees: 0, nonTaxableFees: 0, outOfScope: 0, tradeIn: 0, payments: 0, recycle: 0 }
+}
+
+function classifySalesItem(item: SalesItemInput): SalesItemBucket {
+  const label = `${item.itemType} ${item.description}`
+  if (item.itemType === '車両本体価格' || label.includes('車両本体価格')) return 'vehicleBase'
+  if (item.itemType === '値引き' || label.includes('値引')) return 'discount'
+  if (item.itemType === '付属品・特別仕様' || item.itemType === '取付工賃' || label.includes('付属品') || label.includes('特別仕様')) return 'accessories'
+  if (item.itemType === '車両販売工賃' || label.includes('車両販売側工賃')) return 'vehicleSideLabor'
+  if (item.itemType === '下取車') return 'tradeIn'
+  if (item.itemType === '頭金' || item.itemType === '残金' || label.includes('頭金') || label.includes('残金')) return 'payments'
+  if (label.includes('リサイクル')) return 'recycle'
+  if (['自動車税', '取得税', '環境性能割', '重量税', '自賠責', '印紙代'].some((keyword) => label.includes(keyword))) return 'legalNonTaxable'
+  if (['証紙', '預託金'].some((keyword) => label.includes(keyword))) return 'nonTaxableFees'
+  if (['車庫証明', '登録費用', '登録代行', '登録手続', '検査', '納車', '手数料', '査定料'].some((keyword) => label.includes(keyword))) return 'taxableFees'
+  if (label.includes('下取')) return 'tradeIn'
+  if (item.taxCategory === '非課税') return 'nonTaxableFees'
+  if (item.taxCategory === '対象外') return 'outOfScope'
+  return 'taxableFees'
 }
 
 function parseItems(value: unknown): SalesItemInput[] {
@@ -324,6 +363,7 @@ function parseSalesDetails(value: unknown): SalesDocumentDetails {
     customerBirthDate: dateValue(record.customerBirthDate),
     customerEmployer: limitedString(record.customerEmployer, '', 200),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
+    selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
     tradeIn: {
       name: limitedString(tradeIn.name, '', 200),
       modelYear: limitedString(tradeIn.modelYear, '', 50),
@@ -476,6 +516,7 @@ type SalesDocumentDetails = {
   customerBirthDate: string
   customerEmployer: string
   customerContactPhone: string
+  selectedImageAttachmentId: string
   tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
   recycleFee: number
   downPayment: number
