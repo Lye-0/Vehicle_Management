@@ -7,6 +7,7 @@ export type FirebaseUser = {
   email: string | null
   displayName: string | null
   emailVerified: boolean
+  isAnonymous: boolean
 }
 
 export class UnauthorizedError extends Error {
@@ -50,11 +51,14 @@ function getBearerToken(request: Request) {
 
 function toFirebaseUser(payload: JWTPayload): FirebaseUser {
   if (typeof payload.sub !== 'string' || payload.sub.length === 0) throw new UnauthorizedError('認証ユーザーが特定できません。')
+  const firebaseClaims = payload.firebase && typeof payload.firebase === 'object' ? payload.firebase as Record<string, unknown> : null
+  const signInProvider = typeof firebaseClaims?.sign_in_provider === 'string' ? firebaseClaims.sign_in_provider : ''
   return {
     uid: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : null,
     displayName: typeof payload.name === 'string' ? payload.name : null,
     emailVerified: payload.email_verified === true,
+    isAnonymous: signInProvider === 'anonymous',
   }
 }
 

@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { appSettings } from '@vehicle-management/database'
+import { appSettings, organizations } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -81,6 +81,12 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
       await database.insert(appSettings).values({ organizationId, key, value, updatedAt: now }).run()
     }
   }
+
+  const shopName = next.shop.name
+  if (shopName) {
+    await database.update(organizations).set({ name: shopName, updatedAt: now }).where(eq(organizations.id, organizationId)).run()
+  }
+
   return jsonResponse({ settings: next }, 200, env)
 }
 

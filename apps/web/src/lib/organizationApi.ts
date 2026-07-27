@@ -26,6 +26,13 @@ export type AuthSession = {
   setupAvailable: boolean
   mustChangePassword: boolean
 }
+export async function updateCurrentProfile(input: { displayName?: string; email?: string | null }) {
+  return apiFetch<{ profile: { displayName: string; email: string | null } }>('/api/auth/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
 
 export async function fetchAuthSession() {
   return apiFetch<AuthSession>('/api/auth/me')
