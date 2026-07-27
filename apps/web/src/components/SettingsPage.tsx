@@ -5,7 +5,7 @@ import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
-import { createMember, fetchMembers, sendMemberPasswordReset, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
+import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
 
@@ -357,21 +357,23 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     }
   }
 
-  async function resetMemberPassword(uid: string) {
-    if (!window.confirm('このユーザーにパスワード再設定メールを送信しますか？')) return
-    setMemberLoading(`reset-${uid}`)
+  async function removeMember(uid: string) {
+    const member = members.find((item) => item.uid === uid)
+    if (!member) return
+    if (!window.confirm(`「${member.displayName}」を現在の組織から削除しますか？削除後もアカウント自体は残ります。`)) return
+    setMemberLoading(`remove-${uid}`)
     setMemberError('')
     setMemberMessage('')
     try {
-      const response = await sendMemberPasswordReset(uid)
-      setMemberMessage(response.message)
+      const response = await removeMemberFromOrganization(uid)
+      setMembers(response.members)
+      setMemberMessage('組織から削除しました。')
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
     } finally {
       setMemberLoading('')
     }
   }
-
   async function copyTemporaryPassword() {
     if (!temporaryPassword) return
     if (!navigator.clipboard) {
@@ -411,7 +413,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
         <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setMemberError(''); setMemberMessage(''); setMemberModal('add') }}><UserPlus size={15} />従業員を追加</button>}</div>
         {memberError && !memberModal && <div className="auth-error" role="alert">{memberError}</div>}
         {memberMessage && !memberModal && <div className="settings-success" role="status">{memberMessage}</div>}
-        {membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}
+        {membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onRemove={removeMember} />)}</div>}
       </section>
       {accountModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) setAccountModal(null) }}>
         <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -465,10 +467,10 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   )
 }
 
-function MemberRow({ member, currentRole, loading, onChange, onReset }: { member: MemberRecord; currentRole: MemberRole; loading: string; onChange: (uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) => void; onReset: (uid: string) => void }) {
+function MemberRow({ member, currentRole, loading, onChange, onRemove }: { member: MemberRecord; currentRole: MemberRole; loading: string; onChange: (uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) => void; onRemove: (uid: string) => void }) {
   const canEdit = !member.isSelf && member.role !== 'owner' && (currentRole === 'owner' || (currentRole === 'admin' && member.role === 'employee'))
-  const canReset = canEdit
-  return <article className="member-row"><div className="member-avatar"><UserRound size={18} /></div><div className="member-main"><div className="member-heading"><strong>{member.displayName}</strong>{member.isSelf && <span className="member-self-badge">自分</span>}{member.mustChangePassword && <span className="member-pending-badge">初回変更待ち</span>}</div><small>{member.email || 'メールアドレス未設定'}</small></div><div className="member-role-control">{member.role === 'owner' ? <span className="member-role-badge"><ShieldCheck size={13} />オーナー</span> : canEdit ? <select aria-label={`${member.displayName}の権限`} value={member.role} disabled={Boolean(loading)} onChange={(event) => onChange(member.uid, { role: event.target.value as Exclude<MemberRole, 'owner'> })}><option value="employee">従業員</option><option value="admin">管理者</option></select> : <span className="member-role-badge">{member.role === 'admin' ? '管理者' : '従業員'}</span>}</div><div className="member-status-control">{canEdit ? <button className={`member-status-button is-${member.status}`} type="button" disabled={Boolean(loading)} onClick={() => onChange(member.uid, { status: member.status === 'active' ? 'suspended' : 'active' })}>{member.status === 'active' ? '利用中' : '停止中'}</button> : <span className={`member-status-badge is-${member.status}`}>{member.status === 'active' ? '利用中' : '停止中'}</span>}</div>{canReset && <button className="text-button member-reset-button" type="button" disabled={Boolean(loading)} onClick={() => onReset(member.uid)}>{loading === `reset-${member.uid}` ? '送信中…' : '再設定メール'}</button>}</article>
+  const canRemove = canEdit
+  return <article className="member-row"><div className="member-avatar"><UserRound size={18} /></div><div className="member-main"><div className="member-heading"><strong>{member.displayName}</strong>{member.isSelf && <span className="member-self-badge">自分</span>}{member.mustChangePassword && <span className="member-pending-badge">初回変更待ち</span>}</div><small>{member.email || 'メールアドレス未設定'}</small></div><div className="member-role-control">{member.role === 'owner' ? <span className="member-role-badge"><ShieldCheck size={13} />オーナー</span> : canEdit ? <select aria-label={`${member.displayName}の権限`} value={member.role} disabled={Boolean(loading)} onChange={(event) => onChange(member.uid, { role: event.target.value as Exclude<MemberRole, 'owner'> })}><option value="employee">従業員</option><option value="admin">管理者</option></select> : <span className="member-role-badge">{member.role === 'admin' ? '管理者' : '従業員'}</span>}</div><div className="member-status-control">{canEdit ? <button className={`member-status-button is-${member.status}`} type="button" disabled={Boolean(loading)} onClick={() => onChange(member.uid, { status: member.status === 'active' ? 'suspended' : 'active' })}>{member.status === 'active' ? '利用中' : '停止中'}</button> : <span className={`member-status-badge is-${member.status}`}>{member.status === 'active' ? '利用中' : '停止中'}</span>}</div>{canRemove && <button className="text-button member-remove-button" type="button" disabled={Boolean(loading)} onClick={() => onRemove(member.uid)}>{loading === `remove-${member.uid}` ? '削除中…' : '組織から削除'}</button>}</article>
 }
 
 function getMemberError(error: unknown) {

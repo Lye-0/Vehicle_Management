@@ -36,6 +36,6 @@ export async function updateMember(uid: string, input: { displayName?: string; r
   })
 }
 
-export async function sendMemberPasswordReset(uid: string) {
-  return apiFetch<{ message: string }>(`/api/organization/members/${encodeURIComponent(uid)}/password-reset`, { method: 'POST' })
+export async function removeMemberFromOrganization(uid: string) {
+  return apiFetch<MembersResponse>(`/api/organization/members/${encodeURIComponent(uid)}`, { method: 'DELETE' })
 }

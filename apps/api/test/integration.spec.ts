@@ -366,7 +366,9 @@ describe("CLI authenticated workflow", () => {
 			expect(preview.body.totalRows).toBe(1);
 			expect(arrayValue(preview.body.errors)).toHaveLength(0);
 
-			const committed = await requestForm<JsonObject>("/api/import/customers/commit", importFile);
+			const commitImportFile = new FormData();
+			commitImportFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
+			const committed = await requestForm<JsonObject>("/api/import/customers/commit", commitImportFile);
 			expect(committed.response.status).toBe(200);
 			expect(committed.body).toEqual(expect.objectContaining({ imported: 1, updated: 0, skipped: 0 }));
 
@@ -395,7 +397,9 @@ describe("CLI authenticated workflow", () => {
 
 			const employeeCannotManageMembers = await requestJson<JsonObject>(`/api/organization/members/${ownerUid}`, "PATCH", { status: "suspended" }, employeeUid);
 			expect(employeeCannotManageMembers.response.status).toBe(403);
-			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", new FormData(), employeeUid);
+			const employeeImportAttemptFile = new FormData();
+			employeeImportAttemptFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
+			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", employeeImportAttemptFile, employeeUid);
 			expect(employeeCannotImport.response.status).toBe(403);
 			const employeeCannotBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
 			expect(employeeCannotBackup.response.status).toBe(403);
@@ -408,6 +412,15 @@ describe("CLI authenticated workflow", () => {
 			expect(reactivated.response.status).toBe(200);
 			const activeEmployee = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(activeEmployee.response.status).toBe(200);
+
+			const removedEmployee = await requestJson<JsonObject>(`/api/organization/members/${employeeUid}`, "DELETE");
+			expect(removedEmployee.response.status).toBe(200);
+			expect(arrayValue(removedEmployee.body.members)).not.toEqual(
+				expect.arrayContaining([expect.objectContaining({ uid: employeeUid })]),
+			);
+
+			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
+			expect(removedEmployeeAccess.response.status).toBe(400);
 
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);

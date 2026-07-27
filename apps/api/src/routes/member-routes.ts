@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { authAccounts, organizationMemberships, staffProfiles } from '@vehicle-management/database'
-import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser, sendPasswordResetEmail } from '../auth/identity-toolkit'
+import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser } from '../auth/identity-toolkit'
 import { requireAdminOrganizationContext, requireOrganizationContext, type OrganizationRole } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -14,9 +14,8 @@ type MemberStatus = typeof memberStatuses[number]
 export async function handleMemberRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const collectionPath = pathname === '/api/organization/members'
-  const resetMatch = pathname.match(/^\/api\/organization\/members\/([^/]+)\/password-reset$/)
   const memberMatch = pathname.match(/^\/api\/organization\/members\/([^/]+)$/)
-  if (!collectionPath && !resetMatch && !memberMatch) return null
+  if (!collectionPath && !memberMatch) return null
 
   try {
     const database = createDatabase(env.DB)
@@ -25,8 +24,8 @@ export async function handleMemberRoutes(request: Request, env: Env): Promise<Re
       return jsonResponse({ currentRole: context.organization.role, members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
     }
     if (collectionPath && request.method === 'POST') return await createMember(request, env, database)
-    if (resetMatch && request.method === 'POST') return await resetMemberPassword(request, env, database, decodeURIComponent(resetMatch[1]))
     if (memberMatch && request.method === 'PATCH') return await updateMember(request, env, database, decodeURIComponent(memberMatch[1]))
+    if (memberMatch && request.method === 'DELETE') return await removeMember(request, env, database, decodeURIComponent(memberMatch[1]))
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -111,21 +110,17 @@ async function updateMember(request: Request, env: Env, database: ReturnType<typ
   return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
 }
 
-async function resetMemberPassword(request: Request, env: Env, database: ReturnType<typeof createDatabase>, uid: string) {
+async function removeMember(request: Request, env: Env, database: ReturnType<typeof createDatabase>, uid: string) {
   const context = await requireAdminOrganizationContext(request, env, database)
   const target = await database.select().from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).get()
   if (!target) throw new HttpError(404, '対象ユーザーが見つかりません。')
   const targetRole = normalizeRole(target.role)
-  if (targetRole === 'owner' || (context.organization.role === 'admin' && targetRole !== 'employee')) throw new HttpError(403, 'このユーザーのパスワード再設定は実行できません。')
-  const profile = await database.select().from(staffProfiles).where(eq(staffProfiles.uid, uid)).get()
-  if (!profile?.email) throw new HttpError(400, '対象ユーザーにメールアドレスが登録されていません。')
-  try {
-    await sendPasswordResetEmail(env, profile.email)
-  } catch (error) {
-    if (error instanceof IdentityToolkitError && error.code === 'EMAIL_NOT_FOUND') throw new HttpError(404, 'メール認証アカウントが見つかりません。')
-    throw error
-  }
-  return jsonResponse({ message: 'パスワード再設定メールを送信しました。' }, 200, env)
+  if (targetRole === 'owner') throw new HttpError(403, 'オーナーは組織から削除できません。')
+  if (uid === context.user.uid) throw new HttpError(400, '自分自身は組織から削除できません。')
+  if (context.organization.role === 'admin' && targetRole !== 'employee') throw new HttpError(403, '管理者は他の管理者を組織から削除できません。')
+
+  await database.delete(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).run()
+  return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
 }
 
 async function listMembers(database: ReturnType<typeof createDatabase>, organizationId: string, currentUid: string) {

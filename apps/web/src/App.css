@@ -980,7 +980,7 @@
 .member-status-button { cursor: pointer; }
 .member-status-button.is-active, .member-status-badge.is-active { color: #16794a; background: #e7f7ee; }
 .member-status-button.is-suspended, .member-status-badge.is-suspended { color: #9a5a00; background: #fff2d2; }
-.member-reset-button { white-space: nowrap; }
+.member-remove-button { color: #b42318; white-space: nowrap; }
 .member-add-form { display: grid; gap: 15px; margin-bottom: 16px; padding: 15px; border: 1px solid #c8d9f6; border-radius: 10px; background: var(--primary-soft); }
 .member-add-heading { display: flex; align-items: flex-start; gap: 9px; color: var(--primary); }
 .member-add-heading > div { display: grid; gap: 4px; }
@@ -1205,9 +1205,9 @@
 
 @media (max-width: 820px) {
   .member-row { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .member-role-control, .member-status-control, .member-reset-button { grid-column: 2 / -1; }
+  .member-role-control, .member-status-control, .member-remove-button { grid-column: 2 / -1; }
   .member-role-control, .member-status-control { justify-self: start; }
-  .member-reset-button { justify-self: start; }
+  .member-remove-button { justify-self: start; }
 }
 
 @media print {
