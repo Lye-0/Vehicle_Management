@@ -338,7 +338,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
         setMemberMessage('従業員を登録しました。')
       } else {
         setMemberModal(null)
-        setMemberMessage('既存のアカウントを組織に再追加しました。初期パスワードは再発行されないため、本人は現在のログイン情報を使用します。')
+        setMemberMessage('既存のアカウントを組織に再追加し、初期パスワードを再発行しました。')
       }
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
@@ -457,7 +457,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
           </div>
           {memberError && <div className="auth-error" role="alert">{memberError}</div>}
           {memberModal === 'add' ? <form className="account-modal-content" onSubmit={(event) => void addMember(event)}>
-            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。新規アカウントの場合は初期パスワードが表示され、過去に削除したアカウントは既存のログイン情報で再追加されます。</p>
+            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。新規追加でも、過去に削除したアカウントの再追加でも、新しい初期パスワードが表示されます。</p>
             <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
           </form> : <div className="account-modal-content">

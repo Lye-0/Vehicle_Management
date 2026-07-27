@@ -4,6 +4,7 @@ export type EnvironmentConfig = {
   FIREBASE_PROJECT_ID?: string
   FIREBASE_AUTH_EMULATOR?: string
   FIREBASE_WEB_API_KEY?: string
+  FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON?: string
   INITIAL_SETUP_KEY?: string
   CORS_ORIGIN?: string
   B2_BUCKET?: string

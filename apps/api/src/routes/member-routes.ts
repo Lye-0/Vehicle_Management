@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { authAccounts, organizationMemberships, staffProfiles } from '@vehicle-management/database'
-import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser } from '../auth/identity-toolkit'
+import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser, resetEmailPasswordUser } from '../auth/identity-toolkit'
 import { requireAdminOrganizationContext, requireOrganizationContext, type OrganizationRole } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -46,7 +46,7 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
     : undefined
   if (existingMembership) throw new HttpError(409, 'そのユーザーはすでにこの組織に所属しています。')
 
-  const temporaryPassword = existingProfile ? undefined : createTemporaryPassword()
+  const temporaryPassword = createTemporaryPassword()
   const membershipId = crypto.randomUUID()
   let createdUser: { uid: string; idToken: string } | null = null
   let memberUid = existingProfile?.uid
@@ -54,6 +54,7 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
   try {
     const now = new Date().toISOString()
     if (existingProfile) {
+      await resetEmailPasswordUser(env, existingProfile.uid, email, temporaryPassword)
       await database.insert(organizationMemberships).values({
         id: membershipId,
         organizationId: context.organization.organizationId,
@@ -64,6 +65,7 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
       }).run()
       membershipCreated = true
       await database.update(staffProfiles).set({ displayName, email, updatedAt: now }).where(eq(staffProfiles.uid, existingProfile.uid)).run()
+      await markInitialPasswordIssued(database, existingProfile.uid, now)
     } else {
       createdUser = await createEmailPasswordUser(env, email, temporaryPassword!)
       memberUid = createdUser.uid
@@ -102,6 +104,12 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
     }
     if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
       throw new HttpError(409, 'そのメールアドレスの認証アカウントは既に存在します。既存ユーザーの情報を確認してから再登録してください。')
+    }
+    if (existingProfile && error instanceof IdentityToolkitError) {
+      if (error.code === 'USER_NOT_FOUND' || error.code === 'EMAIL_NOT_FOUND') {
+        throw new HttpError(409, 'このメールアドレスに対応するFirebase認証アカウントが見つかりません。認証アカウントを確認してから再追加してください。')
+      }
+      throw new HttpError(503, '既存アカウントのパスワードを再設定できませんでした。Firebaseの設定と認証アカウントを確認してください。')
     }
     throw error
   }
@@ -149,6 +157,16 @@ async function removeMember(request: Request, env: Env, database: ReturnType<typ
 
   await database.delete(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).run()
   return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
+}
+
+async function markInitialPasswordIssued(database: ReturnType<typeof createDatabase>, uid: string, issuedAt: string) {
+  const existingAccount = await database.select({ uid: authAccounts.uid }).from(authAccounts).where(eq(authAccounts.uid, uid)).get()
+  const values = { mustChangePassword: true, initialPasswordIssuedAt: issuedAt, initialPasswordChangedAt: null, updatedAt: issuedAt }
+  if (existingAccount) {
+    await database.update(authAccounts).set(values).where(eq(authAccounts.uid, uid)).run()
+  } else {
+    await database.insert(authAccounts).values({ uid, ...values }).run()
+  }
 }
 
 async function findStaffProfileByEmail(database: ReturnType<typeof createDatabase>, email: string) {

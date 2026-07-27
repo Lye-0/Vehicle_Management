@@ -421,10 +421,11 @@ describe("CLI authenticated workflow", () => {
 
 			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(removedEmployeeAccess.response.status).toBe(400);
-			const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: `${marker} 再追加従業員`, email: `${employeeUid}@example.com` });
-			expect(readdedEmployee.response.status).toBe(201);
-			expect(readdedEmployee.body.temporaryPassword).toBeUndefined();
-			expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: `${marker} 再追加従業員`, role: "employee", status: "active" }));
+            const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: marker + " 再追加従業員", email: employeeUid + "@example.com" });
+            expect(readdedEmployee.response.status).toBe(201);
+            expect(readdedEmployee.body.temporaryPassword).toEqual(expect.any(String));
+            expect(stringValue(readdedEmployee.body.temporaryPassword).length).toBeGreaterThanOrEqual(16);
+            expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: marker + " 再追加従業員", role: "employee", status: "active", mustChangePassword: true }));
 			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(readdedEmployeeAccess.response.status).toBe(200);
 
@@ -492,7 +493,7 @@ async function prepareTestOrganizations() {
 		.bind(ownerUid, `${marker} オーナー`, `${ownerUid}@example.com`, "owner")
 		.run();
 	await env.DB.prepare("INSERT OR IGNORE INTO staff_profiles (uid, display_name, email, role) VALUES (?, ?, ?, ?)")
-		.bind(employeeUid, `${marker} 従業員`, `${employeeUid}@example.com`, "employee")
+		.bind(employeeUid, marker + " 従業員", employeeUid + "@example.com", "employee")
 		.run();
 	await env.DB.prepare("INSERT OR IGNORE INTO auth_accounts (uid, must_change_password) VALUES (?, 0)")
 		.bind(ownerUid)
