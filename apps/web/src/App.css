@@ -935,6 +935,7 @@
 .account-setting-list { display: grid; gap: 20px; }
 .account-setting-row { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1.4fr) auto; align-items: center; gap: 16px; padding: 4px 0 20px; border-bottom: 1px solid var(--border); }
 .account-setting-label { display: grid; gap: 5px; min-width: 0; }
+.account-setting-value { min-width: 0; padding: 11px 12px; overflow: hidden; color: var(--text); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .account-setting-label strong { color: var(--text); font-size: 14px; }
 .account-setting-label small { color: var(--text-muted); font-size: 11px; }
 .account-setting-input { width: 100%; min-width: 0; height: 42px; padding: 0 12px; color: var(--text); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font: inherit; font-size: 13px; outline: 0; }
@@ -949,6 +950,18 @@
 .account-login-row.is-unlinked { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
 .account-login-editor { display: grid; gap: 13px; margin: -2px 0 5px; padding: 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
 .account-login-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.account-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(15, 27, 47, 0.45); }
+.account-modal { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; color: var(--text); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 80px rgba(15, 27, 47, 0.28); }
+.account-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.account-modal-header h2 { margin: 5px 0 0; color: var(--text); font-size: 20px; line-height: 1.35; }
+.account-modal-close { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px; padding: 0; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 22px; line-height: 1; cursor: pointer; }
+.account-modal-close:hover:not(:disabled) { color: var(--text); background: var(--surface-subtle); }
+.account-modal-close:disabled { cursor: wait; opacity: 0.55; }
+.account-modal .auth-error, .account-modal .settings-success { margin-top: 16px; }
+.account-modal-content { display: grid; gap: 16px; padding-top: 18px; }
+.account-modal-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.account-modal-note { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.account-modal-actions .verified-label { margin-right: auto; }
 .settings-success { padding: 10px 12px; color: #16794a; border: 1px solid #b9e7ca; border-radius: 8px; background: #eefbf2; font-size: 12px; }
 .member-list { display: grid; gap: 8px; }
 .member-list-empty { min-height: 120px; }

@@ -158,12 +158,21 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
-  const [activeLoginEditor, setActiveLoginEditor] = useState<'password' | 'google' | ''>('')
+  const [accountModal, setAccountModal] = useState<'displayName' | 'password' | 'google' | null>(null)
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
   const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
   const isAnonymous = currentUser.isAnonymous
   const canManageMembers = !isAnonymous && (currentRole === 'owner' || currentRole === 'admin')
+
+  useEffect(() => {
+    if (!accountModal) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !loading) setAccountModal(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [accountModal, loading])
 
   useEffect(() => {
     let cancelled = false
@@ -203,15 +212,17 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     }
   }
 
-  async function runAction(action: string, callback: () => Promise<void>, profile?: { displayName?: string; email?: string | null }) {
+  async function runAction(action: string, callback: () => Promise<void>, profile?: { displayName?: string; email?: string | null }): Promise<boolean> {
     setLoading(action)
     setError('')
     setMessage('')
     try {
       await callback()
       await refreshUser(profile)
+      return true
     } catch (reason) {
       setError(getSettingsAuthError(reason))
+      return false
     } finally {
       setLoading('')
     }
@@ -222,10 +233,11 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       setError('表示名を入力してください。')
       return
     }
-    await runAction('displayName', async () => {
+    const completed = await runAction('displayName', async () => {
       await changeCurrentDisplayName(displayName)
       setMessage('表示名を更新しました。')
     }, { displayName: displayName.trim() })
+    if (completed) setAccountModal(null)
   }
 
   async function saveEmail() {
@@ -233,11 +245,12 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       setError('メールアドレスを入力してください。')
       return
     }
-    await runAction('email', async () => {
+    const completed = await runAction('email', async () => {
       await changeCurrentEmail(newEmail)
       await sendCurrentEmailVerification()
       setMessage('メールアドレスを更新し、確認メールを送信しました。')
     }, { email: newEmail.trim().toLowerCase() })
+    if (completed) setAccountModal(null)
   }
 
   async function savePassword() {
@@ -249,12 +262,13 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       setError('パスワードが一致しません。')
       return
     }
-    await runAction('password', async () => {
+    const completed = await runAction('password', async () => {
       await changeCurrentPassword(newPassword)
       setNewPassword('')
       setPasswordConfirmation('')
       setMessage('パスワードを更新しました。')
     })
+    if (completed) setAccountModal(null)
   }
 
   async function linkPassword() {
@@ -262,26 +276,29 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       setError('メールアドレスと8文字以上のパスワードを入力してください。')
       return
     }
-    await runAction('link-password', async () => {
+    const completed = await runAction('link-password', async () => {
       await addEmailPasswordLogin(linkEmail, linkPasswordValue)
       setLinkPasswordValue('')
       setMessage('メールアドレス＋パスワードを追加しました。')
     })
+    if (completed) setAccountModal(null)
   }
 
   async function linkGoogle() {
-    await runAction('link-google', async () => {
+    const completed = await runAction('link-google', async () => {
       await addGoogleLogin()
       setMessage('Googleログインを追加しました。')
     })
+    if (completed) setAccountModal(null)
   }
 
   async function unlinkProvider(providerId: string) {
     if (!window.confirm('このログイン方法を解除しますか？')) return
-    await runAction(`unlink-${providerId}`, async () => {
+    const completed = await runAction(`unlink-${providerId}`, async () => {
       await removeLoginProvider(providerId)
       setMessage('ログイン方法を解除しました。')
     })
+    if (completed) setAccountModal(null)
   }
 
   async function addMember(event: FormEvent<HTMLFormElement>) {
@@ -354,55 +371,61 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       <section className="panel settings-panel account-settings-panel">
         <div className="account-setting-list">
           <div className="account-setting-row account-setting-row-display-name">
-            <div className="account-setting-label"><strong>表示名</strong>{isAnonymous && <small>認証連携後に変更できます。</small>}</div>
-            <input className="account-setting-input" type="text" value={displayName} disabled={isAnonymous || Boolean(loading)} onChange={(event) => setDisplayName(event.target.value)} />
-            <button className="button button-secondary account-change-button" type="button" disabled={isAnonymous || Boolean(loading)} onClick={() => void saveDisplayName()}>{loading === "displayName" ? "変更中…" : "変更"}</button>
+            <div className="account-setting-label"><strong>表示名</strong><small>サイドバーなどに表示されます。</small></div>
+            <div className="account-setting-value">{displayName || '未設定'}</div>
+            <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setMessage(''); setAccountModal('displayName') }}>変更</button>
           </div>
           <div className="account-setting-group">
             <h3>ログイン方法</h3>
-            <div className={hasPassword ? "account-login-row is-linked" : "account-login-row is-unlinked"}>
-              <strong>メールアドレス＋パスワードでログイン（{hasPassword ? "済み" : "未設定"}）</strong>
-              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => setActiveLoginEditor(activeLoginEditor === "password" ? "" : "password")}>変更</button>
+            <div className={hasPassword ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
+              <strong>メールアドレス＋パスワードでログイン（{hasPassword ? '済み' : '未設定'}）</strong>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setMessage(''); setAccountModal('password') }}>変更</button>
             </div>
-            {activeLoginEditor === "password" && hasPassword && <div className="account-login-editor">
-              <div className="settings-form-grid">
-                <SettingsField label="メールアドレス" type="email" value={newEmail} onChange={setNewEmail} />
-                <SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} />
-                <SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} />
-              </div>
-              <div className="account-login-editor-actions">
-                <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === "email" ? "変更中…" : "メールアドレスを変更"}</button>
-                <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === "password" ? "変更中…" : "パスワードを変更"}</button>
-                {currentUser.emailVerified ? <span className="account-verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction("verification", async () => { await sendCurrentEmailVerification(); setMessage("確認メールを送信しました。") })}>{loading === "verification" ? "送信中…" : "確認メールを送信"}</button>}
-              </div>
-            </div>}
-            {activeLoginEditor === "password" && !hasPassword && <div className="account-login-editor">
-              <div className="settings-form-grid">
-                <SettingsField label="メールアドレス" type="email" value={linkEmail} onChange={setLinkEmail} />
-                <SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} />
-              </div>
-              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === "link-password" ? "追加しています…" : "メール認証を追加"}</button>
-            </div>}
-            <div className={hasGoogle ? "account-login-row is-linked" : "account-login-row is-unlinked"}>
-              <strong>Googleでログイン（{hasGoogle ? "済み" : "未設定"}）</strong>
-              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => setActiveLoginEditor(activeLoginEditor === "google" ? "" : "google")}>変更</button>
+            <div className={hasGoogle ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
+              <strong>Googleでログイン（{hasGoogle ? '済み' : '未設定'}）</strong>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setMessage(''); if (hasGoogle) setAccountModal('google'); else void linkGoogle() }}>変更</button>
             </div>
-            {activeLoginEditor === "google" && <div className="account-login-editor">
-              {hasGoogle ? <><p className="account-login-editor-note">Googleログインの連携を解除できます。</p>{currentUser.providerData.length > 1 ? <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider("google.com")}>Googleログインを解除</button> : <span className="account-login-editor-note">ログイン方法を1つ以上残す必要があります。</span>}</> : <><p className="account-login-editor-note">Googleアカウントをこのユーザーに追加します。</p><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkGoogle()}>{loading === "link-google" ? "確認しています…" : "Googleログインを追加"}</button></>}
-            </div>}
           </div>
         </div>
-        {error && <div className="auth-error" role="alert">{error}</div>}
+        {error && !accountModal && <div className="auth-error" role="alert">{error}</div>}
         {message && <div className="settings-success" role="status">{message}</div>}
       </section>
       <section className="panel settings-panel">
-        <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError("") }}><UserPlus size={15} />従業員を追加</button>}</div>
+        <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError('') }}><UserPlus size={15} />従業員を追加</button>}</div>
         {memberError && <div className="auth-error" role="alert">{memberError}</div>}
         {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
-        {temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword("")}>閉じる</button></div></div>}
-        {showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === "create" ? "登録しています…" : "従業員を登録"}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}
+        {temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword('')}>閉じる</button></div></div>}
+        {showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}
         {membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}
       </section>
+      {accountModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) setAccountModal(null) }}>
+        <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="account-modal-header">
+            <div><span className="page-eyebrow">アカウント設定</span><h2 id="account-modal-title">{accountModal === 'displayName' ? '表示名を変更' : accountModal === 'password' ? (hasPassword ? 'メールアドレス・パスワードを変更' : 'メールアドレス＋パスワードを追加') : 'Googleログインの設定'}</h2></div>
+            <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>×</button>
+          </div>
+          {error && <div className="auth-error" role="alert">{error}</div>}
+          {message && <div className="settings-success" role="status">{message}</div>}
+          {accountModal === 'displayName' && <div className="account-modal-content">
+            <SettingsField label="表示名" value={displayName} onChange={setDisplayName} disabled={Boolean(loading)} placeholder="例：山本 翔太" />
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '変更中…' : '変更する'}</button></div>
+          </div>}
+          {accountModal === 'password' && hasPassword && <div className="account-modal-content">
+            <div className="settings-form-grid"><SettingsField label="メールアドレス" type="email" value={newEmail} onChange={setNewEmail} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '変更中…' : 'メールアドレスを変更'}</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '変更中…' : 'パスワードを変更'}</button></div>
+            {currentUser.emailVerified ? <span className="verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}
+          </div>}
+          {accountModal === 'password' && !hasPassword && <div className="account-modal-content">
+            <p className="account-modal-note">このアカウントにメールアドレスとパスワードでログインする方法を追加します。</p>
+            <div className="settings-form-grid"><SettingsField label="メールアドレス" type="email" value={linkEmail} onChange={setLinkEmail} disabled={Boolean(loading)} /><SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === 'link-password' ? '追加しています…' : 'メール認証を追加'}</button></div>
+          </div>}
+          {accountModal === 'google' && hasGoogle && <div className="account-modal-content">
+            <p className="account-modal-note">このアカウントに連携しているGoogleログインを管理します。</p>
+            {currentUser.providerData.length > 1 ? <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider('google.com')}>{loading === 'unlink-google.com' ? '解除しています…' : 'Googleログインを解除'}</button></div> : <><p className="account-modal-note">ログイン方法を1つ以上残す必要があるため、Googleログインは解除できません。</p><div className="account-modal-actions"><button className="button button-primary" type="button" onClick={() => setAccountModal(null)}>閉じる</button></div></>}
+          </div>}
+        </section>
+      </div>}
     </div>
   )
 }
