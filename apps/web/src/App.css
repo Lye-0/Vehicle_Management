@@ -931,6 +931,24 @@
 .account-link-button { margin-top: 14px; }
 .account-link-form, .account-password-form { display: grid; gap: 13px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
 .account-link-form > strong, .account-password-form > strong { color: var(--text); font-size: 13px; }
+.account-settings-panel { padding: 24px; }
+.account-setting-list { display: grid; gap: 20px; }
+.account-setting-row { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1.4fr) auto; align-items: center; gap: 16px; padding: 4px 0 20px; border-bottom: 1px solid var(--border); }
+.account-setting-label { display: grid; gap: 5px; min-width: 0; }
+.account-setting-label strong { color: var(--text); font-size: 14px; }
+.account-setting-label small { color: var(--text-muted); font-size: 11px; }
+.account-setting-input { width: 100%; min-width: 0; height: 42px; padding: 0 12px; color: var(--text); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font: inherit; font-size: 13px; outline: 0; }
+.account-setting-input:focus { border-color: #91b4ef; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.account-setting-input:disabled { color: var(--text-muted); background: var(--surface-subtle); cursor: not-allowed; }
+.account-change-button { white-space: nowrap; }
+.account-setting-group { display: grid; gap: 10px; }
+.account-setting-group h3 { margin: 0 0 2px; color: var(--text); font-size: 15px; }
+.account-login-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 15px; border: 1px solid var(--border); border-radius: 9px; }
+.account-login-row strong { color: inherit; font-size: 13px; }
+.account-login-row.is-linked { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
+.account-login-row.is-unlinked { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+.account-login-editor { display: grid; gap: 13px; margin: -2px 0 5px; padding: 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.account-login-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .settings-success { padding: 10px 12px; color: #16794a; border: 1px solid #b9e7ca; border-radius: 8px; background: #eefbf2; font-size: 12px; }
 .member-list { display: grid; gap: 8px; }
 .member-list-empty { min-height: 120px; }
@@ -1033,6 +1051,9 @@
   .topbar-actions { width: 100%; }
   .search-trigger { flex: 1; }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .account-setting-row { grid-template-columns: 1fr auto; }
+  .account-setting-row-display-name .account-setting-label { grid-column: 1 / -1; }
+  .account-setting-row-display-name .account-setting-input { grid-column: 1; }
 }
 
 @media (max-width: 640px) {

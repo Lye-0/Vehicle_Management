@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
-import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Link2, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, KeyRound, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
@@ -158,11 +158,12 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [activeLoginEditor, setActiveLoginEditor] = useState<'password' | 'google' | ''>('')
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
   const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
   const isAnonymous = currentUser.isAnonymous
-  const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
+  const canManageMembers = !isAnonymous && (currentRole === 'owner' || currentRole === 'admin')
 
   useEffect(() => {
     let cancelled = false
@@ -347,7 +348,63 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setMemberMessage('初期パスワードをコピーしました。')
   }
 
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={UsersRound} title="管理者・従業員" description="自分のアカウントとログイン方法を管理します。" /><section className="panel settings-panel"><div className="account-summary"><span className="account-avatar"><UserRound size={24} /></span><div><strong>{currentUser.displayName || currentUser.email || 'ログインユーザー'}</strong><small>{isAnonymous ? '開発用匿名アカウント' : currentUser.email || 'メールアドレス未設定'}</small></div></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<div className="settings-form-grid account-form-grid"><SettingsField label="表示名" value={displayName} onChange={setDisplayName} disabled={isAnonymous} /><div className="account-action-field"><button className="button button-secondary" type="button" disabled={Boolean(loading) || isAnonymous} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '保存中…' : '表示名を保存'}</button></div></div></section>{<section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>ログイン方法</h2><p>{isAnonymous ? '開発用匿名アカウントから通常アカウントへ変更できます。' : '同じアカウントに複数のログイン方法を連携できます。'}</p></div></div><div className="provider-list">{isAnonymous && <div className="provider-row"><span><strong>開発用匿名ログイン</strong><small>この端末での開発確認専用</small></span><span className="provider-badge">現在のセッション</span></div>}{currentUser.providerData.map((provider) => <div className="provider-row" key={provider.providerId}><span><strong>{provider.providerId === 'google.com' ? 'Google' : provider.providerId === 'password' ? 'メール＋パスワード' : provider.providerId}</strong><small>{provider.email || currentUser.email || '登録済み'}</small></span><span className="provider-actions"><span className="provider-badge">連携済み</span>{currentUser.providerData.length > 1 && <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider(provider.providerId)}>解除</button>}</span></div>)}</div>{!hasGoogle && <button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void linkGoogle()}>{loading === 'link-google' ? 'Googleを確認しています…' : 'Googleログインを追加'}</button>}{!hasPassword && <div className="account-link-form"><strong>メール＋パスワードを追加</strong><div className="settings-form-grid"><SettingsField label="メールアドレス" type="email" value={linkEmail} onChange={setLinkEmail} /><SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === 'link-password' ? '追加しています…' : 'メール認証を追加'}</button></div>}</section>}{!isAnonymous && <section className="panel settings-panel"><div className="settings-section-heading"><Link2 size={18} /><div><h2>アカウント情報</h2><p>メールアドレスやパスワードを変更できます。</p></div></div><div className="settings-form-grid"><SettingsField label="メールアドレス" value={newEmail} onChange={setNewEmail} /><div className="account-action-field"><span>メール確認</span>{currentUser.emailVerified ? <small className="verified-label">確認済み</small> : <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}</div></div><button className="button button-secondary account-link-button" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '更新中…' : 'メールアドレスを更新'}</button>{hasPassword && <div className="account-password-form"><strong>パスワード変更</strong><div className="settings-form-grid"><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} /></div><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '更新中…' : 'パスワードを変更'}</button></div>}</section>}<section className="panel settings-panel"><div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError('') }}><UserPlus size={15} />従業員を追加</button>}</div>{memberError && <div className="auth-error" role="alert">{memberError}</div>}{memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}{temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword('')}>閉じる</button></div></div>}{showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}{membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}</section></div>
+  return (
+    <div className="settings-panel-stack">
+      <SettingsPanelHeader icon={UsersRound} title="管理者・従業員" description="自分のアカウントとログイン方法を管理します。" />
+      <section className="panel settings-panel account-settings-panel">
+        <div className="account-setting-list">
+          <div className="account-setting-row account-setting-row-display-name">
+            <div className="account-setting-label"><strong>表示名</strong>{isAnonymous && <small>認証連携後に変更できます。</small>}</div>
+            <input className="account-setting-input" type="text" value={displayName} disabled={isAnonymous || Boolean(loading)} onChange={(event) => setDisplayName(event.target.value)} />
+            <button className="button button-secondary account-change-button" type="button" disabled={isAnonymous || Boolean(loading)} onClick={() => void saveDisplayName()}>{loading === "displayName" ? "変更中…" : "変更"}</button>
+          </div>
+          <div className="account-setting-group">
+            <h3>ログイン方法</h3>
+            <div className={hasPassword ? "account-login-row is-linked" : "account-login-row is-unlinked"}>
+              <strong>メールアドレス＋パスワードでログイン（{hasPassword ? "済み" : "未設定"}）</strong>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => setActiveLoginEditor(activeLoginEditor === "password" ? "" : "password")}>変更</button>
+            </div>
+            {activeLoginEditor === "password" && hasPassword && <div className="account-login-editor">
+              <div className="settings-form-grid">
+                <SettingsField label="メールアドレス" type="email" value={newEmail} onChange={setNewEmail} />
+                <SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} />
+                <SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} />
+              </div>
+              <div className="account-login-editor-actions">
+                <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === "email" ? "変更中…" : "メールアドレスを変更"}</button>
+                <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === "password" ? "変更中…" : "パスワードを変更"}</button>
+                {currentUser.emailVerified ? <span className="account-verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction("verification", async () => { await sendCurrentEmailVerification(); setMessage("確認メールを送信しました。") })}>{loading === "verification" ? "送信中…" : "確認メールを送信"}</button>}
+              </div>
+            </div>}
+            {activeLoginEditor === "password" && !hasPassword && <div className="account-login-editor">
+              <div className="settings-form-grid">
+                <SettingsField label="メールアドレス" type="email" value={linkEmail} onChange={setLinkEmail} />
+                <SettingsField label="パスワード" type="password" value={linkPasswordValue} onChange={setLinkPasswordValue} />
+              </div>
+              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkPassword()}>{loading === "link-password" ? "追加しています…" : "メール認証を追加"}</button>
+            </div>}
+            <div className={hasGoogle ? "account-login-row is-linked" : "account-login-row is-unlinked"}>
+              <strong>Googleでログイン（{hasGoogle ? "済み" : "未設定"}）</strong>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => setActiveLoginEditor(activeLoginEditor === "google" ? "" : "google")}>変更</button>
+            </div>
+            {activeLoginEditor === "google" && <div className="account-login-editor">
+              {hasGoogle ? <><p className="account-login-editor-note">Googleログインの連携を解除できます。</p>{currentUser.providerData.length > 1 ? <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void unlinkProvider("google.com")}>Googleログインを解除</button> : <span className="account-login-editor-note">ログイン方法を1つ以上残す必要があります。</span>}</> : <><p className="account-login-editor-note">Googleアカウントをこのユーザーに追加します。</p><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void linkGoogle()}>{loading === "link-google" ? "確認しています…" : "Googleログインを追加"}</button></>}
+            </div>}
+          </div>
+        </div>
+        {error && <div className="auth-error" role="alert">{error}</div>}
+        {message && <div className="settings-success" role="status">{message}</div>}
+      </section>
+      <section className="panel settings-panel">
+        <div className="settings-section-heading"><UsersRound size={18} /><div><h2>組織ユーザー</h2><p>この組織に所属する管理者・従業員を確認します。</p></div>{canManageMembers && <button className="button button-secondary settings-add-button" type="button" onClick={() => { setShowAddMember((current) => !current); setMemberError("") }}><UserPlus size={15} />従業員を追加</button>}</div>
+        {memberError && <div className="auth-error" role="alert">{memberError}</div>}
+        {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
+        {temporaryPassword && <div className="temporary-password-box"><div><strong><KeyRound size={16} />初期パスワード</strong><p>このパスワードは今回だけ表示されます。従業員へ安全な方法で伝えてください。</p></div><div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button><button className="text-button" type="button" onClick={() => setTemporaryPassword("")}>閉じる</button></div></div>}
+        {showAddMember && <form className="member-add-form" onSubmit={(event) => void addMember(event)}><div className="member-add-heading"><UserPlus size={18} /><div><strong>従業員を追加</strong><small>登録直後に表示される初期パスワードを本人へ伝えてください。</small></div></div><div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required /></div><div className="member-add-actions"><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === "create" ? "登録しています…" : "従業員を登録"}</button><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={() => setShowAddMember(false)}>キャンセル</button></div></form>}
+        {membersLoading ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーを読み込んでいます。</span></div> : members.length === 0 ? <div className="settings-empty member-list-empty"><UsersRound size={26} /><span>所属ユーザーが見つかりません。</span></div> : <div className="member-list">{members.map((member) => <MemberRow key={member.uid} member={member} currentRole={currentRole} loading={memberLoading} onChange={changeMember} onReset={resetMemberPassword} />)}</div>}
+      </section>
+    </div>
+  )
 }
 
 function MemberRow({ member, currentRole, loading, onChange, onReset }: { member: MemberRecord; currentRole: MemberRole; loading: string; onChange: (uid: string, input: { role?: Exclude<MemberRole, 'owner'>; status?: 'active' | 'suspended' }) => void; onReset: (uid: string) => void }) {
