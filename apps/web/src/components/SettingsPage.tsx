@@ -4,7 +4,7 @@ import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, F
 import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
-import { defaultSettings, fetchSettings, updateSettings, type AppSettings, type DocumentSettings, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
+import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
@@ -18,6 +18,12 @@ const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: t
   { id: 'masters', label: '明細候補', description: '販売・整備で選べる項目', icon: Settings2 },
   { id: 'data', label: 'データ', description: 'データの入出力とバックアップ', icon: Table2 },
   { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
+]
+
+const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; description: string }> = [
+  { key: 'vehiclePrice', title: '車両販売価格内訳', description: '車両価格欄の自由入力行で表示します。' },
+  { key: 'fees', title: '諸費用内訳', description: '法定費用・手続費用・実費欄で表示します。' },
+  { key: 'accessories', title: '付属品・特別仕様明細', description: '付属品・特別仕様の品名欄で表示します。' },
 ]
 
 export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
@@ -62,18 +68,42 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setSaved(false)
   }
 
-  function updatePreset(kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) {
-    setSettings((current) => ({ ...current, [kind]: current[kind].map((item, itemIndex) => itemIndex === index ? value : item) }))
+  function updateSalesPreset(group: SalesItemPresetGroupKey, index: number, value: string) {
+    setSettings((current) => updateSalesPresetGroups(current, {
+      ...current.salesItemPresetGroups,
+      [group]: current.salesItemPresetGroups[group].map((item, itemIndex) => itemIndex === index ? value : item),
+    }))
     setSaved(false)
   }
 
-  function addPreset(kind: 'salesItemPresets' | 'maintenanceItemPresets') {
-    setSettings((current) => ({ ...current, [kind]: [...current[kind], ''] }))
+  function addSalesPreset(group: SalesItemPresetGroupKey) {
+    setSettings((current) => updateSalesPresetGroups(current, {
+      ...current.salesItemPresetGroups,
+      [group]: [...current.salesItemPresetGroups[group], ''],
+    }))
     setSaved(false)
   }
 
-  function removePreset(kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) {
-    setSettings((current) => ({ ...current, [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index) }))
+  function removeSalesPreset(group: SalesItemPresetGroupKey, index: number) {
+    setSettings((current) => updateSalesPresetGroups(current, {
+      ...current.salesItemPresetGroups,
+      [group]: current.salesItemPresetGroups[group].filter((_, itemIndex) => itemIndex !== index),
+    }))
+    setSaved(false)
+  }
+
+  function updateMaintenancePreset(index: number, value: string) {
+    setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.map((item, itemIndex) => itemIndex === index ? value : item) }))
+    setSaved(false)
+  }
+
+  function addMaintenancePreset() {
+    setSettings((current) => ({ ...current, maintenanceItemPresets: [...current.maintenanceItemPresets, ''] }))
+    setSaved(false)
+  }
+
+  function removeMaintenancePreset(index: number) {
+    setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.filter((_, itemIndex) => itemIndex !== index) }))
     setSaved(false)
   }
 
@@ -120,10 +150,18 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdate={updatePreset} onAdd={addPreset} onRemove={removePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
+}
+
+function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetGroups): AppSettings {
+  return {
+    ...settings,
+    salesItemPresetGroups: groups,
+    salesItemPresets: flattenSalesItemPresetGroups(groups),
+  }
 }
 
 function DataSettingsPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
@@ -659,8 +697,8 @@ function TaxSettingsPanel({ settings, onUpdateTax, onUpdateDocument }: { setting
   return <div className="settings-panel-stack"><SettingsPanelHeader icon={ReceiptText} title="税・端数処理" description="販売書類・整備書類の金額計算に使う初期値です。" /><section className="panel settings-panel"><div className="settings-section-heading"><ReceiptText size={18} /><div><h2>消費税</h2><p>書類作成時の税率と表示方法を設定します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>消費税率</span><div className="settings-number-input"><input type="number" min="0" max="100" value={settings.tax.consumptionTaxRate} onChange={(event) => onUpdateTax('consumptionTaxRate', Number(event.target.value))} /><span>%</span></div></label><label className="form-field"><span>金額表示</span><select value={settings.tax.display} onChange={(event) => onUpdateTax('display', event.target.value)}><option value="税込">税込</option><option value="税別">税別</option></select></label><label className="form-field"><span>端数処理</span><select value={settings.tax.rounding} onChange={(event) => onUpdateTax('rounding', event.target.value)}><option value="切り捨て">切り捨て</option><option value="四捨五入">四捨五入</option></select></label></div></section><section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>帳票の初期値</h2><p>新しい販売書類を作成するときに適用します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>支払期限の初期日数</span><div className="settings-number-input"><input type="number" min="0" max="365" value={settings.document.defaultDueDays} onChange={(event) => onUpdateDocument('defaultDueDays', Number(event.target.value))} /><span>日後</span></div></label></div></section></div>
 }
 
-function MasterSettingsPanel({ settings, onUpdate, onAdd, onRemove }: { settings: AppSettings; onUpdate: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) => void; onAdd: (kind: 'salesItemPresets' | 'maintenanceItemPresets') => void; onRemove: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) => void }) {
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Settings2} title="明細候補" description="販売書類・整備書類で選択できる定型項目です。" /><PresetPanel title="販売明細候補" description="車両本体、付属品、諸費用など" items={settings.salesItemPresets} kind="salesItemPresets" onUpdate={onUpdate} onAdd={onAdd} onRemove={onRemove} /><PresetPanel title="整備作業・部品候補" description="作業内容や部品名など" items={settings.maintenanceItemPresets} kind="maintenanceItemPresets" onUpdate={onUpdate} onAdd={onAdd} onRemove={onRemove} /></div>
+function MasterSettingsPanel({ settings, onUpdateSales, onAddSales, onRemoveSales, onUpdateMaintenance, onAddMaintenance, onRemoveMaintenance }: { settings: AppSettings; onUpdateSales: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAddSales: (group: SalesItemPresetGroupKey) => void; onRemoveSales: (group: SalesItemPresetGroupKey, index: number) => void; onUpdateMaintenance: (index: number, value: string) => void; onAddMaintenance: () => void; onRemoveMaintenance: (index: number) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Settings2} title="明細候補" description="販売書類・整備書類で選択できる定型項目です。" /><SalesPresetPanel groups={settings.salesItemPresetGroups} onUpdate={onUpdateSales} onAdd={onAddSales} onRemove={onRemoveSales} /><PresetPanel title="整備作業・部品候補" description="作業内容や部品名など" items={settings.maintenanceItemPresets} onUpdate={onUpdateMaintenance} onAdd={onAddMaintenance} onRemove={onRemoveMaintenance} /></div>
 }
 
 function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof Building2; title: string; description: string }) {
@@ -671,6 +709,17 @@ function SettingsField({ label, value, onChange, placeholder, required, wide, ty
   return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
-function PresetPanel({ title, description, items, kind, onUpdate, onAdd, onRemove }: { title: string; description: string; items: string[]; kind: 'salesItemPresets' | 'maintenanceItemPresets'; onUpdate: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number, value: string) => void; onAdd: (kind: 'salesItemPresets' | 'maintenanceItemPresets') => void; onRemove: (kind: 'salesItemPresets' | 'maintenanceItemPresets', index: number) => void }) {
-  return <section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>{title}</h2><p>{description}</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => onAdd(kind)}><Plus size={15} />項目を追加</button></div><div className="settings-preset-list">{items.map((item, index) => <div className="settings-preset-row" key={`${kind}-${index}`}><span className="settings-preset-index">{index + 1}</span><input value={item} onChange={(event) => onUpdate(kind, index, event.target.value)} placeholder="項目名" /><button className="icon-button" type="button" aria-label={`${index + 1}番目の項目を削除`} onClick={() => onRemove(kind, index)}><Trash2 size={16} /></button></div>)}{items.length === 0 && <div className="settings-preset-empty">登録されている項目はありません。右上の「項目を追加」から登録できます。</div>}</div></section>
+function SalesPresetPanel({ groups, onUpdate, onAdd, onRemove }: { groups: SalesItemPresetGroups; onUpdate: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAdd: (group: SalesItemPresetGroupKey) => void; onRemove: (group: SalesItemPresetGroupKey, index: number) => void }) {
+  return <section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>販売明細候補</h2><p>見積書プレビューの3つの内訳ブロックごとに、プルダウンへ表示する候補を管理します。</p></div></div><div className="settings-sales-preset-grid">{salesPresetColumns.map(({ key, title, description }) => {
+    const items = groups[key]
+    return <section className="settings-sales-preset-column" key={key} aria-labelledby={`sales-preset-${key}`}><div className="settings-sales-preset-column-heading"><div><h3 id={`sales-preset-${key}`}>{title}</h3><p>{description}</p></div><button className="button button-secondary" type="button" onClick={() => onAdd(key)}><Plus size={14} />追加</button></div><div className="settings-preset-list">{items.map((item, index) => <PresetRow key={`${key}-${index}`} item={item} index={index} ariaPrefix={title} onUpdate={(value) => onUpdate(key, index, value)} onRemove={() => onRemove(key, index)} />)}{items.length === 0 && <div className="settings-preset-empty settings-sales-preset-empty">項目はありません。「追加」から登録できます。</div>}</div></section>
+  })}</div></section>
+}
+
+function PresetPanel({ title, description, items, onUpdate, onAdd, onRemove }: { title: string; description: string; items: string[]; onUpdate: (index: number, value: string) => void; onAdd: () => void; onRemove: (index: number) => void }) {
+  return <section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>{title}</h2><p>{description}</p></div><button className="button button-secondary settings-add-button" type="button" onClick={onAdd}><Plus size={15} />項目を追加</button></div><div className="settings-preset-list">{items.map((item, index) => <PresetRow key={`maintenance-${index}`} item={item} index={index} ariaPrefix={title} onUpdate={(value) => onUpdate(index, value)} onRemove={() => onRemove(index)} />)}{items.length === 0 && <div className="settings-preset-empty">登録されている項目はありません。右上の「項目を追加」から登録できます。</div>}</div></section>
+}
+
+function PresetRow({ item, index, ariaPrefix, onUpdate, onRemove }: { item: string; index: number; ariaPrefix: string; onUpdate: (value: string) => void; onRemove: () => void }) {
+  return <div className="settings-preset-row"><span className="settings-preset-index">{index + 1}</span><input aria-label={`${ariaPrefix}の${index + 1}番目の項目`} value={item} onChange={(event) => onUpdate(event.target.value)} placeholder="項目名" /><button className="icon-button" type="button" aria-label={`${ariaPrefix}の${index + 1}番目の項目を削除`} onClick={onRemove}><Trash2 size={16} /></button></div>
 }

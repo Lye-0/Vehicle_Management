@@ -31,7 +31,7 @@ import {
   type SalesLineItem,
   type SalesTaxCategory,
 } from '../lib/salesApi'
-import { defaultSettings, fetchSettings, type AppSettings } from '../lib/settingsApi'
+import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
 import { buildSalesEstimateSheetSvg } from '../lib/salesEstimateSheet'
 
@@ -406,7 +406,7 @@ function SalesEstimatePreview(props: SalesPreviewProps) {
   */
 }
 
-function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateSheetLine, onPdfPreview, settings }: SalesPreviewProps) {
+function SalesEstimateExactPreview({ document, customers, onUpdateHeader, onUpdateDetails, onUpdateSheetLine, onPdfPreview, settings }: SalesPreviewProps) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
   const imageAttachments = selectedVehicle?.attachments.filter((attachment) => attachment.type === 'image') ?? []
@@ -440,7 +440,7 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
         document={document}
         hasImage={Boolean(imageState.url)}
         sections={sections}
-        itemPresets={itemPresets}
+        itemPresetGroups={settings.salesItemPresetGroups}
         onUpdateDetails={onUpdateDetails}
         onUpdateHeader={onUpdateHeader}
         onUpdateLine={onUpdateSheetLine}
@@ -451,6 +451,7 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
 
 type SheetLinePosition = {
   bucket: SalesEstimateEditableBucket
+  presetGroup: SalesItemPresetGroupKey
   index: number
   x: number
   y: number
@@ -462,16 +463,16 @@ type SheetLinePosition = {
 }
 
 const salesEstimateSheetLinePositions: SheetLinePosition[] = [
-  { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35, fixedLabel: '車両本体価格' },
-  { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35, fixedLabel: '値引等' },
-  { bucket: 'vehicleSideLabor', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
-  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
-  ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
-  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
-  ...Array.from({ length: 13 }, (_, index) => ({ bucket: 'accessories' as const, index, x: 677, y: 817 + index * 34, width: 360, labelWidth: 210, height: 34, menuUp: index > 8 })),
+  { bucket: 'vehicleBase', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35, fixedLabel: '車両本体価格' },
+  { bucket: 'discounts', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35, fixedLabel: '値引等' },
+  { bucket: 'vehicleSideLabor', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
+  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, presetGroup: 'fees' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
+  ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, presetGroup: 'fees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
+  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, presetGroup: 'fees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
+  ...Array.from({ length: 13 }, (_, index) => ({ bucket: 'accessories' as const, presetGroup: 'accessories' as const, index, x: 677, y: 817 + index * 34, width: 360, labelWidth: 210, height: 34, menuUp: index > 8 })),
 ]
 
-export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresets, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresets: string[]; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
+export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresetGroups, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresetGroups: SalesItemPresetGroups; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
   const customer = document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicleDetails()
   const tradeInLine = sections.tradeIns[0]
@@ -519,7 +520,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
     {salesEstimateSheetLinePositions.map((position) => {
       const line = sections[position.bucket][position.index]
       const defaults = estimateBucketDefaults[position.bucket]
-      const candidates = Array.from(new Set([defaults.label, ...itemPresets].filter(Boolean)))
+      const candidates = Array.from(new Set([defaults.label, ...itemPresetGroups[position.presetGroup]].filter(Boolean)))
       return <SheetLineControl
         key={`${position.bucket}-${position.index}`}
         position={position}

@@ -291,13 +291,27 @@ describe("CLI authenticated workflow", () => {
 					shop: { name: `${marker} 店舗` },
 					document: { defaultDueDays: 30 },
 					tax: { consumptionTaxRate: 10, display: "税込", rounding: "四捨五入" },
-					salesItemPresets: ["車両本体価格", marker],
+					salesItemPresetGroups: {
+						vehiclePrice: ["車両本体価格", `${marker}-vehicle`],
+						fees: ["登録代行費用", `${marker}-fees`],
+						accessories: ["フロアマット", `${marker}-accessory`],
+					},
 					maintenanceItemPresets: ["点検", marker],
 				},
 			});
 			expect(settings.response.status).toBe(200);
-			expect(objectValue(objectValue(settings.body.settings).shop).name).toBe(`${marker} 店舗`);
-			expect(objectValue(objectValue(settings.body.settings).document).defaultDueDays).toBe(30);
+			const savedSettings = objectValue(settings.body.settings);
+			expect(objectValue(savedSettings.shop).name).toBe(`${marker} 店舗`);
+			expect(objectValue(savedSettings.document).defaultDueDays).toBe(30);
+			const salesPresetGroups = objectValue(savedSettings.salesItemPresetGroups);
+			expect(stringArrayValue(salesPresetGroups.vehiclePrice)).toContain(`${marker}-vehicle`);
+			expect(stringArrayValue(salesPresetGroups.fees)).toContain(`${marker}-fees`);
+			expect(stringArrayValue(salesPresetGroups.accessories)).toContain(`${marker}-accessory`);
+			expect(stringArrayValue(savedSettings.salesItemPresets)).toEqual(expect.arrayContaining([
+				`${marker}-vehicle`,
+				`${marker}-fees`,
+				`${marker}-accessory`,
+			]));
 
 			const dashboard = await requestJson<JsonObject>("/api/dashboard");
 			expect(dashboard.response.status).toBe(200);
@@ -626,6 +640,10 @@ function objectValue(value: unknown): JsonObject {
 
 function arrayValue(value: unknown): JsonObject[] {
 	return Array.isArray(value) ? value.filter((item): item is JsonObject => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function stringArrayValue(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function stringValue(value: unknown) {
