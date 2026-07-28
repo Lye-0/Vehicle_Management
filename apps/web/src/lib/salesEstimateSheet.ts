@@ -53,7 +53,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
   ${amountPanel(document, totals)}
   ${vehicleBlock(vehicle, withImage ? 314 : 296)}
   ${tradeInBlock(details.tradeIn, withImage ? 557 : 543)}
-  ${taxCaption(document, totals, withImage ? 672 : 657)}
+  ${taxCaption(document, totals, 692)}
   ${requiredBlock(requiredDocuments)}
   ${noteBlock(document.note)}
   ${vehiclePriceCard(document, totals)}
