@@ -312,13 +312,13 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
 }
 
 function shopBlock(settings: AppSettings) {
+  const companyLeft = 723
   return `
   <line x1="520" y1="1321" x2="1037" y2="1321" stroke="${BLUE}" stroke-width="1.5"/>
-  ${text(659, 1361, '▦', 'blue bold', 30)}
-  ${text(699, 1360, settings.shop.name || '店舗名未設定', 'blue heavy', 23)}
-  ${text(699, 1385, '車両販売システム', 'blue bold small')}
-  ${text(622, 1415, settings.shop.postalCode ? `〒${settings.shop.postalCode}　${settings.shop.address}` : settings.shop.address || '住所未登録', 'body')}
-  ${text(622, 1442, `${settings.shop.phone ? `TEL ${settings.shop.phone}` : 'TEL 未登録'}　${settings.shop.registrationNumber ? `FAX ${settings.shop.registrationNumber}` : ''}`, 'body')}`
+  ${text(companyLeft - 40, 1361, '▦', 'blue bold', 30)}
+  ${text(companyLeft, 1360, settings.shop.name || '店舗名未設定', 'blue heavy', 23)}
+  ${text(companyLeft, 1415, settings.shop.postalCode ? `〒${settings.shop.postalCode}　${settings.shop.address}` : settings.shop.address || '住所未登録', 'body')}
+  ${text(companyLeft, 1442, `${settings.shop.phone ? `TEL ${settings.shop.phone}` : 'TEL 未登録'}　${settings.shop.registrationNumber ? `FAX ${settings.shop.registrationNumber}` : ''}`, 'body')}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
