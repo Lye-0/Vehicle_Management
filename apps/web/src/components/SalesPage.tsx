@@ -457,12 +457,13 @@ type SheetLinePosition = {
   width: number
   labelWidth: number
   height: number
+  fixedLabel?: string
   menuUp?: boolean
 }
 
 const salesEstimateSheetLinePositions: SheetLinePosition[] = [
-  { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35 },
-  { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35 },
+  { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35, fixedLabel: '車両本体価格' },
+  { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35, fixedLabel: '値引等' },
   { bucket: 'vehicleSideLabor', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
   ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
   ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
@@ -666,7 +667,9 @@ function SheetLineControl({ position, label, amount, exists, candidates, onChang
     '--sheet-label-width': `${position.labelWidth / position.width * 100}%`,
   } as CSSProperties
   return <div className="sales-estimate-sheet-line-control" style={style}>
-    <SheetNameCombobox value={label} candidates={candidates} menuUp={position.menuUp} onCommit={(value) => onChange({ label: value })} />
+    {position.fixedLabel
+      ? <span className="sales-sheet-fixed-label">{position.fixedLabel}</span>
+      : <SheetNameCombobox value={label} candidates={candidates} menuUp={position.menuUp} onCommit={(value) => onChange({ label: value })} />}
     <SheetAmountInput value={amount} exists={exists} onCommit={(value) => onChange({ amount: value })} />
   </div>
 }

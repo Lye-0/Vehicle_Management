@@ -56,7 +56,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
   ${taxCaption(document, totals, 692)}
   ${requiredBlock(requiredDocuments)}
   ${noteBlock(document.note)}
-  ${vehiclePriceCard(document, totals)}
+  ${vehiclePriceCard(document, sections, totals)}
   ${feeCard(legalLines, taxableLines, actualLines, totals)}
   ${accessoryCard(accessories, totals.accessoryTotal)}
   ${creditBlock(details.credit)}
@@ -197,7 +197,7 @@ function noteBlock(note: string) {
   ${text(722, 721, note || '特になし', 'small')}`
 }
 
-function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
+function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof buildSalesEstimateSections>, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
   const x = 23
   const y = 742
   const w = 324
@@ -211,7 +211,7 @@ function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof cal
     ['値引等', totals.discount, 'discount'],
     ['本体課税対象額', totals.vehicleTaxableAmount, 'bold'],
     ['付属品／特別仕様', totals.accessoryTotal, ''],
-    ['工賃', totals.vehicleSideLabor, ''],
+    [sections.vehicleSideLabor[0]?.label ?? '', totals.vehicleSideLabor, ''],
   ] as const
   return `${sectionHeader(x, y, w, '車両販売価格内訳')}
   ${rows.map(([label, amount, tone], index) => valueRow(x, topY + index * rowH, w, label, amount, rowH, tone)).join('')}
@@ -245,7 +245,7 @@ function taxMatrix(document: SalesDocument, totals: ReturnType<typeof calculateS
   ${text(x + 10, y + 94, `消費税(${formatPercent(document.taxRate)})`, 'small')}
   ${text(x + c1 + c2 - 8, y + 94, formatYen(totals.tax), 'small amount', 13, 'end')}
   ${text(x + 10, y + 132, '総額', 'blue bold', 17)}
-  ${text(x + w - 10, y + 134, formatYen(totals.total), 'heavy amount', 23, 'end')}`
+  ${text(x + c1 + (w - c1) / 2, y + 134, formatYen(totals.total), 'heavy amount', 23, 'middle')}`
 }
 
 function feeCard(
