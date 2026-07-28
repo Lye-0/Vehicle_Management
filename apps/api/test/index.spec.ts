@@ -55,6 +55,15 @@ describe("Vehicle Management API", () => {
 		expect(response.status).toBe(401);
 	});
 
+	it("protects the current profile route with authentication", async () => {
+		const response = await SELF.fetch("https://example.com/api/auth/profile", {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ displayName: "未認証" }),
+		});
+		expect(response.status).toBe(401);
+	});
+
 	it("protects customer data routes with authentication", async () => {
 		const response = await SELF.fetch("https://example.com/api/customers");
 		expect(response.status).toBe(401);

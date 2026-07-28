@@ -25,7 +25,7 @@ export async function requireOrganizationContext(request: Request, env: Env, dat
   const user = await requireAuthenticatedUser(request, env)
   await ensureDevelopmentMembership(database, env, user)
   const organizationId = request.headers.get('X-Organization-Id')?.trim() || new URL(request.url).searchParams.get('organizationId')?.trim() || ''
-  const memberships = await loadMemberships(database, user.uid)
+  const memberships = isDevelopmentAnonymousUser(env, user) ? await loadDevelopmentAnonymousMembership(database) : await loadMemberships(database, user.uid)
   const organization = organizationId
     ? memberships.find((membership) => membership.organizationId === organizationId)
     : memberships.length === 1 ? memberships[0] : undefined
@@ -64,19 +64,35 @@ export async function loadMemberships(database: Database, uid: string): Promise<
   })
 }
 
+function isDevelopmentAnonymousUser(env: Pick<Env, 'APP_ENV' | 'FIREBASE_AUTH_EMULATOR'>, user: FirebaseUser) {
+  return env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true' && user.isAnonymous
+}
+
+async function loadDevelopmentAnonymousMembership(database: Database): Promise<OrganizationMembership[]> {
+  const organization = await database.select().from(organizations).where(eq(organizations.id, defaultOrganizationId)).get()
+  if (!organization) return []
+  return [{
+    id: 'development-anonymous-' + organization.id,
+    organizationId: organization.id,
+    name: organization.name,
+    role: 'owner',
+    status: 'active',
+  }]
+}
 export async function loadAuthSession(database: Database, env: Env, user: FirebaseUser) {
   await ensureDevelopmentMembership(database, env, user)
+  const membershipsPromise = isDevelopmentAnonymousUser(env, user) ? loadDevelopmentAnonymousMembership(database) : loadMemberships(database, user.uid)
   const [memberships, account, profile, incompleteOrganization] = await Promise.all([
-    loadMemberships(database, user.uid),
+    membershipsPromise,
     database.select().from(authAccounts).where(eq(authAccounts.uid, user.uid)).get(),
     database.select().from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get(),
     database.select({ id: organizations.id }).from(organizations).where(eq(organizations.setupCompleted, false)).get(),
   ])
   return {
     user,
-    profile: profile ? { displayName: profile.displayName, email: profile.email, role: profile.role } : null,
+    profile: profile ? { displayName: profile.displayName, email: profile.email, role: profile.role } : user.isAnonymous ? { displayName: user.displayName || '開発用アカウント', email: user.email, role: 'owner' } : null,
     organizations: memberships,
-    setupAvailable: Boolean(incompleteOrganization) && memberships.length === 0,
+    setupAvailable: !user.isAnonymous && Boolean(incompleteOrganization) && memberships.length === 0,
     mustChangePassword: account?.mustChangePassword ?? false,
   }
 }
@@ -84,6 +100,7 @@ export async function loadAuthSession(database: Database, env: Env, user: Fireba
 export async function completeInitialOrganizationSetup(database: Database, env: Env, user: FirebaseUser, name: string, setupKey: string) {
   const normalizedName = name.trim()
   if (!normalizedName) throw new HttpError(400, '組織名を入力してください。')
+  if (user.isAnonymous) throw new HttpError(403, '開発用匿名ログインでは組織セットアップを実行できません。')
   if (!(env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true')) {
     if (!env.INITIAL_SETUP_KEY || setupKey !== env.INITIAL_SETUP_KEY) throw new HttpError(403, '初回セットアップキーが正しくありません。')
   }
@@ -111,6 +128,7 @@ export async function completeInitialPasswordChange(database: Database, uid: str
 
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {
   if (!(env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true')) return
+  if (user.isAnonymous) return
   const organization = await database.select({ id: organizations.id }).from(organizations).where(eq(organizations.id, defaultOrganizationId)).get()
   if (!organization) return
   const existingMembership = await database.select({ id: organizationMemberships.id, role: organizationMemberships.role }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, defaultOrganizationId), eq(organizationMemberships.uid, user.uid))).get()
@@ -123,11 +141,11 @@ export async function ensureDevelopmentMembership(database: Database, env: Env, 
 }
 
 async function upsertProfile(database: Database, user: FirebaseUser, role: OrganizationRole) {
-  const existing = await database.select({ uid: staffProfiles.uid }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
+  const existing = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName, email: staffProfiles.email }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const now = new Date().toISOString()
   const displayName = user.displayName || user.email || 'ログインユーザー'
   if (existing) {
-    await database.update(staffProfiles).set({ displayName, email: user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
+    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: existing.email ?? user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
   } else {
     await database.insert(staffProfiles).values({ uid: user.uid, displayName, email: user.email, role, updatedAt: now }).run()
   }

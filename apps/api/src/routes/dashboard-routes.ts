@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
+import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -23,12 +23,13 @@ export async function handleDashboardRoutes(request: Request, env: Env): Promise
 }
 
 async function loadDashboard(database: ReturnType<typeof createDatabase>, organizationId: string) {
-  const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows] = await Promise.all([
+  const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows, scheduleRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.updatedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
+    database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(desc(inspectionSchedules.dueDate)).all(),
   ])
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
@@ -49,7 +50,105 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
     inspections,
     unpaidInvoices,
     recentActivities: buildRecentActivities(salesRows, vehicleRows, paymentRows, customersById, vehiclesById),
+    calendarEvents: buildCalendarEvents(vehicleRows, scheduleRows, salesRows, maintenanceRows, paymentRows, customersById, vehiclesById),
   }
+}
+
+type CalendarEventCategory = 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
+
+type CalendarEvent = {
+  id: string
+  date: string
+  category: CalendarEventCategory
+  categoryLabel: string
+  title: string
+  detail: string
+  status: string | null
+  amount: number | null
+}
+
+const calendarEventLabels: Record<CalendarEventCategory, string> = {
+  'vehicle-inspection': '車検満了',
+  inspection: '点検予定',
+  maintenance: '整備',
+  sales: '販売書類',
+  'payment-due': '支払期限',
+  payment: '入金',
+}
+
+function buildCalendarEvents(
+  vehicleRows: Array<typeof vehicles.$inferSelect>,
+  scheduleRows: Array<typeof inspectionSchedules.$inferSelect>,
+  salesRows: Array<typeof salesDocuments.$inferSelect>,
+  maintenanceRows: Array<typeof maintenanceDocuments.$inferSelect>,
+  paymentRows: Array<typeof paymentRecords.$inferSelect>,
+  customersById: Map<string, typeof customers.$inferSelect>,
+  vehiclesById: Map<string, typeof vehicles.$inferSelect>,
+) {
+  const events: CalendarEvent[] = []
+  const salesById = new Map(salesRows.map((document) => [document.id, document]))
+  const maintenanceById = new Map(maintenanceRows.map((document) => [document.id, document]))
+
+  for (const vehicle of vehicleRows) {
+    const customer = customersById.get(vehicle.customerId)?.name ?? '顧客未登録'
+    addCalendarEvent(events, vehicle.inspectionDate, `vehicle-${vehicle.id}-inspection`, 'vehicle-inspection', `車検満了：${customer}`, vehicleLabel(vehicle.id, vehiclesById), '車検満了')
+  }
+
+  for (const schedule of scheduleRows) {
+    const customer = customersById.get(schedule.customerId)?.name ?? '顧客未登録'
+    addCalendarEvent(events, schedule.dueDate, `inspection-${schedule.id}`, 'inspection', `${schedule.inspectionType}：${customer}`, vehicleLabel(schedule.vehicleId, vehiclesById), schedule.status)
+  }
+
+  for (const document of salesRows) {
+    const customer = customersById.get(document.customerId)?.name ?? '顧客未登録'
+    const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
+    addCalendarEvent(events, document.issuedAt, `sales-${document.id}-issued`, 'sales', `${document.type}：${customer}`, `${vehicle} ・ #${document.number}`, document.status, document.total)
+    addCalendarEvent(events, document.dueDate, `sales-${document.id}-due`, 'payment-due', `支払期限：${customer}`, `${document.type} ・ #${document.number}`, document.status, document.total)
+  }
+
+  for (const document of maintenanceRows) {
+    const customer = customersById.get(document.customerId)?.name ?? '顧客未登録'
+    const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
+    const documentLabel = `${document.type} ・ #${document.number}`
+    addCalendarEvent(events, document.issuedAt, `maintenance-${document.id}-issued`, 'maintenance', `整備書類：${customer}`, documentLabel, document.status, document.total)
+    addCalendarEvent(events, document.intakeDate, `maintenance-${document.id}-intake`, 'maintenance', `入庫：${customer}`, vehicle, document.status)
+    addCalendarEvent(events, document.plannedReleaseDate, `maintenance-${document.id}-release`, 'maintenance', `出庫予定：${customer}`, vehicle, document.status)
+    addCalendarEvent(events, document.completionDate, `maintenance-${document.id}-completion`, 'maintenance', `整備完了：${customer}`, vehicle, document.status)
+    addCalendarEvent(events, document.dueDate, `maintenance-${document.id}-due`, 'payment-due', `支払期限：${customer}`, documentLabel, document.status, document.total)
+  }
+
+  for (const payment of paymentRows) {
+    if (!payment.paymentDate || payment.paidAmount <= 0) continue
+    const document = payment.documentType === '販売請求書' ? salesById.get(payment.documentId) : maintenanceById.get(payment.documentId)
+    if (!document) continue
+    const customer = customersById.get(document.customerId)?.name ?? '顧客未登録'
+    const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
+    const method = payment.method ? `・${payment.method}` : ''
+    addCalendarEvent(events, payment.paymentDate, `payment-${payment.id}`, 'payment', `入金：${customer}`, `${payment.documentType} ・ ${vehicle}${method}`, '入金済み', payment.paidAmount)
+  }
+
+  return events.sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title, 'ja'))
+}
+
+function addCalendarEvent(
+  events: CalendarEvent[],
+  date: string | null,
+  id: string,
+  category: CalendarEventCategory,
+  title: string,
+  detail: string,
+  status: string | null,
+  amount: number | null = null,
+) {
+  const normalizedDate = date ? normalizeDate(date) : ''
+  if (!isCalendarDate(normalizedDate)) return
+  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount })
+}
+
+function isCalendarDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00`)
+  return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(value.slice(0, 4)) && date.getMonth() + 1 === Number(value.slice(5, 7)) && date.getDate() === Number(value.slice(8, 10))
 }
 
 function buildInspectionRows(

@@ -45,11 +45,28 @@ describe("CLI authenticated workflow", () => {
 				expect.objectContaining({ organizationId, role: "owner", status: "active" }),
 		]));
 
+			const updatedProfile = await requestJson<JsonObject>("/api/auth/profile", "PATCH", {
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			});
+			expect(updatedProfile.response.status).toBe(200);
+			expect(updatedProfile.body.profile).toEqual({
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			});
+
+			const refreshedSession = await requestJson<JsonObject>("/api/auth/me");
+			expect(refreshedSession.body.profile).toEqual(expect.objectContaining({
+				displayName: `${marker} 表示名変更`,
+				email: `${marker.toLowerCase()}-profile@example.com`,
+			}));
+
 			const members = await requestJson<JsonObject>("/api/organization/members");
 			expect(members.response.status).toBe(200);
 			expect(members.body.currentRole).toBe("owner");
 			expect(members.body.members).toEqual(expect.arrayContaining([
 				expect.objectContaining({ uid: employeeUid, role: "employee", status: "active" }),
+				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${marker.toLowerCase()}-profile@example.com` }),
 		]));
 
 			const createdCustomer = await requestJson<JsonObject>("/api/customers", "POST", {
@@ -162,7 +179,9 @@ describe("CLI authenticated workflow", () => {
 			expect(sales.response.status).toBe(201);
 			const salesDocument = objectValue(sales.body.document);
 			salesDocumentId = stringValue(salesDocument.id);
-			expect(salesDocument).toEqual(expect.objectContaining({ number: `${marker}-SALE-001`, subtotal: 100001, tax: 10000, total: 110001, status: "下書き" }));
+			const salesNumber = stringValue(salesDocument.number);
+			expect(salesNumber).toMatch(/^S-\d{4}-\d{5}$/);
+			expect(salesDocument).toEqual(expect.objectContaining({ subtotal: 100001, tax: 10000, total: 110001, status: "下書き" }));
 
 			const duplicateSales = await requestJson<JsonObject>("/api/sales-documents", "POST", {
 				type: "請求書",
@@ -173,19 +192,28 @@ describe("CLI authenticated workflow", () => {
 				issuedAt: "2026-07-26",
 				items: [{ itemType: "その他", description: "重複確認", quantity: 1, unit: "式", unitPrice: 1 }],
 			});
-			expect(duplicateSales.response.status).toBe(409);
+			expect(duplicateSales.response.status).toBe(201);
+			expect(stringValue(objectValue(duplicateSales.body.document).number)).toMatch(/^S-\d{4}-\d{5}$/);
+			expect(stringValue(objectValue(duplicateSales.body.document).number)).not.toBe(salesNumber);
 
 			const updatedSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", {
 				status: "入金待ち",
 				number: `${marker}-SALE-EDITED`,
 				note: `${marker} 販売ヘッダー更新`,
+				details: {
+					downPayment: 12345,
+					customerOverride: { name: `${marker} プレビュー顧客` },
+				},
 				items: [
 					{ itemType: "車両本体価格", description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 },
 					{ itemType: "登録費用", description: "登録代行費用", quantity: 1, unit: "式", unitPrice: 999 },
 				],
 			});
 			expect(updatedSales.response.status).toBe(200);
-			expect(objectValue(updatedSales.body.document)).toEqual(expect.objectContaining({ number: `${marker}-SALE-EDITED`, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
+			const updatedSalesDocument = objectValue(updatedSales.body.document);
+			expect(updatedSalesDocument).toEqual(expect.objectContaining({ number: salesNumber, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
+			expect(objectValue(updatedSalesDocument.details).downPayment).toBe(12345);
+			expect(objectValue(objectValue(updatedSalesDocument.details).customerOverride).name).toBe(`${marker} プレビュー顧客`);
 			const tamperedSalesStatus = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", { status: "不正状態" });
 			expect(tamperedSalesStatus.response.status).toBe(400);
 
@@ -210,6 +238,8 @@ describe("CLI authenticated workflow", () => {
 			expect(maintenance.response.status).toBe(201);
 			const maintenanceDocument = objectValue(maintenance.body.document);
 			maintenanceDocumentId = stringValue(maintenanceDocument.id);
+			const maintenanceNumber = stringValue(maintenanceDocument.number);
+			expect(maintenanceNumber).toMatch(/^M-\d{4}-\d{5}$/);
 			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
 
 			const duplicateMaintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
@@ -222,7 +252,9 @@ describe("CLI authenticated workflow", () => {
 				issuedAt: "2026-07-26",
 				items: [{ kind: "作業", description: "重複確認", quantity: 1, unit: "式", unitPrice: 1 }],
 			});
-			expect(duplicateMaintenance.response.status).toBe(409);
+			expect(duplicateMaintenance.response.status).toBe(201);
+			expect(stringValue(objectValue(duplicateMaintenance.body.document).number)).toMatch(/^M-\d{4}-\d{5}$/);
+			expect(stringValue(objectValue(duplicateMaintenance.body.document).number)).not.toBe(maintenanceNumber);
 
 			const updatedMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", {
 				status: "完了",
@@ -247,6 +279,10 @@ describe("CLI authenticated workflow", () => {
 			expect(arrayValue(payments.body.records)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 }),
 			]));
+			const manySalesItems = Array.from({ length: 20 }, (_, index) => ({ itemType: "その他", description: `${marker} 明細${index + 1}`, quantity: 1, unit: "式", unitPrice: index + 1 }));
+			const manyItemsSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", { items: manySalesItems });
+			expect(manyItemsSales.response.status).toBe(200);
+			expect(arrayValue(objectValue(manyItemsSales.body.document).items)).toHaveLength(20);
 
 			const archivedSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "DELETE");
 			expect(archivedSales.response.status).toBe(200);
@@ -271,22 +307,44 @@ describe("CLI authenticated workflow", () => {
 
 			const settings = await requestJson<JsonObject>("/api/settings", "PATCH", {
 				settings: {
-					shop: { name: `${marker} 店舗` },
+					shop: { name: `${marker} 店舗`, logoDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" },
 					document: { defaultDueDays: 30 },
 					tax: { consumptionTaxRate: 10, display: "税込", rounding: "四捨五入" },
-					salesItemPresets: ["車両本体価格", marker],
+					salesItemPresetGroups: {
+						vehiclePrice: ["車両本体価格", `${marker}-vehicle`],
+						fees: ["登録代行費用", `${marker}-fees`],
+						accessories: ["フロアマット", `${marker}-accessory`],
+					},
 					maintenanceItemPresets: ["点検", marker],
 				},
 			});
 			expect(settings.response.status).toBe(200);
-			expect(objectValue(objectValue(settings.body.settings).shop).name).toBe(`${marker} 店舗`);
-			expect(objectValue(objectValue(settings.body.settings).document).defaultDueDays).toBe(30);
+			const savedSettings = objectValue(settings.body.settings);
+			expect(objectValue(savedSettings.shop).name).toBe(`${marker} 店舗`);
+			expect(objectValue(savedSettings.shop).logoDataUrl).toMatch(/^data:image\/png;base64,/);
+			expect(objectValue(savedSettings.document).defaultDueDays).toBe(30);
+			const salesPresetGroups = objectValue(savedSettings.salesItemPresetGroups);
+			expect(stringArrayValue(salesPresetGroups.vehiclePrice)).toContain(`${marker}-vehicle`);
+			expect(stringArrayValue(salesPresetGroups.fees)).toContain(`${marker}-fees`);
+			expect(stringArrayValue(salesPresetGroups.accessories)).toContain(`${marker}-accessory`);
+			expect(stringArrayValue(savedSettings.salesItemPresets)).toEqual(expect.arrayContaining([
+				`${marker}-vehicle`,
+				`${marker}-fees`,
+				`${marker}-accessory`,
+			]));
 
 			const dashboard = await requestJson<JsonObject>("/api/dashboard");
 			expect(dashboard.response.status).toBe(200);
 			const dashboardSummary = objectValue(objectValue(dashboard.body.dashboard).summary);
 			const dashboardVehicleCount = Number(dashboardSummary.registeredVehicles);
 			if (dashboardVehicleCount !== 1) throw new Error(`ダッシュボードの車両件数が不正です: ${dashboardVehicleCount}`);
+			const calendarEvents = arrayValue(objectValue(dashboard.body.dashboard).calendarEvents);
+			expect(calendarEvents).toEqual(expect.arrayContaining([
+				expect.objectContaining({ date: "2026-07-26", category: "payment" }),
+				expect.objectContaining({ date: "2027-08-01", category: "vehicle-inspection" }),
+				expect.objectContaining({ date: "2026-08-09", category: "payment-due" }),
+				expect.objectContaining({ date: "2026-08-20", category: "inspection" }),
+			]));
 
 			const invalidAttachment = new FormData();
 			invalidAttachment.append("file", new File(["not an allowed file"], "invalid.txt", { type: "text/plain" }));
@@ -342,7 +400,9 @@ describe("CLI authenticated workflow", () => {
 			expect(preview.body.totalRows).toBe(1);
 			expect(arrayValue(preview.body.errors)).toHaveLength(0);
 
-			const committed = await requestForm<JsonObject>("/api/import/customers/commit", importFile);
+			const commitImportFile = new FormData();
+			commitImportFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
+			const committed = await requestForm<JsonObject>("/api/import/customers/commit", commitImportFile);
 			expect(committed.response.status).toBe(200);
 			expect(committed.body).toEqual(expect.objectContaining({ imported: 1, updated: 0, skipped: 0 }));
 
@@ -371,7 +431,9 @@ describe("CLI authenticated workflow", () => {
 
 			const employeeCannotManageMembers = await requestJson<JsonObject>(`/api/organization/members/${ownerUid}`, "PATCH", { status: "suspended" }, employeeUid);
 			expect(employeeCannotManageMembers.response.status).toBe(403);
-			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", new FormData(), employeeUid);
+			const employeeImportAttemptFile = new FormData();
+			employeeImportAttemptFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
+			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", employeeImportAttemptFile, employeeUid);
 			expect(employeeCannotImport.response.status).toBe(403);
 			const employeeCannotBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
 			expect(employeeCannotBackup.response.status).toBe(403);
@@ -384,6 +446,22 @@ describe("CLI authenticated workflow", () => {
 			expect(reactivated.response.status).toBe(200);
 			const activeEmployee = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(activeEmployee.response.status).toBe(200);
+
+			const removedEmployee = await requestJson<JsonObject>(`/api/organization/members/${employeeUid}`, "DELETE");
+			expect(removedEmployee.response.status).toBe(200);
+			expect(arrayValue(removedEmployee.body.members)).not.toEqual(
+				expect.arrayContaining([expect.objectContaining({ uid: employeeUid })]),
+			);
+
+			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
+			expect(removedEmployeeAccess.response.status).toBe(400);
+            const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: marker + " 再追加従業員", email: employeeUid + "@example.com" });
+            expect(readdedEmployee.response.status).toBe(201);
+            expect(readdedEmployee.body.temporaryPassword).toEqual(expect.any(String));
+            expect(stringValue(readdedEmployee.body.temporaryPassword).length).toBeGreaterThanOrEqual(16);
+            expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: marker + " 再追加従業員", role: "employee", status: "active", mustChangePassword: true }));
+			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
+			expect(readdedEmployeeAccess.response.status).toBe(200);
 
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);
@@ -449,7 +527,7 @@ async function prepareTestOrganizations() {
 		.bind(ownerUid, `${marker} オーナー`, `${ownerUid}@example.com`, "owner")
 		.run();
 	await env.DB.prepare("INSERT OR IGNORE INTO staff_profiles (uid, display_name, email, role) VALUES (?, ?, ?, ?)")
-		.bind(employeeUid, `${marker} 従業員`, `${employeeUid}@example.com`, "employee")
+		.bind(employeeUid, marker + " 従業員", employeeUid + "@example.com", "employee")
 		.run();
 	await env.DB.prepare("INSERT OR IGNORE INTO auth_accounts (uid, must_change_password) VALUES (?, 0)")
 		.bind(ownerUid)
@@ -582,6 +660,10 @@ function objectValue(value: unknown): JsonObject {
 
 function arrayValue(value: unknown): JsonObject[] {
 	return Array.isArray(value) ? value.filter((item): item is JsonObject => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function stringArrayValue(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function stringValue(value: unknown) {

@@ -1,9 +1,18 @@
 import { and, eq } from 'drizzle-orm'
-import { appSettings } from '@vehicle-management/database'
+import { appSettings, organizations } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+
+type SalesItemPresetGroupKey = 'vehiclePrice' | 'fees' | 'accessories'
+type SalesItemPresetGroups = Record<SalesItemPresetGroupKey, string[]>
+
+const defaultSalesItemPresetGroups: SalesItemPresetGroups = {
+  vehiclePrice: ['車両本体価格', '値引等', '工賃'],
+  fees: ['登録代行費用', '納車費用', 'リサイクル料金', 'その他'],
+  accessories: ['付属品・特別仕様', 'フロアマット', 'シートカバー', '純正SDナビ', '取付工賃'],
+}
 
 const defaultSettings: AppSettings = {
   shop: {
@@ -15,6 +24,7 @@ const defaultSettings: AppSettings = {
     registrationNumber: '',
     bankName: '',
     bankAccount: '',
+    logoDataUrl: '',
   },
   document: {
     defaultDueDays: 14,
@@ -26,11 +36,12 @@ const defaultSettings: AppSettings = {
     display: '税込',
     rounding: '切り捨て',
   },
-  salesItemPresets: ['車両本体価格', '付属品・特別仕様', '登録代行費用', '納車費用', 'リサイクル料金', '値引き'],
+  salesItemPresets: flattenSalesItemPresetGroups(defaultSalesItemPresetGroups),
+  salesItemPresetGroups: defaultSalesItemPresetGroups,
   maintenanceItemPresets: ['法定24か月点検', 'エンジンオイル交換', 'オイルフィルター交換', 'ブレーキ点検', 'タイヤ交換'],
 }
 
-const settingKeys = ['shop', 'document', 'tax', 'salesItemPresets', 'maintenanceItemPresets'] as const
+const settingKeys = ['shop', 'document', 'tax', 'salesItemPresets', 'salesItemPresetGroups', 'maintenanceItemPresets'] as const
 
 export async function handleSettingsRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -56,11 +67,13 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
   const incoming = recordValue(body.settings)
   if (!incoming) throw new HttpError(400, '設定内容が不正です。')
   const current = await loadSettings(database, organizationId)
+  const hasIncomingLegacySalesPresets = incoming.salesItemPresets !== undefined
   const next = normalizeSettings({
     shop: { ...current.shop, ...recordValue(incoming.shop) },
     document: { ...current.document, ...recordValue(incoming.document) },
     tax: { ...current.tax, ...recordValue(incoming.tax) },
     salesItemPresets: incoming.salesItemPresets ?? current.salesItemPresets,
+    salesItemPresetGroups: incoming.salesItemPresetGroups ?? (hasIncomingLegacySalesPresets ? undefined : current.salesItemPresetGroups),
     maintenanceItemPresets: incoming.maintenanceItemPresets ?? current.maintenanceItemPresets,
   })
 
@@ -69,6 +82,7 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
     document: next.document,
     tax: next.tax,
     salesItemPresets: next.salesItemPresets,
+    salesItemPresetGroups: next.salesItemPresetGroups,
     maintenanceItemPresets: next.maintenanceItemPresets,
   }
   const now = new Date().toISOString()
@@ -81,6 +95,12 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
       await database.insert(appSettings).values({ organizationId, key, value, updatedAt: now }).run()
     }
   }
+
+  const shopName = next.shop.name
+  if (shopName) {
+    await database.update(organizations).set({ name: shopName, updatedAt: now }).where(eq(organizations.id, organizationId)).run()
+  }
+
   return jsonResponse({ settings: next }, 200, env)
 }
 
@@ -92,6 +112,7 @@ async function loadSettings(database: ReturnType<typeof createDatabase>, organiz
     document: saved.get('document'),
     tax: saved.get('tax'),
     salesItemPresets: saved.get('salesItemPresets'),
+    salesItemPresetGroups: saved.get('salesItemPresetGroups'),
     maintenanceItemPresets: saved.get('maintenanceItemPresets'),
   })
 }
@@ -100,6 +121,8 @@ function normalizeSettings(value: Record<string, unknown>): AppSettings {
   const shop = recordValue(value.shop)
   const document = recordValue(value.document)
   const tax = recordValue(value.tax)
+  const legacySalesItemPresets = listValue(value.salesItemPresets, defaultSettings.salesItemPresets)
+  const salesItemPresetGroups = salesItemPresetGroupsValue(value.salesItemPresetGroups, legacySalesItemPresets)
   return {
     shop: {
       name: textValue(shop?.name, defaultSettings.shop.name),
@@ -110,6 +133,7 @@ function normalizeSettings(value: Record<string, unknown>): AppSettings {
       registrationNumber: textValue(shop?.registrationNumber, defaultSettings.shop.registrationNumber),
       bankName: textValue(shop?.bankName, defaultSettings.shop.bankName),
       bankAccount: textValue(shop?.bankAccount, defaultSettings.shop.bankAccount),
+      logoDataUrl: imageDataUrlValue(shop?.logoDataUrl, defaultSettings.shop.logoDataUrl),
     },
     document: {
       defaultDueDays: integerValue(document?.defaultDueDays, defaultSettings.document.defaultDueDays, 0, 365),
@@ -121,9 +145,39 @@ function normalizeSettings(value: Record<string, unknown>): AppSettings {
       display: tax?.display === '税別' ? '税別' : '税込',
       rounding: tax?.rounding === '四捨五入' ? '四捨五入' : '切り捨て',
     },
-    salesItemPresets: listValue(value.salesItemPresets, defaultSettings.salesItemPresets),
+    salesItemPresets: flattenSalesItemPresetGroups(salesItemPresetGroups),
+    salesItemPresetGroups,
     maintenanceItemPresets: listValue(value.maintenanceItemPresets, defaultSettings.maintenanceItemPresets),
   }
+}
+
+function salesItemPresetGroupsValue(value: unknown, legacyItems: string[]): SalesItemPresetGroups {
+  const groups = recordValue(value)
+  if (!groups) return migrateLegacySalesItemPresets(legacyItems)
+  return {
+    vehiclePrice: listValue(groups.vehiclePrice, []),
+    fees: listValue(groups.fees, []),
+    accessories: listValue(groups.accessories, []),
+  }
+}
+
+function migrateLegacySalesItemPresets(items: string[]): SalesItemPresetGroups {
+  const groups: SalesItemPresetGroups = { vehiclePrice: [], fees: [], accessories: [] }
+  items.forEach((item) => {
+    const key = classifyLegacySalesItemPreset(item)
+    groups[key].push(item)
+  })
+  return groups
+}
+
+function classifyLegacySalesItemPreset(item: string): SalesItemPresetGroupKey {
+  if (/(付属品|特別仕様|マット|カバー|ナビ|オーディオ|ETC|ドラレコ|取付)/i.test(item)) return 'accessories'
+  if (/(車両本体|値引)/.test(item) || item === '工賃') return 'vehiclePrice'
+  return 'fees'
+}
+
+function flattenSalesItemPresetGroups(groups: SalesItemPresetGroups) {
+  return Array.from(new Set([...groups.vehiclePrice, ...groups.fees, ...groups.accessories]))
 }
 
 function parseJson(value: string) {
@@ -140,6 +194,11 @@ function recordValue(value: unknown): Record<string, unknown> | null {
 
 function textValue(value: unknown, fallback: string) {
   return typeof value === 'string' ? value.trim().slice(0, 500) : fallback
+}
+
+function imageDataUrlValue(value: unknown, fallback: string) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2_000_000) return fallback
+  return /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : fallback
 }
 
 function integerValue(value: unknown, fallback: number, minimum: number, maximum: number) {
@@ -164,6 +223,7 @@ type AppSettings = {
     registrationNumber: string
     bankName: string
     bankAccount: string
+    logoDataUrl: string
   }
   document: {
     defaultDueDays: number
@@ -176,5 +236,6 @@ type AppSettings = {
     rounding: '切り捨て' | '四捨五入'
   }
   salesItemPresets: string[]
+  salesItemPresetGroups: SalesItemPresetGroups
   maintenanceItemPresets: string[]
 }

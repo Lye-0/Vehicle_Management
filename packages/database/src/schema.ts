@@ -22,6 +22,18 @@ export const organizations = sqliteTable('organizations', {
   ...timestamps,
 })
 
+export const documentNumberSequences = sqliteTable('document_number_sequences', {
+  organizationId: text('organization_id').notNull().default('org-default'),
+  prefix: text('prefix').notNull(),
+  year: integer('year').notNull(),
+  month: integer('month').notNull(),
+  nextSequence: integer('next_sequence').notNull().default(1),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  primaryKey({ columns: [table.organizationId, table.prefix, table.year, table.month] }),
+  index('document_number_sequences_organization_id_idx').on(table.organizationId),
+])
+
 export const organizationMemberships = sqliteTable('organization_memberships', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id').notNull(),
@@ -120,6 +132,7 @@ export const salesDocuments = sqliteTable('sales_documents', {
   tax: integer('tax').notNull().default(0),
   total: integer('total').notNull().default(0),
   note: text('note'),
+  detailsJson: text('details_json').notNull().default('{}'),
   archivedAt: text('archived_at'),
   ...timestamps,
 }, (table) => [
@@ -139,6 +152,9 @@ export const salesDocumentItems = sqliteTable('sales_document_items', {
   quantity: real('quantity').notNull().default(1),
   unit: text('unit').notNull().default('式'),
   unitPrice: integer('unit_price').notNull().default(0),
+  taxCategory: text('tax_category').notNull().default('課税'),
+  otherAmount: integer('other_amount').notNull().default(0),
+  summary: text('summary').notNull().default(''),
   amount: integer('amount').notNull().default(0),
   sortOrder: integer('sort_order').notNull().default(0),
 }, (table) => [
@@ -251,6 +267,7 @@ export const backupRecords = sqliteTable('backup_records', {
 export const databaseSchema = {
   staffProfiles,
   organizations,
+  documentNumberSequences,
   organizationMemberships,
   authAccounts,
   customers,

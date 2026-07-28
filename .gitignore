@@ -43,6 +43,10 @@ Thumbs.db
 # Vercel
 .vercel
 
+# AI
+.codex/
+.kilo/
+
 
 # 以下はViteの自動生成内容
 

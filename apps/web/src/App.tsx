@@ -19,7 +19,8 @@ import {
   Settings,
   UserRound,
 } from 'lucide-react'
-import { CustomerVehiclePage } from './components/CustomerVehiclePage'
+import { CustomerVehiclePage, type VehicleHistoryNavigation } from './components/CustomerVehiclePage'
+import { DashboardCalendar } from './components/DashboardCalendar'
 import { InspectionSchedulesPage } from './components/InspectionSchedulesPage'
 import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
@@ -53,7 +54,7 @@ const navItems: { id: SectionId; label: string; icon: LucideIcon }[] = [
 const pageMeta: Record<SectionId, PageMeta> = {
   dashboard: { title: 'ダッシュボード', description: '店舗の状況をひと目で確認できます。', actionLabel: 'クイック操作', icon: LayoutDashboard },
   customers: { title: '顧客・車両', description: '顧客情報と、顧客に紐づく複数の車両を管理します。', actionLabel: '顧客を登録', icon: CarFront },
-  sales: { title: '販売', description: '見積書・注文書・請求書を車両情報と連動して管理します。', actionLabel: '販売書類を作成', icon: FileText },
+  sales: { title: '販売', description: '見積書・請求書を車両情報と連動して管理します。', actionLabel: '販売書類を作成', icon: FileText },
   maintenance: { title: '車検・点検・一般', description: '整備の受付から作業明細、納品書・請求書まで管理します。', actionLabel: '整備書類を作成', icon: ClipboardCheck },
   inspections: { title: '点検予定', description: '車検・定期点検の予定と完了状態を管理します。', actionLabel: '点検予定を登録', icon: CalendarClock },
   payments: { title: '入金管理', description: '請求に対する入金状況を確認し、未入金を管理します。', actionLabel: '入金を登録', icon: CircleDollarSign },
@@ -73,10 +74,10 @@ function App() {
 
   if (authState.loading) return <AuthLoading />
   if (!authState.user) return <LoginPage initialError={authState.error} />
-  return <AuthenticatedApp user={authState.user} />
+  return <AuthenticatedApp user={authState.user} onUserUpdated={(nextUser) => setAuthState((current) => ({ ...current, loading: false, user: nextUser, error: '' }))} />
 }
 
-function AuthenticatedApp({ user }: { user: User }) {
+function AuthenticatedApp({ user, onUserUpdated }: { user: User; onUserUpdated: (user: User) => void }) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [sessionError, setSessionError] = useState('')
   const [sessionLoading, setSessionLoading] = useState(true)
@@ -109,7 +110,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   if (!session.organizations.length) return <NoOrganizationPage onSignOut={() => void signOutCurrentUser()} />
 
   const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
-  return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} />
+  return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} />
 }
 
 function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (session: AuthSession) => void; onSignOut: () => void }) {
@@ -143,8 +144,18 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
   return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong></div></div><span className="page-eyebrow">FIRST SIGN IN</span><h1>パスワードを設定</h1><p>管理者から発行された初期パスワードを、あなた専用のパスワードへ変更してください。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>新しいパスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={loading} /></label><label className="form-field"><span>新しいパスワード（確認）</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="もう一度入力" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '設定しています…' : 'パスワードを設定して開始'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
 }
 
-function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void }) {
+function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
+  const [navigationTarget, setNavigationTarget] = useState<VehicleHistoryNavigation | null>(null)
+
+  useEffect(() => {
+    if (navigationTarget?.section === activeSection) setNavigationTarget(null)
+  }, [activeSection, navigationTarget])
+
+  function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
+    setNavigationTarget(target)
+    setActiveSection(target.section)
+  }
 
   return (
     <div className="app-shell">
@@ -152,7 +163,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage /> : activeSection === 'sales' ? <SalesPage /> : activeSection === 'maintenance' ? <MaintenancePage /> : activeSection === 'inspections' ? <InspectionSchedulesPage /> : activeSection === 'payments' ? <PaymentsPage /> : <SettingsPage user={user} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage initialScheduleId={navigationTarget?.section === 'inspections' ? navigationTarget.recordId : undefined} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
         </div>
       </main>
     </div>
@@ -367,15 +378,10 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
 }
 
 function Topbar({ currentPage }: { currentPage: PageMeta }) {
-  const Icon = currentPage.icon
   return (
     <header className="topbar">
       <div className="breadcrumb"><strong>{currentPage.title}</strong></div>
-      <div className="topbar-actions">
-        <button className="search-trigger" type="button"><Search size={18} /><span>顧客・車両を検索</span><kbd>⌘ K</kbd></button>
-        <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
-        <span className="topbar-page-icon" aria-hidden="true"><Icon size={20} /></span>
-      </div>
+      <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
     </header>
   )
 }
@@ -415,6 +421,7 @@ function Dashboard() {
         <StatCard label="車検期限30日以内" value={String(summary?.inspectionsWithin30Days ?? 0)} suffix="台" note={`期限超過 ${summary?.overdueInspections ?? 0}台`} icon={CalendarDays} tone="orange" />
         <StatCard label="未入金の請求" value={String(summary?.unpaidInvoices ?? 0)} suffix="件" note={`合計 ${formatYen(summary?.unpaidAmount ?? 0)}`} icon={CircleDollarSign} tone="red" />
       </section>
+      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} />
       <section className="dashboard-grid">
         <Panel title="車検・点検期限が近い車両" action="一覧を見る">
           <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row) => <div className="data-list-row" key={`${row.customer}-${row.date}-${row.plate}`}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>

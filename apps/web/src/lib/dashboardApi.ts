@@ -1,5 +1,16 @@
 import { apiFetch } from './api'
 
+export type DashboardCalendarEvent = {
+  id: string
+  date: string
+  category: 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
+  categoryLabel: string
+  title: string
+  detail: string
+  status: string | null
+  amount: number | null
+}
+
 export type DashboardData = {
   summary: {
     registeredVehicles: number
@@ -30,6 +41,7 @@ export type DashboardData = {
     detail: string
     at: string
   }>
+  calendarEvents: DashboardCalendarEvent[]
 }
 
 export async function fetchDashboard() {

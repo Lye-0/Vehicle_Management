@@ -50,7 +50,10 @@ async function exportSales(env: Env, database: ReturnType<typeof createDatabase>
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
-  return csvResponse(['書類ID', '書類番号', '書類種別', 'ステータス', '顧客名', '車名', '登録番号', '発行日', '支払期限', '税率', '小計', '消費税', '合計', '明細'], documentRows.map((row) => [row.id, row.number, row.type, row.status, customersById.get(row.customerId)?.name, vehicleLabel(row.vehicleId, vehiclesById), plateLabel(row.vehicleId, vehiclesById), row.issuedAt, row.dueDate, `${row.taxRate}%`, row.subtotal, row.tax, row.total, (itemsByDocument.get(row.id) ?? []).map((item) => `${item.description} x${item.quantity} ${item.unit} ¥${item.amount}`).join(' / ')]), 'sales.csv', env)
+  return csvResponse(['書類ID', '書類番号', '書類種別', 'ステータス', '顧客名', '車名', '登録番号', '発行日', '支払期限', '税率', '小計', '消費税', '合計', '明細', '明細詳細', '帳票詳細'], documentRows.map((row) => {
+    const items = itemsByDocument.get(row.id) ?? []
+    return [row.id, row.number, row.type, row.status, customersById.get(row.customerId)?.name, vehicleLabel(row.vehicleId, vehiclesById), plateLabel(row.vehicleId, vehiclesById), row.issuedAt, row.dueDate, `${row.taxRate}%`, row.subtotal, row.tax, row.total, items.map((item) => `${item.description} x${item.quantity} ${item.unit} ¥${item.amount}`).join(' / '), JSON.stringify(items.map(({ itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary }) => ({ itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary }))), row.detailsJson]
+  }), 'sales.csv', env)
 }
 
 async function exportMaintenance(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {

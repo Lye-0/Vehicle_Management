@@ -1,13 +1,16 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
+import { customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
+import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
-const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
+const salesDocumentTypes = new Set(['見積書', '請求書'])
 const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
-const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
+const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
+const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
+const salesItemInsertBatchSize = 7
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -61,9 +64,9 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   const body = await readJson(request)
   const input = await parseSalesDocumentInput(body, database, organizationId)
   const id = crypto.randomUUID()
-  const number = input.number ?? await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
+  const number = await nextDocumentNumber(env.DB, organizationId, 'S')
   await ensureSalesDocumentNumberAvailable(database, number, organizationId)
-  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
+  const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
   await database.insert(salesDocuments).values({
     id,
@@ -80,6 +83,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
   }).run()
   await insertSalesItems(database, id, input.items, organizationId)
 
@@ -99,17 +103,17 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     vehicleId: body.vehicleId === undefined ? current.vehicleId : body.vehicleId,
     issuedAt: body.issuedAt ?? current.issuedAt,
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
-    number: body.number === undefined ? current.number : body.number,
+    number: current.number,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
+    details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
   }, database, organizationId)
-  await ensureSalesDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
-  const totals = calculateTotals(input.items, input.taxRate, input.rounding)
+  const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
   await database.update(salesDocuments).set({
     type: input.type,
-    number: input.number ?? current.number,
+    number: current.number,
     status: input.status,
     customerId: input.customerId,
     vehicleId: input.vehicleId,
@@ -120,6 +124,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
 
@@ -159,18 +164,24 @@ async function loadSalesItems(database: ReturnType<typeof createDatabase>, docum
 
 async function insertSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, items: SalesItemInput[], organizationId: string) {
   if (!items.length) return
-  await database.insert(salesDocumentItems).values(items.map((item, index) => ({
-    id: crypto.randomUUID(),
-    organizationId,
-    documentId,
-    itemType: item.itemType,
-    description: item.description,
-    quantity: item.quantity,
-    unit: item.unit,
-    unitPrice: item.unitPrice,
-    amount: item.amount,
-    sortOrder: index,
-  }))).run()
+  for (let start = 0; start < items.length; start += salesItemInsertBatchSize) {
+    const batch = items.slice(start, start + salesItemInsertBatchSize)
+    await database.insert(salesDocumentItems).values(batch.map((item, index) => ({
+      id: crypto.randomUUID(),
+      organizationId,
+      documentId,
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+      amount: item.amount,
+      sortOrder: start + index,
+    }))).run()
+  }
 }
 
 async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<SalesDocumentInput> {
@@ -195,8 +206,14 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   const issuedAt = dateValue(body.issuedAt) || today()
   const dueDate = nullableDate(body.dueDate)
   const number = nullableString(body, 'number')
+  const details = parseSalesDetails(body.details)
+  if (details.selectedImageAttachmentId) {
+    if (!vehicleId) throw new HttpError(400, '画像を選択するには対象車両が必要です。')
+    const image = await database.select({ id: vehicleFiles.id }).from(vehicleFiles).where(and(eq(vehicleFiles.id, details.selectedImageAttachmentId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId), eq(vehicleFiles.fileKind, 'image'))).get()
+    if (!image) throw new HttpError(400, '選択した画像が対象車両に紐づいていません。')
+  }
   const items = parseItems(body.items)
-  return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), items }
+  return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), details, items }
 }
 
 function serializeSalesDocument(
@@ -213,9 +230,34 @@ function serializeSalesDocument(
     customerId: document.customerId,
     customerName: customer?.name ?? '',
     phone: customer?.phone ?? '',
+    customerDetails: {
+      name: customer?.name ?? '',
+      kana: customer?.nameKana ?? '',
+      phone: customer?.phone ?? '',
+      postalCode: customer?.postalCode ?? '',
+      address: customer?.address ?? '',
+      birthDate: '',
+      employer: '',
+      contactPhone: '',
+    },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
     plate: vehicle?.registrationNumber ?? '',
+    vehicleDetails: vehicle ? {
+      maker: vehicle.maker ?? '',
+      name: vehicle.name,
+      modelType: vehicle.model ?? '',
+      plate: vehicle.registrationNumber ?? '',
+      vin: vehicle.chassisNumber ?? '',
+      year: vehicle.modelYear ? `${vehicle.modelYear}年` : '',
+      inspectionDate: vehicle.inspectionDate ?? '',
+      mileage: vehicle.mileage === null ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+      color: vehicle.bodyColor ?? '',
+      displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
+      transmission: vehicle.transmission ?? '',
+      inspectionRecordAvailable: Boolean(vehicle.inspectionRecordAvailable),
+    } : null,
+    details: parseSalesDetails(document.detailsJson),
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
@@ -231,26 +273,57 @@ function serializeSalesDocument(
       quantity: item.quantity,
       unit: item.unit,
       unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
       amount: item.amount,
     })),
   }
 }
 
-async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string, organizationId: string) {
-  const year = issuedAt.slice(0, 4) || String(new Date().getFullYear())
-  const prefix = `S-${year}-`
-  const rows = await database.select({ number: salesDocuments.number }).from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).all()
-  const usedNumbers = new Set(rows.map((row) => row.number))
-  let sequence = 1
-  while (usedNumbers.has(`${prefix}${String(sequence).padStart(3, '0')}`)) sequence += 1
-  return `${prefix}${String(sequence).padStart(3, '0')}`
-}
-
-function calculateTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入') {
-  const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const taxValue = Math.max(0, subtotal) * taxRate / 100
+export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {
+  const buckets = { vehicleBase: 0, discount: 0, accessories: 0, vehicleSideLabor: 0, legalNonTaxable: 0, taxableFees: 0, nonTaxableFees: 0, outOfScope: 0, tradeIn: 0, payments: 0, recycle: 0 }
+  let hasRecycleLine = false
+  items.forEach((item) => {
+    const bucket = classifySalesItem(item)
+    buckets[bucket] += item.amount
+    if (bucket === 'recycle') hasRecycleLine = true
+  })
+  const recycleFee = hasRecycleLine ? buckets.recycle : Math.max(0, details.recycleFee)
+  const vehicleSalesTotal = buckets.vehicleBase + buckets.discount + buckets.accessories + buckets.vehicleSideLabor
+  const taxableSubtotal = vehicleSalesTotal + buckets.taxableFees
+  const nonTaxableSubtotal = buckets.legalNonTaxable + buckets.nonTaxableFees + recycleFee
+  const subtotal = taxableSubtotal + nonTaxableSubtotal + buckets.outOfScope
+  const taxValue = Math.max(0, taxableSubtotal) * taxRate / 100
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   return { subtotal, tax, total: subtotal + tax }
+}
+
+type SalesItemBucket = keyof ReturnType<typeof emptySalesCalculationBuckets>
+
+function emptySalesCalculationBuckets() {
+  return { vehicleBase: 0, discount: 0, accessories: 0, vehicleSideLabor: 0, legalNonTaxable: 0, taxableFees: 0, nonTaxableFees: 0, outOfScope: 0, tradeIn: 0, payments: 0, recycle: 0 }
+}
+
+function classifySalesItem(item: SalesItemInput): SalesItemBucket {
+  const label = `${item.itemType} ${item.description}`
+  if (item.itemType === '法定費用') return 'legalNonTaxable'
+  if (item.itemType === '手続代行費用') return 'taxableFees'
+  if (item.itemType === '実費・預託金') return label.includes('リサイクル') ? 'recycle' : 'nonTaxableFees'
+  if (item.itemType === '車両本体価格' || label.includes('車両本体価格')) return 'vehicleBase'
+  if (item.itemType === '値引き' || label.includes('値引')) return 'discount'
+  if (item.itemType === '付属品・特別仕様' || item.itemType === '取付工賃' || label.includes('付属品') || label.includes('特別仕様')) return 'accessories'
+  if (item.itemType === '車両販売工賃' || label.includes('車両販売側工賃')) return 'vehicleSideLabor'
+  if (item.itemType === '下取車') return 'tradeIn'
+  if (item.itemType === '頭金' || item.itemType === '残金' || label.includes('頭金') || label.includes('残金')) return 'payments'
+  if (label.includes('リサイクル')) return 'recycle'
+  if (['自動車税', '取得税', '環境性能割', '重量税', '自賠責', '印紙代'].some((keyword) => label.includes(keyword))) return 'legalNonTaxable'
+  if (['証紙', '預託金'].some((keyword) => label.includes(keyword))) return 'nonTaxableFees'
+  if (['車庫証明', '登録費用', '登録代行', '登録手続', '検査', '納車', '手数料', '査定料'].some((keyword) => label.includes(keyword))) return 'taxableFees'
+  if (label.includes('下取')) return 'tradeIn'
+  if (item.taxCategory === '非課税') return 'nonTaxableFees'
+  if (item.taxCategory === '対象外') return 'outOfScope'
+  return 'taxableFees'
 }
 
 function parseItems(value: unknown): SalesItemInput[] {
@@ -258,16 +331,114 @@ function parseItems(value: unknown): SalesItemInput[] {
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
+    const otherAmount = integerNumber(item.otherAmount, 0)
     const itemTypeValue = stringValue(item, 'itemType')
+    const taxCategoryValue = stringValue(item, 'taxCategory')
     return {
       itemType: salesItemTypes.has(itemTypeValue) ? itemTypeValue : 'その他',
       description: stringValue(item, 'description'),
       quantity,
       unit: stringValue(item, 'unit') || '式',
       unitPrice,
-      amount: Math.round(quantity * unitPrice),
+      taxCategory: salesTaxCategories.has(taxCategoryValue) ? taxCategoryValue : '課税',
+      otherAmount,
+      summary: stringValue(item, 'summary'),
+      amount: Math.round(quantity * unitPrice) + otherAmount,
     }
   })
+}
+
+export function parseSalesDetails(value: unknown): SalesDocumentDetails {
+  const record = parseRecord(value)
+  const tradeIn = parseRecord(record.tradeIn)
+  const credit = parseRecord(record.credit)
+  const requiredDocuments = parseRecord(record.requiredDocuments)
+  const customerOverride = isRecord(record.customerOverride) ? record.customerOverride : null
+  const vehicleOverride = isRecord(record.vehicleOverride) ? record.vehicleOverride : null
+  return {
+    salesCategory: limitedString(record.salesCategory, '中古車', 100),
+    staffName: limitedString(record.staffName, '', 100),
+    customerHonorific: limitedString(record.customerHonorific, '様', 20),
+    customerBirthDate: dateValue(record.customerBirthDate),
+    customerEmployer: limitedString(record.customerEmployer, '', 200),
+    customerContactPhone: limitedString(record.customerContactPhone, '', 50),
+    selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
+    customerOverride: customerOverride ? {
+      name: limitedString(customerOverride.name, '', 200),
+      kana: limitedString(customerOverride.kana, '', 200),
+      phone: limitedString(customerOverride.phone, '', 50),
+      postalCode: limitedString(customerOverride.postalCode, '', 20),
+      address: limitedString(customerOverride.address, '', 500),
+    } : null,
+    vehicleOverride: vehicleOverride ? {
+      maker: limitedString(vehicleOverride.maker, '', 100),
+      name: limitedString(vehicleOverride.name, '', 200),
+      modelType: limitedString(vehicleOverride.modelType, '', 100),
+      plate: limitedString(vehicleOverride.plate, '', 100),
+      vin: limitedString(vehicleOverride.vin, '', 100),
+      year: limitedString(vehicleOverride.year, '', 50),
+      inspectionDate: dateValue(vehicleOverride.inspectionDate),
+      mileage: limitedString(vehicleOverride.mileage, '', 50),
+      color: limitedString(vehicleOverride.color, '', 100),
+      displacement: limitedString(vehicleOverride.displacement, '', 50),
+      transmission: limitedString(vehicleOverride.transmission, '', 100),
+      inspectionRecordAvailable: booleanValue(vehicleOverride.inspectionRecordAvailable),
+    } : null,
+    tradeIn: {
+      name: limitedString(tradeIn.name, '', 200),
+      modelYear: limitedString(tradeIn.modelYear, '', 50),
+      inspectionDate: dateValue(tradeIn.inspectionDate),
+      mileage: limitedString(tradeIn.mileage, '', 50),
+      color: limitedString(tradeIn.color, '', 100),
+    },
+    recycleFee: nonNegativeInteger(record.recycleFee, 0),
+    downPayment: nonNegativeInteger(record.downPayment, 0),
+    remainingPayment: nonNegativeInteger(record.remainingPayment, 0),
+    credit: {
+      enabled: record.creditEnabled === true || credit.enabled === true,
+      paymentCount: limitedString(credit.paymentCount, '', 50),
+      fee: integerNumber(credit.fee, 0),
+      monthlyPayment: nonNegativeInteger(credit.monthlyPayment, 0),
+      initialPayment: nonNegativeInteger(credit.initialPayment, 0),
+      bonusMonths: limitedString(credit.bonusMonths, '', 50),
+      bonusPayment: nonNegativeInteger(credit.bonusPayment, 0),
+    },
+    requiredDocuments: {
+      sealCertificate: booleanValue(requiredDocuments.sealCertificate),
+      selfDeclaration: booleanValue(requiredDocuments.selfDeclaration) || booleanValue(requiredDocuments.warrantyCertificate),
+      residentCard: booleanValue(requiredDocuments.residentCard),
+      powerOfAttorney: booleanValue(requiredDocuments.powerOfAttorney),
+      lightVehicleCertificate: booleanValue(requiredDocuments.lightVehicleCertificate),
+      transferCertificate: booleanValue(requiredDocuments.transferCertificate),
+      taxPaymentCertificate: booleanValue(requiredDocuments.taxPaymentCertificate),
+      guarantorSealCertificate: booleanValue(requiredDocuments.guarantorSealCertificate),
+      warrantyCertificate: booleanValue(requiredDocuments.warrantyCertificate),
+      other: limitedString(requiredDocuments.other, '', 200),
+    },
+  }
+}
+
+function parseRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try { return parseRecord(JSON.parse(value)) } catch { return {} }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function limitedString(value: unknown, fallback: string, maxLength: number) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : fallback
+}
+
+function nonNegativeInteger(value: unknown, fallback: number) {
+  return Math.max(0, integerNumber(value, fallback))
+}
+
+function booleanValue(value: unknown) {
+  return value === true || value === 'true' || value === 1
 }
 
 async function ensureSalesDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {
@@ -344,6 +515,9 @@ type SalesItemInput = {
   quantity: number
   unit: string
   unitPrice: number
+  taxCategory: string
+  otherAmount: number
+  summary: string
   amount: number
 }
 
@@ -358,5 +532,24 @@ type SalesDocumentInput = {
   taxRate: number
   rounding: '切り捨て' | '四捨五入'
   note: string | null
+  details: SalesDocumentDetails
   items: SalesItemInput[]
+}
+
+type SalesDocumentDetails = {
+  salesCategory: string
+  staffName: string
+  customerHonorific: string
+  customerBirthDate: string
+  customerEmployer: string
+  customerContactPhone: string
+  selectedImageAttachmentId: string
+  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string } | null
+  vehicleOverride: { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean } | null
+  tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
+  recycleFee: number
+  downPayment: number
+  remainingPayment: number
+  credit: { enabled: boolean; paymentCount: string; fee: number; monthlyPayment: number; initialPayment: number; bonusMonths: string; bonusPayment: number }
+  requiredDocuments: { sealCertificate: boolean; selfDeclaration: boolean; residentCard: boolean; powerOfAttorney: boolean; lightVehicleCertificate: boolean; transferCertificate: boolean; taxPaymentCertificate: boolean; guarantorSealCertificate: boolean; warrantyCertificate: boolean; other: string }
 }
