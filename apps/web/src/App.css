@@ -445,11 +445,6 @@
 .sales-detail-footer { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 22px; color: var(--text-muted); font-size: 10px; }
 .sales-detail-footer span { display: inline-flex; align-items: center; gap: 5px; }
 .sales-preview-area { display: grid; gap: 14px; }
-.sales-preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.sales-preview-toolbar > div { min-width: 0; }
-.sales-preview-toolbar strong { display: block; color: var(--text); font-size: 14px; }
-.sales-preview-toolbar span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
-.sales-preview-toolbar .button { min-height: 34px; padding: 0 11px; font-size: 11px; box-shadow: none; white-space: nowrap; }
 .sales-document-paper { width: min(100%, 900px); margin: 0 auto; padding: 46px 48px 34px; box-sizing: border-box; color: #1f2937; border: 1px solid #d5dde8; border-radius: 5px; background: #fff; box-shadow: 0 10px 26px rgba(31, 48, 71, 0.08); }
 .sales-paper-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr); align-items: start; gap: 24px; min-height: 86px; }
 .sales-paper-heading { min-width: 0; display: flex; align-items: flex-start; }
@@ -1235,8 +1230,6 @@
   .sales-detail-content { padding: 18px; }
   .sales-context-grid, .sales-summary-grid { grid-template-columns: 1fr; }
   .sales-summary-grid { gap: 18px; }
-  .sales-preview-toolbar { align-items: stretch; flex-direction: column; }
-  .sales-preview-toolbar .button { width: 100%; }
   .sales-document-paper { padding: 22px 16px 20px; }
   .sales-paper-header { grid-template-columns: 1fr; gap: 16px; min-height: 0; }
   .sales-paper-header-side { justify-items: start; text-align: left; }
