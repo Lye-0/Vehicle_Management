@@ -221,7 +221,7 @@ function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof b
   ${taxMatrix(document, totals, x, taxY, w)}
   ${valueRow(x, paymentY, w, '下取車価格', totals.tradeInPrice, 31, '')}
   ${valueRow(x, paymentY + 31, w, '頭金／現金／他', totals.downPayment, 31, '')}
-  ${valueRow(x, paymentY + 62, w, '残金／所要資金', totals.remainingPayment, 33, 'bold pale')}
+  ${valueRow(x, paymentY + 62, w, '残金／所要資金', totals.remainingPayment, 33, 'bold dark')}
   <rect x="${x}" y="${paymentY}" width="${w}" height="95" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
 }
 
@@ -277,9 +277,7 @@ function feeCard(
   return `${sectionHeader(x, y, w, '諸費用内訳')}
   <rect x="${x}" y="${y + 39}" width="${w}" height="526" class="box"/>
   ${groups}
-  <rect x="${x}" y="${y + 526}" width="${w}" height="39" fill="${BLUE}"/>
-  ${text(x + 20, y + 552, '諸費用合計', 'white bold', 17)}
-  ${text(x + w - 12, y + 552, formatYen(totals.feesTotal), 'white bold amount', 18, 'end')}`
+  ${valueRow(x, y + 526, w, '諸費用合計', totals.feesTotal, 39, 'bold pale')}`
 }
 
 function accessoryCard(rows: Array<{ label: string; amount: number }>, total: number) {
@@ -350,12 +348,15 @@ function simpleColumns(x: number, y: number, widths: number[], values: string[],
 
 function valueRow(x: number, y: number, width: number, label: string, amount: number, height: number, tone: string, splitWidth?: number) {
   const split = splitWidth ?? Math.round(width * 0.61)
-  const fill = tone.includes('pale') ? PALE : '#fff'
+  const dark = tone.includes('dark')
+  const fill = tone.includes('pale') ? PALE : dark ? BLUE : '#fff'
   const amountText = label || amount ? formatYen(amount) : ''
+  const labelClass = dark ? 'white bold body' : tone.includes('bold') ? 'bold body' : 'small'
+  const amountClass = `${dark ? 'white ' : ''}${tone.includes('bold') ? 'bold body' : 'small'} amount${tone.includes('discount') ? ' discount' : ''}`
   return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" stroke="${LINE}"/>
   <line x1="${x + split}" y1="${y}" x2="${x + split}" y2="${y + height}" class="line"/>
-  ${text(x + 12, y + height / 2 + 6, label, tone.includes('bold') ? 'bold body' : 'small')}
-  ${text(x + width - 10, y + height / 2 + 6, amountText, `${tone.includes('bold') ? 'bold body' : 'small'} amount${tone.includes('discount') ? ' discount' : ''}`, tone.includes('bold') ? 16 : 13, 'end')}`
+  ${text(x + 12, y + height / 2 + 6, label, labelClass)}
+  ${text(x + width - 10, y + height / 2 + 6, amountText, amountClass, tone.includes('bold') ? 16 : 13, 'end')}`
 }
 
 function text(x: number, y: number, value: string, className = '', size?: number, anchor: 'start' | 'middle' | 'end' = 'start') {

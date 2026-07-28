@@ -358,7 +358,7 @@ function drawSalesPdfImage(state: PageState, image: PDFImage, x: number, top: nu
   state.page.drawImage(image, { x: x + (width - drawWidth) / 2, y: top - height + (height - drawHeight) / 2, width: drawWidth, height: drawHeight, opacity: 1 })
 }
 
-type SalesPdfBreakdownRow = { label: string; amount: number; emphasis?: boolean; discount?: boolean }
+type SalesPdfBreakdownRow = { label: string; amount: number; emphasis?: boolean; discount?: boolean; dark?: boolean }
 type SalesPdfTaxBreakdown = { taxRate: number; taxableSubtotal: number; nonTaxableSubtotal: number; tax: number; total: number }
 
 function drawSalesEstimateBreakdown(state: PageState, document: SalesDocument, totals: SalesTotals) {
@@ -377,7 +377,7 @@ function drawSalesEstimateBreakdown(state: PageState, document: SalesDocument, t
   const vehicleRowsAfterTax: SalesPdfBreakdownRow[] = [
     { label: '下取車価格', amount: totals.tradeInPrice },
     { label: '頭金／現金／他', amount: totals.downPayment },
-    { label: '残金／所要資金', amount: totals.remainingPayment, emphasis: true },
+    { label: '残金／所要資金', amount: totals.remainingPayment, emphasis: true, dark: true },
   ]
   const feeGroups = [
     { title: '法定費用（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
@@ -443,10 +443,10 @@ function drawSalesPdfBreakdownCard(state: PageState, x: number, top: number, wid
   rowTop -= 14 + 6
   trailingRows.forEach((row) => {
     const rowHeight = 12
-    if (row.emphasis) state.page.drawRectangle({ x: x + 0.5, y: rowTop - rowHeight, width: width - 1, height: rowHeight, color: rgb(0.86, 0.93, 1) })
+    if (row.emphasis) state.page.drawRectangle({ x: x + 0.5, y: rowTop - rowHeight, width: width - 1, height: rowHeight, color: row.dark ? colors.primary : rgb(0.86, 0.93, 1) })
     state.page.drawLine({ start: { x, y: rowTop - rowHeight }, end: { x: x + width, y: rowTop - rowHeight }, thickness: 0.35, color: colors.line })
-    drawTextTop(state.page, state.font, row.label, x + 5, rowTop - 3, row.emphasis ? 7.1 : 6.8, row.emphasis ? colors.primary : colors.ink, width * 0.64 - 5)
-    drawTextTop(state.page, state.latinFont, formatYen(row.amount), x + width - 5 - width * 0.34, rowTop - 3, row.emphasis ? 7.2 : 6.9, colors.ink, width * 0.34, 'right')
+    drawTextTop(state.page, state.font, row.label, x + 5, rowTop - 3, row.emphasis ? 7.1 : 6.8, row.dark ? colors.white : row.emphasis ? colors.primary : colors.ink, width * 0.64 - 5)
+    drawTextTop(state.page, state.latinFont, formatYen(row.amount), x + width - 5 - width * 0.34, rowTop - 3, row.emphasis ? 7.2 : 6.9, row.dark ? colors.white : colors.ink, width * 0.34, 'right')
     rowTop -= rowHeight
   })
 }
@@ -471,9 +471,11 @@ function drawSalesPdfFeeCard(state: PageState, x: number, top: number, width: nu
     drawTextTop(state.page, state.latinFont, formatYen(group.total), x + width - 5 - width * 0.32, rowTop - 4, 6.6, colors.ink, width * 0.32, 'right')
     rowTop -= 12
   })
-  state.page.drawRectangle({ x: x + 1, y: top - height + 1, width: width - 2, height: 14, color: colors.primary })
-  drawTextTop(state.page, state.font, '諸費用合計', x + 5, top - height + 12, 7, colors.white, width * 0.66 - 5)
-  drawTextTop(state.page, state.latinFont, formatYen(total), x + width - 5 - width * 0.32, top - height + 12, 7.2, colors.white, width * 0.32, 'right')
+  const totalTop = top - height + 1
+  state.page.drawRectangle({ x: x + 1, y: totalTop, width: width - 2, height: 14, color: rgb(0.86, 0.93, 1) })
+  state.page.drawLine({ start: { x: x + width * 0.66, y: totalTop }, end: { x: x + width * 0.66, y: totalTop + 14 }, thickness: 0.35, color: colors.line })
+  drawTextTop(state.page, state.font, '諸費用合計', x + 5, top - height + 12, 7, colors.primary, width * 0.66 - 5)
+  drawTextTop(state.page, state.latinFont, formatYen(total), x + width - 5 - width * 0.32, top - height + 12, 7.2, colors.ink, width * 0.32, 'right')
 }
 
 function drawSalesPdfAccessoryCard(state: PageState, x: number, top: number, width: number, height: number, rows: Array<{ label: string; amount: number }>, total: number) {
