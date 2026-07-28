@@ -696,7 +696,7 @@
 .sales-estimate-edit-details .sales-estimate-items-table { margin: 10px; }
 .sales-estimate-edit-actions { display: flex; align-items: center; gap: 10px; padding: 0 10px 10px; }
 .sales-estimate-edit-actions span { color: #718096; font-size: 10px; }
-.document-header-editor > .form-grid > .form-field:first-child, .sales-estimate-input-panel > .sales-estimate-input-grid > .form-field:nth-child(9) { display: none; }
+.sales-estimate-input-panel > .sales-estimate-input-grid > .form-field:nth-child(9) { display: none; }
 .is-spinning { animation: sales-estimate-spin 1s linear infinite; }
 @keyframes sales-estimate-spin { to { transform: rotate(360deg); } }
 
@@ -1450,7 +1450,13 @@
 .document-header-editor-title h3 { margin: 0; color: var(--text); font-size: 14px; }
 .document-header-editor-title span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .document-header-editor .form-grid { margin-bottom: 0; }
-.sales-detail-content .document-header-editor .form-grid > .form-field:first-child { display: none; }
+.sales-details-accordion { margin-top: 16px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.sales-details-accordion summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; color: var(--text); font-size: 13px; font-weight: 800; cursor: pointer; list-style: none; }
+.sales-details-accordion summary::-webkit-details-marker { display: none; }
+.sales-details-accordion summary svg { color: var(--text-muted); transition: transform 180ms ease; }
+.sales-details-accordion[open] summary { border-bottom: 1px solid var(--border); }
+.sales-details-accordion[open] summary svg { transform: rotate(180deg); }
+.sales-details-accordion-content { min-height: 0; }
 .sales-estimate-meta-table input[aria-label="書類番号"] { pointer-events: none; cursor: default; }
 .maintenance-header-editor { margin: 20px 0; }
 .sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
