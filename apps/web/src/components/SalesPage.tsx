@@ -43,6 +43,7 @@ type SalesTaxCategoryField = keyof SalesDocumentDetails['requiredDocuments']
 
 const salesLineItemTypes = ['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他']
 const salesTaxCategories: SalesTaxCategory[] = ['課税', '非課税', '対象外']
+const sheetYenFormatter = new Intl.NumberFormat('ja-JP')
 const requiredDocumentFields: Array<{ key: keyof SalesDocumentDetails['requiredDocuments']; label: string }> = [
   { key: 'sealCertificate', label: '印鑑証明' },
   { key: 'selfDeclaration', label: '自認書・承諾書' },
@@ -463,7 +464,7 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
   { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35 },
   { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35 },
   { bucket: 'vehicleSideLabor', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
-  { bucket: 'tradeIns', index: 0, x: 23, y: 1214, width: 324, labelWidth: 198, height: 30, menuUp: true },
+  { bucket: 'tradeIns', index: 0, x: 23, y: 1224, width: 324, labelWidth: 198, height: 30, menuUp: true },
   ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
   ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
   ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
@@ -503,15 +504,15 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
       return <SheetLineControl
         key={`${position.bucket}-${position.index}`}
         position={position}
-        label={line?.label ?? ''}
+        label={line?.label ?? (position.bucket === 'tradeIns' ? defaults.label : '')}
         amount={line?.amount ?? 0}
         exists={Boolean(line)}
         candidates={candidates}
         onChange={(patch) => onUpdateLine(position.bucket, position.index, patch)}
       />
     })}
-    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1244 / 14.91}%`, width: `${126 / 10.55}%`, height: `${30 / 14.91}%` }}>
-      <SheetAmountInput value={document.details.downPayment} exists onCommit={(downPayment) => onUpdateDetails({ downPayment })} />
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1254 / 14.91}%`, width: `${126 / 10.55}%`, height: `${30 / 14.91}%` }}>
+      <SheetAmountInput value={document.details.downPayment} exists={document.details.downPayment !== 0} onCommit={(downPayment) => onUpdateDetails({ downPayment })} />
     </div>
   </div>
 }
@@ -642,6 +643,7 @@ function SheetNameCombobox({ value, candidates, menuUp = false, onCommit }: { va
 
 function SheetAmountInput({ value, exists, onCommit }: { value: number; exists: boolean; onCommit: (value: number) => void }) {
   const [draft, setDraft] = useState(exists ? String(value) : '')
+  const [focused, setFocused] = useState(false)
   useEffect(() => setDraft(exists ? String(value) : ''), [exists, value])
 
   function update(nextValue: string) {
@@ -652,12 +654,29 @@ function SheetAmountInput({ value, exists, onCommit }: { value: number; exists: 
 
   function finish() {
     if (!draft || draft === '-') {
-      setDraft(exists ? '0' : '')
+      setDraft('')
       if (exists) onCommit(0)
     }
+    setFocused(false)
   }
 
-  return <input className="sales-sheet-amount-input" aria-label="金額" inputMode="numeric" value={draft} onChange={(event) => update(event.target.value)} onBlur={finish} />
+  return <input
+    className="sales-sheet-amount-input"
+    aria-label="金額"
+    inputMode="numeric"
+    value={focused ? draft : draft ? formatSheetYen(Number(draft)) : ''}
+    onFocus={() => {
+      setDraft(exists ? String(value) : '')
+      setFocused(true)
+    }}
+    onChange={(event) => update(event.target.value)}
+    onBlur={finish}
+  />
+}
+
+function formatSheetYen(value: number) {
+  const formatted = sheetYenFormatter.format(Math.abs(Math.round(value)))
+  return value < 0 ? `-¥${formatted}` : `¥${formatted}`
 }
 
 function SalesEstimatePreviewLayout({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview }: SalesPreviewProps) {

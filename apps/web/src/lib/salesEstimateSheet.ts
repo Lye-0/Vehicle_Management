@@ -202,6 +202,10 @@ function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof cal
   const y = 742
   const w = 324
   const rowH = 35
+  const topY = y + 39
+  const topHeight = 271
+  const taxY = y + 328
+  const paymentY = y + 482
   const rows = [
     ['車両本体価格', totals.vehicleBasePrice, ''],
     ['値引等', totals.discount, 'discount'],
@@ -210,27 +214,29 @@ function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof cal
     ['工賃', totals.vehicleSideLabor, ''],
   ] as const
   return `${sectionHeader(x, y, w, '車両販売価格内訳')}
-  <rect x="${x}" y="${y + 39}" width="${w}" height="526" class="box"/>
-  ${rows.map(([label, amount, tone], index) => valueRow(x, y + 39 + index * rowH, w, label, amount, rowH, tone)).join('')}
-  ${valueRow(x, y + 236, w, '車両販売合計', totals.vehicleSalesTotal, 46, 'bold pale')}
-  ${valueRow(x, y + 282, w, '諸費用合計', totals.feesTotal, 46, 'bold pale')}
-  ${taxMatrix(document, totals, x, y + 328, w)}
-  ${valueRow(x, y + 472, w, '下取車価格', totals.tradeInPrice, 30, '')}
-  ${valueRow(x, y + 502, w, '頭金／現金／他', totals.downPayment, 30, '')}
-  ${valueRow(x, y + 532, w, '残金／所要資金', totals.remainingPayment, 33, 'bold pale')}`
+  ${rows.map(([label, amount, tone], index) => valueRow(x, topY + index * rowH, w, label, amount, rowH, tone)).join('')}
+  ${valueRow(x, y + 226, w, '車両販売合計', totals.vehicleSalesTotal, 42, 'bold pale')}
+  ${valueRow(x, y + 268, w, '諸費用合計', totals.feesTotal, 42, 'bold pale')}
+  <rect x="${x}" y="${topY}" width="${w}" height="${topHeight}" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>
+  ${taxMatrix(document, totals, x, taxY, w)}
+  ${valueRow(x, paymentY, w, '下取車価格', totals.tradeInPrice, 30, '')}
+  ${valueRow(x, paymentY + 30, w, '頭金／現金／他', totals.downPayment, 30, '')}
+  ${valueRow(x, paymentY + 60, w, '残金／所要資金', totals.remainingPayment, 33, 'bold pale')}
+  <rect x="${x}" y="${paymentY}" width="${w}" height="93" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
 }
 
 function taxMatrix(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, x: number, y: number, w: number) {
   const c1 = 95
   const c2 = 115
   return `
-  <rect x="${x}" y="${y}" width="${w}" height="144" fill="#fff" stroke="${LINE}"/>
+  <rect x="${x}" y="${y}" width="${w}" height="144" rx="5" fill="#fff"/>
+  <rect x="${x + 1}" y="${y + 105}" width="${w - 2}" height="38" rx="4" fill="${YELLOW}"/>
   <line x1="${x + c1}" y1="${y}" x2="${x + c1}" y2="${y + 144}" class="line"/>
   <line x1="${x + c1 + c2}" y1="${y}" x2="${x + c1 + c2}" y2="${y + 105}" class="line"/>
   <line x1="${x}" y1="${y + 35}" x2="${x + w}" y2="${y + 35}" class="line"/>
   <line x1="${x}" y1="${y + 70}" x2="${x + w}" y2="${y + 70}" class="line"/>
-  <rect x="${x}" y="${y + 105}" width="${w}" height="39" fill="${YELLOW}"/>
   <line x1="${x}" y1="${y + 105}" x2="${x + w}" y2="${y + 105}" class="line"/>
+  <rect x="${x}" y="${y}" width="${w}" height="144" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>
   ${text(x + c1 + c2 / 2, y + 24, `課税対象（${formatPercent(document.taxRate)}）`, 'label small', 13, 'middle')}
   ${text(x + c1 + c2 + (w - c1 - c2) / 2, y + 24, '非課税対象', 'label small', 13, 'middle')}
   ${text(x + 10, y + 59, '対象額合計', 'small')}
