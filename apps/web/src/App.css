@@ -541,7 +541,7 @@
 .sales-estimate-sheet-line-control { position: absolute; display: flex; pointer-events: auto; color: #101820; font-size: clamp(6px, 1.1vw, 13px); }
 .sales-estimate-sheet-line-control:focus-within { z-index: 20; }
 .sales-sheet-name-combobox { position: relative; width: var(--sheet-label-width); height: 100%; min-width: 0; }
-.sales-sheet-fixed-label { display: flex; align-items: center; width: var(--sheet-label-width); height: 100%; padding: 0 11px; box-sizing: border-box; background: #fff; }
+.sales-sheet-fixed-label { display: flex; align-items: center; width: var(--sheet-label-width); height: calc(100% - 2px); margin: 1px 0; padding: 0 11px; box-sizing: border-box; background: #fff; }
 .sales-sheet-name-combobox > input,
 .sales-sheet-amount-input { width: 100%; height: calc(100% - 2px); margin: 1px 0; border: 0; border-radius: 0; background: #fff; color: #101820; font: inherit; line-height: 1; }
 .sales-sheet-name-combobox > input { padding: 0 22px 0 11px; }
