@@ -172,8 +172,8 @@ function tradeInBlock(tradeIn: SalesDocument['details']['tradeIn'], y: number) {
 
 function taxCaption(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, y: number) {
   return `
-  ${text(72, y, `※課税対象額（${formatPercent(document.taxRate)}）${formatYen(totals.taxableSubtotal)}　消費税（${formatPercent(document.taxRate)}）${formatYen(totals.tax)}　非課税対象額 ${formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}`, 'small')}
-  ${text(72, y + 27, '（※この見積では、自賠責保険料・重量税・印紙代・証紙代・リサイクル預託金を非課税として表示しています）', 'small')}`
+  ${text(24, y, `※課税対象額（${formatPercent(document.taxRate)}）${formatYen(totals.taxableSubtotal)}　消費税（${formatPercent(document.taxRate)}）${formatYen(totals.tax)}　非課税対象額 ${formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}`, 'small')}
+  ${text(24, y + 27, '（※この見積では、自賠責保険料・重量税・印紙代・証紙代・リサイクル預託金を非課税として表示しています）', 'small')}`
 }
 
 function requiredBlock(rows: ReadonlyArray<readonly [string, boolean]>) {
@@ -286,8 +286,8 @@ function accessoryCard(rows: Array<{ label: string; amount: number }>, total: nu
   return `${sectionHeader(x, y, w, '付属品・特別仕様明細')}
   <rect x="${x}" y="${y + 39}" width="${w}" height="526" class="box"/>
   ${simpleColumns(x, y + 39, [210, 150], ['品名', '金額'], 36, true)}
-  ${visible.slice(0, 13).map((line, index) => valueRow(x, y + 75 + index * rowH, w, line.label, line.amount, rowH, '')).join('')}
-  ${valueRow(x, y + 517, w, '付属品・特別仕様合計', total, 48, 'bold pale')}`
+  ${visible.slice(0, 13).map((line, index) => valueRow(x, y + 75 + index * rowH, w, line.label, line.amount, rowH, '', 210)).join('')}
+  ${valueRow(x, y + 517, w, '付属品・特別仕様合計', total, 48, 'bold pale', 210)}`
 }
 
 function creditBlock(credit: SalesDocument['details']['credit']) {
@@ -340,8 +340,8 @@ function simpleColumns(x: number, y: number, widths: number[], values: string[],
   }).join('')
 }
 
-function valueRow(x: number, y: number, width: number, label: string, amount: number, height: number, tone: string) {
-  const split = Math.round(width * 0.61)
+function valueRow(x: number, y: number, width: number, label: string, amount: number, height: number, tone: string, splitWidth?: number) {
+  const split = splitWidth ?? Math.round(width * 0.61)
   const fill = tone.includes('pale') ? PALE : '#fff'
   const amountText = label || amount ? formatYen(amount) : ''
   return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" stroke="${LINE}"/>
