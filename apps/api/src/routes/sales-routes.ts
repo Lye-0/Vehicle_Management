@@ -3,6 +3,7 @@ import { customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles }
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
+import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
 const salesDocumentTypes = new Set(['見積書', '請求書'])
@@ -63,7 +64,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   const body = await readJson(request)
   const input = await parseSalesDocumentInput(body, database, organizationId)
   const id = crypto.randomUUID()
-  const number = input.number ?? await nextSalesDocumentNumber(database, input.issuedAt, organizationId)
+  const number = await nextDocumentNumber(env.DB, organizationId, 'S')
   await ensureSalesDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
@@ -102,18 +103,17 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     vehicleId: body.vehicleId === undefined ? current.vehicleId : body.vehicleId,
     issuedAt: body.issuedAt ?? current.issuedAt,
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
-    number: body.number === undefined ? current.number : body.number,
+    number: current.number,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
     details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
   }, database, organizationId)
-  await ensureSalesDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
   const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
 
   await database.update(salesDocuments).set({
     type: input.type,
-    number: input.number ?? current.number,
+    number: current.number,
     status: input.status,
     customerId: input.customerId,
     vehicleId: input.vehicleId,
@@ -279,16 +279,6 @@ function serializeSalesDocument(
       amount: item.amount,
     })),
   }
-}
-
-async function nextSalesDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string, organizationId: string) {
-  const year = issuedAt.slice(0, 4) || String(new Date().getFullYear())
-  const prefix = `S-${year}-`
-  const rows = await database.select({ number: salesDocuments.number }).from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).all()
-  const usedNumbers = new Set(rows.map((row) => row.number))
-  let sequence = 1
-  while (usedNumbers.has(`${prefix}${String(sequence).padStart(3, '0')}`)) sequence += 1
-  return `${prefix}${String(sequence).padStart(3, '0')}`
 }
 
 export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {

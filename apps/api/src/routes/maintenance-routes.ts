@@ -3,6 +3,7 @@ import { customers, maintenanceItems, maintenanceDocuments, vehicles } from '@ve
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
+import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
 const maintenanceDocumentTypes = new Set(['整備見積書', '納品書', '整備請求書'])
@@ -52,7 +53,7 @@ async function listMaintenanceDocuments(request: Request, env: Env, database: Re
 async function createMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const input = await parseMaintenanceInput(await readJson(request), database, organizationId)
   const id = crypto.randomUUID()
-  const number = input.number ?? await nextMaintenanceDocumentNumber(database, input.issuedAt, organizationId)
+  const number = await nextDocumentNumber(env.DB, organizationId, 'M')
   await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
@@ -92,7 +93,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     type: body.type ?? current.type,
     status: body.status ?? current.status,
     category: body.category ?? current.category,
-    number: body.number === undefined ? current.number : body.number,
+    number: current.number,
     customerId: body.customerId ?? current.customerId,
     vehicleId: body.vehicleId ?? current.vehicleId,
     intakeDate: body.intakeDate === undefined ? current.intakeDate : body.intakeDate,
@@ -106,11 +107,10 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
-  await ensureMaintenanceDocumentNumberAvailable(database, input.number ?? current.number, organizationId, documentId)
   const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.update(maintenanceDocuments).set({
-    number: input.number ?? current.number,
+    number: current.number,
     type: input.type,
     category: input.category,
     status: input.status,
@@ -249,15 +249,6 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     archivedAt: document.archivedAt,
     items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice })),
   }
-}
-
-async function nextMaintenanceDocumentNumber(database: ReturnType<typeof createDatabase>, issuedAt: string, organizationId: string) {
-  const prefix = `M-${issuedAt.slice(0, 4) || new Date().getFullYear()}-`
-  const rows = await database.select({ number: maintenanceDocuments.number }).from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).all()
-  const usedNumbers = new Set(rows.map((row) => row.number))
-  let sequence = 1
-  while (usedNumbers.has(`${prefix}${String(sequence).padStart(3, '0')}`)) sequence += 1
-  return `${prefix}${String(sequence).padStart(3, '0')}`
 }
 
 function calculateTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {

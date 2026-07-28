@@ -22,6 +22,18 @@ export const organizations = sqliteTable('organizations', {
   ...timestamps,
 })
 
+export const documentNumberSequences = sqliteTable('document_number_sequences', {
+  organizationId: text('organization_id').notNull().default('org-default'),
+  prefix: text('prefix').notNull(),
+  year: integer('year').notNull(),
+  month: integer('month').notNull(),
+  nextSequence: integer('next_sequence').notNull().default(1),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  primaryKey({ columns: [table.organizationId, table.prefix, table.year, table.month] }),
+  index('document_number_sequences_organization_id_idx').on(table.organizationId),
+])
+
 export const organizationMemberships = sqliteTable('organization_memberships', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id').notNull(),
@@ -255,6 +267,7 @@ export const backupRecords = sqliteTable('backup_records', {
 export const databaseSchema = {
   staffProfiles,
   organizations,
+  documentNumberSequences,
   organizationMemberships,
   authAccounts,
   customers,
