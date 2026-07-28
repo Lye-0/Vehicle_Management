@@ -9,6 +9,7 @@ export type ShopSettings = {
   registrationNumber: string
   bankName: string
   bankAccount: string
+  logoDataUrl: string
 }
 
 export type DocumentSettings = {
@@ -47,7 +48,7 @@ export function flattenSalesItemPresetGroups(groups: SalesItemPresetGroups) {
 }
 
 export const defaultSettings: AppSettings = {
-  shop: { name: '', postalCode: '', address: '', phone: '', representative: '', registrationNumber: '', bankName: '', bankAccount: '' },
+  shop: { name: '', postalCode: '', address: '', phone: '', representative: '', registrationNumber: '', bankName: '', bankAccount: '', logoDataUrl: '' },
   document: { defaultDueDays: 14, footerNote: '', paymentNote: '' },
   tax: { consumptionTaxRate: 10, display: '税込', rounding: '切り捨て' },
   salesItemPresets: flattenSalesItemPresetGroups(defaultSalesItemPresetGroups),

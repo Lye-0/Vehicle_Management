@@ -312,9 +312,13 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
 }
 
 function shopBlock(settings: AppSettings) {
-  const companyLeft = 723
+  const companyLeft = 747
+  const logoMarkup = settings.shop.logoDataUrl
+    ? `<image href="${escapeAttribute(settings.shop.logoDataUrl)}" x="532" y="1337" width="154" height="91" preserveAspectRatio="xMidYMid meet"/>`
+    : ''
   return `
   <line x1="520" y1="1321" x2="1037" y2="1321" stroke="${BLUE}" stroke-width="1.5"/>
+  ${logoMarkup}
   ${text(companyLeft - 40, 1361, '▦', 'blue bold', 30)}
   ${text(companyLeft, 1360, settings.shop.name || '店舗名未設定', 'blue heavy', 23)}
   ${text(companyLeft, 1415, settings.shop.postalCode ? `〒${settings.shop.postalCode}　${settings.shop.address}` : settings.shop.address || '住所未登録', 'body')}

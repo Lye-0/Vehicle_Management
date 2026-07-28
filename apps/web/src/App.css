@@ -988,6 +988,20 @@
 .settings-number-input { display: flex; align-items: center; gap: 8px; }
 .settings-number-input input { min-width: 0; flex: 1; }
 .settings-number-input span { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.settings-logo-field { display: grid; gap: 7px; }
+.settings-logo-field > span { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.settings-logo-control { display: grid; gap: 7px; }
+.settings-logo-input { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.settings-logo-dropzone { display: grid; place-items: center; align-content: center; gap: 5px; min-height: 108px; color: var(--primary); border: 1px dashed #afc6ed; border-radius: 9px; background: #f8fbff; cursor: pointer; }
+.settings-logo-dropzone:hover { border-color: var(--primary); background: #f2f7ff; }
+.settings-logo-dropzone strong { color: var(--text-secondary); font-size: 12px; }
+.settings-logo-dropzone small { color: var(--text-muted); font-size: 10px; }
+.settings-logo-preview { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 108px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.settings-logo-preview img { width: 180px; height: 78px; object-fit: contain; background: #fff; }
+.settings-logo-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.settings-logo-actions .button { min-height: 32px; padding: 0 10px; font-size: 11px; }
+.settings-logo-remove { display: inline-flex; align-items: center; gap: 5px; }
+.settings-logo-error { color: var(--danger); font-size: 10px; }
 .settings-sales-preset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .settings-sales-preset-column { min-width: 0; padding: 14px; border: 1px solid #dbe5f1; border-radius: 12px; background: #f8fbff; }
 .settings-sales-preset-column-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-height: 74px; margin-bottom: 12px; }
@@ -1268,6 +1282,8 @@
   .settings-panel { padding: 18px; }
   .settings-form-grid { grid-template-columns: 1fr; }
   .settings-field-wide { grid-column: auto; }
+  .settings-logo-preview { align-items: stretch; flex-direction: column; }
+  .settings-logo-preview img { width: 100%; }
   .settings-section-heading { flex-wrap: wrap; }
   .settings-section-heading .settings-add-button { margin-left: auto; }
   .customer-profile-header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }

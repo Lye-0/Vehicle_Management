@@ -24,6 +24,7 @@ const defaultSettings: AppSettings = {
     registrationNumber: '',
     bankName: '',
     bankAccount: '',
+    logoDataUrl: '',
   },
   document: {
     defaultDueDays: 14,
@@ -132,6 +133,7 @@ function normalizeSettings(value: Record<string, unknown>): AppSettings {
       registrationNumber: textValue(shop?.registrationNumber, defaultSettings.shop.registrationNumber),
       bankName: textValue(shop?.bankName, defaultSettings.shop.bankName),
       bankAccount: textValue(shop?.bankAccount, defaultSettings.shop.bankAccount),
+      logoDataUrl: imageDataUrlValue(shop?.logoDataUrl, defaultSettings.shop.logoDataUrl),
     },
     document: {
       defaultDueDays: integerValue(document?.defaultDueDays, defaultSettings.document.defaultDueDays, 0, 365),
@@ -194,6 +196,11 @@ function textValue(value: unknown, fallback: string) {
   return typeof value === 'string' ? value.trim().slice(0, 500) : fallback
 }
 
+function imageDataUrlValue(value: unknown, fallback: string) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2_000_000) return fallback
+  return /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : fallback
+}
+
 function integerValue(value: unknown, fallback: number, minimum: number, maximum: number) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return fallback
@@ -216,6 +223,7 @@ type AppSettings = {
     registrationNumber: string
     bankName: string
     bankAccount: string
+    logoDataUrl: string
   }
   document: {
     defaultDueDays: number

@@ -307,7 +307,7 @@ describe("CLI authenticated workflow", () => {
 
 			const settings = await requestJson<JsonObject>("/api/settings", "PATCH", {
 				settings: {
-					shop: { name: `${marker} 店舗` },
+					shop: { name: `${marker} 店舗`, logoDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" },
 					document: { defaultDueDays: 30 },
 					tax: { consumptionTaxRate: 10, display: "税込", rounding: "四捨五入" },
 					salesItemPresetGroups: {
@@ -321,6 +321,7 @@ describe("CLI authenticated workflow", () => {
 			expect(settings.response.status).toBe(200);
 			const savedSettings = objectValue(settings.body.settings);
 			expect(objectValue(savedSettings.shop).name).toBe(`${marker} 店舗`);
+			expect(objectValue(savedSettings.shop).logoDataUrl).toMatch(/^data:image\/png;base64,/);
 			expect(objectValue(savedSettings.document).defaultDueDays).toBe(30);
 			const salesPresetGroups = objectValue(savedSettings.salesItemPresetGroups);
 			expect(stringArrayValue(salesPresetGroups.vehiclePrice)).toContain(`${marker}-vehicle`);
