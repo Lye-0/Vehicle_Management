@@ -9,6 +9,7 @@ const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
 const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
 const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
+const salesItemInsertBatchSize = 7
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -163,21 +164,24 @@ async function loadSalesItems(database: ReturnType<typeof createDatabase>, docum
 
 async function insertSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, items: SalesItemInput[], organizationId: string) {
   if (!items.length) return
-  await database.insert(salesDocumentItems).values(items.map((item, index) => ({
-    id: crypto.randomUUID(),
-    organizationId,
-    documentId,
-    itemType: item.itemType,
-    description: item.description,
-    quantity: item.quantity,
-    unit: item.unit,
-    unitPrice: item.unitPrice,
-    taxCategory: item.taxCategory,
-    otherAmount: item.otherAmount,
-    summary: item.summary,
-    amount: item.amount,
-    sortOrder: index,
-  }))).run()
+  for (let start = 0; start < items.length; start += salesItemInsertBatchSize) {
+    const batch = items.slice(start, start + salesItemInsertBatchSize)
+    await database.insert(salesDocumentItems).values(batch.map((item, index) => ({
+      id: crypto.randomUUID(),
+      organizationId,
+      documentId,
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+      amount: item.amount,
+      sortOrder: start + index,
+    }))).run()
+  }
 }
 
 async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<SalesDocumentInput> {

@@ -271,6 +271,10 @@ describe("CLI authenticated workflow", () => {
 			expect(arrayValue(payments.body.records)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 }),
 			]));
+			const manySalesItems = Array.from({ length: 20 }, (_, index) => ({ itemType: "その他", description: `${marker} 明細${index + 1}`, quantity: 1, unit: "式", unitPrice: index + 1 }));
+			const manyItemsSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", { items: manySalesItems });
+			expect(manyItemsSales.response.status).toBe(200);
+			expect(arrayValue(objectValue(manyItemsSales.body.document).items)).toHaveLength(20);
 
 			const archivedSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "DELETE");
 			expect(archivedSales.response.status).toBe(200);
