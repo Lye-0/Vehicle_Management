@@ -51,4 +51,16 @@ describe('sales estimate calculation', () => {
 
     expect(totals).toEqual({ subtotal: 1494350, tax: 143700, total: 1638050 })
   })
+
+  it('keeps freely named preview rows in their selected estimate blocks', () => {
+    const totals = calculateSalesTotals([
+      line('車両本体価格', '特選車価格', 1000000),
+      line('法定費用', '自由入力した法定費用', 30000, '非課税'),
+      line('手続代行費用', '自由入力した代行費用', 40000),
+      line('実費・預託金', '自由入力した預託金', 5000, '非課税'),
+      line('付属品・特別仕様', '自由入力した用品', 20000),
+    ], 10, '切り捨て', { ...details, recycleFee: 0 })
+
+    expect(totals).toEqual({ subtotal: 1095000, tax: 106000, total: 1201000 })
+  })
 })

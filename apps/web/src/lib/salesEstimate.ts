@@ -22,6 +22,16 @@ export type SalesEstimateSections = {
   payments: SalesEstimateLine[]
 }
 
+export type SalesEstimateEditableBucket =
+  | 'vehicleBase'
+  | 'discounts'
+  | 'accessories'
+  | 'vehicleSideLabor'
+  | 'legalNonTaxable'
+  | 'taxableFees'
+  | 'nonTaxableFees'
+  | 'tradeIns'
+
 export type SalesTotals = {
   subtotal: number
   lineItemsSubtotal: number
@@ -163,6 +173,9 @@ export function emptySalesDocumentDetails(): SalesDocumentDetails {
 function classifySalesItem(item: SalesLineItem): SalesItemBucket {
   const itemType = item.itemType.trim()
   const label = `${itemType} ${item.description}`
+  if (itemType === '法定費用') return 'legalNonTaxable'
+  if (itemType === '手続代行費用') return 'taxableFees'
+  if (itemType === '実費・預託金') return 'nonTaxableFees'
   if (itemType === '車両本体価格' || label.includes('車両本体価格')) return 'vehicleBase'
   if (itemType === '値引き' || label.includes('値引')) return 'discounts'
   if (itemType === '付属品・特別仕様' || itemType === '取付工賃' || label.includes('付属品') || label.includes('特別仕様')) return 'accessories'
