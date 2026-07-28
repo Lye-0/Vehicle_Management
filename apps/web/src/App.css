@@ -556,8 +556,6 @@
 .sales-sheet-candidate-menu button { overflow: hidden; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent; color: #152a47; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .sales-sheet-candidate-menu button:hover,
 .sales-sheet-candidate-menu button[aria-selected="true"] { background: #eaf3ff; color: #06377d; }
-.sales-estimate-exact-editor { width: min(100%, 1055px); margin: 18px auto 0; }
-.sales-estimate-quick-edit { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .sales-estimate-item-description { display: grid; min-width: 0; gap: 5px; }
 .sales-estimate-item-description select,
 .sales-estimate-item-description input { width: 100%; min-width: 0; }

@@ -405,7 +405,7 @@ function SalesEstimatePreview(props: SalesPreviewProps) {
   */
 }
 
-function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onPdfPreview, settings }: SalesPreviewProps) {
+function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateSheetLine, onPdfPreview, settings }: SalesPreviewProps) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
   const imageAttachments = selectedVehicle?.attachments.filter((attachment) => attachment.type === 'image') ?? []
@@ -445,31 +445,6 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
         onUpdateLine={onUpdateSheetLine}
       />
     </div>
-    <details className="sales-estimate-edit-details sales-estimate-exact-editor">
-      <summary><FileText size={15} />帳票の内容・金額を編集</summary>
-      <div className="sales-estimate-quick-edit">
-        <label className="form-field"><span>見積日</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label>
-        <label className="form-field"><span>販売区分</span><input value={document.details.salesCategory} onChange={(event) => onUpdateDetails({ salesCategory: event.target.value })} /></label>
-        <label className="form-field"><span>担当者</span><input value={document.details.staffName} onChange={(event) => onUpdateDetails({ staffName: event.target.value })} /></label>
-        <label className="form-field"><span>備考</span><input value={document.note} onChange={(event) => onUpdateHeader('note', event.target.value)} /></label>
-      </div>
-      <div className="sales-estimate-items-table">
-        <div className="sales-estimate-items-head"><span>No.</span><span>区分・内容</span><span>数量</span><span>単位</span><span>単価</span><span>金額</span><span>技術料・他</span><span>摘要・課税</span></div>
-        {document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}>
-          <span>{index + 1}</span>
-          <div className="sales-estimate-item-description"><select aria-label="明細区分" value={item.itemType} onChange={(event) => onUpdateItem(item.id, 'itemType', event.target.value)}>{salesLineItemTypes.map((type) => <option key={type}>{type}</option>)}</select><input list="sales-preview-item-presets" aria-label="明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /></div>
-          <input aria-label="数量" type="number" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} />
-          <input aria-label="単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} />
-          <input aria-label="単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} />
-          <strong>{formatYen(calculateSalesLineAmount(item))}</strong>
-          <input aria-label="技術料・他" type="number" value={item.otherAmount} onChange={(event) => onUpdateItem(item.id, 'otherAmount', event.target.value)} />
-          <div className="sales-estimate-summary-cell"><input aria-label="摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div>
-          <button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button>
-        </div>)}
-      </div>
-      <datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist>
-      <div className="sales-estimate-edit-actions"><button className="button button-secondary" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button><span>入力・プレビュー・PDFは同じ保存データと計算結果を使用します。</span></div>
-    </details>
   </div>
 }
 
