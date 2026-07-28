@@ -17,18 +17,18 @@ export type SalesEstimateSheetOptions = {
 export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: AppSettings, { imageHref = '' }: SalesEstimateSheetOptions = {}) {
   const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
   const sections = buildSalesEstimateSections(document)
-  const vehicle = document.vehicleDetails
+  const vehicle = document.details.vehicleOverride ?? document.vehicleDetails
   const details = document.details
   const withImage = Boolean(imageHref)
   const requiredDocuments = [
     ['印鑑証明', details.requiredDocuments.sealCertificate],
-    ['自認書・承諾書', details.requiredDocuments.warrantyCertificate],
+    ['自認書・承諾書', details.requiredDocuments.selfDeclaration],
     ['住民票', details.requiredDocuments.residentCard],
-    ['委任状', details.requiredDocuments.transferCertificate],
+    ['委任状', details.requiredDocuments.powerOfAttorney],
     ['軽自動車住民票', details.requiredDocuments.lightVehicleCertificate],
     ['譲渡証明書', details.requiredDocuments.transferCertificate],
     ['納税証明書', details.requiredDocuments.taxPaymentCertificate],
-    ['保証人印鑑証明', Boolean(details.requiredDocuments.other)],
+    ['保証人印鑑証明', details.requiredDocuments.guarantorSealCertificate],
   ] as const
   const legalLines = sections.legalNonTaxable.slice(0, 3)
   const taxableLines = sections.taxableFees.slice(0, 5)
@@ -86,7 +86,7 @@ function sheetTitle(document: SalesDocument) {
 }
 
 function imageCustomerBlock(document: SalesDocument, imageHref: string) {
-  const customer = document.customerDetails
+  const customer = { ...document.customerDetails, ...document.details.customerOverride }
   return `
   <rect x="24" y="108" width="338" height="186" rx="5" class="box"/>
   <circle cx="57" cy="144" r="19" fill="${BLUE}"/>
@@ -100,7 +100,7 @@ function imageCustomerBlock(document: SalesDocument, imageHref: string) {
 }
 
 function expandedCustomerBlock(document: SalesDocument) {
-  const customer = document.customerDetails
+  const customer = { ...document.customerDetails, ...document.details.customerOverride }
   const details = document.details
   const rows: Array<[string, string]> = [
     ['生年月日', details.customerBirthDate || customer.birthDate || '未設定'],

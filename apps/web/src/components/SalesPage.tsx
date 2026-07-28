@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import {
   Archive,
   CarFront,
@@ -45,11 +45,13 @@ const salesLineItemTypes = ['車両本体価格', '付属品・特別仕様', '�
 const salesTaxCategories: SalesTaxCategory[] = ['課税', '非課税', '対象外']
 const requiredDocumentFields: Array<{ key: keyof SalesDocumentDetails['requiredDocuments']; label: string }> = [
   { key: 'sealCertificate', label: '印鑑証明' },
+  { key: 'selfDeclaration', label: '自認書・承諾書' },
   { key: 'residentCard', label: '住民票' },
+  { key: 'powerOfAttorney', label: '委任状' },
   { key: 'lightVehicleCertificate', label: '軽自動車住所証明' },
   { key: 'transferCertificate', label: '譲渡証明' },
   { key: 'taxPaymentCertificate', label: '納税証明（下取車）' },
-  { key: 'warrantyCertificate', label: '保証書・承諾書' },
+  { key: 'guarantorSealCertificate', label: '保証人印鑑証明' },
 ]
 
 const estimateBucketDefaults: Record<SalesEstimateEditableBucket, { itemType: string; label: string; taxCategory: SalesTaxCategory }> = {
@@ -208,7 +210,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       plate: nextVehicle?.plate ?? '',
       customerDetails: nextCustomer ? mapCustomerDetails(nextCustomer) : emptyCustomerDetails(),
       vehicleDetails: nextVehicle ? mapVehicleDetails(nextVehicle) : null,
-      details: { ...selectedDocument.details, selectedImageAttachmentId: '' },
+      details: { ...selectedDocument.details, selectedImageAttachmentId: '', customerOverride: null, vehicleOverride: null },
     } : {}
     setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, [field]: value, ...relationPatch }))
     markDirty()
@@ -233,7 +235,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function updateRequiredDocument(field: SalesTaxCategoryField, value: string | boolean) {
     if (!selectedDocument) return
-    updateDetails({ requiredDocuments: { ...selectedDocument.details.requiredDocuments, [field]: value } })
+    updateDetails({ requiredDocuments: { ...selectedDocument.details.requiredDocuments, [field]: value, ...(field === 'selfDeclaration' ? { warrantyCertificate: value === true } : {}) } })
   }
 
   function markDirty() {
@@ -433,7 +435,15 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
     </div>
     <div className="sales-estimate-sheet-frame">
       <div className="sales-estimate-sheet" dangerouslySetInnerHTML={{ __html: sheetSvg }} />
-      <SalesEstimateSheetEditor sections={sections} itemPresets={itemPresets} downPayment={document.details.downPayment} onUpdateLine={onUpdateSheetLine} onUpdateDownPayment={(downPayment) => onUpdateDetails({ downPayment })} />
+      <SalesEstimateSheetEditor
+        document={document}
+        hasImage={Boolean(imageState.url)}
+        sections={sections}
+        itemPresets={itemPresets}
+        onUpdateDetails={onUpdateDetails}
+        onUpdateHeader={onUpdateHeader}
+        onUpdateLine={onUpdateSheetLine}
+      />
     </div>
     <details className="sales-estimate-edit-details sales-estimate-exact-editor">
       <summary><FileText size={15} />帳票の内容・金額を編集</summary>
@@ -485,8 +495,32 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
   ...Array.from({ length: 13 }, (_, index) => ({ bucket: 'accessories' as const, index, x: 677, y: 817 + index * 34, width: 360, labelWidth: 210, height: 34, menuUp: index > 8 })),
 ]
 
-export function SalesEstimateSheetEditor({ sections, itemPresets, downPayment, onUpdateLine, onUpdateDownPayment }: { sections: SalesEstimateSections; itemPresets: string[]; downPayment: number; onUpdateLine: SalesPreviewProps['onUpdateSheetLine']; onUpdateDownPayment: (value: number) => void }) {
+export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresets, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresets: string[]; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
+  const customer = document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)
+  const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicleDetails()
+
+  function updateCustomer(field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) {
+    onUpdateDetails({ customerOverride: { ...customer, [field]: value } })
+  }
+
+  function updateVehicle(field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) {
+    onUpdateDetails({ vehicleOverride: { ...vehicle, [field]: value } })
+  }
+
+  function updateTradeIn(field: keyof SalesDocumentDetails['tradeIn'], value: string) {
+    onUpdateDetails({ tradeIn: { ...document.details.tradeIn, [field]: value } })
+  }
+
+  function updateRequiredDocument(field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) {
+    onUpdateDetails({ requiredDocuments: { ...document.details.requiredDocuments, [field]: checked, ...(field === 'selfDeclaration' ? { warrantyCertificate: checked } : {}) } })
+  }
+
   return <div className="sales-estimate-sheet-editor" aria-label="見積書の明細を直接編集">
+    <SalesSheetCustomerEditor document={document} hasImage={hasImage} customer={customer} onUpdateCustomer={updateCustomer} onUpdateDetails={onUpdateDetails} />
+    <SalesSheetVehicleEditor hasImage={hasImage} vehicle={vehicle} onUpdate={updateVehicle} />
+    <SalesSheetTradeInEditor hasImage={hasImage} tradeIn={document.details.tradeIn} onUpdate={updateTradeIn} />
+    <SalesSheetRequiredDocumentsEditor requiredDocuments={document.details.requiredDocuments} onUpdate={updateRequiredDocument} />
+    <SheetTextControl multiline ariaLabel="備考" value={document.note} x={713} y={701} width={318} height={27} onChange={(value) => onUpdateHeader('note', value)} />
     {salesEstimateSheetLinePositions.map((position) => {
       const line = sections[position.bucket][position.index]
       const defaults = estimateBucketDefaults[position.bucket]
@@ -502,9 +536,79 @@ export function SalesEstimateSheetEditor({ sections, itemPresets, downPayment, o
       />
     })}
     <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1244 / 14.91}%`, width: `${126 / 10.55}%`, height: `${30 / 14.91}%` }}>
-      <SheetAmountInput value={downPayment} exists onCommit={onUpdateDownPayment} />
+      <SheetAmountInput value={document.details.downPayment} exists onCommit={(downPayment) => onUpdateDetails({ downPayment })} />
     </div>
   </div>
+}
+
+function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocument; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
+  const left = hasImage
+    ? { name: [84, 124, 230, 35], postalCode: [40, 169, 310, 27], address: [40, 201, 310, 27], phone: [40, 237, 310, 28] }
+    : { name: [84, 121, 230, 35], postalCode: [40, 166, 325, 26], address: [40, 198, 325, 26], phone: [40, 234, 325, 27] }
+  return <>
+    <SheetTextControl ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
+    <SheetTextControl ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
+    <SheetTextControl ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
+    <SheetTextControl ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} />
+    {!hasImage ? <>
+      <SheetTextControl ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={43} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
+      <SheetTextControl ariaLabel="お客様電話番号" value={customer.phone} x={479} y={148} width={197} height={43} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={193} width={197} height={43} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={237} width={197} height={44} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
+    </> : null}
+  </>
+}
+
+function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: boolean; vehicle: NonNullable<SalesDocumentDetails['vehicleOverride']>; onUpdate: (field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) => void }) {
+  const y = hasImage ? 353 : 335
+  const fields: Array<{ field: keyof typeof vehicle; x: number; y: number; width: number; height: number }> = [
+    { field: 'maker', x: 116, y, width: 100, height: 37 },
+    { field: 'name', x: 311, y, width: 100, height: 37 },
+    { field: 'year', x: 469, y, width: 82, height: 37 },
+    { field: 'displacement', x: 618, y, width: 67, height: 37 },
+    { field: 'transmission', x: 116, y: y + 38, width: 100, height: 37 },
+    { field: 'color', x: 311, y: y + 38, width: 274, height: 37 },
+    { field: 'modelType', x: 116, y: y + 75, width: 277, height: 37 },
+    { field: 'vin', x: 483, y: y + 75, width: 202, height: 37 },
+    { field: 'plate', x: 116, y: y + 113, width: 277, height: 37 },
+    { field: 'mileage', x: 483, y: y + 113, width: 202, height: 37 },
+    { field: 'inspectionDate', x: 116, y: y + 150, width: 277, height: 37 },
+  ]
+  return <>
+    {fields.map(({ field, ...position }) => <SheetTextControl key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+    <label className="sales-estimate-sheet-checkbox is-record" style={sheetPositionStyle(497, y + 158, 16, 16)}><input aria-label="記録簿あり" type="checkbox" checked={vehicle.inspectionRecordAvailable} onChange={(event) => onUpdate('inspectionRecordAvailable', event.target.checked)} /></label>
+  </>
+}
+
+function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: boolean; tradeIn: SalesDocumentDetails['tradeIn']; onUpdate: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void }) {
+  const y = hasImage ? 625 : 611
+  const fields: Array<{ field: keyof typeof tradeIn; x: number; width: number }> = [
+    { field: 'name', x: 24, width: 180 },
+    { field: 'modelYear', x: 204, width: 105 },
+    { field: 'inspectionDate', x: 309, width: 118 },
+    { field: 'mileage', x: 427, width: 137 },
+    { field: 'color', x: 564, width: 121 },
+  ]
+  return <>{fields.map(({ field, x, width }) => <SheetTextControl key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered onChange={(value) => onUpdate(field, value)} />)}</>
+}
+
+function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { requiredDocuments: SalesDocumentDetails['requiredDocuments']; onUpdate: (field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) => void }) {
+  const fields: Array<keyof SalesDocumentDetails['requiredDocuments']> = ['sealCertificate', 'selfDeclaration', 'residentCard', 'powerOfAttorney', 'lightVehicleCertificate', 'transferCertificate', 'taxPaymentCertificate', 'guarantorSealCertificate']
+  return <>{fields.map((field, index) => {
+    const col = index % 2
+    const row = Math.floor(index / 2)
+    return <label key={field} className="sales-estimate-sheet-checkbox" style={sheetPositionStyle(724 + col * 156, 539 + row * 26, 16, 16)}><input aria-label={requiredDocumentFields.find((item) => item.key === field)?.label ?? field} type="checkbox" checked={Boolean(requiredDocuments[field])} onChange={(event) => onUpdate(field, event.target.checked)} /></label>
+  })}</>
+}
+
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; onChange: (value: string) => void }) {
+  const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}`
+  const props = { className, 'aria-label': ariaLabel, value, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value) }
+  return multiline ? <textarea {...props} /> : <input {...props} />
+}
+
+function sheetPositionStyle(x: number, y: number, width: number, height: number): CSSProperties {
+  return { left: `${x / 10.55}%`, top: `${y / 14.91}%`, width: `${width / 10.55}%`, height: `${height / 14.91}%` }
 }
 
 function SheetLineControl({ position, label, amount, exists, candidates, onChange }: { position: SheetLinePosition; label: string; amount: number; exists: boolean; candidates: string[]; onChange: (patch: { label?: string; amount?: number }) => void }) {
@@ -677,8 +781,16 @@ function mapCustomerDetails(customer: Customer | undefined): SalesDocument['cust
   return customer ? { name: customer.name, kana: customer.kana, phone: customer.phone, postalCode: customer.postalCode, address: customer.address, birthDate: '', employer: '', contactPhone: '' } : emptyCustomerDetails()
 }
 
+function pickCustomerOverride(customer: SalesDocument['customerDetails']): NonNullable<SalesDocumentDetails['customerOverride']> {
+  return { name: customer.name, kana: customer.kana, phone: customer.phone, postalCode: customer.postalCode, address: customer.address }
+}
+
 function emptyCustomerDetails(): SalesDocument['customerDetails'] {
   return { name: '', kana: '', phone: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' }
+}
+
+function emptyVehicleDetails(): NonNullable<SalesDocumentDetails['vehicleOverride']> {
+  return { maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false }
 }
 
 function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicleDetails']> {

@@ -529,6 +529,14 @@
 .sales-estimate-sheet { width: 100%; aspect-ratio: 1055 / 1491; background: #fff; }
 .sales-estimate-sheet svg { display: block; width: 100%; height: 100%; }
 .sales-estimate-sheet-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.sales-estimate-sheet-field-control { position: absolute; z-index: 3; min-width: 0; box-sizing: border-box; padding: 0 5px; overflow: hidden; border: 1px solid transparent; border-radius: 0; outline: 0; background: #fff; color: #101820; font: inherit; font-size: clamp(6px, 1.1vw, 13px); line-height: 1.15; pointer-events: auto; }
+.sales-estimate-sheet-field-control:hover { background: #f8fbff; }
+.sales-estimate-sheet-field-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
+.sales-estimate-sheet-field-control.is-centered { text-align: center; }
+.sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
+.sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
+.sales-estimate-sheet-checkbox input { width: 100%; height: 100%; margin: 0; accent-color: #06377d; cursor: pointer; }
+.sales-estimate-sheet-checkbox.is-record { width: auto; }
 .sales-estimate-sheet-line-control { position: absolute; display: flex; pointer-events: auto; color: #101820; font-size: clamp(6px, 1.1vw, 13px); }
 .sales-estimate-sheet-line-control:focus-within { z-index: 20; }
 .sales-sheet-name-combobox { position: relative; width: var(--sheet-label-width); height: 100%; min-width: 0; }
@@ -541,7 +549,7 @@
 .sales-estimate-sheet-line-control input:hover { background: #f8fbff; }
 .sales-estimate-sheet-line-control input:focus { position: relative; z-index: 1; outline: 2px solid #2563eb; outline-offset: -2px; background: #fff; }
 .sales-sheet-amount-input { width: calc(100% - var(--sheet-label-width)); padding: 0 9px 0 4px; border-left: 1px solid #86a5d0; text-align: right; font-variant-numeric: tabular-nums; }
-.sales-estimate-sheet-line-control.is-amount-only .sales-sheet-amount-input { width: 100%; border-left: 0; }
+.sales-estimate-sheet-line-control.is-amount-only .sales-sheet-amount-input { width: 100%; height: 100%; margin: 0; border: 0; border-top: 1px solid #86a5d0; border-bottom: 1px solid #86a5d0; box-shadow: none; }
 .sales-sheet-candidate-menu { position: absolute; top: calc(100% + 2px); left: 0; z-index: 30; display: grid; width: max(100%, 180px); max-height: 180px; overflow-y: auto; padding: 4px; border: 1px solid #9bb4d6; border-radius: 5px; background: #fff; box-shadow: 0 8px 22px rgba(20, 48, 87, 0.2); }
 .sales-sheet-candidate-menu.is-up { top: auto; bottom: calc(100% + 2px); }
 .sales-sheet-candidate-menu button { overflow: hidden; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent; color: #152a47; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
