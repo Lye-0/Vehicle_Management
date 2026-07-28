@@ -203,9 +203,9 @@ function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof cal
   const w = 324
   const rowH = 35
   const topY = y + 39
-  const topHeight = 271
-  const taxY = y + 328
-  const paymentY = y + 482
+  const topHeight = 267
+  const taxY = y + 316
+  const paymentY = y + 470
   const rows = [
     ['車両本体価格', totals.vehicleBasePrice, ''],
     ['値引等', totals.discount, 'discount'],
@@ -215,14 +215,14 @@ function vehiclePriceCard(document: SalesDocument, totals: ReturnType<typeof cal
   ] as const
   return `${sectionHeader(x, y, w, '車両販売価格内訳')}
   ${rows.map(([label, amount, tone], index) => valueRow(x, topY + index * rowH, w, label, amount, rowH, tone)).join('')}
-  ${valueRow(x, y + 226, w, '車両販売合計', totals.vehicleSalesTotal, 42, 'bold pale')}
-  ${valueRow(x, y + 268, w, '諸費用合計', totals.feesTotal, 42, 'bold pale')}
+  ${valueRow(x, y + 214, w, '車両販売合計', totals.vehicleSalesTotal, 46, 'bold pale')}
+  ${valueRow(x, y + 260, w, '諸費用合計', totals.feesTotal, 46, 'bold pale')}
   <rect x="${x}" y="${topY}" width="${w}" height="${topHeight}" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>
   ${taxMatrix(document, totals, x, taxY, w)}
-  ${valueRow(x, paymentY, w, '下取車価格', totals.tradeInPrice, 30, '')}
-  ${valueRow(x, paymentY + 30, w, '頭金／現金／他', totals.downPayment, 30, '')}
-  ${valueRow(x, paymentY + 60, w, '残金／所要資金', totals.remainingPayment, 33, 'bold pale')}
-  <rect x="${x}" y="${paymentY}" width="${w}" height="93" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
+  ${valueRow(x, paymentY, w, '下取車価格', totals.tradeInPrice, 31, '')}
+  ${valueRow(x, paymentY + 31, w, '頭金／現金／他', totals.downPayment, 31, '')}
+  ${valueRow(x, paymentY + 62, w, '残金／所要資金', totals.remainingPayment, 33, 'bold pale')}
+  <rect x="${x}" y="${paymentY}" width="${w}" height="95" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
 }
 
 function taxMatrix(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, x: number, y: number, w: number) {
@@ -301,12 +301,12 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
     ? [credit.paymentCount || '-', formatYen(credit.bonusPayment), credit.fee ? `${formatYen(credit.fee)}` : '-', credit.bonusMonths || '-']
     : ['-', '-', '-', '-']
   return `
-  <rect x="23" y="1322" width="475" height="123" rx="5" class="box"/>
-  ${text(48, 1361, '▣  クレジットお支払いプラン', 'blue bold', 21)}
-  ${text(475, 1360, credit.enabled ? '利用あり' : '利用なし', 'body', 16, 'end')}
-  <line x1="23" y1="1377" x2="498" y2="1377" class="line"/>
-  ${simpleColumns(23, 1377, [119, 119, 119, 118], ['回数', 'ボーナス払', '金利', '支払開始月'], 34, true)}
-  ${simpleColumns(23, 1411, [119, 119, 119, 118], values, 34, false)}`
+  <rect x="23" y="1322" width="475" height="110" rx="5" class="box"/>
+  ${text(48, 1354, '▣  クレジットお支払いプラン', 'blue bold', 21)}
+  ${text(475, 1353, credit.enabled ? '利用あり' : '利用なし', 'body', 16, 'end')}
+  <line x1="23" y1="1366" x2="498" y2="1366" class="line"/>
+  ${simpleColumns(23, 1366, [119, 119, 119, 118], ['回数', 'ボーナス払', '金利', '支払開始月'], 32, true)}
+  ${simpleColumns(23, 1398, [119, 119, 119, 118], values, 34, false)}`
 }
 
 function shopBlock(settings: AppSettings) {

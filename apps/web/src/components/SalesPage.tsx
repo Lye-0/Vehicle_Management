@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import {
   Archive,
   CarFront,
@@ -464,7 +464,6 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
   { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35 },
   { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35 },
   { bucket: 'vehicleSideLabor', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
-  { bucket: 'tradeIns', index: 0, x: 23, y: 1224, width: 324, labelWidth: 198, height: 30, menuUp: true },
   ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
   ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
   ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
@@ -474,6 +473,7 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
 export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresets, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresets: string[]; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
   const customer = document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicleDetails()
+  const tradeInLine = sections.tradeIns[0]
 
   function updateCustomer(field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) {
     onUpdateDetails({ customerOverride: { ...customer, [field]: value } })
@@ -504,14 +504,17 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
       return <SheetLineControl
         key={`${position.bucket}-${position.index}`}
         position={position}
-        label={line?.label ?? (position.bucket === 'tradeIns' ? defaults.label : '')}
+        label={line?.label ?? ''}
         amount={line?.amount ?? 0}
         exists={Boolean(line)}
         candidates={candidates}
         onChange={(patch) => onUpdateLine(position.bucket, position.index, patch)}
       />
     })}
-    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1254 / 14.91}%`, width: `${126 / 10.55}%`, height: `${30 / 14.91}%` }}>
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1212 / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
+      <SheetAmountInput value={tradeInLine?.amount ?? 0} exists={Boolean(tradeInLine)} onCommit={(amount) => onUpdateLine('tradeIns', 0, { amount })} />
+    </div>
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1243 / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
       <SheetAmountInput value={document.details.downPayment} exists={document.details.downPayment !== 0} onCommit={(downPayment) => onUpdateDetails({ downPayment })} />
     </div>
   </div>
@@ -617,14 +620,23 @@ function SheetLineControl({ position, label, amount, exists, candidates, onChang
 function SheetNameCombobox({ value, candidates, menuUp = false, onCommit }: { value: string; candidates: string[]; menuUp?: boolean; onCommit: (value: string) => void }) {
   const [draft, setDraft] = useState(value)
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => setDraft(value), [value])
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [open])
 
   function commit() {
     setOpen(false)
     if (draft !== value) onCommit(draft.trim())
   }
 
-  return <div className="sales-sheet-name-combobox">
+  return <div ref={rootRef} className="sales-sheet-name-combobox">
     <input
       aria-label="費用名・品名"
       role="combobox"
