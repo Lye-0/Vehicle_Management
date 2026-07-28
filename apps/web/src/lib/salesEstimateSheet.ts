@@ -360,7 +360,7 @@ function valueRow(x: number, y: number, width: number, label: string, amount: nu
 }
 
 function text(x: number, y: number, value: string, className = '', size?: number, anchor: 'start' | 'middle' | 'end' = 'start') {
-  const style = className.includes('discount') ? ' style="fill:#e02020"' : ''
+  const style = ''
   return `<text x="${x}" y="${y}" class="${className}"${size ? ` font-size="${size}"` : ''} text-anchor="${anchor}"${style}>${escapeXml(value)}</text>`
 }
 
