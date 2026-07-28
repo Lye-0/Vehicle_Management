@@ -196,13 +196,20 @@ describe("CLI authenticated workflow", () => {
 				status: "入金待ち",
 				number: `${marker}-SALE-EDITED`,
 				note: `${marker} 販売ヘッダー更新`,
+				details: {
+					downPayment: 12345,
+					customerOverride: { name: `${marker} プレビュー顧客` },
+				},
 				items: [
 					{ itemType: "車両本体価格", description: "車両本体価格", quantity: 1, unit: "式", unitPrice: 100001 },
 					{ itemType: "登録費用", description: "登録代行費用", quantity: 1, unit: "式", unitPrice: 999 },
 				],
 			});
 			expect(updatedSales.response.status).toBe(200);
-			expect(objectValue(updatedSales.body.document)).toEqual(expect.objectContaining({ number: `${marker}-SALE-EDITED`, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
+			const updatedSalesDocument = objectValue(updatedSales.body.document);
+			expect(updatedSalesDocument).toEqual(expect.objectContaining({ number: `${marker}-SALE-EDITED`, status: "入金待ち", note: `${marker} 販売ヘッダー更新`, subtotal: 101000, tax: 10100, total: 111100 }));
+			expect(objectValue(updatedSalesDocument.details).downPayment).toBe(12345);
+			expect(objectValue(objectValue(updatedSalesDocument.details).customerOverride).name).toBe(`${marker} プレビュー顧客`);
 			const tamperedSalesStatus = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}`, "PATCH", { status: "不正状態" });
 			expect(tamperedSalesStatus.response.status).toBe(400);
 

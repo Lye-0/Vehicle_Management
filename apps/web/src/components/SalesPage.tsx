@@ -95,6 +95,13 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
   const [documentView, setDocumentView] = useState<SalesDocumentView>('edit')
+  const documentsRef = useRef<SalesDocument[]>([])
+
+  function replaceDocuments(updater: (current: SalesDocument[]) => SalesDocument[]) {
+    const nextDocuments = updater(documentsRef.current)
+    documentsRef.current = nextDocuments
+    setDocuments(nextDocuments)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -102,6 +109,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     Promise.all([fetchSalesDocuments(), fetchCustomers(), fetchSettings()])
       .then(([nextDocuments, nextCustomers, nextSettings]) => {
         if (cancelled) return
+        documentsRef.current = nextDocuments
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
@@ -132,7 +140,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function updateLineItem(itemId: string, field: SalesItemField, value: string) {
     if (!selectedDocument) return
     const nextValue = field === 'description' || field === 'itemType' || field === 'unit' || field === 'taxCategory' || field === 'summary' ? value : Number(value)
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : {
+    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : {
       ...document,
       items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item),
     }))
@@ -142,7 +150,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function updateEstimateSheetLine(bucket: SalesEstimateEditableBucket, index: number, patch: { label?: string; amount?: number }) {
     if (!selectedDocument) return
     const defaults = estimateBucketDefaults[bucket]
-    setDocuments((current) => current.map((document) => {
+    replaceDocuments((current) => current.map((document) => {
       if (document.id !== selectedDocument.id) return document
       const line = buildSalesEstimateSections(document)[bucket][index]
       if (line) {
@@ -193,7 +201,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function addLineItem() {
     if (!selectedDocument) return
     const newItem: SalesLineItem = { id: `item-${Date.now()}`, itemType: 'その他', description: '', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
+    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
     markDirty()
   }
 
@@ -213,13 +221,13 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       vehicleDetails: nextVehicle ? mapVehicleDetails(nextVehicle) : null,
       details: { ...selectedDocument.details, selectedImageAttachmentId: '', customerOverride: null, vehicleOverride: null },
     } : {}
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, [field]: value, ...relationPatch }))
+    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, [field]: value, ...relationPatch }))
     markDirty()
   }
 
   function updateDetails(patch: Partial<SalesDocumentDetails>) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, details: { ...document.details, ...patch } }))
+    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, details: { ...document.details, ...patch } }))
     markDirty()
   }
 
@@ -251,7 +259,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setSyncError('')
     try {
       await archiveSalesDocument(selectedDocument.id)
-      setDocuments((current) => current.filter((document) => document.id !== selectedDocument.id))
+      replaceDocuments((current) => current.filter((document) => document.id !== selectedDocument.id))
       setSelectedDocumentId('')
       setDirty(false)
       setSaved(false)
@@ -264,17 +272,19 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function removeLineItem(itemId: string) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: document.items.filter((item) => item.id !== itemId) } : document))
+    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: document.items.filter((item) => item.id !== itemId) } : document))
     markDirty()
   }
 
   async function saveSelectedDocument() {
     if (!selectedDocument || saving) return
+    const documentToSave = documentsRef.current.find((document) => document.id === selectedDocument.id)
+    if (!documentToSave) return
     setSaving(true)
     setSaved(false)
     try {
-      const nextDocument = await updateSalesDocument(selectedDocument, settings.tax.rounding)
-      setDocuments((current) => current.map((document) => document.id === nextDocument.id ? nextDocument : document))
+      const nextDocument = await updateSalesDocument(documentToSave, settings.tax.rounding)
+      replaceDocuments((current) => current.map((document) => document.id === nextDocument.id ? nextDocument : document))
       setDirty(false)
       setSaved(true)
       setSyncError('')
@@ -311,7 +321,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setCreating(true)
     try {
       const newDocument = await createSalesDocument({ ...createForm, vehicleId: createForm.vehicleId || null, note: '' })
-      setDocuments((current) => [newDocument, ...current])
+      replaceDocuments((current) => [newDocument, ...current])
       setSelectedDocumentId(newDocument.id)
       setCreateDialogOpen(false)
       setDirty(false)
