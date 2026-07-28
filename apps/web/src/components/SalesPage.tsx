@@ -519,8 +519,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
     <SheetTextControl multiline ariaLabel="備考" value={document.note} x={713} y={701} width={318} height={27} onChange={(value) => onUpdateHeader('note', value)} />
     {salesEstimateSheetLinePositions.map((position) => {
       const line = sections[position.bucket][position.index]
-      const defaults = estimateBucketDefaults[position.bucket]
-      const candidates = Array.from(new Set([defaults.label, ...itemPresetGroups[position.presetGroup]].filter(Boolean)))
+      const candidates = Array.from(new Set(itemPresetGroups[position.presetGroup].filter(Boolean)))
       return <SheetLineControl
         key={`${position.bucket}-${position.index}`}
         position={position}
