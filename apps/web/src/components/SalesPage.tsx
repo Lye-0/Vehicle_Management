@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   Archive,
   CarFront,
+  ChevronDown,
   ChevronRight,
   CircleDollarSign,
   Eye,
@@ -31,7 +32,7 @@ import {
   type SalesTaxCategory,
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings } from '../lib/settingsApi'
-import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
+import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
 import { buildSalesEstimateSheetSvg } from '../lib/salesEstimateSheet'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
@@ -40,7 +41,7 @@ type SalesHeaderField = 'number' | 'type' | 'status' | 'customerId' | 'vehicleId
 type SalesItemField = 'itemType' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'taxCategory' | 'otherAmount' | 'summary'
 type SalesTaxCategoryField = keyof SalesDocumentDetails['requiredDocuments']
 
-const salesLineItemTypes = ['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他']
+const salesLineItemTypes = ['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他']
 const salesTaxCategories: SalesTaxCategory[] = ['課税', '非課税', '対象外']
 const requiredDocumentFields: Array<{ key: keyof SalesDocumentDetails['requiredDocuments']; label: string }> = [
   { key: 'sealCertificate', label: '印鑑証明' },
@@ -50,6 +51,17 @@ const requiredDocumentFields: Array<{ key: keyof SalesDocumentDetails['requiredD
   { key: 'taxPaymentCertificate', label: '納税証明（下取車）' },
   { key: 'warrantyCertificate', label: '保証書・承諾書' },
 ]
+
+const estimateBucketDefaults: Record<SalesEstimateEditableBucket, { itemType: string; label: string; taxCategory: SalesTaxCategory }> = {
+  vehicleBase: { itemType: '車両本体価格', label: '車両本体価格', taxCategory: '課税' },
+  discounts: { itemType: '値引き', label: '値引等', taxCategory: '課税' },
+  accessories: { itemType: '付属品・特別仕様', label: '付属品・特別仕様', taxCategory: '課税' },
+  vehicleSideLabor: { itemType: '車両販売工賃', label: '工賃', taxCategory: '課税' },
+  legalNonTaxable: { itemType: '法定費用', label: '法定費用', taxCategory: '非課税' },
+  taxableFees: { itemType: '手続代行費用', label: '手続代行費用', taxCategory: '課税' },
+  nonTaxableFees: { itemType: '実費・預託金', label: '実費・預託金', taxCategory: '非課税' },
+  tradeIns: { itemType: '下取車', label: '下取車価格', taxCategory: '対象外' },
+}
 
 type SalesCreateForm = {
   type: SalesDocumentType
@@ -120,6 +132,57 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : {
       ...document,
       items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item),
+    }))
+    markDirty()
+  }
+
+  function updateEstimateSheetLine(bucket: SalesEstimateEditableBucket, index: number, patch: { label?: string; amount?: number }) {
+    if (!selectedDocument) return
+    const defaults = estimateBucketDefaults[bucket]
+    setDocuments((current) => current.map((document) => {
+      if (document.id !== selectedDocument.id) return document
+      const line = buildSalesEstimateSections(document)[bucket][index]
+      if (line) {
+        const nextLabel = patch.label ?? line.label
+        const nextAmount = patch.amount ?? line.amount
+        if (line.id === 'recycle-fee') {
+          if (patch.label !== undefined && !patch.label.trim()) return { ...document, details: { ...document.details, recycleFee: 0 } }
+          if (patch.label !== undefined && patch.label.trim() !== line.label) {
+            const item: SalesLineItem = { id: `item-${Date.now()}-${bucket}-${index}`, itemType: defaults.itemType, description: patch.label.trim(), quantity: 1, unit: '式', unitPrice: nextAmount, taxCategory: defaults.taxCategory, otherAmount: 0, summary: '' }
+            return { ...document, details: { ...document.details, recycleFee: 0 }, items: [...document.items, item] }
+          }
+          return { ...document, details: { ...document.details, recycleFee: nextAmount } }
+        }
+        if ((patch.label !== undefined && !patch.label.trim()) || (!nextLabel.trim() && nextAmount === 0)) return { ...document, items: document.items.filter((item) => item.id !== line.id) }
+        return {
+          ...document,
+          items: document.items.map((item) => item.id === line.id ? {
+            ...item,
+            itemType: defaults.itemType,
+            description: nextLabel,
+            quantity: 1,
+            unit: item.unit || '式',
+            unitPrice: nextAmount,
+            otherAmount: 0,
+            taxCategory: defaults.taxCategory,
+          } : item),
+        }
+      }
+      const nextLabel = patch.label?.trim() || defaults.label
+      const nextAmount = patch.amount ?? 0
+      if (!patch.label?.trim() && patch.amount === undefined) return document
+      const newItem: SalesLineItem = {
+        id: `item-${Date.now()}-${bucket}-${index}`,
+        itemType: defaults.itemType,
+        description: nextLabel,
+        quantity: 1,
+        unit: '式',
+        unitPrice: nextAmount,
+        taxCategory: defaults.taxCategory,
+        otherAmount: 0,
+        summary: '',
+      }
+      return { ...document, items: [...document.items, newItem] }
     }))
     markDirty()
   }
@@ -264,7 +327,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {syncError && <div className="customer-sync-status is-error"><span>{syncError}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><div className="sales-filter-tabs" aria-label="書類種別"><button className={filterType === 'すべて' ? 'is-active' : ''} type="button" onClick={() => setFilterType('すべて')}>すべて</button>{(['見積書', '注文書', '請求書'] as SalesDocumentType[]).map((type) => <button className={filterType === type ? 'is-active' : ''} key={type} type="button" onClick={() => setFilterType(type)}>{type}</button>)}</div></div>
-      <div className="sales-workspace"><SalesDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} rounding={settings.tax.rounding} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または書類種別を変更してください。'}</span></div>}</div>
+      <div className="sales-workspace"><SalesDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} rounding={settings.tax.rounding} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または書類種別を変更してください。'}</span></div>}</div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
     </>
   )
@@ -274,8 +337,8 @@ function SalesDocumentList({ documents, selectedDocumentId, rounding, onSelect }
   return <section className="panel sales-list-panel"><div className="sales-list-header"><div><h2>販売書類</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{documents.length}件</span></div><div className="sales-document-list">{documents.map((document) => <button className={`sales-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="sales-card-top"><span className="sales-card-customer"><UserRound size={14} /><strong>{document.customerName}</strong></span><ChevronRight size={16} /></div><span className="sales-card-vehicle"><CarFront size={14} />{document.vehicle || '車両未指定'}{document.plate ? ` ・ ${document.plate}` : ''}</span><div className="sales-card-bottom"><span>{document.issuedAt}</span><strong>{formatYen(calculateTotals(document, rounding).total)}</strong></div></button>)}</div></section>
 }
 
-function SalesDocumentDetail({ document, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
-  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><h2>{document.number}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div><StatusTag status={document.status} /></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} onPdfPreview={onPdfPreview} /></div>}</section>
+function SalesDocumentDetail({ document, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
+  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><h2>{document.number}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div><StatusTag status={document.status} /></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} onPdfPreview={onPdfPreview} /></div>}</section>
 }
 
 function SalesDocumentEditor({ document, totals, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onAddItem, onRemoveItem }: { document: SalesDocument; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
@@ -295,8 +358,8 @@ function SalesSummary({ document, totals }: { document: SalesDocument; totals: S
   return <><div className="sales-summary-grid"><div className="sales-note"><span>備考・特記事項</span><p>{document.note || '備考はありません。'}</p></div><div className="sales-totals"><div><span>課税対象額</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>非課税・対象外</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div className="sales-total-row"><span>見積金額</span><strong>{formatYen(totals.total)}</strong></div></div></div><div className="sales-detail-footer"><span><ShoppingCart size={15} />支払期限：{document.dueDate || '未設定'}</span><span><CircleDollarSign size={15} />入金状況は入金管理で登録</span></div></>
 }
 
-function SalesDocumentPreview({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; settings: AppSettings; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onPdfPreview: () => void }) {
-  return <SalesEstimatePreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} onPdfPreview={onPdfPreview} />
+function SalesDocumentPreview({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; settings: AppSettings; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onPdfPreview: () => void }) {
+  return <SalesEstimatePreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} onPdfPreview={onPdfPreview} />
   /*
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
@@ -319,6 +382,7 @@ type SalesPreviewProps = {
   onUpdateHeader: (field: SalesHeaderField, value: string) => void
   onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void
   onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void
+  onUpdateSheetLine: (bucket: SalesEstimateEditableBucket, index: number, patch: { label?: string; amount?: number }) => void
   onAddItem: () => void
   onRemoveItem: (itemId: string) => void
   onPdfPreview: () => void
@@ -339,13 +403,14 @@ function SalesEstimatePreview(props: SalesPreviewProps) {
   */
 }
 
-function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview, settings }: SalesPreviewProps) {
+function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onPdfPreview, settings }: SalesPreviewProps) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
   const imageAttachments = selectedVehicle?.attachments.filter((attachment) => attachment.type === 'image') ?? []
   const selectedAttachment = imageAttachments.find((attachment) => attachment.id === document.details.selectedImageAttachmentId)
   const imageState = useVehicleAttachmentUrl(document.vehicleId, selectedAttachment?.id ?? '')
   const sheetSvg = buildSalesEstimateSheetSvg(document, settings, { imageHref: imageState.url })
+  const sections = buildSalesEstimateSections(document)
   // Keep the previous implementation available while the new fixed A4 sheet is stabilized.
   void SalesEstimatePreviewLayout
 
@@ -368,6 +433,7 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
     </div>
     <div className="sales-estimate-sheet-frame">
       <div className="sales-estimate-sheet" dangerouslySetInnerHTML={{ __html: sheetSvg }} />
+      <SalesEstimateSheetEditor sections={sections} itemPresets={itemPresets} downPayment={document.details.downPayment} onUpdateLine={onUpdateSheetLine} onUpdateDownPayment={(downPayment) => onUpdateDetails({ downPayment })} />
     </div>
     <details className="sales-estimate-edit-details sales-estimate-exact-editor">
       <summary><FileText size={15} />帳票の内容・金額を編集</summary>
@@ -395,6 +461,111 @@ function SalesEstimateExactPreview({ document, itemPresets, customers, onUpdateH
       <div className="sales-estimate-edit-actions"><button className="button button-secondary" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button><span>入力・プレビュー・PDFは同じ保存データと計算結果を使用します。</span></div>
     </details>
   </div>
+}
+
+type SheetLinePosition = {
+  bucket: SalesEstimateEditableBucket
+  index: number
+  x: number
+  y: number
+  width: number
+  labelWidth: number
+  height: number
+  menuUp?: boolean
+}
+
+const salesEstimateSheetLinePositions: SheetLinePosition[] = [
+  { bucket: 'vehicleBase', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35 },
+  { bucket: 'discounts', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35 },
+  { bucket: 'vehicleSideLabor', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
+  { bucket: 'tradeIns', index: 0, x: 23, y: 1214, width: 324, labelWidth: 198, height: 30, menuUp: true },
+  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
+  ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
+  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
+  ...Array.from({ length: 13 }, (_, index) => ({ bucket: 'accessories' as const, index, x: 677, y: 817 + index * 34, width: 360, labelWidth: 210, height: 34, menuUp: index > 8 })),
+]
+
+export function SalesEstimateSheetEditor({ sections, itemPresets, downPayment, onUpdateLine, onUpdateDownPayment }: { sections: SalesEstimateSections; itemPresets: string[]; downPayment: number; onUpdateLine: SalesPreviewProps['onUpdateSheetLine']; onUpdateDownPayment: (value: number) => void }) {
+  return <div className="sales-estimate-sheet-editor" aria-label="見積書の明細を直接編集">
+    {salesEstimateSheetLinePositions.map((position) => {
+      const line = sections[position.bucket][position.index]
+      const defaults = estimateBucketDefaults[position.bucket]
+      const candidates = Array.from(new Set([defaults.label, ...itemPresets].filter(Boolean)))
+      return <SheetLineControl
+        key={`${position.bucket}-${position.index}`}
+        position={position}
+        label={line?.label ?? ''}
+        amount={line?.amount ?? 0}
+        exists={Boolean(line)}
+        candidates={candidates}
+        onChange={(patch) => onUpdateLine(position.bucket, position.index, patch)}
+      />
+    })}
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1244 / 14.91}%`, width: `${126 / 10.55}%`, height: `${30 / 14.91}%` }}>
+      <SheetAmountInput value={downPayment} exists onCommit={onUpdateDownPayment} />
+    </div>
+  </div>
+}
+
+function SheetLineControl({ position, label, amount, exists, candidates, onChange }: { position: SheetLinePosition; label: string; amount: number; exists: boolean; candidates: string[]; onChange: (patch: { label?: string; amount?: number }) => void }) {
+  const style = {
+    left: `${position.x / 10.55}%`,
+    top: `${position.y / 14.91}%`,
+    width: `${position.width / 10.55}%`,
+    height: `${position.height / 14.91}%`,
+    '--sheet-label-width': `${position.labelWidth / position.width * 100}%`,
+  } as CSSProperties
+  return <div className="sales-estimate-sheet-line-control" style={style}>
+    <SheetNameCombobox value={label} candidates={candidates} menuUp={position.menuUp} onCommit={(value) => onChange({ label: value })} />
+    <SheetAmountInput value={amount} exists={exists} onCommit={(value) => onChange({ amount: value })} />
+  </div>
+}
+
+function SheetNameCombobox({ value, candidates, menuUp = false, onCommit }: { value: string; candidates: string[]; menuUp?: boolean; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [open, setOpen] = useState(false)
+  useEffect(() => setDraft(value), [value])
+
+  function commit() {
+    setOpen(false)
+    if (draft !== value) onCommit(draft.trim())
+  }
+
+  return <div className="sales-sheet-name-combobox">
+    <input
+      aria-label="費用名・品名"
+      role="combobox"
+      aria-expanded={open}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onFocus={() => setOpen(false)}
+      onBlur={commit}
+    />
+    <button type="button" aria-label="明細候補を表示" onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((current) => !current)}><ChevronDown size={13} /></button>
+    {open ? <div className={`sales-sheet-candidate-menu${menuUp ? ' is-up' : ''}`} role="listbox">
+      {candidates.map((candidate) => <button key={candidate} type="button" role="option" aria-selected={candidate === draft} onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft(candidate); setOpen(false); onCommit(candidate) }}>{candidate}</button>)}
+    </div> : null}
+  </div>
+}
+
+function SheetAmountInput({ value, exists, onCommit }: { value: number; exists: boolean; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(exists ? String(value) : '')
+  useEffect(() => setDraft(exists ? String(value) : ''), [exists, value])
+
+  function update(nextValue: string) {
+    if (!/^-?\d*$/.test(nextValue)) return
+    setDraft(nextValue)
+    if (nextValue && nextValue !== '-') onCommit(Number(nextValue))
+  }
+
+  function finish() {
+    if (!draft || draft === '-') {
+      setDraft(exists ? '0' : '')
+      if (exists) onCommit(0)
+    }
+  }
+
+  return <input className="sales-sheet-amount-input" aria-label="金額" inputMode="numeric" value={draft} onChange={(event) => update(event.target.value)} onBlur={finish} />
 }
 
 function SalesEstimatePreviewLayout({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onAddItem, onRemoveItem, onPdfPreview }: SalesPreviewProps) {
