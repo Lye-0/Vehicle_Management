@@ -38,6 +38,8 @@ export type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
+  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'postalCode' | 'address'> | null
+  vehicleOverride: SalesVehicleDetails | null
   tradeIn: {
     name: string
     modelYear: string
@@ -59,10 +61,13 @@ export type SalesDocumentDetails = {
   }
   requiredDocuments: {
     sealCertificate: boolean
+    selfDeclaration: boolean
     residentCard: boolean
+    powerOfAttorney: boolean
     lightVehicleCertificate: boolean
     transferCertificate: boolean
     taxPaymentCertificate: boolean
+    guarantorSealCertificate: boolean
     warrantyCertificate: boolean
     other: string
   }
@@ -76,12 +81,14 @@ export const defaultSalesDocumentDetails: SalesDocumentDetails = {
   customerEmployer: '',
   customerContactPhone: '',
   selectedImageAttachmentId: '',
+  customerOverride: null,
+  vehicleOverride: null,
   tradeIn: { name: '', modelYear: '', inspectionDate: '', mileage: '', color: '' },
   recycleFee: 0,
   downPayment: 0,
   remainingPayment: 0,
   credit: { enabled: false, paymentCount: '', fee: 0, monthlyPayment: 0, initialPayment: 0, bonusMonths: '', bonusPayment: 0 },
-  requiredDocuments: { sealCertificate: false, residentCard: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, warrantyCertificate: false, other: '' },
+  requiredDocuments: { sealCertificate: false, selfDeclaration: false, residentCard: false, powerOfAttorney: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, guarantorSealCertificate: false, warrantyCertificate: false, other: '' },
 }
 
 export type SalesLineItem = {
@@ -219,6 +226,8 @@ function normalizeDetails(value: SalesDocumentDetails | null | undefined): Sales
     ...defaultSalesDocumentDetails,
     ...details,
     tradeIn: { ...defaultSalesDocumentDetails.tradeIn, ...details.tradeIn },
+    customerOverride: details.customerOverride ? { ...details.customerOverride } : null,
+    vehicleOverride: details.vehicleOverride ? { ...details.vehicleOverride } : null,
     credit: { ...defaultSalesDocumentDetails.credit, ...details.credit },
     requiredDocuments: { ...defaultSalesDocumentDetails.requiredDocuments, ...details.requiredDocuments },
   }

@@ -354,11 +354,13 @@ function parseItems(value: unknown): SalesItemInput[] {
   })
 }
 
-function parseSalesDetails(value: unknown): SalesDocumentDetails {
+export function parseSalesDetails(value: unknown): SalesDocumentDetails {
   const record = parseRecord(value)
   const tradeIn = parseRecord(record.tradeIn)
   const credit = parseRecord(record.credit)
   const requiredDocuments = parseRecord(record.requiredDocuments)
+  const customerOverride = isRecord(record.customerOverride) ? record.customerOverride : null
+  const vehicleOverride = isRecord(record.vehicleOverride) ? record.vehicleOverride : null
   return {
     salesCategory: limitedString(record.salesCategory, '中古車', 100),
     staffName: limitedString(record.staffName, '', 100),
@@ -367,6 +369,27 @@ function parseSalesDetails(value: unknown): SalesDocumentDetails {
     customerEmployer: limitedString(record.customerEmployer, '', 200),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
     selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
+    customerOverride: customerOverride ? {
+      name: limitedString(customerOverride.name, '', 200),
+      kana: limitedString(customerOverride.kana, '', 200),
+      phone: limitedString(customerOverride.phone, '', 50),
+      postalCode: limitedString(customerOverride.postalCode, '', 20),
+      address: limitedString(customerOverride.address, '', 500),
+    } : null,
+    vehicleOverride: vehicleOverride ? {
+      maker: limitedString(vehicleOverride.maker, '', 100),
+      name: limitedString(vehicleOverride.name, '', 200),
+      modelType: limitedString(vehicleOverride.modelType, '', 100),
+      plate: limitedString(vehicleOverride.plate, '', 100),
+      vin: limitedString(vehicleOverride.vin, '', 100),
+      year: limitedString(vehicleOverride.year, '', 50),
+      inspectionDate: dateValue(vehicleOverride.inspectionDate),
+      mileage: limitedString(vehicleOverride.mileage, '', 50),
+      color: limitedString(vehicleOverride.color, '', 100),
+      displacement: limitedString(vehicleOverride.displacement, '', 50),
+      transmission: limitedString(vehicleOverride.transmission, '', 100),
+      inspectionRecordAvailable: booleanValue(vehicleOverride.inspectionRecordAvailable),
+    } : null,
     tradeIn: {
       name: limitedString(tradeIn.name, '', 200),
       modelYear: limitedString(tradeIn.modelYear, '', 50),
@@ -388,10 +411,13 @@ function parseSalesDetails(value: unknown): SalesDocumentDetails {
     },
     requiredDocuments: {
       sealCertificate: booleanValue(requiredDocuments.sealCertificate),
+      selfDeclaration: booleanValue(requiredDocuments.selfDeclaration) || booleanValue(requiredDocuments.warrantyCertificate),
       residentCard: booleanValue(requiredDocuments.residentCard),
+      powerOfAttorney: booleanValue(requiredDocuments.powerOfAttorney),
       lightVehicleCertificate: booleanValue(requiredDocuments.lightVehicleCertificate),
       transferCertificate: booleanValue(requiredDocuments.transferCertificate),
       taxPaymentCertificate: booleanValue(requiredDocuments.taxPaymentCertificate),
+      guarantorSealCertificate: booleanValue(requiredDocuments.guarantorSealCertificate),
       warrantyCertificate: booleanValue(requiredDocuments.warrantyCertificate),
       other: limitedString(requiredDocuments.other, '', 200),
     },
@@ -403,6 +429,10 @@ function parseRecord(value: unknown): Record<string, unknown> {
     try { return parseRecord(JSON.parse(value)) } catch { return {} }
   }
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function limitedString(value: unknown, fallback: string, maxLength: number) {
@@ -520,10 +550,12 @@ type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
+  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string } | null
+  vehicleOverride: { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean } | null
   tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
   recycleFee: number
   downPayment: number
   remainingPayment: number
   credit: { enabled: boolean; paymentCount: string; fee: number; monthlyPayment: number; initialPayment: number; bonusMonths: string; bonusPayment: number }
-  requiredDocuments: { sealCertificate: boolean; residentCard: boolean; lightVehicleCertificate: boolean; transferCertificate: boolean; taxPaymentCertificate: boolean; warrantyCertificate: boolean; other: string }
+  requiredDocuments: { sealCertificate: boolean; selfDeclaration: boolean; residentCard: boolean; powerOfAttorney: boolean; lightVehicleCertificate: boolean; transferCertificate: boolean; taxPaymentCertificate: boolean; guarantorSealCertificate: boolean; warrantyCertificate: boolean; other: string }
 }

@@ -161,12 +161,14 @@ export function emptySalesDocumentDetails(): SalesDocumentDetails {
     customerEmployer: '',
     customerContactPhone: '',
     selectedImageAttachmentId: '',
+    customerOverride: null,
+    vehicleOverride: null,
     tradeIn: { name: '', modelYear: '', inspectionDate: '', mileage: '', color: '' },
     recycleFee: 0,
     downPayment: 0,
     remainingPayment: 0,
     credit: { enabled: false, paymentCount: '', fee: 0, monthlyPayment: 0, initialPayment: 0, bonusMonths: '', bonusPayment: 0 },
-    requiredDocuments: { sealCertificate: false, residentCard: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, warrantyCertificate: false, other: '' },
+    requiredDocuments: { sealCertificate: false, selfDeclaration: false, residentCard: false, powerOfAttorney: false, lightVehicleCertificate: false, transferCertificate: false, taxPaymentCertificate: false, guarantorSealCertificate: false, warrantyCertificate: false, other: '' },
   }
 }
 

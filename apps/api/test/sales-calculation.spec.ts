@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateSalesTotals } from '../src/routes/sales-routes'
+import { calculateSalesTotals, parseSalesDetails } from '../src/routes/sales-routes'
 
 const details = {
   salesCategory: '中古車',
@@ -9,12 +9,14 @@ const details = {
   customerEmployer: '松上電機（株）',
   customerContactPhone: '090-1234-5678',
   selectedImageAttachmentId: '',
+  customerOverride: null,
+  vehicleOverride: null,
   tradeIn: { name: 'なし', modelYear: '', inspectionDate: '', mileage: '', color: '' },
   recycleFee: 10800,
   downPayment: 100000,
   remainingPayment: 0,
   credit: { enabled: false, paymentCount: '', fee: 0, monthlyPayment: 0, initialPayment: 0, bonusMonths: '', bonusPayment: 0 },
-  requiredDocuments: { sealCertificate: true, residentCard: true, lightVehicleCertificate: false, transferCertificate: true, taxPaymentCertificate: false, warrantyCertificate: true, other: '' },
+  requiredDocuments: { sealCertificate: true, selfDeclaration: true, residentCard: true, powerOfAttorney: true, lightVehicleCertificate: false, transferCertificate: true, taxPaymentCertificate: false, guarantorSealCertificate: false, warrantyCertificate: true, other: '' },
 }
 
 const line = (itemType: string, description: string, amount: number, taxCategory = '課税') => ({
@@ -30,6 +32,19 @@ const line = (itemType: string, description: string, amount: number, taxCategory
 })
 
 describe('sales estimate calculation', () => {
+  it('keeps document-specific customer, vehicle, and required-document overrides', () => {
+    const parsed = parseSalesDetails({
+      customerOverride: { name: '手入力 顧客', kana: 'てにゅう こきゃく', phone: '090-0000-0000', postalCode: '100-0001', address: '東京都' },
+      vehicleOverride: { maker: '手入力メーカー', name: '手入力車', modelType: 'ABC-1', plate: '品川 100 あ 1', vin: 'VIN-1', year: '2026年', inspectionDate: '2027/01/02', mileage: '1,000km', color: '白', displacement: '1,500cc', transmission: 'AT', inspectionRecordAvailable: true },
+      requiredDocuments: { sealCertificate: true, selfDeclaration: true, powerOfAttorney: true, guarantorSealCertificate: true },
+    })
+
+    expect(parsed.customerOverride?.name).toBe('手入力 顧客')
+    expect(parsed.vehicleOverride?.inspectionDate).toBe('2027-01-02')
+    expect(parsed.vehicleOverride?.inspectionRecordAvailable).toBe(true)
+    expect(parsed.requiredDocuments).toMatchObject({ sealCertificate: true, selfDeclaration: true, powerOfAttorney: true, guarantorSealCertificate: true })
+  })
+
   it('matches the reference estimate without double-counting installation labor', () => {
     const totals = calculateSalesTotals([
       line('車両本体価格', '車両本体価格', 1280000),
