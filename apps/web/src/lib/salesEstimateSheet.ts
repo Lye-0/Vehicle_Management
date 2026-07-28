@@ -72,9 +72,11 @@ function sheetTitle(document: SalesDocument) {
     ['担当者', document.details.staffName || '未設定'],
     ['ページ', '1 / 1'],
   ]
+  const title = document.type === '見積書' ? 'お見積書' : document.type;
+  const lineEnd = Math.round(27 + title.length * 50 + (title.length - 1) * 8);
   return `
-  <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">${salesDocumentTitle(document.type)}</text>
-  <line x1="27" y1="86" x2="253" y2="86" stroke="${BLUE}" stroke-width="5"/>
+  <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">${escapeXml(title)}</text>
+  <line x1="27" y1="86" x2="${lineEnd}" y2="86" stroke="${BLUE}" stroke-width="5"/>
   <rect x="731" y="13" width="306" height="130" rx="4" class="box"/>
   ${rows.map(([label, value], index) => {
     const y = 13 + index * 26
