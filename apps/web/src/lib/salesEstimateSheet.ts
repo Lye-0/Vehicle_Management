@@ -297,13 +297,15 @@ function accessoryCard(rows: Array<{ label: string; amount: number }>, total: nu
 }
 
 function creditBlock(credit: SalesDocument['details']['credit']) {
-  const values = credit.enabled
-    ? [credit.paymentCount || '-', formatYen(credit.bonusPayment), credit.fee ? `${formatYen(credit.fee)}` : '-', credit.bonusMonths || '-']
-    : ['-', '-', '-', '-']
+  const values = [
+    credit.paymentCount,
+    credit.bonusPayment ? formatYen(credit.bonusPayment) : '',
+    credit.fee ? String(credit.fee) : '',
+    credit.bonusMonths,
+  ]
   return `
   <rect x="23" y="1322" width="475" height="110" rx="5" class="box"/>
   ${text(48, 1354, '▣  クレジットお支払いプラン', 'blue bold', 21)}
-  ${text(475, 1353, credit.enabled ? '利用あり' : '利用なし', 'body', 16, 'end')}
   <line x1="23" y1="1366" x2="498" y2="1366" class="line"/>
   ${simpleColumns(23, 1366, [119, 119, 119, 118], ['回数', 'ボーナス払', '金利', '支払開始月'], 32, true)}
   ${simpleColumns(23, 1398, [119, 119, 119, 118], values, 34, false)}`

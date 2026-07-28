@@ -491,11 +491,29 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
     onUpdateDetails({ requiredDocuments: { ...document.details.requiredDocuments, [field]: checked, ...(field === 'selfDeclaration' ? { warrantyCertificate: checked } : {}) } })
   }
 
+  function updateCredit(field: 'paymentCount' | 'bonusPayment' | 'fee' | 'bonusMonths', value: string) {
+    const credit = document.details.credit
+    const nextCredit = {
+      ...credit,
+      [field]: field === 'bonusPayment' || field === 'fee' ? Number(value || 0) : value,
+    }
+    nextCredit.enabled = Boolean(
+      nextCredit.paymentCount
+      || nextCredit.bonusPayment
+      || nextCredit.fee
+      || nextCredit.monthlyPayment
+      || nextCredit.initialPayment
+      || nextCredit.bonusMonths,
+    )
+    onUpdateDetails({ credit: nextCredit })
+  }
+
   return <div className="sales-estimate-sheet-editor" aria-label="見積書の明細を直接編集">
     <SalesSheetCustomerEditor document={document} hasImage={hasImage} customer={customer} onUpdateCustomer={updateCustomer} onUpdateDetails={onUpdateDetails} />
     <SalesSheetVehicleEditor hasImage={hasImage} vehicle={vehicle} onUpdate={updateVehicle} />
     <SalesSheetTradeInEditor hasImage={hasImage} tradeIn={document.details.tradeIn} onUpdate={updateTradeIn} />
     <SalesSheetRequiredDocumentsEditor requiredDocuments={document.details.requiredDocuments} onUpdate={updateRequiredDocument} />
+    <SalesSheetCreditEditor credit={document.details.credit} onUpdate={updateCredit} />
     <SheetTextControl multiline ariaLabel="備考" value={document.note} x={713} y={701} width={318} height={27} onChange={(value) => onUpdateHeader('note', value)} />
     {salesEstimateSheetLinePositions.map((position) => {
       const line = sections[position.bucket][position.index]
@@ -578,6 +596,42 @@ function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { re
     const row = Math.floor(index / 2)
     return <label key={field} className="sales-estimate-sheet-checkbox" style={sheetPositionStyle(724 + col * 156, 539 + row * 26, 16, 16)}><input aria-label={requiredDocumentFields.find((item) => item.key === field)?.label ?? field} type="checkbox" checked={Boolean(requiredDocuments[field])} onChange={(event) => onUpdate(field, event.target.checked)} /></label>
   })}</>
+}
+
+function SalesSheetCreditEditor({ credit, onUpdate }: { credit: SalesDocumentDetails['credit']; onUpdate: (field: 'paymentCount' | 'bonusPayment' | 'fee' | 'bonusMonths', value: string) => void }) {
+  return <>
+    <SheetCreditInput ariaLabel="クレジット支払回数" value={credit.paymentCount} x={23} width={119} onCommit={(value) => onUpdate('paymentCount', value)} />
+    <SheetCreditInput currency ariaLabel="クレジットボーナス払" value={credit.bonusPayment ? String(credit.bonusPayment) : ''} x={142} width={119} onCommit={(value) => onUpdate('bonusPayment', value)} />
+    <SheetCreditInput decimal ariaLabel="クレジット金利" value={credit.fee ? String(credit.fee) : ''} x={261} width={119} onCommit={(value) => onUpdate('fee', value)} />
+    <SheetCreditInput ariaLabel="クレジット支払開始月" value={credit.bonusMonths} x={380} width={118} onCommit={(value) => onUpdate('bonusMonths', value)} />
+  </>
+}
+
+function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decimal = false, onCommit }: { ariaLabel: string; value: string; x: number; width: number; currency?: boolean; decimal?: boolean; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => setDraft(value), [value])
+
+  function update(nextValue: string) {
+    const pattern = decimal ? /^\d*(?:\.\d{0,2})?$/ : /^[\d./-]*$/
+    if (pattern.test(nextValue)) setDraft(nextValue)
+  }
+
+  function finish() {
+    setFocused(false)
+    if (draft !== value) onCommit(draft)
+  }
+
+  return <input
+    className="sales-estimate-sheet-field-control has-grid is-centered"
+    aria-label={ariaLabel}
+    inputMode={decimal ? 'decimal' : 'numeric'}
+    value={currency && !focused && draft ? formatSheetYen(Number(draft)) : draft}
+    style={sheetPositionStyle(x, 1398, width, 34)}
+    onFocus={() => setFocused(true)}
+    onChange={(event) => update(event.target.value)}
+    onBlur={finish}
+  />
 }
 
 function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; onChange: (value: string) => void }) {
