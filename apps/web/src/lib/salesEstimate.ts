@@ -1,6 +1,14 @@
 import type { SalesDocument, SalesDocumentDetails, SalesLineItem, SalesTaxCategory } from './salesApi'
 import type { AppSettings } from './settingsApi'
 
+export function salesDocumentTitle(type: SalesDocument['type']) {
+  return type === '請求書' ? '請求書' : 'お見積書'
+}
+
+export function salesDocumentAmountTitle(type: SalesDocument['type']) {
+  return type === '請求書' ? '請求金額（税込み）' : 'お見積金額（税込）'
+}
+
 export type SalesEstimateLine = {
   id: string
   label: string

@@ -1,5 +1,5 @@
 import type { SalesDocument } from './salesApi'
-import { buildSalesEstimateSections, calculateSalesEstimateTotals } from './salesEstimate'
+import { buildSalesEstimateSections, calculateSalesEstimateTotals, salesDocumentAmountTitle, salesDocumentTitle } from './salesEstimate'
 import type { AppSettings } from './settingsApi'
 
 const WIDTH = 1055
@@ -35,7 +35,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
   const actualLines = sections.nonTaxableFees.slice(0, 3)
   const accessories = sections.accessories.slice(0, 13)
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="お見積書">
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${salesDocumentTitle(document.type)}">
   <defs>
     <style>
       text{font-family:"Noto Sans JP","Yu Gothic","Meiryo",sans-serif;fill:#101820}
@@ -73,7 +73,7 @@ function sheetTitle(document: SalesDocument) {
     ['ページ', '1 / 1'],
   ]
   return `
-  <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">お見積書</text>
+  <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">${salesDocumentTitle(document.type)}</text>
   <line x1="27" y1="86" x2="253" y2="86" stroke="${BLUE}" stroke-width="5"/>
   <rect x="731" y="13" width="306" height="130" rx="4" class="box"/>
   ${rows.map(([label, value], index) => {
@@ -131,7 +131,7 @@ function amountPanel(document: SalesDocument, totals: ReturnType<typeof calculat
   return `
   <rect x="707" y="157" width="330" height="318" rx="5" class="box"/>
   <path d="M712 157h320a5 5 0 015 5v45H707v-45a5 5 0 015-5z" class="section"/>
-  ${text(872, 191, 'お見積金額（税込）', 'sectionText', 20, 'middle')}
+  ${text(872, 191, salesDocumentAmountTitle(document.type), 'sectionText', 20, 'middle')}
   ${text(872, 260, formatYen(totals.total), 'blue heavy amount', 46, 'middle')}
   <line x1="712" y1="284" x2="1032" y2="284" class="line"/>
   ${amountLine(722, 310, `課税対象額（${formatPercent(document.taxRate)}）`, totals.taxableSubtotal)}

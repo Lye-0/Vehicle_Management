@@ -3,7 +3,7 @@ import fontkit from '@pdf-lib/fontkit'
 import fontUrl from '../assets/fonts/NotoSansCJKjp-Regular.otf?url'
 import { fetchVehicleFile } from './customerApi'
 import type { MaintenanceDocument } from './maintenanceApi'
-import { buildSalesEstimateSections, calculateSalesEstimateTotals, type SalesTotals } from './salesEstimate'
+import { buildSalesEstimateSections, calculateSalesEstimateTotals, salesDocumentAmountTitle, salesDocumentTitle, type SalesTotals } from './salesEstimate'
 import { buildSalesEstimateSheetSvg } from './salesEstimateSheet'
 import type { AppSettings } from './settingsApi'
 import type { SalesDocument } from './salesApi'
@@ -225,10 +225,6 @@ function drawPageHeader(state: PageState) {
   state.y = ruleY - 20
 }
 
-function salesDocumentTitle(type: SalesDocument['type']) {
-  return type === '見積書' ? 'お見積書' : type
-}
-
 function drawSalesPageHeader(state: PageState, document: SalesDocument) {
   const top = PAGE_HEIGHT - MARGIN
   const titleWidth = 190
@@ -340,7 +336,7 @@ function drawSalesDocumentIntroLayout(state: PageState, document: SalesDocument,
 
   const totals = calculateSalesEstimateTotals(document, state.settings.tax.rounding)
   const summaryTop = state.y
-  drawSalesGridBlock(state, MARGIN, summaryTop, [112, 93], [[{ text: 'お見積金額（税込）', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8.2 }, { text: formatYen(totals.total), bold: true, align: 'right', size: 12 }]], [30])
+  drawSalesGridBlock(state, MARGIN, summaryTop, [112, 93], [[{ text: salesDocumentAmountTitle(document.type), fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8.2 }, { text: formatYen(totals.total), bold: true, align: 'right', size: 12 }]], [30])
   const taxX = MARGIN + 205 + 12
   drawSalesGridBlock(state, taxX, summaryTop, [98, 98, 98], [[{ text: `課税対象額（${formatPercent(document.taxRate)}）`, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }, { text: `消費税（${formatPercent(document.taxRate)}）`, fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }, { text: '非課税対象額', fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 7.1 }], [{ text: formatYen(totals.taxableSubtotal), align: 'right' }, { text: formatYen(totals.tax), align: 'right' }, { text: formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal), align: 'right' }]], [14, 16])
   state.y = summaryTop - 30 - 8

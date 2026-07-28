@@ -5,7 +5,7 @@ import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
-const salesDocumentTypes = new Set(['見積書', '注文書', '請求書'])
+const salesDocumentTypes = new Set(['見積書', '請求書'])
 const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
 const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
