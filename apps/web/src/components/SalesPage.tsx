@@ -551,10 +551,10 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
     <SheetTextControl ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
     <SheetTextControl ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} />
     {!hasImage ? <>
-      <SheetTextControl ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={43} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
-      <SheetTextControl ariaLabel="お客様電話番号" value={customer.phone} x={479} y={148} width={197} height={43} onChange={(value) => onUpdateCustomer('phone', value)} />
-      <SheetTextControl ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={193} width={197} height={43} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
-      <SheetTextControl ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={237} width={197} height={44} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
+      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={43} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
+      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={479} y={148} width={197} height={43} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={193} width={197} height={43} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={237} width={197} height={44} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
 }
@@ -575,8 +575,8 @@ function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: bo
     { field: 'inspectionDate', x: 116, y: y + 150, width: 277, height: 37 },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <SheetTextControl key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
-    <label className="sales-estimate-sheet-checkbox is-record" style={sheetPositionStyle(497, y + 158, 16, 16)}><input aria-label="記録簿あり" type="checkbox" checked={vehicle.inspectionRecordAvailable} onChange={(event) => onUpdate('inspectionRecordAvailable', event.target.checked)} /></label>
+    {fields.map(({ field, ...position }) => <SheetTextControl grid key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+    <SheetRecordControl value={vehicle.inspectionRecordAvailable} x={483} y={y + 150} width={202} height={37} onChange={(value) => onUpdate('inspectionRecordAvailable', value)} />
   </>
 }
 
@@ -589,7 +589,7 @@ function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: bo
     { field: 'mileage', x: 427, width: 137 },
     { field: 'color', x: 564, width: 121 },
   ]
-  return <>{fields.map(({ field, x, width }) => <SheetTextControl key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered onChange={(value) => onUpdate(field, value)} />)}</>
+  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered onChange={(value) => onUpdate(field, value)} />)}</>
 }
 
 function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { requiredDocuments: SalesDocumentDetails['requiredDocuments']; onUpdate: (field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) => void }) {
@@ -601,10 +601,23 @@ function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { re
   })}</>
 }
 
-function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; onChange: (value: string) => void }) {
-  const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}`
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; onChange: (value: string) => void }) {
+  const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}`
   const props = { className, 'aria-label': ariaLabel, value, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value) }
   return multiline ? <textarea {...props} /> : <input {...props} />
+}
+
+function SheetRecordControl({ value, x, y, width, height, onChange }: { value: boolean; x: number; y: number; width: number; height: number; onChange: (value: boolean) => void }) {
+  return <select
+    aria-label="記録簿"
+    className="sales-estimate-sheet-field-control has-grid is-select"
+    value={value ? 'あり' : 'なし'}
+    style={sheetPositionStyle(x, y, width, height)}
+    onChange={(event) => onChange(event.target.value === 'あり')}
+  >
+    <option value="あり">あり</option>
+    <option value="なし">なし</option>
+  </select>
 }
 
 function sheetPositionStyle(x: number, y: number, width: number, height: number): CSSProperties {
