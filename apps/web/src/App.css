@@ -764,6 +764,15 @@
 .maintenance-note-editor textarea { width: 100%; min-height: 102px; padding: 9px 10px; color: #8b5b16; outline: 0; border: 1px solid #f1d89e; border-radius: 7px; background: #fffdf5; font: inherit; font-size: 11px; line-height: 1.7; resize: vertical; }
 .maintenance-note-editor textarea:focus { border-color: #d6a72f; box-shadow: 0 0 0 3px rgba(214, 167, 47, 0.12); }
 .maintenance-preview-placeholder { width: 100%; min-height: 680px; aspect-ratio: 210 / 297; border: 1px solid #c8d5e6; background: #fff; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.12); }
+.maintenance-preview-content { padding: 24px; background: #e9eef5; }
+.maintenance-statement-frame { width: 100%; max-width: 1122px; margin: 0 auto; background: #fff; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.16); }
+.maintenance-statement { width: 100%; aspect-ratio: 1122 / 1407; }
+.maintenance-statement svg { display: block; width: 100%; height: auto; }
+.maintenance-parameter-panel { margin-bottom: 22px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.maintenance-parameter-panel h4 { margin: 20px 0 10px; color: var(--text-secondary); font-size: 12px; }
+.maintenance-checkbox-field input { width: 18px; height: 18px; }
+.maintenance-statement-items-table .maintenance-items-head,
+.maintenance-statement-items-table .maintenance-item-row { grid-template-columns: 64px minmax(180px, 1fr) 56px 56px 86px 94px 92px 110px 28px; min-width: 940px; }
 .maintenance-context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .maintenance-context-card { display: grid; gap: 6px; min-width: 0; padding: 13px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
 .maintenance-context-label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 10px; font-weight: 800; }
