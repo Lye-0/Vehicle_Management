@@ -94,7 +94,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     type: body.type ?? current.type,
     status: body.status ?? current.status,
     category: body.category ?? current.category,
-    number: current.number,
+    number: body.number === undefined ? current.number : body.number,
     customerId: body.customerId ?? current.customerId,
     vehicleId: body.vehicleId ?? current.vehicleId,
     intakeDate: body.intakeDate === undefined ? current.intakeDate : body.intakeDate,
@@ -110,9 +110,11 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
   const totals = calculateMaintenanceTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
+  const number = input.number || current.number
+  await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId, documentId)
 
   await database.update(maintenanceDocuments).set({
-    number: current.number,
+    number,
     type: input.type,
     category: input.category,
     status: input.status,
@@ -392,10 +394,10 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
       inspectionRecordAvailable: typeof vehicleOverride.inspectionRecordAvailable === 'boolean' ? vehicleOverride.inspectionRecordAvailable : false,
     },
     labels: {
-      documentTitle: stringValue(labels, 'documentTitle'),
-      amountTitle: stringValue(labels, 'amountTitle') || 'お見積金額（税込）',
+      documentTitle: '',
+      amountTitle: 'お見積金額（税込）',
       vehicleSectionTitle: stringValue(labels, 'vehicleSectionTitle') || '車両情報',
-      workSectionTitle: stringValue(labels, 'workSectionTitle') || '作業内容／部品名等',
+      workSectionTitle: '作業内容／部品名等',
       bankTitle: stringValue(labels, 'bankTitle') || 'お振込先',
       otherFee: stringValue(labels, 'otherFee') || 'その他',
     },

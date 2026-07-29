@@ -33,7 +33,9 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   const customer = document.details.customerOverride ?? document.customerDetails
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels
-  const documentTitle = labels.documentTitle || defaultDocumentTitle(document.type)
+  const documentTitle = defaultDocumentTitle(document.type)
+  const amountTitle = 'お見積金額（税込）'
+  const workSectionTitle = '作業内容／部品名等'
   const rows = statementRows(document)
   const rowHeight = 28
   const rowTop = 587
@@ -95,7 +97,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
   ${roundedBox(832, 90, 250, 255)}
   ${rect(832, 90, 250, 43, 'url(#maintenance-blue)')}
-  ${centerText(957, 119, labels.amountTitle, 18, '700', '#fff')}
+  ${centerText(957, 119, amountTitle, 18, '700', '#fff')}
   ${centerText(957, 184, `${number(totals.total)}円`, 39, '800', '#073c87')}
   ${line(847, 206, 1068, 206, '#c2cfdf')}
   ${valueText(847, 239, '課税対象額（作業料金）', 'start', 13, '700')}
@@ -121,7 +123,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
   ${roundedBox(16, 509, 1067, 620)}
   ${rect(16, 509, 1067, 42, 'url(#maintenance-blue)')}
-  ${centerText(550, 538, labels.workSectionTitle, 24, '700', '#fff')}
+  ${centerText(550, 538, workSectionTitle, 24, '700', '#fff')}
   ${rect(16, 551, 1067, 36, '#f4f8fd')}
   ${workGridLines(rowTop, rowHeight)}
   ${headerText(45, 575, 'No.')}${headerText(233, 575, '作業内容／部品名等')}${headerText(432, 575, '数量')}${headerText(514, 575, '単位')}${headerText(612, 575, '部品単価')}${headerText(727, 575, '部品金額')}${headerText(868, 575, '技術料／他')}${headerText(1017, 575, '摘要')}

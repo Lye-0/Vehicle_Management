@@ -43,9 +43,6 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   }
 
   return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
-    <StatementTextControl className="is-blue is-title" ariaLabel="帳票タイトル" value={details.labels.documentTitle || defaultDocumentTitle(document.type)} x={160} y={19} width={216} height={38} onChange={(value) => updateLabel('documentTitle', value)} />
-    <StatementTextControl className="is-blue is-header-label" ariaLabel="金額欄タイトル" value={details.labels.amountTitle} x={846} y={94} width={222} height={34} onChange={(value) => updateLabel('amountTitle', value)} />
-    <StatementTextControl className="is-blue is-section-label" ariaLabel="作業明細タイトル" value={details.labels.workSectionTitle} x={310} y={514} width={480} height={32} onChange={(value) => updateLabel('workSectionTitle', value)} />
     <StatementTextControl className="is-blue is-section-label" ariaLabel="振込先タイトル" value={details.labels.bankTitle} x={105} y={1238} width={330} height={32} onChange={(value) => updateLabel('bankTitle', value)} />
 
     <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
@@ -170,12 +167,6 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
 
 function controlStyle(x: number, y: number, width: number, height: number): CSSProperties {
   return { left: `${x / maintenanceStatementWidth * 100}%`, top: `${y / maintenanceStatementHeight * 100}%`, width: `${width / maintenanceStatementWidth * 100}%`, height: `${height / maintenanceStatementHeight * 100}%` }
-}
-
-function defaultDocumentTitle(type: MaintenanceDocument['type']) {
-  if (type === '整備見積書') return '見積書'
-  if (type === '納品書') return '納品書'
-  return '請求書'
 }
 
 const emptyVehicle: NonNullable<MaintenanceDocumentDetails['vehicleOverride']> = {

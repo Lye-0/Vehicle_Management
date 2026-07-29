@@ -24,12 +24,14 @@ import {
   defaultMaintenanceDocumentDetails,
   type IntakeCategory,
   type MandatoryFees,
+  type MaintenanceCustomerDetails,
   type MaintenanceDocument,
   type MaintenanceDocumentDetails,
   type MaintenanceDocumentInput,
   type MaintenanceDocumentType,
   type MaintenanceItemKind,
   type MaintenanceLineItem,
+  type MaintenanceVehicleDetails,
   type MaintenanceStatus,
 } from '../lib/maintenanceApi'
 import { buildMaintenanceStatementSvg, calculateMaintenanceStatementTotals } from '../lib/maintenanceStatement'
@@ -127,15 +129,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function updateHeader(field: 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note', value: string) {
     if (!selectedDocument) return
-    const relationChanged = field === 'customerId' || field === 'vehicleId'
-    const nextVehicleId = field === 'customerId' ? customers.find((customer) => customer.id === value)?.vehicles[0]?.id ?? '' : value
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : {
-      ...document,
-      [field]: value,
-      ...(field === 'customerId' ? { vehicleId: nextVehicleId } : {}),
-      ...(field === 'vehicleId' && value === '' ? { vehicleId: '' } : {}),
-      ...(relationChanged ? { details: { ...document.details, customerOverride: null, vehicleOverride: null } } : {}),
-    }))
+    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
     setSavedDocumentId('')
   }
 
@@ -283,7 +277,60 @@ function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmi
 
 function FormField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) { return <label className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</label> }
 
-function toMaintenanceInput(document: MaintenanceDocument, taxRounding: AppSettings['tax']['rounding']): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item) } }
+function toMaintenanceInput(document: MaintenanceDocument, taxRounding: AppSettings['tax']['rounding']): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item) } }
+function updateMaintenanceHeader(document: MaintenanceDocument, field: MaintenanceHeaderField, value: string, customers: Customer[]): MaintenanceDocument {
+  if (field !== 'customerId' && field !== 'vehicleId') return { ...document, [field]: value }
+
+  const nextCustomer = customers.find((customer) => customer.id === (field === 'customerId' ? value : document.customerId))
+  const nextVehicleId = field === 'customerId' ? nextCustomer?.vehicles[0]?.id ?? '' : value
+  const nextVehicle = nextCustomer?.vehicles.find((vehicle) => vehicle.id === nextVehicleId)
+  const nextDetails = field === 'customerId'
+    ? { ...document.details, customerOverride: null, vehicleOverride: null }
+    : { ...document.details, vehicleOverride: null }
+
+  return {
+    ...document,
+    [field]: value,
+    customerId: field === 'customerId' ? value : document.customerId,
+    vehicleId: nextVehicleId,
+    customerName: nextCustomer?.name ?? '',
+    phone: nextCustomer?.phone ?? '',
+    customerDetails: mapMaintenanceCustomerDetails(nextCustomer),
+    vehicle: nextVehicle ? [nextVehicle.maker, nextVehicle.model].filter(Boolean).join(' ') : '',
+    plate: nextVehicle?.plate ?? '',
+    mileage: nextVehicle?.mileage ?? '',
+    vehicleDetails: mapMaintenanceVehicleDetails(nextVehicle),
+    details: nextDetails,
+  }
+}
+
+function mapMaintenanceCustomerDetails(customer: Customer | undefined): MaintenanceCustomerDetails {
+  return {
+    name: customer?.name ?? '',
+    kana: customer?.kana ?? '',
+    phone: customer?.phone ?? '',
+    postalCode: customer?.postalCode ?? '',
+    address: customer?.address ?? '',
+  }
+}
+
+function mapMaintenanceVehicleDetails(vehicle: Customer['vehicles'][number] | undefined): MaintenanceVehicleDetails | null {
+  if (!vehicle) return null
+  return {
+    maker: vehicle.maker,
+    name: vehicle.model,
+    modelType: vehicle.modelType,
+    plate: vehicle.plate,
+    vin: vehicle.vin,
+    year: vehicle.year,
+    inspectionDate: vehicle.inspectionDate,
+    mileage: vehicle.mileage,
+    color: vehicle.color,
+    displacement: vehicle.displacement,
+    transmission: vehicle.transmission,
+    inspectionRecordAvailable: vehicle.inspectionRecordAvailable,
+  }
+}
 function createFormForCustomers(customers: Customer[], defaultDueDays: number): MaintenanceCreateForm { const customer = customers[0]; return { ...emptyCreateForm, dueDate: addDaysDisplay(defaultDueDays), customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '' } }
 function todayDisplay() { return new Date().toISOString().slice(0, 10).replaceAll('-', '/') }
 function addDaysDisplay(days: number) { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10).replaceAll('-', '/') }

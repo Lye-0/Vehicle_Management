@@ -77,6 +77,7 @@ export type MaintenanceDocumentInput = {
   category: IntakeCategory
   customerId: string
   vehicleId: string
+  issuedAt?: string
   intakeDate: string
   plannedReleaseDate: string
   completionDate: string
@@ -133,7 +134,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  return { ...input, number: input.number || undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+  return { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
 }
 
 function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | undefined): MaintenanceDocumentDetails {
@@ -143,7 +144,13 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
     ...details,
     customerOverride: details.customerOverride ? { ...details.customerOverride } : null,
     vehicleOverride: details.vehicleOverride ? { ...details.vehicleOverride } : null,
-    labels: { ...defaultMaintenanceDocumentDetails.labels, ...details.labels },
+    labels: {
+      ...defaultMaintenanceDocumentDetails.labels,
+      ...details.labels,
+      documentTitle: '',
+      amountTitle: 'お見積金額（税込）',
+      workSectionTitle: '作業内容／部品名等',
+    },
   }
 }
 
