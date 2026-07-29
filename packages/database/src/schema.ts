@@ -181,6 +181,7 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   tax: integer('tax').notNull().default(0),
   total: integer('total').notNull().default(0),
   note: text('note'),
+  detailsJson: text('details_json').notNull().default('{}'),
   archivedAt: text('archived_at'),
   ...timestamps,
 }, (table) => [
@@ -200,6 +201,8 @@ export const maintenanceItems = sqliteTable('maintenance_items', {
   quantity: real('quantity').notNull().default(1),
   unit: text('unit').notNull().default('式'),
   unitPrice: integer('unit_price').notNull().default(0),
+  technicalFee: integer('technical_fee').notNull().default(0),
+  summary: text('summary').notNull().default(''),
   amount: integer('amount').notNull().default(0),
   sortOrder: integer('sort_order').notNull().default(0),
 }, (table) => [

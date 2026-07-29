@@ -5,7 +5,43 @@ export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金�
 export type IntakeCategory = '車検' | '法定点検' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
-export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number }
+export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; postalCode: string; address: string }
+export type MaintenanceVehicleDetails = { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean }
+export type MaintenanceDocumentDetails = {
+  staffName: string
+  customerHonorific: string
+  customerBirthDate: string
+  customerEmployer: string
+  customerContactPhone: string
+  customerOverride: MaintenanceCustomerDetails | null
+  vehicleOverride: MaintenanceVehicleDetails | null
+  labels: {
+    documentTitle: string
+    amountTitle: string
+    workSectionTitle: string
+    bankTitle: string
+    otherFee: string
+  }
+}
+export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string }
+
+export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
+  staffName: '',
+  customerHonorific: '様',
+  customerBirthDate: '',
+  customerEmployer: '',
+  customerContactPhone: '',
+  customerOverride: null,
+  vehicleOverride: null,
+  labels: {
+    documentTitle: '',
+    amountTitle: 'お見積金額（税込）',
+    workSectionTitle: '作業内容／部品名等',
+    bankTitle: 'お振込先',
+    otherFee: 'その他',
+  },
+}
+
 export type MaintenanceDocument = {
   id: string
   number: string
@@ -15,10 +51,13 @@ export type MaintenanceDocument = {
   customerId: string
   customerName: string
   phone: string
+  customerDetails: MaintenanceCustomerDetails
   vehicleId: string
   vehicle: string
   plate: string
   mileage: string
+  vehicleDetails: MaintenanceVehicleDetails | null
+  details: MaintenanceDocumentDetails
   intakeDate: string
   plannedReleaseDate: string
   completionDate: string
@@ -47,6 +86,7 @@ export type MaintenanceDocumentInput = {
   fees: MandatoryFees
   adjustment: number
   note: string
+  details: MaintenanceDocumentDetails
   items: Array<Omit<MaintenanceLineItem, 'id'>>
 }
 
@@ -76,11 +116,35 @@ export async function restoreMaintenanceDocument(id: string) {
 }
 
 function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDocument {
-  return { ...document, intakeDate: formatDate(document.intakeDate), plannedReleaseDate: formatDate(document.plannedReleaseDate), completionDate: formatDate(document.completionDate), issuedAt: formatDate(document.issuedAt), dueDate: formatDate(document.dueDate), taxRate: document.taxRate / 100, note: document.note ?? '', items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) })) }
+  return {
+    ...document,
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '' },
+    vehicleDetails: document.vehicleDetails ?? null,
+    details: normalizeMaintenanceDetails(document.details),
+    intakeDate: formatDate(document.intakeDate),
+    plannedReleaseDate: formatDate(document.plannedReleaseDate),
+    completionDate: formatDate(document.completionDate),
+    issuedAt: formatDate(document.issuedAt),
+    dueDate: formatDate(document.dueDate),
+    taxRate: document.taxRate / 100,
+    note: document.note ?? '',
+    items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
+  }
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  return { ...input, number: input.number || undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice }) => ({ description, kind, quantity, unit, unitPrice })) }
+  return { ...input, number: input.number || undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+}
+
+function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | undefined): MaintenanceDocumentDetails {
+  const details = value ?? defaultMaintenanceDocumentDetails
+  return {
+    ...defaultMaintenanceDocumentDetails,
+    ...details,
+    customerOverride: details.customerOverride ? { ...details.customerOverride } : null,
+    vehicleOverride: details.vehicleOverride ? { ...details.vehicleOverride } : null,
+    labels: { ...defaultMaintenanceDocumentDetails.labels, ...details.labels },
+  }
 }
 
 function formatDate(value: string | null) { return value ? value.slice(0, 10).replaceAll('-', '/') : '' }
