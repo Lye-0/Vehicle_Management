@@ -142,8 +142,27 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
   return {
     ...defaultMaintenanceDocumentDetails,
     ...details,
-    customerOverride: details.customerOverride ? { ...details.customerOverride } : null,
-    vehicleOverride: details.vehicleOverride ? { ...details.vehicleOverride } : null,
+    customerOverride: details.customerOverride && hasMaintenanceOverrideValue(details.customerOverride) ? {
+      name: details.customerOverride.name,
+      kana: details.customerOverride.kana,
+      phone: details.customerOverride.phone,
+      postalCode: details.customerOverride.postalCode,
+      address: details.customerOverride.address,
+    } : null,
+    vehicleOverride: details.vehicleOverride && hasMaintenanceOverrideValue(details.vehicleOverride) ? {
+      maker: details.vehicleOverride.maker,
+      name: details.vehicleOverride.name,
+      modelType: details.vehicleOverride.modelType,
+      plate: details.vehicleOverride.plate,
+      vin: details.vehicleOverride.vin,
+      year: details.vehicleOverride.year,
+      inspectionDate: details.vehicleOverride.inspectionDate,
+      mileage: details.vehicleOverride.mileage,
+      color: details.vehicleOverride.color,
+      displacement: details.vehicleOverride.displacement,
+      transmission: details.vehicleOverride.transmission,
+      inspectionRecordAvailable: details.vehicleOverride.inspectionRecordAvailable,
+    } : null,
     labels: {
       ...defaultMaintenanceDocumentDetails.labels,
       ...details.labels,
@@ -152,6 +171,10 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
       workSectionTitle: '作業内容／部品名等',
     },
   }
+}
+
+function hasMaintenanceOverrideValue(value: MaintenanceCustomerDetails | MaintenanceVehicleDetails | null) {
+  return Boolean(value && Object.values(value).some((field) => typeof field === 'string' ? field.trim().length > 0 : field))
 }
 
 function formatDate(value: string | null) { return value ? value.slice(0, 10).replaceAll('-', '/') : '' }

@@ -241,6 +241,8 @@ describe("CLI authenticated workflow", () => {
 			const maintenanceNumber = stringValue(maintenanceDocument.number);
 			expect(maintenanceNumber).toMatch(/^M-\d{4}-\d{5}$/);
 			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
+			expect(objectValue(maintenanceDocument.details).customerOverride).toBeNull();
+			expect(objectValue(maintenanceDocument.details).vehicleOverride).toBeNull();
 
 			const duplicateMaintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
 				type: "整備請求書",

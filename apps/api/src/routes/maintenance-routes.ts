@@ -366,33 +366,35 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
   const customerOverride = recordValue(source.customerOverride)
   const vehicleOverride = recordValue(source.vehicleOverride)
   const labels = recordValue(source.labels)
+  const normalizedCustomerOverride = {
+    name: stringValue(customerOverride, 'name'),
+    kana: stringValue(customerOverride, 'kana'),
+    phone: stringValue(customerOverride, 'phone'),
+    postalCode: stringValue(customerOverride, 'postalCode'),
+    address: stringValue(customerOverride, 'address'),
+  }
+  const normalizedVehicleOverride = {
+    maker: stringValue(vehicleOverride, 'maker'),
+    name: stringValue(vehicleOverride, 'name'),
+    modelType: stringValue(vehicleOverride, 'modelType'),
+    plate: stringValue(vehicleOverride, 'plate'),
+    vin: stringValue(vehicleOverride, 'vin'),
+    year: stringValue(vehicleOverride, 'year'),
+    inspectionDate: stringValue(vehicleOverride, 'inspectionDate'),
+    mileage: stringValue(vehicleOverride, 'mileage'),
+    color: stringValue(vehicleOverride, 'color'),
+    displacement: stringValue(vehicleOverride, 'displacement'),
+    transmission: stringValue(vehicleOverride, 'transmission'),
+    inspectionRecordAvailable: typeof vehicleOverride.inspectionRecordAvailable === 'boolean' ? vehicleOverride.inspectionRecordAvailable : false,
+  }
   return {
     staffName: stringValue(source, 'staffName'),
     customerHonorific: stringValue(source, 'customerHonorific') || '様',
     customerBirthDate: stringValue(source, 'customerBirthDate'),
     customerEmployer: stringValue(source, 'customerEmployer'),
     customerContactPhone: stringValue(source, 'customerContactPhone'),
-    customerOverride: {
-      name: stringValue(customerOverride, 'name'),
-      kana: stringValue(customerOverride, 'kana'),
-      phone: stringValue(customerOverride, 'phone'),
-      postalCode: stringValue(customerOverride, 'postalCode'),
-      address: stringValue(customerOverride, 'address'),
-    },
-    vehicleOverride: {
-      maker: stringValue(vehicleOverride, 'maker'),
-      name: stringValue(vehicleOverride, 'name'),
-      modelType: stringValue(vehicleOverride, 'modelType'),
-      plate: stringValue(vehicleOverride, 'plate'),
-      vin: stringValue(vehicleOverride, 'vin'),
-      year: stringValue(vehicleOverride, 'year'),
-      inspectionDate: stringValue(vehicleOverride, 'inspectionDate'),
-      mileage: stringValue(vehicleOverride, 'mileage'),
-      color: stringValue(vehicleOverride, 'color'),
-      displacement: stringValue(vehicleOverride, 'displacement'),
-      transmission: stringValue(vehicleOverride, 'transmission'),
-      inspectionRecordAvailable: typeof vehicleOverride.inspectionRecordAvailable === 'boolean' ? vehicleOverride.inspectionRecordAvailable : false,
-    },
+    customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
+    vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
     labels: {
       documentTitle: '',
       amountTitle: 'お見積金額（税込）',
@@ -402,6 +404,10 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
       otherFee: stringValue(labels, 'otherFee') || 'その他',
     },
   }
+}
+
+function hasOverrideValue(value: Record<string, string | boolean>) {
+  return Object.values(value).some((field) => typeof field === 'string' ? field.length > 0 : field)
 }
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -415,8 +421,8 @@ type MaintenanceDetails = {
   customerBirthDate: string
   customerEmployer: string
   customerContactPhone: string
-  customerOverride: Record<string, string>
-  vehicleOverride: Record<string, string | boolean>
+  customerOverride: Record<string, string> | null
+  vehicleOverride: Record<string, string | boolean> | null
   labels: Record<string, string>
 }
 type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; details: MaintenanceDetails; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }
