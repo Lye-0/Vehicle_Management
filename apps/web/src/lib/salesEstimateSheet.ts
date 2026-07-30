@@ -312,17 +312,19 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
 }
 
 function shopBlock(settings: AppSettings) {
-  const companyLeft = 747
-  const logoMarkup = settings.shop.logoDataUrl
-    ? `<image href="${escapeAttribute(settings.shop.logoDataUrl)}" x="532" y="1337" width="154" height="91" preserveAspectRatio="xMidYMid meet"/>`
-    : ''
+  const shop = settings.shop
+  const hasLogo = Boolean(shop.logoDataUrl)
+  const companyLeft = hasLogo ? 780 : 733
+  const infoLeft = companyLeft + 20
+  const logoMarkup = hasLogo
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="544" y="1337" width="207" height="95" preserveAspectRatio="xMidYMid meet"/>`
+    : text(597, 1440, '▦', 'blue bold', 113)
   return `
-  <line x1="520" y1="1321" x2="1037" y2="1321" stroke="${BLUE}" stroke-width="1.5"/>
   ${logoMarkup}
-  ${text(companyLeft - 40, 1361, '▦', 'blue bold', 30)}
-  ${text(companyLeft, 1360, settings.shop.name || '店舗名未設定', 'blue heavy', 23)}
-  ${text(companyLeft, 1415, settings.shop.postalCode ? `〒${settings.shop.postalCode}　${settings.shop.address}` : settings.shop.address || '住所未登録', 'body')}
-  ${text(companyLeft, 1442, `${settings.shop.phone ? `TEL ${settings.shop.phone}` : 'TEL 未登録'}　${settings.shop.registrationNumber ? `FAX ${settings.shop.registrationNumber}` : ''}`, 'body')}`
+  ${text(companyLeft, 1357, shop.name || '店舗名未設定', 'blue heavy', 20)}
+  ${text(infoLeft, 1384, shop.postalCode ? `〒${shop.postalCode}` : '', '', 13)}
+  ${text(infoLeft, 1406, shop.address, '', 13)}
+  ${text(infoLeft, 1429, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 13)}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
