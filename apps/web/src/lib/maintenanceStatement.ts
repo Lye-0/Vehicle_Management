@@ -172,7 +172,7 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
   const fee = document.fees
   return `${roundedBox(16, 1144, 350, 75)}
   ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
-  ${headerText(74, 1170, '税抜金額')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金')}
+  ${headerText(74, 1170, '作業料金')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金＋税')}
   ${valueText(74, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(190, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(307, 1207, number(totals.workTotal), 'middle', 18, '800', '#073c87')}
   ${roundedBox(385, 1144, 435, 75)}
   ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
@@ -180,7 +180,7 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
   ${valueText(428, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 15)}${valueText(515, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 15)}${valueText(602, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 15)}${valueText(689, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
   ${roundedBox(844, 1144, 238, 75, '#fff7b0')}
   ${line(844, 1182, 1082, 1182)}
-  ${headerText(963, 1170, '作業料金＋諸費用計')}
+  ${headerText(963, 1170, '作業料金＋税＋諸費用計')}
   ${centerText(963, 1209, number(totals.total), 19, '800', '#073c87')}`
 }
 
