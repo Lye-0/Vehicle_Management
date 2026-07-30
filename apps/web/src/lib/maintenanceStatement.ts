@@ -197,7 +197,7 @@ function shopBox(settings: AppSettings) {
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
   const companyX = hasLogo ? 830 : 780
-  const infoX = companyX + 60
+  const infoX = companyX + 20
   const logoMarkup = hasLogo
     ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1265" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
     : valueText(575, 1358, '▦', 'start', 120, '700', '#073c87')
