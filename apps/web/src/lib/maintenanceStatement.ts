@@ -46,10 +46,6 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
       <stop offset="0" stop-color="#063378"/>
       <stop offset="1" stop-color="#0062bd"/>
     </linearGradient>
-    <linearGradient id="maintenance-yellow" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#fffbe0"/>
-      <stop offset="1" stop-color="#fff2a0"/>
-    </linearGradient>
     <style>
       text { font-family: "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif; fill: #111827; }
       .blue { fill: #073c87; }
@@ -135,7 +131,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(868, 1117, number(totals.technicalSubtotal), 'middle', 14)}
 
   ${summaryBoxes(document, totals, labels.otherFee)}
-  ${bankBox(settings, labels.bankTitle)}
+  ${bankBox(settings)}
   ${shopBox(settings)}
   </svg>`
 }
@@ -163,7 +159,7 @@ function workRow(item: StatementRow, index: number, y: number) {
   ${valueText(514, baseline, item.unit, 'middle', 13)}
   ${valueText(654, baseline, item.unitPrice ? number(item.unitPrice) : '', 'end', 13)}
   ${valueText(770, baseline, item.partAmount ? number(item.partAmount) : '', 'end', 13)}
-  ${valueText(936, baseline, item.technicalFee ? number(item.technicalFee) : '', 'end', 13, item.technicalFee < 0 ? '700' : '400', item.technicalFee < 0 ? '#d82323' : '#111827')}
+  ${valueText(936, baseline, item.technicalFee ? number(item.technicalFee) : '', 'end', 13, '400', '#111827')}
   ${valueText(966, baseline, item.summary, 'start', 12)}`
 }
 
@@ -177,16 +173,16 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
   ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
   ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
   ${valueText(428, 1207, number(fee.自賠責), 'middle', 15)}${valueText(515, 1207, number(fee.重量税), 'middle', 15)}${valueText(602, 1207, number(fee.印紙代), 'middle', 15)}${valueText(689, 1207, number(fee.リサイクル料金), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
-  ${roundedBox(844, 1144, 238, 75, 'url(#maintenance-yellow)')}
+  ${roundedBox(844, 1144, 238, 75, '#fff7b0')}
   ${line(844, 1182, 1082, 1182)}
   ${headerText(963, 1170, '作業料金＋諸費用計')}
   ${centerText(963, 1209, number(totals.total), 19, '800', '#073c87')}`
 }
 
-function bankBox(settings: AppSettings, title: string) {
+function bankBox(settings: AppSettings) {
   return `${roundedBox(16, 1233, 510, 151)}
   ${rect(16, 1233, 510, 42, 'url(#maintenance-blue)')}
-  ${centerText(271, 1262, title, 20, '700', '#fff')}
+  ${centerText(271, 1262, 'お振込先', 20, '700', '#fff')}
   ${valueText(54, 1341, `${settings.shop.bankName}　${settings.shop.bankAccount}`, 'start', 17)}`
 }
 

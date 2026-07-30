@@ -767,36 +767,26 @@
 .maintenance-preview-content { padding: 24px; background: #e9eef5; }
 .maintenance-statement-frame { width: 100%; max-width: 1122px; margin: 0 auto; background: #fff; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.16); }
 .maintenance-preview-shell { display: grid; gap: 14px; }
-.maintenance-preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid #c8d5e6; border-radius: 9px; background: #fff; }
-.maintenance-preview-toolbar > div:first-child { display: grid; gap: 4px; min-width: 0; }
-.maintenance-preview-toolbar strong { color: var(--text); font-size: 13px; }
-.maintenance-preview-toolbar span { color: var(--text-muted); font-size: 10px; }
-.maintenance-preview-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.maintenance-preview-actions label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 700; }
-.maintenance-preview-actions input { width: 92px; height: 32px; padding: 0 8px; color: var(--text); border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 12px; text-align: right; }
 .maintenance-statement { position: relative; width: 100%; aspect-ratio: 1122 / 1407; }
 .maintenance-statement > div:first-child { position: absolute; inset: 0; z-index: 1; }
 .maintenance-statement svg { display: block; width: 100%; height: auto; }
 .maintenance-statement-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: transparent; caret-color: transparent; border: 1px solid transparent; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
-.maintenance-statement-control:hover { color: #101820; caret-color: auto; border-color: #86a5d0; background: rgba(248, 251, 255, 0.88); }
-.maintenance-statement-control:focus { z-index: 25; color: #101820; caret-color: auto; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
+.maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: #101820; caret-color: auto; border: 1px solid transparent; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
+.maintenance-statement-control:hover { border-color: #86a5d0; background: #f8fbff; }
+.maintenance-statement-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
 .maintenance-statement-control.is-centered { text-align: center; }
 .maintenance-statement-control.is-number { padding-right: 14px; text-align: right; font-variant-numeric: tabular-nums; }
 .maintenance-statement-control.is-number.is-centered { padding: 0 5px; text-align: center; }
 .maintenance-statement-control.is-item-text { padding-left: 14px; }
-.maintenance-statement-control.is-blue { color: transparent; font-weight: 700; text-align: center; }
-.maintenance-statement-control.is-blue:hover { color: #fff; background: rgba(3, 55, 125, 0.88); }
-.maintenance-statement-control.is-blue:focus { color: #fff; background: #06377d; }
 .maintenance-statement-control.is-title { font-size: clamp(14px, 2vw, 25px); }
 .maintenance-statement-control.is-large { font-size: clamp(12px, 1.8vw, 22px); }
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
-.maintenance-statement-combobox > input { width: 100%; height: 100%; box-sizing: border-box; padding: 0 21px 0 14px; overflow: hidden; color: transparent; caret-color: transparent; border: 1px solid transparent; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); }
-.maintenance-statement-combobox:hover > input { color: #101820; border-color: #86a5d0; background: rgba(248, 251, 255, 0.88); }
-.maintenance-statement-combobox > input:focus { position: relative; z-index: 1; color: #101820; caret-color: auto; border-color: #2563eb; background: #fff; outline: 1px solid #2563eb; }
+.maintenance-statement-combobox > input { width: 100%; height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 0 22px 0 11px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1; }
+.maintenance-statement-combobox:hover > input { background: #f8fbff; }
+.maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: #fff; box-shadow: inset 0 0 0 2px #2563eb; }
 .maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: rgba(234, 243, 255, 0.72); opacity: 0.55; cursor: pointer; }
 .maintenance-statement-combobox:hover > button, .maintenance-statement-combobox:focus-within > button { border-left-color: #86a5d0; opacity: 1; }
 .maintenance-statement-candidates { position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; display: grid; width: max(190px, 100%); max-height: 190px; overflow: auto; padding: 4px; border: 1px solid #86a5d0; border-radius: 5px; background: #fff; box-shadow: 0 8px 18px rgba(22, 44, 76, 0.2); }
@@ -806,6 +796,9 @@
 .maintenance-statement-candidates span { padding: 7px 8px; color: var(--text-muted); font-size: 10px; }
 .maintenance-statement-remove { position: absolute; display: grid; place-items: center; padding: 0; color: #073c87; border: 1px solid #86a5d0; border-radius: 4px; background: rgba(255, 255, 255, 0.92); opacity: 0.35; pointer-events: auto; cursor: pointer; }
 .maintenance-statement-remove:hover, .maintenance-statement-remove:focus { z-index: 30; opacity: 1; color: var(--danger); border-color: var(--danger); }
+.maintenance-statement-add { position: absolute; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 7px; color: #073c87; border: 1px solid #fff; border-radius: 4px; background: #fff; font-size: clamp(6px, 1.05vw, 12px); font-weight: 800; white-space: nowrap; pointer-events: auto; cursor: pointer; }
+.maintenance-statement-add:hover { color: #06377d; background: #eaf3ff; }
+.maintenance-statement-add:disabled { opacity: 0.45; cursor: not-allowed; }
 .maintenance-parameter-panel { margin-bottom: 22px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .maintenance-parameter-panel h4 { margin: 20px 0 10px; color: var(--text-secondary); font-size: 12px; }
 .maintenance-checkbox-field input { width: 18px; height: 18px; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { ChevronDown, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import type {
   MaintenanceDocument,
   MaintenanceDocumentDetails,
@@ -19,9 +19,10 @@ type Props = {
   onUpdateItem: (itemId: string, field: MaintenanceStatementItemField, value: string) => void
   onRemoveItem: (itemId: string) => void
   onUpdateFee: (key: keyof MandatoryFees, value: string) => void
+  onAddItem: () => void
 }
 
-export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee }: Props) {
+export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
   const details = document.details
   const customer = details.customerOverride ?? document.customerDetails
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
@@ -38,12 +39,8 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     updateDetails({ vehicleOverride: { ...vehicle, [field]: value } })
   }
 
-  function updateLabel(field: keyof MaintenanceDocumentDetails['labels'], value: string) {
-    updateDetails({ labels: { ...details.labels, [field]: value } })
-  }
-
   return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
-    <StatementTextControl className="is-blue is-section-label" ariaLabel="振込先タイトル" value={details.labels.bankTitle} x={105} y={1238} width={330} height={32} onChange={(value) => updateLabel('bankTitle', value)} />
+    <button className="maintenance-statement-add" type="button" aria-label="作業内容・部品明細を追加" style={controlStyle(942, 516, 132, 28)} disabled={document.items.length >= 18} onClick={onAddItem}><Plus size={12} aria-hidden="true" />明細を追加</button>
 
     <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
     <StatementTextControl ariaLabel="担当" value={details.staffName} x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
@@ -162,7 +159,14 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
     setFocused(false)
   }
 
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={draft} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value)} onBlur={finish} />
+  const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+}
+
+const statementNumberFormatter = new Intl.NumberFormat('ja-JP')
+
+function formatStatementNumber(value: number) {
+  return statementNumberFormatter.format(value)
 }
 
 function controlStyle(x: number, y: number, width: number, height: number): CSSProperties {

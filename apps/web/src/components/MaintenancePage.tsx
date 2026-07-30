@@ -97,7 +97,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   }
 
   function addItem() {
-    if (!selectedDocument) return
+    if (!selectedDocument || selectedDocument.items.length >= 18) return
     const newItem: MaintenanceLineItem = { id: `maintenance-item-${Date.now()}`, kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }
     setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
     setSavedDocumentId('')
@@ -112,12 +112,6 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   function updateFee(key: keyof MandatoryFees, value: string) {
     if (!selectedDocument) return
     setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, fees: { ...document.fees, [key]: Number(value) || 0 } }))
-    setSavedDocumentId('')
-  }
-
-  function updateAdjustment(value: string) {
-    if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, adjustment: Number(value) || 0 } : document))
     setSavedDocumentId('')
   }
 
@@ -204,7 +198,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><div className="maintenance-filter-tabs" aria-label="入庫区分"><button className={categoryFilter === 'すべて' ? 'is-active' : ''} type="button" onClick={() => setCategoryFilter('すべて')}>すべて</button>{(['車検', '法定点検', '一般整備'] as IntakeCategory[]).map((category) => <button className={categoryFilter === category ? 'is-active' : ''} key={category} type="button" onClick={() => setCategoryFilter(category)}>{category}</button>)}</div><span className="maintenance-result-summary"><strong>{filteredDocuments.length}件</strong><span>整備書類</span></span></div>
-    <div className="maintenance-workspace"><MaintenanceDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} onUpdateAdjustment={updateAdjustment} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入庫区分を変更してください。'}</span></div>}</div>
+    <div className="maintenance-workspace"><MaintenanceDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入庫区分を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
   </>
 }
@@ -215,7 +209,7 @@ function MaintenanceDocumentList({ documents, selectedDocumentId, onSelect }: { 
 
 type MaintenanceHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note'
 
-function MaintenanceDocumentDetail({ document, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee, onUpdateAdjustment }: MaintenanceDocumentDetailProps) {
+function MaintenanceDocumentDetail({ document, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
   return <section className="panel maintenance-detail-panel">
     <div className="maintenance-detail-header">
       <div className="maintenance-detail-title"><div><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><h2>{document.number}</h2><small>{document.type} ・ 発行元 {settings.shop.name}</small></div><MaintenanceStatusTag status={document.status} /></div>
@@ -224,7 +218,7 @@ function MaintenanceDocumentDetail({ document, customers, settings, itemPresets,
     <div className="maintenance-document-tabs" role="tablist" aria-label="整備書類の表示"><button id="maintenance-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="maintenance-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="maintenance-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="maintenance-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>
     {view === 'edit'
       ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} customers={customers} onUpdateHeader={onUpdateHeader} /></div>
-      : <div id="maintenance-document-preview-panel" className="maintenance-detail-content maintenance-preview-content" role="tabpanel" aria-labelledby="maintenance-document-preview-tab"><MaintenancePreview document={document} settings={settings} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} onUpdateAdjustment={onUpdateAdjustment} /></div>}
+      : <div id="maintenance-document-preview-panel" className="maintenance-detail-content maintenance-preview-content" role="tabpanel" aria-labelledby="maintenance-document-preview-tab"><MaintenancePreview document={document} settings={settings} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div>}
   </section>
 }
 
@@ -248,7 +242,6 @@ type MaintenanceDocumentDetailProps = {
   onAddItem: () => void
   onRemoveItem: (itemId: string) => void
   onUpdateFee: (key: keyof MandatoryFees, value: string) => void
-  onUpdateAdjustment: (value: string) => void
 }
 
 function MaintenanceDocumentEditor({ document, customers, onUpdateHeader }: { document: MaintenanceDocument; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void }) {
@@ -259,11 +252,10 @@ function MaintenanceDocumentEditor({ document, customers, onUpdateHeader }: { do
   </>
 }
 
-function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem, onUpdateAdjustment }: { document: MaintenanceDocument; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: keyof MandatoryFees, value: string) => void; onAddItem: () => void; onUpdateAdjustment: (value: string) => void }) {
+function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: { document: MaintenanceDocument; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: keyof MandatoryFees, value: string) => void; onAddItem: () => void }) {
   const svg = useMemo(() => buildMaintenanceStatementSvg(document, settings), [document, settings])
   return <div className="maintenance-preview-shell">
-    <div className="maintenance-preview-toolbar"><div><strong>整備帳票プレビュー</strong><span>入力タブの基本情報を反映し、細かな項目はこの画面から選択・手入力できます。</span></div><div className="maintenance-preview-actions"><label>調整額<input aria-label="調整額" type="number" value={document.adjustment} onChange={(event) => onUpdateAdjustment(event.target.value)} /></label><button className="button button-secondary" type="button" disabled={document.items.length >= 18} onClick={onAddItem}>明細を追加</button></div></div>
-    <div className="maintenance-statement-frame"><div className="maintenance-statement"><div dangerouslySetInnerHTML={{ __html: svg }} /><MaintenanceStatementEditor document={document} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} /></div></div>
+    <div className="maintenance-statement-frame"><div className="maintenance-statement"><div dangerouslySetInnerHTML={{ __html: svg }} /><MaintenanceStatementEditor document={document} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div></div>
   </div>
 }
 
