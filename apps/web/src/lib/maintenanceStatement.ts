@@ -196,17 +196,17 @@ function bankBox(settings: AppSettings, details: MaintenanceDocument['details'],
 function shopBox(settings: AppSettings) {
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyX = hasLogo ? 770 : 665
-  const infoX = companyX + 6
+  const companyX = hasLogo ? 830 : 780
+  const infoX = companyX + 60
   const logoMarkup = hasLogo
-    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1244" width="170" height="85" preserveAspectRatio="xMidYMid meet"/>`
-    : valueText(590, 1310, '▦', 'start', 56, '700', '#073c87')
+    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1245" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
+    : valueText(575, 1338, '▦', 'start', 120, '700', '#073c87')
   return `${logoMarkup}
-  ${valueText(companyX, 1261, shop.name, 'start', 20, '700', '#073c87')}
-  ${valueText(infoX, 1280, shop.registrationNumber, 'start', 12)}
-  ${valueText(infoX, 1303, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
-  ${valueText(infoX, 1325, shop.address, 'start', 13)}
-  ${valueText(infoX, 1347, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
+  ${valueText(companyX, 1260, shop.name, 'start', 20, '700', '#073c87')}
+  ${valueText(infoX, 1279, shop.registrationNumber, 'start', 12)}
+  ${valueText(infoX, 1300, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
+  ${valueText(infoX, 1321, shop.address, 'start', 13)}
+  ${valueText(infoX, 1342, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
 }
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
