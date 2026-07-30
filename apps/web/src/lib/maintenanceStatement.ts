@@ -23,7 +23,7 @@ export function calculateMaintenanceStatementTotals(
   rounding: AppSettings['tax']['rounding'],
 ): MaintenanceStatementTotals {
   const partsSubtotal = document.items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice), 0)
-  const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0) + document.adjustment
+  const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0)
   const taxableSubtotal = Math.max(0, partsSubtotal + technicalSubtotal)
   const taxValue = taxableSubtotal * document.taxRate
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
@@ -129,8 +129,9 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${workGridLines(rowTop, rowHeight)}
   ${headerText(45, 575, 'No.')}${headerText(233, 575, '作業内容／部品名等')}${headerText(432, 575, '数量')}${headerText(514, 575, '単位')}${headerText(612, 575, '部品単価')}${headerText(727, 575, '部品金額')}${headerText(868, 575, '技術料／他')}${headerText(1017, 575, '摘要')}
   ${rows.map((item, index) => workRow(item, index, rowTop + rowHeight * index, hideEditableValues)).join('')}
+  ${rect(557, 1092, 111, 36, '#dcecff')}
   ${line(16, 1091, 1083, 1091)}
-  ${rect(556, 1091, 113, 38, '#f4f8fd')}
+  ${line(556, 1091, 556, 1129)}${line(669, 1091, 669, 1129)}${line(785, 1091, 785, 1129)}${line(951, 1091, 951, 1129)}
   ${headerText(612, 1117, '小計金額')}
   ${valueText(727, 1117, number(totals.partsSubtotal), 'middle', 14, '700')}
   ${valueText(868, 1117, number(totals.technicalSubtotal), 'middle', 14)}
@@ -151,7 +152,8 @@ function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>
 }
 
 function workGridLines(rowTop: number, rowHeight: number) {
-  const vertical = [16, 74, 392, 472, 556, 669, 785, 951, 1083].map((x) => line(x, 551, x, 1129)).join('')
+  const tableBottom = rowTop + rowHeight * 18
+  const vertical = [16, 74, 392, 472, 556, 669, 785, 951, 1083].map((x) => line(x, 551, x, tableBottom)).join('')
   const horizontal = Array.from({ length: 19 }, (_, index) => line(16, rowTop + rowHeight * index, 1083, rowTop + rowHeight * index)).join('')
   return vertical + horizontal
 }
