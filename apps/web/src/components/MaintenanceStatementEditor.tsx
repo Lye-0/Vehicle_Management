@@ -1,0 +1,182 @@
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { ChevronDown, Plus, Trash2 } from 'lucide-react'
+import type {
+  MaintenanceDocument,
+  MaintenanceDocumentDetails,
+  MaintenanceLineItem,
+  MandatoryFees,
+} from '../lib/maintenanceApi'
+import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/maintenanceStatement'
+
+export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
+export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note'
+
+type Props = {
+  document: MaintenanceDocument
+  itemPresets: string[]
+  bankName: string
+  bankAccount: string
+  onUpdateHeader: (field: MaintenanceStatementHeaderField, value: string) => void
+  onUpdateDetails: (details: MaintenanceDocumentDetails) => void
+  onUpdateItem: (itemId: string, field: MaintenanceStatementItemField, value: string) => void
+  onRemoveItem: (itemId: string) => void
+  onUpdateFee: (key: keyof MandatoryFees, value: string) => void
+  onAddItem: () => void
+}
+
+export function MaintenanceStatementEditor({ document, itemPresets, bankName, bankAccount, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
+  const details = document.details
+  const customer = details.customerOverride ?? document.customerDetails
+  const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
+
+  function updateDetails(patch: Partial<MaintenanceDocumentDetails>) {
+    onUpdateDetails({ ...details, ...patch })
+  }
+
+  function updateCustomer(field: keyof NonNullable<MaintenanceDocumentDetails['customerOverride']>, value: string) {
+    updateDetails({ customerOverride: { ...customer, [field]: value } })
+  }
+
+  function updateVehicle(field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>, value: string | boolean) {
+    updateDetails({ vehicleOverride: { ...vehicle, [field]: value } })
+  }
+
+  return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
+    <button className="maintenance-statement-add" type="button" aria-label="作業内容・部品明細を追加" style={controlStyle(942, 516, 132, 28)} disabled={document.items.length >= 18} onClick={onAddItem}><Plus size={12} aria-hidden="true" />明細を追加</button>
+
+    <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
+    <StatementTextControl ariaLabel="担当" value={details.staffName} x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
+    <StatementTextControl ariaLabel="請求番号" value={document.number} x={847} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('number', value)} />
+
+    <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
+    <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
+    <StatementTextControl ariaLabel="顧客敬称" value={details.customerHonorific} x={462} y={112} width={54} height={38} centered className="is-large" onChange={(value) => updateDetails({ customerHonorific: value })} />
+    <StatementTextControl ariaLabel="郵便番号" value={customer.postalCode} x={140} y={181} width={200} height={28} onChange={(value) => updateCustomer('postalCode', value)} />
+    <StatementTextControl ariaLabel="顧客住所" value={customer.address} x={140} y={211} width={370} height={41} onChange={(value) => updateCustomer('address', value)} />
+    <StatementTextControl ariaLabel="生年月日" value={details.customerBirthDate} x={665} y={101} width={135} height={30} onChange={(value) => updateDetails({ customerBirthDate: value })} />
+    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={665} y={143} width={135} height={30} onChange={(value) => updateCustomer('phone', value)} />
+    <StatementTextControl ariaLabel="勤務先等" value={details.customerEmployer} x={665} y={185} width={135} height={30} onChange={(value) => updateDetails({ customerEmployer: value })} />
+    <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={665} y={227} width={135} height={30} onChange={(value) => updateDetails({ customerContactPhone: value })} />
+
+    <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
+    <StatementTextControl ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
+    <StatementTextControl ariaLabel="出庫予定日" value={document.plannedReleaseDate || document.completionDate} x={999} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('plannedReleaseDate', value)} />
+
+    {document.items.slice(0, 18).map((item, index) => <LineEditor key={item.id} item={item} index={index} itemPresets={itemPresets} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />)}
+
+    <StatementNumberControl ariaLabel="自賠責" value={document.fees.自賠責} x={385} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('自賠責', String(value))} />
+    <StatementNumberControl ariaLabel="重量税" value={document.fees.重量税} x={472} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
+    <StatementNumberControl ariaLabel="印紙代" value={document.fees.印紙代} x={559} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
+    <StatementNumberControl ariaLabel="その他費用" value={document.fees.リサイクル料金} x={646} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
+
+    <StatementTextControl ariaLabel="振込先銀行名" value={bankName} x={50} y={1284} width={260} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankName: value })} />
+    <StatementTextControl ariaLabel="振込先口座番号" value={bankAccount} x={310} y={1284} width={205} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankAccount: value })} />
+  </div>
+}
+
+function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<MaintenanceDocumentDetails['vehicleOverride']>; onUpdate: (field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>, value: string | boolean) => void }) {
+  const fields: Array<{ field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>; x: number; y: number; width: number; height: number; centered?: boolean }> = [
+    { field: 'maker', x: 16, y: 367, width: 99, height: 38, centered: true },
+    { field: 'name', x: 115, y: 367, width: 236, height: 38, centered: true },
+    { field: 'year', x: 351, y: 367, width: 104, height: 38, centered: true },
+    { field: 'displacement', x: 455, y: 367, width: 113, height: 38, centered: true },
+    { field: 'transmission', x: 568, y: 367, width: 115, height: 38, centered: true },
+    { field: 'color', x: 683, y: 367, width: 127, height: 38, centered: true },
+    { field: 'modelType', x: 16, y: 447, width: 124, height: 47, centered: true },
+    { field: 'vin', x: 140, y: 447, width: 210, height: 47, centered: true },
+    { field: 'plate', x: 350, y: 447, width: 180, height: 47, centered: true },
+    { field: 'mileage', x: 530, y: 447, width: 140, height: 47, centered: true },
+    { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
+  ]
+  return <>
+    {fields.map(({ field, ...position }) => <StatementTextControl key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+  </>
+}
+
+function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { item: MaintenanceLineItem; index: number; itemPresets: string[]; onUpdateItem: Props['onUpdateItem']; onRemoveItem: Props['onRemoveItem'] }) {
+  const y = 587 + index * 28
+  return <>
+    <StatementNameCombobox value={item.description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
+    <StatementNumberControl ariaLabel={`明細${index + 1}の数量`} value={item.quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
+    <StatementTextControl ariaLabel={`明細${index + 1}の単位`} value={item.unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
+    <StatementNumberControl ariaLabel={`明細${index + 1}の部品単価`} value={item.unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
+    <StatementNumberControl ariaLabel={`明細${index + 1}の技術料`} value={item.technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
+    <StatementTextControl className="is-item-text" ariaLabel={`明細${index + 1}の摘要`} value={item.summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
+    <button className="maintenance-statement-remove" type="button" aria-label={`明細${index + 1}を削除`} style={controlStyle(1085, y + 3, 31, 22)} onClick={() => onRemoveItem(item.id)}><Trash2 size={13} /></button>
+  </>
+}
+
+function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, height, onCommit }: { value: string; candidates: string[]; ariaLabel: string; x: number; y: number; width: number; height: number; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)))
+
+  useEffect(() => setDraft(value), [value])
+  useEffect(() => {
+    if (!open) return
+    function close(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [open])
+
+  function commit(nextValue = draft) {
+    setDraft(nextValue)
+    setOpen(false)
+    if (nextValue !== value) onCommit(nextValue)
+  }
+
+  return <div ref={rootRef} className="maintenance-statement-combobox" style={controlStyle(x, y, width, height)}>
+    <input aria-label={ariaLabel} value={draft} onChange={(event) => setDraft(event.target.value)} onFocus={() => setOpen(false)} onBlur={() => { if (draft !== value) onCommit(draft) }} />
+    <button type="button" aria-label={`${ariaLabel}の候補を表示`} aria-expanded={open} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((current) => !current)}><ChevronDown size={12} /></button>
+    {open && <div className={`maintenance-statement-candidates${y > 900 ? ' is-up' : ''}`} role="listbox">
+      {uniqueCandidates.map((candidate) => <button key={candidate} type="button" role="option" aria-selected={candidate === draft} onMouseDown={(event) => event.preventDefault()} onClick={() => commit(candidate)}>{candidate}</button>)}
+      {!uniqueCandidates.length && <span>候補なし</span>}
+    </div>}
+  </div>
+}
+
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '' }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string }) {
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={value} style={controlStyle(x, y, width, height)} onChange={(event) => onChange(event.target.value)} />
+}
+
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean }) {
+  const [draft, setDraft] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(String(value)) }, [focused, value])
+
+  function update(nextValue: string) {
+    const pattern = decimal ? /^-?\d*(?:\.\d*)?$/ : /^-?\d*$/
+    if (pattern.test(nextValue)) {
+      setDraft(nextValue)
+      if (nextValue !== '' && nextValue !== '-') onCommit(Number(nextValue))
+    }
+  }
+
+  function finish() {
+    if (draft === '' || draft === '-') {
+      setDraft('0')
+      onCommit(0)
+    }
+    setFocused(false)
+  }
+
+  const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+}
+
+const statementNumberFormatter = new Intl.NumberFormat('ja-JP')
+
+function formatStatementNumber(value: number) {
+  return statementNumberFormatter.format(value)
+}
+
+function controlStyle(x: number, y: number, width: number, height: number): CSSProperties {
+  return { left: `${x / maintenanceStatementWidth * 100}%`, top: `${y / maintenanceStatementHeight * 100}%`, width: `${width / maintenanceStatementWidth * 100}%`, height: `${height / maintenanceStatementHeight * 100}%` }
+}
+
+const emptyVehicle: NonNullable<MaintenanceDocumentDetails['vehicleOverride']> = {
+  maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false,
+}

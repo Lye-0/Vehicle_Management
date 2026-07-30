@@ -20,6 +20,7 @@ const defaultSettings: AppSettings = {
     postalCode: '',
     address: '',
     phone: '',
+    fax: '',
     representative: '',
     registrationNumber: '',
     bankName: '',
@@ -129,6 +130,7 @@ function normalizeSettings(value: Record<string, unknown>): AppSettings {
       postalCode: textValue(shop?.postalCode, defaultSettings.shop.postalCode),
       address: textValue(shop?.address, defaultSettings.shop.address),
       phone: textValue(shop?.phone, defaultSettings.shop.phone),
+      fax: textValue(shop?.fax, defaultSettings.shop.fax),
       representative: textValue(shop?.representative, defaultSettings.shop.representative),
       registrationNumber: textValue(shop?.registrationNumber, defaultSettings.shop.registrationNumber),
       bankName: textValue(shop?.bankName, defaultSettings.shop.bankName),
@@ -219,6 +221,7 @@ type AppSettings = {
     postalCode: string
     address: string
     phone: string
+    fax: string
     representative: string
     registrationNumber: string
     bankName: string

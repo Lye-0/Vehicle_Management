@@ -55,7 +55,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   const id = crypto.randomUUID()
   const number = await nextDocumentNumber(env.DB, organizationId, 'M')
   await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId)
-  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
+  const totals = calculateMaintenanceTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
 
   await database.insert(maintenanceDocuments).values({
     id,
@@ -76,6 +76,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
   }).run()
   await insertMaintenanceItems(database, id, input.items, input.fees, input.adjustment, organizationId)
 
@@ -93,7 +94,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     type: body.type ?? current.type,
     status: body.status ?? current.status,
     category: body.category ?? current.category,
-    number: current.number,
+    number: body.number === undefined ? current.number : body.number,
     customerId: body.customerId ?? current.customerId,
     vehicleId: body.vehicleId ?? current.vehicleId,
     intakeDate: body.intakeDate === undefined ? current.intakeDate : body.intakeDate,
@@ -103,14 +104,17 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
     taxRate: body.taxRate ?? current.taxRate,
     note: body.note === undefined ? current.note : body.note,
+    details: body.details === undefined ? parseDetailsJson(current.detailsJson) : body.details,
     items: body.items === undefined ? currentItems.filter((item) => item.itemType === '作業' || item.itemType === '部品').map(toInputItem) : body.items,
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
-  const totals = calculateTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
+  const totals = calculateMaintenanceTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
+  const number = input.number || current.number
+  await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId, documentId)
 
   await database.update(maintenanceDocuments).set({
-    number: current.number,
+    number,
     type: input.type,
     category: input.category,
     status: input.status,
@@ -126,6 +130,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     tax: totals.tax,
     total: totals.total,
     note: input.note,
+    detailsJson: JSON.stringify(input.details),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
   await database.delete(maintenanceItems).where(and(eq(maintenanceItems.documentId, documentId), eq(maintenanceItems.organizationId, organizationId))).run()
@@ -164,9 +169,9 @@ async function loadMaintenanceItems(database: ReturnType<typeof createDatabase>,
 
 async function insertMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, organizationId: string) {
   const rows = [
-    ...items.map((item) => ({ itemType: item.kind, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount })),
-    ...feeNames.map((name) => ({ itemType: '法定費用', description: name, quantity: 1, unit: '式', unitPrice: fees[name], amount: fees[name] })),
-    ...(adjustment === 0 ? [] : [{ itemType: '調整', description: '調整額', quantity: 1, unit: '式', unitPrice: adjustment, amount: adjustment }]),
+    ...items.map((item) => ({ itemType: item.kind, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary, amount: item.amount })),
+    ...feeNames.map((name) => ({ itemType: '法定費用', description: name, quantity: 1, unit: '式', unitPrice: fees[name], technicalFee: 0, summary: '', amount: fees[name] })),
+    ...(adjustment === 0 ? [] : [{ itemType: '調整', description: '調整額', quantity: 1, unit: '式', unitPrice: adjustment, technicalFee: 0, summary: '', amount: adjustment }]),
   ]
   if (!rows.length) return
   await database.insert(maintenanceItems).values(rows.map((item, index) => ({ id: crypto.randomUUID(), organizationId, documentId, ...item, sortOrder: index }))).run()
@@ -211,6 +216,7 @@ async function parseMaintenanceInputAsync(body: Record<string, unknown>, databas
     taxRate,
     rounding,
     note: nullableString(body, 'note'),
+    details: parseMaintenanceDetails(body.details),
     items,
     fees,
     adjustment,
@@ -230,10 +236,31 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     customerId: document.customerId,
     customerName: customer?.name ?? '',
     phone: customer?.phone ?? '',
+    customerDetails: {
+      name: customer?.name ?? '',
+      kana: customer?.nameKana ?? '',
+      phone: customer?.phone ?? '',
+      postalCode: customer?.postalCode ?? '',
+      address: customer?.address ?? '',
+    },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
     plate: vehicle?.registrationNumber ?? '',
     mileage: vehicle?.mileage === null || vehicle?.mileage === undefined ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+    vehicleDetails: {
+      maker: vehicle?.maker ?? '',
+      name: vehicle?.name ?? '',
+      modelType: vehicle?.model ?? '',
+      plate: vehicle?.registrationNumber ?? '',
+      vin: vehicle?.chassisNumber ?? '',
+      year: vehicle?.modelYear === null || vehicle?.modelYear === undefined ? '' : String(vehicle.modelYear),
+      inspectionDate: vehicle?.inspectionDate ?? '',
+      mileage: vehicle?.mileage === null || vehicle?.mileage === undefined ? '' : `${vehicle.mileage.toLocaleString('ja-JP')}km`,
+      color: vehicle?.bodyColor ?? '',
+      displacement: vehicle?.displacement === null || vehicle?.displacement === undefined ? '' : String(vehicle.displacement),
+      transmission: vehicle?.transmission ?? '',
+      inspectionRecordAvailable: vehicle?.inspectionRecordAvailable ?? false,
+    },
     intakeDate: document.intakeDate,
     plannedReleaseDate: document.plannedReleaseDate ?? document.completionDate,
     completionDate: document.completionDate,
@@ -246,12 +273,13 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     fees,
     adjustment,
     note: document.note ?? '',
+    details: parseMaintenanceDetails(parseDetailsJson(document.detailsJson)),
     archivedAt: document.archivedAt,
-    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice })),
+    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary })),
   }
 }
 
-function calculateTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {
+export function calculateMaintenanceTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
   const taxableAmount = Math.max(0, subtotal + adjustment)
   const taxValue = taxableAmount * taxRate / 100
@@ -283,7 +311,8 @@ function parseItems(value: unknown): MaintenanceItemInput[] {
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
-    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit: stringValue(item, 'unit') || '式', unitPrice, amount: Math.round(quantity * unitPrice) }
+    const technicalFee = integerNumber(item.technicalFee, 0)
+    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit: stringValue(item, 'unit') || '式', unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
   })
 }
 
@@ -303,7 +332,7 @@ function extractAdjustment(rows: Array<{ itemType: string; amount: number }>) {
 }
 
 function toInputItem(item: typeof maintenanceItems.$inferSelect): Record<string, unknown> {
-  return { kind: item.itemType, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice }
+  return { kind: item.itemType, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary }
 }
 
 function groupBy<T>(items: T[], getKey: (item: T) => string) {
@@ -322,5 +351,82 @@ function integerNumber(value: unknown, fallback: number) { const number = typeof
 function nonNegativeInteger(value: unknown, fallback: number) { return Math.max(0, integerNumber(value, fallback)) }
 function today() { return new Date().toISOString().slice(0, 10) }
 
-type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; amount: number }
-type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }
+function parseDetailsJson(value: string | null) {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
+  const source = recordValue(value)
+  const customerOverride = recordValue(source.customerOverride)
+  const vehicleOverride = recordValue(source.vehicleOverride)
+  const labels = recordValue(source.labels)
+  const normalizedCustomerOverride = {
+    name: stringValue(customerOverride, 'name'),
+    kana: stringValue(customerOverride, 'kana'),
+    phone: stringValue(customerOverride, 'phone'),
+    postalCode: stringValue(customerOverride, 'postalCode'),
+    address: stringValue(customerOverride, 'address'),
+  }
+  const normalizedVehicleOverride = {
+    maker: stringValue(vehicleOverride, 'maker'),
+    name: stringValue(vehicleOverride, 'name'),
+    modelType: stringValue(vehicleOverride, 'modelType'),
+    plate: stringValue(vehicleOverride, 'plate'),
+    vin: stringValue(vehicleOverride, 'vin'),
+    year: stringValue(vehicleOverride, 'year'),
+    inspectionDate: stringValue(vehicleOverride, 'inspectionDate'),
+    mileage: stringValue(vehicleOverride, 'mileage'),
+    color: stringValue(vehicleOverride, 'color'),
+    displacement: stringValue(vehicleOverride, 'displacement'),
+    transmission: stringValue(vehicleOverride, 'transmission'),
+    inspectionRecordAvailable: typeof vehicleOverride.inspectionRecordAvailable === 'boolean' ? vehicleOverride.inspectionRecordAvailable : false,
+  }
+  return {
+    staffName: stringValue(source, 'staffName'),
+    customerHonorific: stringValue(source, 'customerHonorific') || '様',
+    customerBirthDate: stringValue(source, 'customerBirthDate'),
+    customerEmployer: stringValue(source, 'customerEmployer'),
+    customerContactPhone: stringValue(source, 'customerContactPhone'),
+    bankName: stringValue(source, 'bankName'),
+    bankAccount: stringValue(source, 'bankAccount'),
+    customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
+    vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
+    labels: {
+      documentTitle: '',
+      amountTitle: 'お見積金額（税込）',
+      vehicleSectionTitle: stringValue(labels, 'vehicleSectionTitle') || '車両情報',
+      workSectionTitle: '作業内容／部品名等',
+      bankTitle: stringValue(labels, 'bankTitle') || 'お振込先',
+      otherFee: stringValue(labels, 'otherFee') || 'その他',
+    },
+  }
+}
+
+function hasOverrideValue(value: Record<string, string | boolean>) {
+  return Object.values(value).some((field) => typeof field === 'string' ? field.length > 0 : field)
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; amount: number }
+type MaintenanceDetails = {
+  staffName: string
+  customerHonorific: string
+  customerBirthDate: string
+  customerEmployer: string
+  customerContactPhone: string
+  bankName: string
+  bankAccount: string
+  customerOverride: Record<string, string> | null
+  vehicleOverride: Record<string, string | boolean> | null
+  labels: Record<string, string>
+}
+type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; details: MaintenanceDetails; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }

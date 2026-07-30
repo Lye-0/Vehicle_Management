@@ -3,6 +3,7 @@ import fontkit from '@pdf-lib/fontkit'
 import fontUrl from '../assets/fonts/NotoSansCJKjp-Regular.otf?url'
 import { fetchVehicleFile } from './customerApi'
 import type { MaintenanceDocument } from './maintenanceApi'
+import { buildMaintenanceStatementSvg, maintenanceStatementHeight, maintenanceStatementWidth } from './maintenanceStatement'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, salesDocumentAmountTitle, salesDocumentTitle, type SalesTotals } from './salesEstimate'
 import { buildSalesEstimateSheetSvg } from './salesEstimateSheet'
 import type { AppSettings } from './settingsApi'
@@ -138,50 +139,17 @@ async function embedSalesImage(pdf: PDFDocument, document: SalesDocument): Promi
   return null
 }
 
-async function createMaintenanceDocumentPdf(document: MaintenanceDocument, settings: AppSettings) {
-  const state = await createPageState(document.type, document.number, document.issuedAt, settings)
-  drawCustomerAndVehicle(state, document.customerName, document.phone, document.category, document.vehicle, `${document.plate}${document.mileage ? ` / ${document.mileage}` : ''}`)
-  drawMetaGrid(state, [
-    ['書類日付', document.issuedAt || '未設定'],
-    ['入庫日', document.intakeDate || '未設定'],
-    ['出庫予定日', document.plannedReleaseDate || '未設定'],
-    ['完了日', document.completionDate || '未設定'],
-    ['支払期限', document.dueDate || '未設定'],
-    ['状態', document.status],
-    ['消費税・端数', `${formatPercent(document.taxRate)} / ${settings.tax.rounding}`],
-  ])
-
-  drawSectionTitle(state, '作業・部品明細')
-  const columns: TableColumn[] = [
-    { label: '区分', width: 60 },
-    { label: '作業内容・部品名', width: 208 },
-    { label: '数量', width: 45, align: 'right' },
-    { label: '単位', width: 42, align: 'center' },
-    { label: '単価', width: 72, align: 'right' },
-    { label: '金額', width: 84, align: 'right' },
-  ]
-  drawTable(state, columns, document.items.map((item) => [
-    item.kind,
-    item.description || '（明細未入力）',
-    formatNumber(item.quantity),
-    item.unit,
-    formatYen(item.unitPrice),
-    formatYen(item.quantity * item.unitPrice),
-  ]))
-
-  const itemsSubtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
-  const fees = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0)
-  const tax = calculateTax(itemsSubtotal + document.adjustment, document.taxRate, settings.tax.rounding)
-  drawTotals(state, [
-    ['作業・部品小計', formatYen(itemsSubtotal)],
-    ['法定費用等', formatYen(fees)],
-    ['調整額', formatYen(document.adjustment)],
-    [`消費税（${formatPercent(document.taxRate)}）`, formatYen(tax)],
-    ['合計金額', formatYen(itemsSubtotal + fees + document.adjustment + tax)],
-  ])
-  drawDocumentNotes(state, document.note, settings)
-  finishPage(state)
-  return state.pdf.save()
+export async function createMaintenanceDocumentPdf(document: MaintenanceDocument, settings: AppSettings) {
+  // Kept temporarily for compatibility while the fixed maintenance sheet replaces the legacy vector layout.
+  void [createPageState, drawCustomerAndVehicle, drawMetaGrid, drawSectionTitle, drawTable, drawTotals, drawDocumentNotes, calculateTax, formatNumber]
+  const pdf = await PDFDocument.create()
+  const svg = buildMaintenanceStatementSvg(document, settings)
+  const pngBytes = await renderSvgToPng(svg, maintenanceStatementWidth * 2, maintenanceStatementHeight * 2)
+  const sheet = await pdf.embedPng(pngBytes)
+  const pageHeight = PAGE_WIDTH * maintenanceStatementHeight / maintenanceStatementWidth
+  const page = pdf.addPage([PAGE_WIDTH, pageHeight])
+  page.drawImage(sheet, { x: 0, y: 0, width: PAGE_WIDTH, height: pageHeight })
+  return pdf.save()
 }
 
 async function createPageState(title: string, number: string, issuedAt: string, settings: AppSettings, salesDocument?: SalesDocument): Promise<PageState> {
@@ -376,7 +344,7 @@ function drawSalesEstimateBreakdown(state: PageState, document: SalesDocument, t
     { label: '残金／所要資金', amount: totals.remainingPayment, emphasis: true, dark: true },
   ]
   const feeGroups = [
-    { title: '法定費用（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
+    { title: '税金/保険料（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
     { title: '手続代行費用（課税）', lines: sections.taxableFees, total: totals.taxableFeeTotal },
     { title: '実費・預託金（非課税）', lines: sections.nonTaxableFees, total: totals.nonTaxableFeeTotal },
   ]
