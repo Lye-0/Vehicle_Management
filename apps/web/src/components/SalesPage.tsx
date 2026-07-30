@@ -31,7 +31,7 @@ import {
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
-import { buildSalesEstimateSheetSvg } from '../lib/salesEstimateSheet'
+import { buildSalesEstimateSheetSvg, salesEstimateSheetLayout } from '../lib/salesEstimateSheet'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesDocumentView = 'edit' | 'preview'
@@ -472,13 +472,31 @@ type SheetLinePosition = {
 }
 
 const salesEstimateSheetLinePositions: SheetLinePosition[] = [
-  { bucket: 'vehicleBase', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 781, width: 324, labelWidth: 198, height: 35, fixedLabel: '車両本体価格' },
-  { bucket: 'discounts', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 816, width: 324, labelWidth: 198, height: 35, fixedLabel: '値引等' },
-  { bucket: 'vehicleSideLabor', presetGroup: 'vehiclePrice', index: 0, x: 23, y: 921, width: 324, labelWidth: 198, height: 35 },
-  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'legalNonTaxable' as const, presetGroup: 'fees' as const, index, x: 363, y: 808 + index * 26, width: 299, labelWidth: 182, height: 26 })),
-  ...Array.from({ length: 5 }, (_, index) => ({ bucket: 'taxableFees' as const, presetGroup: 'fees' as const, index, x: 363, y: 945 + index * 26, width: 299, labelWidth: 182, height: 26 })),
-  ...Array.from({ length: 3 }, (_, index) => ({ bucket: 'nonTaxableFees' as const, presetGroup: 'fees' as const, index, x: 363, y: 1134 + index * 26, width: 299, labelWidth: 182, height: 26, menuUp: index > 0 })),
-  ...Array.from({ length: 13 }, (_, index) => ({ bucket: 'accessories' as const, presetGroup: 'accessories' as const, index, x: 677, y: 817 + index * 34, width: 360, labelWidth: 210, height: 34, menuUp: index > 8 })),
+  { bucket: 'vehicleBase', presetGroup: 'vehiclePrice', index: 0, x: salesEstimateSheetLayout.vehicle.x, y: salesEstimateSheetLayout.lowerY + 39, width: salesEstimateSheetLayout.vehicle.width, labelWidth: 198, height: 35, fixedLabel: '車両本体価格' },
+  { bucket: 'discounts', presetGroup: 'vehiclePrice', index: 0, x: salesEstimateSheetLayout.vehicle.x, y: salesEstimateSheetLayout.lowerY + 74, width: salesEstimateSheetLayout.vehicle.width, labelWidth: 198, height: 35, fixedLabel: '値引等' },
+  { bucket: 'vehicleSideLabor', presetGroup: 'vehiclePrice', index: 0, x: salesEstimateSheetLayout.vehicle.x, y: salesEstimateSheetLayout.lowerY + 179, width: salesEstimateSheetLayout.vehicle.width, labelWidth: 198, height: 35 },
+  ...salesEstimateSheetLayout.fee.groups.flatMap((group) => Array.from({ length: group.rows }, (_, index) => ({
+    bucket: group.bucket,
+    presetGroup: 'fees' as const,
+    index,
+    x: salesEstimateSheetLayout.fee.detailX,
+    y: group.startY + index * 26,
+    width: salesEstimateSheetLayout.fee.detailWidth,
+    labelWidth: salesEstimateSheetLayout.fee.detailLabelWidth,
+    height: 26,
+    menuUp: group.startY + index * 26 >= 1040,
+  }))),
+  ...Array.from({ length: salesEstimateSheetLayout.accessory.rowCount }, (_, index) => ({
+    bucket: 'accessories' as const,
+    presetGroup: 'accessories' as const,
+    index,
+    x: salesEstimateSheetLayout.accessory.x,
+    y: salesEstimateSheetLayout.accessory.detailY + index * salesEstimateSheetLayout.accessory.rowHeight,
+    width: salesEstimateSheetLayout.accessory.width,
+    labelWidth: salesEstimateSheetLayout.accessory.nameWidth,
+    height: salesEstimateSheetLayout.accessory.rowHeight,
+    menuUp: index > 8,
+  })),
 ]
 
 export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresetGroups, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresetGroups: SalesItemPresetGroups; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
@@ -525,7 +543,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
     <SalesSheetTradeInEditor hasImage={hasImage} tradeIn={document.details.tradeIn} onUpdate={updateTradeIn} />
     <SalesSheetRequiredDocumentsEditor requiredDocuments={document.details.requiredDocuments} onUpdate={updateRequiredDocument} />
     <SalesSheetCreditEditor credit={document.details.credit} onUpdate={updateCredit} />
-    <SheetTextControl multiline ariaLabel="備考" value={document.note} x={713} y={701} width={318} height={27} onChange={(value) => onUpdateHeader('note', value)} />
+    <SheetTextControl multiline ariaLabel="備考" value={document.note} x={713} y={salesEstimateSheetLayout.noteY + 37} width={318} height={27} onChange={(value) => onUpdateHeader('note', value)} />
     {salesEstimateSheetLinePositions.map((position) => {
       const line = sections[position.bucket][position.index]
       const candidates = Array.from(new Set(itemPresetGroups[position.presetGroup].filter(Boolean)))
@@ -539,10 +557,10 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
         onChange={(patch) => onUpdateLine(position.bucket, position.index, patch)}
       />
     })}
-    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1212 / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${salesEstimateSheetLayout.vehicle.paymentY / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
       <SheetAmountInput value={tradeInLine?.amount ?? 0} exists={Boolean(tradeInLine)} onCommit={(amount) => onUpdateLine('tradeIns', 0, { amount })} />
     </div>
-    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${1243 / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
+    <div className="sales-estimate-sheet-line-control is-amount-only" style={{ left: `${221 / 10.55}%`, top: `${(salesEstimateSheetLayout.vehicle.paymentY + 31) / 14.91}%`, width: `${126 / 10.55}%`, height: `${31 / 14.91}%` }}>
       <SheetAmountInput value={document.details.downPayment} exists={document.details.downPayment !== 0} onCommit={(downPayment) => onUpdateDetails({ downPayment })} />
     </div>
   </div>
@@ -551,23 +569,23 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
 function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocument; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
   const left = hasImage
     ? { name: [84, 124, 230, 35], postalCode: [40, 169, 310, 27], address: [40, 201, 310, 27], phone: [40, 237, 310, 28] }
-    : { name: [84, 121, 230, 35], postalCode: [40, 166, 325, 26], address: [40, 198, 325, 26], phone: [40, 234, 325, 27] }
+    : { name: [84, 121, 230, 35], postalCode: [40, 166, 325, 26], address: [40, 198, 325, 26], phone: [40, 230, 325, 26] }
   return <>
     <SheetTextControl ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SheetTextControl ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
     <SheetTextControl ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
     <SheetTextControl ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} />
     {!hasImage ? <>
-      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={43} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
-      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={479} y={148} width={197} height={43} onChange={(value) => onUpdateCustomer('phone', value)} />
-      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={193} width={197} height={43} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
-      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={237} width={197} height={44} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
+      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={38.75} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
+      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={479} y={142.75} width={197} height={38.75} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={181.5} width={197} height={38.75} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={220.25} width={197} height={37.75} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
 }
 
 function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: boolean; vehicle: NonNullable<SalesDocumentDetails['vehicleOverride']>; onUpdate: (field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) => void }) {
-  const y = hasImage ? 353 : 335
+  const y = hasImage ? salesEstimateSheetLayout.imageVehicleY + 39 : salesEstimateSheetLayout.expandedVehicleY + 39
   const fields: Array<{ field: keyof typeof vehicle; x: number; y: number; width: number; height: number }> = [
     { field: 'maker', x: 116, y, width: 100, height: 37 },
     { field: 'name', x: 311, y, width: 100, height: 37 },
@@ -588,7 +606,7 @@ function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: bo
 }
 
 function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: boolean; tradeIn: SalesDocumentDetails['tradeIn']; onUpdate: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void }) {
-  const y = hasImage ? 625 : 611
+  const y = (hasImage ? salesEstimateSheetLayout.imageTradeInY : salesEstimateSheetLayout.expandedTradeInY) + 68
   const fields: Array<{ field: keyof typeof tradeIn; x: number; width: number }> = [
     { field: 'name', x: 24, width: 180 },
     { field: 'modelYear', x: 204, width: 105 },
@@ -604,7 +622,7 @@ function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { re
   return <>{fields.map((field, index) => {
     const col = index % 2
     const row = Math.floor(index / 2)
-    return <label key={field} className="sales-estimate-sheet-checkbox" style={sheetPositionStyle(724 + col * 156, 539 + row * 26, 16, 16)}><input aria-label={requiredDocumentFields.find((item) => item.key === field)?.label ?? field} type="checkbox" checked={Boolean(requiredDocuments[field])} onChange={(event) => onUpdate(field, event.target.checked)} /></label>
+    return <label key={field} className="sales-estimate-sheet-checkbox" style={sheetPositionStyle(724 + col * 156, salesEstimateSheetLayout.requiredY + 50 + row * 26, 16, 16)}><input aria-label={requiredDocumentFields.find((item) => item.key === field)?.label ?? field} type="checkbox" checked={Boolean(requiredDocuments[field])} onChange={(event) => onUpdate(field, event.target.checked)} /></label>
   })}</>
 }
 
@@ -637,7 +655,7 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
     aria-label={ariaLabel}
     inputMode={decimal ? 'decimal' : 'numeric'}
     value={currency && !focused && draft ? formatSheetYen(Number(draft)) : draft}
-    style={sheetPositionStyle(x, 1398, width, 34)}
+    style={sheetPositionStyle(x, salesEstimateSheetLayout.creditY + 76, width, 34)}
     onFocus={() => setFocused(true)}
     onChange={(event) => update(event.target.value)}
     onBlur={finish}
