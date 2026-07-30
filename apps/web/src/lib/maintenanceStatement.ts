@@ -126,7 +126,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${roundedBox(16, 509, 1067, 620)}
   ${rect(16, 509, 1067, 42, 'url(#maintenance-blue)')}
   ${centerText(550, 538, workSectionTitle, 24, '700', '#fff')}
-  ${rect(16, 551, 1067, 36, '#f4f8fd')}
+  ${rect(17, 552, 1065, 34, '#dcecff')}
   ${workGridLines(rowTop, rowHeight)}
   ${headerText(45, 575, 'No.')}${headerText(233, 575, '作業内容／部品名等')}${headerText(432, 575, '数量')}${headerText(514, 575, '単位')}${headerText(612, 575, '部品単価')}${headerText(727, 575, '部品金額')}${headerText(868, 575, '技術料／他')}${headerText(1017, 575, '摘要')}
   ${rows.map((item, index) => workRow(item, index, rowTop + rowHeight * index, hideEditableValues)).join('')}
@@ -174,11 +174,13 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
 function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
   return `${roundedBox(16, 1144, 350, 75)}
+  ${rect(17, 1145, 348, 36, '#dcecff')}
   ${rect(250, 1145, 115, 73, '#dcecff')}
   ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
   ${headerText(74, 1170, '作業料金')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金＋税')}
   ${valueText(74, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(190, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(307, 1207, number(totals.workTotal), 'middle', 18, '800', '#073c87')}
   ${roundedBox(385, 1144, 435, 75)}
+  ${rect(386, 1145, 433, 36, '#dcecff')}
   ${rect(734, 1145, 85, 73, '#dcecff')}
   ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
   ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
@@ -192,7 +194,7 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
 function bankBox(settings: AppSettings, details: MaintenanceDocument['details'], hideEditableValues: boolean) {
   const bankName = details.bankName || settings.shop.bankName
   const bankAccount = details.bankAccount || settings.shop.bankAccount
-  return `${roundedBox(16, 1233, 510, 151)}
+  return `${roundedBox(16, 1233, 510, 122)}
   ${rect(16, 1233, 510, 42, 'url(#maintenance-blue)')}
   ${centerText(271, 1262, 'お振込先', 20, '700', '#fff')}
   ${valueText(54, 1341, statementValue(`${bankName}　${bankAccount}`, hideEditableValues), 'start', 17)}`
