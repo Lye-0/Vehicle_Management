@@ -14,6 +14,8 @@ export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'ca
 type Props = {
   document: MaintenanceDocument
   itemPresets: string[]
+  bankName: string
+  bankAccount: string
   onUpdateHeader: (field: MaintenanceStatementHeaderField, value: string) => void
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
   onUpdateItem: (itemId: string, field: MaintenanceStatementItemField, value: string) => void
@@ -22,7 +24,7 @@ type Props = {
   onAddItem: () => void
 }
 
-export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
+export function MaintenanceStatementEditor({ document, itemPresets, bankName, bankAccount, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
   const details = document.details
   const customer = details.customerOverride ?? document.customerDetails
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
@@ -66,6 +68,9 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     <StatementNumberControl ariaLabel="重量税" value={document.fees.重量税} x={472} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
     <StatementNumberControl ariaLabel="印紙代" value={document.fees.印紙代} x={559} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
     <StatementNumberControl ariaLabel="その他費用" value={document.fees.リサイクル料金} x={646} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
+
+    <StatementTextControl ariaLabel="振込先銀行名" value={bankName} x={50} y={1284} width={260} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankName: value })} />
+    <StatementTextControl ariaLabel="振込先口座番号" value={bankAccount} x={310} y={1284} width={205} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankAccount: value })} />
   </div>
 }
 

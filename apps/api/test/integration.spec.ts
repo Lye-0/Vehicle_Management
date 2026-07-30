@@ -233,6 +233,7 @@ describe("CLI authenticated workflow", () => {
 				fees: { 自賠責: 10000, 重量税: 0, 印紙代: 1000, リサイクル料金: 500 },
 				adjustment: -100,
 				note: marker,
+				details: { bankName: `${marker}銀行`, bankAccount: "7654321" },
 				items: [{ kind: "作業", description: "エンジンオイル交換", quantity: 2, unit: "式", unitPrice: 1500 }],
 			});
 			expect(maintenance.response.status).toBe(201);
@@ -243,6 +244,7 @@ describe("CLI authenticated workflow", () => {
 			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
 			expect(objectValue(maintenanceDocument.details).customerOverride).toBeNull();
 			expect(objectValue(maintenanceDocument.details).vehicleOverride).toBeNull();
+			expect(objectValue(maintenanceDocument.details)).toEqual(expect.objectContaining({ bankName: `${marker}銀行`, bankAccount: "7654321" }));
 
 			const duplicateMaintenance = await requestJson<JsonObject>("/api/maintenance-documents", "POST", {
 				type: "整備請求書",

@@ -13,6 +13,8 @@ export type MaintenanceDocumentDetails = {
   customerBirthDate: string
   customerEmployer: string
   customerContactPhone: string
+  bankName: string
+  bankAccount: string
   customerOverride: MaintenanceCustomerDetails | null
   vehicleOverride: MaintenanceVehicleDetails | null
   labels: {
@@ -31,6 +33,8 @@ export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
   customerBirthDate: '',
   customerEmployer: '',
   customerContactPhone: '',
+  bankName: '',
+  bankAccount: '',
   customerOverride: null,
   vehicleOverride: null,
   labels: {
@@ -142,6 +146,8 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
   return {
     ...defaultMaintenanceDocumentDetails,
     ...details,
+    bankName: typeof details.bankName === 'string' ? details.bankName : '',
+    bankAccount: typeof details.bankAccount === 'string' ? details.bankAccount : '',
     customerOverride: details.customerOverride && hasMaintenanceOverrideValue(details.customerOverride) ? {
       name: details.customerOverride.name,
       kana: details.customerOverride.kana,

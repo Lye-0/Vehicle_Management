@@ -771,9 +771,9 @@
 .maintenance-statement > div:first-child { position: absolute; inset: 0; z-index: 1; }
 .maintenance-statement svg { display: block; width: 100%; height: auto; }
 .maintenance-statement-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: #101820; caret-color: auto; border: 1px solid transparent; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
-.maintenance-statement-control:hover { border-color: #86a5d0; background: #f8fbff; }
-.maintenance-statement-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
+.maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: #101820; caret-color: auto; border: 1px solid transparent; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
+.maintenance-statement-control:hover { border-color: #86a5d0; background: transparent; }
+.maintenance-statement-control:focus { z-index: 25; border-color: #2563eb; background: transparent; box-shadow: inset 0 0 0 1px #2563eb; }
 .maintenance-statement-control.is-centered { text-align: center; }
 .maintenance-statement-control.is-number { padding-right: 14px; text-align: right; font-variant-numeric: tabular-nums; }
 .maintenance-statement-control.is-number.is-centered { padding: 0 5px; text-align: center; }
@@ -782,12 +782,13 @@
 .maintenance-statement-control.is-large { font-size: clamp(12px, 1.8vw, 22px); }
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
+.maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
-.maintenance-statement-combobox > input { width: 100%; height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 0 22px 0 11px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1; }
-.maintenance-statement-combobox:hover > input { background: #f8fbff; }
-.maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: #fff; box-shadow: inset 0 0 0 2px #2563eb; }
-.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: rgba(234, 243, 255, 0.72); opacity: 0.55; cursor: pointer; }
+.maintenance-statement-combobox > input { width: 100%; height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 0 22px 0 11px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1; }
+.maintenance-statement-combobox:hover > input { background: transparent; }
+.maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: transparent; box-shadow: inset 0 0 0 2px #2563eb; }
+.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; }
 .maintenance-statement-combobox:hover > button, .maintenance-statement-combobox:focus-within > button { border-left-color: #86a5d0; opacity: 1; }
 .maintenance-statement-candidates { position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; display: grid; width: max(190px, 100%); max-height: 190px; overflow: auto; padding: 4px; border: 1px solid #86a5d0; border-radius: 5px; background: #fff; box-shadow: 0 8px 18px rgba(22, 44, 76, 0.2); }
 .maintenance-statement-candidates.is-up { top: auto; bottom: calc(100% + 2px); }

@@ -14,6 +14,10 @@ export type MaintenanceStatementTotals = {
   total: number
 }
 
+export type MaintenanceStatementSvgOptions = {
+  hideEditableValues?: boolean
+}
+
 export function calculateMaintenanceStatementTotals(
   document: MaintenanceDocument,
   rounding: AppSettings['tax']['rounding'],
@@ -28,7 +32,8 @@ export function calculateMaintenanceStatementTotals(
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
 }
 
-export function buildMaintenanceStatementSvg(document: MaintenanceDocument, settings: AppSettings) {
+export function buildMaintenanceStatementSvg(document: MaintenanceDocument, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
+  const hideEditableValues = options.hideEditableValues ?? false
   const totals = calculateMaintenanceStatementTotals(document, settings.tax.rounding)
   const customer = document.details.customerOverride ?? document.customerDetails
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
@@ -70,9 +75,9 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${roundedBox(611, 12, 472, 65)}
   ${gridLines([611, 729, 847, 965, 1083], [12, 43, 77])}
   ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '請求番号')}${headerText(1024, 34, 'ページ')}
-  ${valueText(670, 65, dateDot(document.issuedAt), 'middle')}
-  ${valueText(788, 65, document.details.staffName, 'middle')}
-  ${valueText(906, 65, document.number, 'middle')}
+  ${valueText(670, 65, statementValue(dateDot(document.issuedAt), hideEditableValues), 'middle')}
+  ${valueText(788, 65, statementValue(document.details.staffName, hideEditableValues), 'middle')}
+  ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle')}
   ${valueText(1024, 65, 'P.1', 'middle')}
 
   ${roundedBox(16, 90, 794, 185)}
@@ -80,16 +85,16 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${line(125, 90, 125, 275)}${line(535, 90, 535, 275)}${line(645, 90, 645, 275)}
   ${line(16, 174, 810, 174)}${line(535, 132, 810, 132)}${line(535, 216, 810, 216)}
   ${headerText(70, 137, 'お名前')}${headerText(70, 224, 'ご住所')}
-  ${valueText(145, 127, customer.name, 'start', 24)}
-  ${valueText(145, 150, customer.kana, 'start', 11)}
-  ${valueText(504, 143, document.details.customerHonorific, 'end', 22)}
-  ${valueText(145, 205, customer.postalCode ? `〒${customer.postalCode}` : '', 'start')}
-  ${valueText(145, 233, customer.address, 'start')}
+  ${valueText(145, 127, statementValue(customer.name, hideEditableValues), 'start', 24)}
+  ${valueText(145, 150, statementValue(customer.kana, hideEditableValues), 'start', 11)}
+  ${valueText(504, 143, statementValue(document.details.customerHonorific, hideEditableValues), 'end', 22)}
+  ${valueText(145, 205, statementValue(customer.postalCode ? `〒${customer.postalCode}` : '', hideEditableValues), 'start')}
+  ${valueText(145, 233, statementValue(customer.address, hideEditableValues), 'start')}
   ${headerText(590, 119, '生年月日')}${headerText(590, 161, '電話番号')}${headerText(590, 203, '勤務先等')}${headerText(590, 245, '連絡先TEL')}
-  ${valueText(665, 119, dateDot(document.details.customerBirthDate), 'start', 14)}
-  ${valueText(665, 161, customer.phone, 'start', 14)}
-  ${valueText(665, 203, document.details.customerEmployer, 'start', 14)}
-  ${valueText(665, 245, document.details.customerContactPhone, 'start', 14)}
+  ${valueText(665, 119, statementValue(dateDot(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
+  ${valueText(665, 161, statementValue(customer.phone, hideEditableValues), 'start', 14)}
+  ${valueText(665, 203, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
+  ${valueText(665, 245, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
 
   ${roundedBox(832, 90, 250, 255)}
   ${rect(832, 90, 250, 43, 'url(#maintenance-blue)')}
@@ -106,7 +111,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${roundedBox(16, 288, 794, 207)}
   ${rect(16, 288, 794, 38, 'url(#maintenance-blue)')}
   ${centerText(413, 315, '車両情報', 22, '700', '#fff')}
-  ${vehicleGrid(vehicle)}
+  ${vehicleGrid(vehicle, hideEditableValues)}
 
   ${roundedBox(832, 361, 250, 121)}
   ${rect(832, 361, 250, 40, 'url(#maintenance-blue)')}
@@ -114,8 +119,8 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${gridLines([832, 916, 999, 1082], [401, 442, 482])}
   ${headerText(874, 429, '入庫区分')}${headerText(957, 429, '入庫日')}${headerText(1040, 429, '出庫日')}
   ${valueText(874, 469, document.category, 'middle', 12, '700')}
-  ${valueText(957, 469, dateDot(document.intakeDate), 'middle', 12)}
-  ${valueText(1040, 469, dateDot(document.plannedReleaseDate || document.completionDate), 'middle', 12)}
+  ${valueText(957, 469, statementValue(dateDot(document.intakeDate), hideEditableValues), 'middle', 12)}
+  ${valueText(1040, 469, statementValue(dateDot(document.plannedReleaseDate || document.completionDate), hideEditableValues), 'middle', 12)}
 
   ${roundedBox(16, 509, 1067, 620)}
   ${rect(16, 509, 1067, 42, 'url(#maintenance-blue)')}
@@ -123,26 +128,26 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${rect(16, 551, 1067, 36, '#f4f8fd')}
   ${workGridLines(rowTop, rowHeight)}
   ${headerText(45, 575, 'No.')}${headerText(233, 575, '作業内容／部品名等')}${headerText(432, 575, '数量')}${headerText(514, 575, '単位')}${headerText(612, 575, '部品単価')}${headerText(727, 575, '部品金額')}${headerText(868, 575, '技術料／他')}${headerText(1017, 575, '摘要')}
-  ${rows.map((item, index) => workRow(item, index, rowTop + rowHeight * index)).join('')}
+  ${rows.map((item, index) => workRow(item, index, rowTop + rowHeight * index, hideEditableValues)).join('')}
   ${line(16, 1091, 1083, 1091)}
   ${rect(556, 1091, 113, 38, '#f4f8fd')}
   ${headerText(612, 1117, '小計金額')}
   ${valueText(727, 1117, number(totals.partsSubtotal), 'middle', 14, '700')}
   ${valueText(868, 1117, number(totals.technicalSubtotal), 'middle', 14)}
 
-  ${summaryBoxes(document, totals, labels.otherFee)}
-  ${bankBox(settings)}
+  ${summaryBoxes(document, totals, labels.otherFee, hideEditableValues)}
+  ${bankBox(settings, document.details, hideEditableValues)}
   ${shopBox(settings)}
   </svg>`
 }
 
-function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>) {
+function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>, hideEditableValues: boolean) {
   const x = [16, 115, 351, 455, 568, 683, 810]
   return `${gridLines(x, [326, 366, 406, 446, 495])}
   ${headerText(65, 354, 'メーカー')}${headerText(233, 354, '車名・仕様')}${headerText(403, 354, '年式')}${headerText(512, 354, '排気量')}${headerText(625, 354, 'ミッション')}${headerText(746, 354, '車体色')}
-  ${valueText(65, 394, vehicle.maker, 'middle', 14)}${valueText(233, 394, vehicle.name, 'middle', 14)}${valueText(403, 394, vehicle.year, 'middle', 14)}${valueText(512, 394, suffix(vehicle.displacement, 'cc'), 'middle', 14)}${valueText(625, 394, vehicle.transmission, 'middle', 14)}${valueText(746, 394, vehicle.color, 'middle', 14)}
+  ${valueText(65, 394, statementValue(vehicle.maker, hideEditableValues), 'middle', 14)}${valueText(233, 394, statementValue(vehicle.name, hideEditableValues), 'middle', 14)}${valueText(403, 394, statementValue(vehicle.year, hideEditableValues), 'middle', 14)}${valueText(512, 394, statementValue(suffix(vehicle.displacement, 'cc'), hideEditableValues), 'middle', 14)}${valueText(625, 394, statementValue(vehicle.transmission, hideEditableValues), 'middle', 14)}${valueText(746, 394, statementValue(vehicle.color, hideEditableValues), 'middle', 14)}
   ${headerText(65, 434, '型式')}${headerText(233, 434, '車台番号')}${headerText(403, 434, '登録番号')}${headerText(512, 434, '走行距離')}${headerText(625, 434, '車検日')}${headerText(746, 434, '記録簿')}
-  ${valueText(65, 479, vehicle.modelType, 'middle', 14)}${valueText(233, 479, vehicle.vin, 'middle', 14)}${valueText(403, 479, vehicle.plate, 'middle', 14)}${valueText(512, 479, vehicle.mileage, 'middle', 14)}${valueText(625, 479, dateDot(vehicle.inspectionDate), 'middle', 14)}${valueText(746, 479, vehicle.inspectionRecordAvailable ? 'あり' : 'なし', 'middle', 14, '700')}`
+  ${valueText(65, 479, statementValue(vehicle.modelType, hideEditableValues), 'middle', 14)}${valueText(233, 479, statementValue(vehicle.vin, hideEditableValues), 'middle', 14)}${valueText(403, 479, statementValue(vehicle.plate, hideEditableValues), 'middle', 14)}${valueText(512, 479, statementValue(vehicle.mileage, hideEditableValues), 'middle', 14)}${valueText(625, 479, statementValue(dateDot(vehicle.inspectionDate), hideEditableValues), 'middle', 14)}${valueText(746, 479, statementValue(vehicle.inspectionRecordAvailable ? 'あり' : 'なし', hideEditableValues), 'middle', 14, '700')}`
 }
 
 function workGridLines(rowTop: number, rowHeight: number) {
@@ -151,19 +156,19 @@ function workGridLines(rowTop: number, rowHeight: number) {
   return vertical + horizontal
 }
 
-function workRow(item: StatementRow, index: number, y: number) {
+function workRow(item: StatementRow, index: number, y: number, hideEditableValues: boolean) {
   const baseline = y + 20
   return `${valueText(45, baseline, String(index + 1), 'middle', 13)}
-  ${valueText(89, baseline, item.description, 'start', 14)}
-  ${valueText(432, baseline, displayQuantity(item), 'middle', 13)}
-  ${valueText(514, baseline, item.unit, 'middle', 13)}
-  ${valueText(654, baseline, item.unitPrice ? number(item.unitPrice) : '', 'end', 13)}
+  ${valueText(89, baseline, statementValue(item.description, hideEditableValues), 'start', 14)}
+  ${valueText(432, baseline, statementValue(displayQuantity(item), hideEditableValues), 'middle', 13)}
+  ${valueText(514, baseline, statementValue(item.unit, hideEditableValues), 'middle', 13)}
+  ${valueText(654, baseline, statementValue(item.unitPrice ? number(item.unitPrice) : '', hideEditableValues), 'end', 13)}
   ${valueText(770, baseline, item.partAmount ? number(item.partAmount) : '', 'end', 13)}
-  ${valueText(936, baseline, item.technicalFee ? number(item.technicalFee) : '', 'end', 13, '400', '#111827')}
-  ${valueText(966, baseline, item.summary, 'start', 12)}`
+  ${valueText(936, baseline, statementValue(item.technicalFee ? number(item.technicalFee) : '', hideEditableValues), 'end', 13, '400', '#111827')}
+  ${valueText(966, baseline, statementValue(item.summary, hideEditableValues), 'start', 12)}`
 }
 
-function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string) {
+function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
   return `${roundedBox(16, 1144, 350, 75)}
   ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
@@ -172,18 +177,20 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
   ${roundedBox(385, 1144, 435, 75)}
   ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
   ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
-  ${valueText(428, 1207, number(fee.自賠責), 'middle', 15)}${valueText(515, 1207, number(fee.重量税), 'middle', 15)}${valueText(602, 1207, number(fee.印紙代), 'middle', 15)}${valueText(689, 1207, number(fee.リサイクル料金), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
+  ${valueText(428, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 15)}${valueText(515, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 15)}${valueText(602, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 15)}${valueText(689, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
   ${roundedBox(844, 1144, 238, 75, '#fff7b0')}
   ${line(844, 1182, 1082, 1182)}
   ${headerText(963, 1170, '作業料金＋諸費用計')}
   ${centerText(963, 1209, number(totals.total), 19, '800', '#073c87')}`
 }
 
-function bankBox(settings: AppSettings) {
+function bankBox(settings: AppSettings, details: MaintenanceDocument['details'], hideEditableValues: boolean) {
+  const bankName = details.bankName || settings.shop.bankName
+  const bankAccount = details.bankAccount || settings.shop.bankAccount
   return `${roundedBox(16, 1233, 510, 151)}
   ${rect(16, 1233, 510, 42, 'url(#maintenance-blue)')}
   ${centerText(271, 1262, 'お振込先', 20, '700', '#fff')}
-  ${valueText(54, 1341, `${settings.shop.bankName}　${settings.shop.bankAccount}`, 'start', 17)}`
+  ${valueText(54, 1341, statementValue(`${bankName}　${bankAccount}`, hideEditableValues), 'start', 17)}`
 }
 
 function shopBox(settings: AppSettings) {
@@ -202,9 +209,6 @@ type StatementRow = MaintenanceLineItem & { partAmount: number }
 
 function statementRows(document: MaintenanceDocument): StatementRow[] {
   const rows = document.items.map((item) => ({ ...item, partAmount: Math.round(item.quantity * item.unitPrice) }))
-  if (document.adjustment) {
-    rows.push({ id: 'adjustment', kind: '作業', description: '調整額', quantity: 1, unit: '式', unitPrice: 0, technicalFee: document.adjustment, summary: '', partAmount: 0 })
-  }
   return rows.slice(0, 18)
 }
 
@@ -228,6 +232,10 @@ function suffix(value: string, unit: string) {
 
 function displayQuantity(item: StatementRow) {
   return item.description || item.unitPrice || item.technicalFee ? String(item.quantity) : ''
+}
+
+function statementValue(value: string | number, hideEditableValues: boolean) {
+  return hideEditableValues ? '' : value
 }
 
 function number(value: number) {
