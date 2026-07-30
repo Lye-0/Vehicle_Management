@@ -81,7 +81,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(1024, 65, 'P.1', 'middle')}
 
   ${roundedBox(16, 90, 794, 185)}
-  ${rect(16, 90, 109, 185, '#f4f8fd')}
+  ${rect(17, 91, 107, 183, '#dcecff')}${rect(536, 91, 108, 183, '#dcecff')}
   ${line(125, 90, 125, 275)}${line(535, 90, 535, 275)}${line(645, 90, 645, 275)}
   ${line(16, 174, 810, 174)}${line(535, 132, 810, 132)}${line(535, 216, 810, 216)}
   ${headerText(70, 137, 'お名前')}${headerText(70, 224, 'ご住所')}
@@ -116,6 +116,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${roundedBox(832, 361, 250, 121)}
   ${rect(832, 361, 250, 40, 'url(#maintenance-blue)')}
   ${centerText(957, 389, '入庫／出庫', 18, '700', '#fff')}
+  ${rect(833, 402, 248, 39, '#dcecff')}
   ${gridLines([832, 916, 999, 1082], [401, 442, 482])}
   ${headerText(874, 429, '入庫区分')}${headerText(957, 429, '入庫日')}${headerText(1040, 429, '出庫日')}
   ${valueText(874, 469, document.category, 'middle', 12, '700')}
@@ -144,7 +145,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
 function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>, hideEditableValues: boolean) {
   const x = [16, 115, 351, 455, 568, 683, 810]
-  return `${gridLines(x, [326, 366, 406, 446, 495])}
+  return `${rect(17, 327, 792, 38, '#dcecff')}${rect(17, 407, 792, 38, '#dcecff')}${gridLines(x, [326, 366, 406, 446, 495])}
   ${headerText(65, 354, 'メーカー')}${headerText(233, 354, '車名・仕様')}${headerText(403, 354, '年式')}${headerText(512, 354, '排気量')}${headerText(625, 354, 'ミッション')}${headerText(746, 354, '車体色')}
   ${valueText(65, 394, statementValue(vehicle.maker, hideEditableValues), 'middle', 14)}${valueText(233, 394, statementValue(vehicle.name, hideEditableValues), 'middle', 14)}${valueText(403, 394, statementValue(vehicle.year, hideEditableValues), 'middle', 14)}${valueText(512, 394, statementValue(suffix(vehicle.displacement, 'cc'), hideEditableValues), 'middle', 14)}${valueText(625, 394, statementValue(vehicle.transmission, hideEditableValues), 'middle', 14)}${valueText(746, 394, statementValue(vehicle.color, hideEditableValues), 'middle', 14)}
   ${headerText(65, 434, '型式')}${headerText(233, 434, '車台番号')}${headerText(403, 434, '登録番号')}${headerText(512, 434, '走行距離')}${headerText(625, 434, '車検日')}${headerText(746, 434, '記録簿')}
@@ -173,10 +174,12 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
 function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
   return `${roundedBox(16, 1144, 350, 75)}
+  ${rect(250, 1145, 115, 73, '#dcecff')}
   ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
   ${headerText(74, 1170, '作業料金')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金＋税')}
   ${valueText(74, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(190, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(307, 1207, number(totals.workTotal), 'middle', 18, '800', '#073c87')}
   ${roundedBox(385, 1144, 435, 75)}
+  ${rect(734, 1145, 85, 73, '#dcecff')}
   ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
   ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
   ${valueText(428, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 15)}${valueText(515, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 15)}${valueText(602, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 15)}${valueText(689, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
