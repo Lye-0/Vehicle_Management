@@ -195,14 +195,17 @@ function bankBox(settings: AppSettings, details: MaintenanceDocument['details'],
 
 function shopBox(settings: AppSettings) {
   const shop = settings.shop
-  return `${roundedBox(565, 1233, 519, 151)}
-  ${buildingMark(589, 1245)}
-  ${valueText(647, 1265, shop.name, 'start', 21, '700', '#073c87')}
-  ${valueText(647, 1288, shop.registrationNumber, 'start', 12)}
-  ${line(588, 1297, 1055, 1297, '#555')}
-  ${valueText(588, 1320, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
-  ${valueText(588, 1342, shop.address, 'start', 13)}
-  ${valueText(588, 1365, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
+  const hasLogo = Boolean(shop.logoDataUrl)
+  const companyX = hasLogo ? 752 : 647
+  const logoMarkup = hasLogo
+    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="585" y="1247" width="150" height="75" preserveAspectRatio="xMidYMid meet"/>`
+    : valueText(590, 1307, '▦', 'start', 50, '700', '#073c87')
+  return `${logoMarkup}
+  ${valueText(companyX, 1265, shop.name, 'start', 20, '700', '#073c87')}
+  ${valueText(companyX, 1288, shop.registrationNumber, 'start', 12)}
+  ${valueText(companyX, 1320, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
+  ${valueText(companyX, 1342, shop.address, 'start', 13)}
+  ${valueText(companyX, 1365, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
 }
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
@@ -276,8 +279,4 @@ function centerText(x: number, y: number, value: string, size: number, weight: s
 
 function brandMark(x: number, y: number) {
   return `<g fill="#073c87"><rect x="${x}" y="${y}" width="9" height="9"/><rect x="${x + 9}" y="${y + 9}" width="9" height="9"/><rect x="${x}" y="${y + 18}" width="9" height="9"/></g>`
-}
-
-function buildingMark(x: number, y: number) {
-  return `<g fill="#073c87"><rect x="${x}" y="${y}" width="34" height="40"/><rect x="${x + 7}" y="${y + 7}" width="6" height="6" fill="#fff"/><rect x="${x + 20}" y="${y + 7}" width="6" height="6" fill="#fff"/><rect x="${x + 7}" y="${y + 19}" width="6" height="6" fill="#fff"/><rect x="${x + 20}" y="${y + 19}" width="6" height="6" fill="#fff"/><rect x="${x + 14}" y="${y + 29}" width="7" height="11" fill="#fff"/></g>`
 }
