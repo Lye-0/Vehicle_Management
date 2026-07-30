@@ -82,15 +82,14 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
     { field: 'displacement', x: 455, y: 367, width: 113, height: 38, centered: true },
     { field: 'transmission', x: 568, y: 367, width: 115, height: 38, centered: true },
     { field: 'color', x: 683, y: 367, width: 127, height: 38, centered: true },
-    { field: 'modelType', x: 16, y: 447, width: 99, height: 47, centered: true },
-    { field: 'vin', x: 115, y: 447, width: 236, height: 47, centered: true },
-    { field: 'plate', x: 351, y: 447, width: 104, height: 47, centered: true },
-    { field: 'mileage', x: 455, y: 447, width: 113, height: 47, centered: true },
-    { field: 'inspectionDate', x: 568, y: 447, width: 115, height: 47, centered: true },
+    { field: 'modelType', x: 16, y: 447, width: 124, height: 47, centered: true },
+    { field: 'vin', x: 140, y: 447, width: 210, height: 47, centered: true },
+    { field: 'plate', x: 350, y: 447, width: 180, height: 47, centered: true },
+    { field: 'mileage', x: 530, y: 447, width: 140, height: 47, centered: true },
+    { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
   ]
   return <>
     {fields.map(({ field, ...position }) => <StatementTextControl key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
-    <select aria-label="記録簿" className="maintenance-statement-control is-select is-centered" value={vehicle.inspectionRecordAvailable ? 'あり' : 'なし'} style={controlStyle(683, 447, 127, 47)} onChange={(event) => onUpdate('inspectionRecordAvailable', event.target.value === 'あり')}><option value="あり">あり</option><option value="なし">なし</option></select>
   </>
 }
 

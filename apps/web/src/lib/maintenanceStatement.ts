@@ -144,12 +144,13 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 }
 
 function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>, hideEditableValues: boolean) {
-  const x = [16, 115, 351, 455, 568, 683, 810]
-  return `${rect(17, 327, 792, 38, '#dcecff')}${rect(17, 407, 792, 38, '#dcecff')}${gridLines(x, [326, 366, 406, 446, 495])}
+  const topX = [16, 115, 351, 455, 568, 683, 810]
+  const bottomX = [16, 140, 350, 530, 670, 810]
+  return `${rect(17, 327, 792, 38, '#dcecff')}${rect(17, 407, 792, 38, '#dcecff')}${gridLines(topX, [326, 366, 406])}${gridLines(bottomX, [406, 446, 495])}
   ${headerText(65, 354, 'メーカー')}${headerText(233, 354, '車名・仕様')}${headerText(403, 354, '年式')}${headerText(512, 354, '排気量')}${headerText(625, 354, 'ミッション')}${headerText(746, 354, '車体色')}
   ${valueText(65, 394, statementValue(vehicle.maker, hideEditableValues), 'middle', 14)}${valueText(233, 394, statementValue(vehicle.name, hideEditableValues), 'middle', 14)}${valueText(403, 394, statementValue(vehicle.year, hideEditableValues), 'middle', 14)}${valueText(512, 394, statementValue(suffix(vehicle.displacement, 'cc'), hideEditableValues), 'middle', 14)}${valueText(625, 394, statementValue(vehicle.transmission, hideEditableValues), 'middle', 14)}${valueText(746, 394, statementValue(vehicle.color, hideEditableValues), 'middle', 14)}
-  ${headerText(65, 434, '型式')}${headerText(233, 434, '車台番号')}${headerText(403, 434, '登録番号')}${headerText(512, 434, '走行距離')}${headerText(625, 434, '車検日')}${headerText(746, 434, '記録簿')}
-  ${valueText(65, 479, statementValue(vehicle.modelType, hideEditableValues), 'middle', 14)}${valueText(233, 479, statementValue(vehicle.vin, hideEditableValues), 'middle', 14)}${valueText(403, 479, statementValue(vehicle.plate, hideEditableValues), 'middle', 14)}${valueText(512, 479, statementValue(vehicle.mileage, hideEditableValues), 'middle', 14)}${valueText(625, 479, statementValue(dateDot(vehicle.inspectionDate), hideEditableValues), 'middle', 14)}${valueText(746, 479, statementValue(vehicle.inspectionRecordAvailable ? 'あり' : 'なし', hideEditableValues), 'middle', 14, '700')}`
+  ${headerText(78, 434, '型式')}${headerText(245, 434, '車台番号')}${headerText(440, 434, '登録番号')}${headerText(600, 434, '走行距離')}${headerText(740, 434, '車検日')}
+  ${valueText(78, 479, statementValue(vehicle.modelType, hideEditableValues), 'middle', 14)}${valueText(245, 479, statementValue(vehicle.vin, hideEditableValues), 'middle', 14)}${valueText(440, 479, statementValue(vehicle.plate, hideEditableValues), 'middle', 14)}${valueText(600, 479, statementValue(vehicle.mileage, hideEditableValues), 'middle', 14)}${valueText(740, 479, statementValue(dateDot(vehicle.inspectionDate), hideEditableValues), 'middle', 14)}`
 }
 
 function workGridLines(rowTop: number, rowHeight: number) {
