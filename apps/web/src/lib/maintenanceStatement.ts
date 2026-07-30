@@ -199,14 +199,14 @@ function shopBox(settings: AppSettings) {
   const companyX = hasLogo ? 830 : 780
   const infoX = companyX + 60
   const logoMarkup = hasLogo
-    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1245" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
-    : valueText(575, 1338, '▦', 'start', 120, '700', '#073c87')
+    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1265" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
+    : valueText(575, 1358, '▦', 'start', 120, '700', '#073c87')
   return `${logoMarkup}
-  ${valueText(companyX, 1260, shop.name, 'start', 20, '700', '#073c87')}
-  ${valueText(infoX, 1279, shop.registrationNumber, 'start', 12)}
-  ${valueText(infoX, 1300, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
-  ${valueText(infoX, 1321, shop.address, 'start', 13)}
-  ${valueText(infoX, 1342, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
+  ${valueText(companyX, 1280, shop.name, 'start', 20, '700', '#073c87')}
+  ${valueText(infoX, 1284, shop.registrationNumber, 'start', 12)}
+  ${valueText(infoX, 1305, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
+  ${valueText(infoX, 1326, shop.address, 'start', 13)}
+  ${valueText(infoX, 1347, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
 }
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
