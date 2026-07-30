@@ -59,8 +59,8 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
     <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={665} y={227} width={135} height={30} onChange={(value) => updateDetails({ customerContactPhone: value })} />
 
     <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
-    <StatementTextControl ariaLabel="入庫日" value={document.intakeDate} x={922} y={443} width={71} height={35} centered onChange={(value) => onUpdateHeader('intakeDate', value)} />
-    <StatementTextControl ariaLabel="出庫予定日" value={document.plannedReleaseDate || document.completionDate} x={1005} y={443} width={71} height={35} centered onChange={(value) => onUpdateHeader('plannedReleaseDate', value)} />
+    <StatementTextControl ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
+    <StatementTextControl ariaLabel="出庫予定日" value={document.plannedReleaseDate || document.completionDate} x={999} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('plannedReleaseDate', value)} />
 
     {document.items.slice(0, 18).map((item, index) => <LineEditor key={item.id} item={item} index={index} itemPresets={itemPresets} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />)}
 
