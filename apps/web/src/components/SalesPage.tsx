@@ -780,7 +780,7 @@ function EstimateVehicleBreakdown({ totals, taxRate }: { totals: SalesTotals; ta
 }
 
 function EstimateFeeBreakdown({ sections, totals }: { sections: SalesEstimateSections; totals: SalesTotals }) {
-  return <section className="sales-estimate-breakdown-card sales-estimate-fee-breakdown"><h4>諸費用内訳</h4><EstimateFeeGroup title="法定費用（非課税）" lines={sections.legalNonTaxable} total={totals.legalNonTaxable} /><EstimateFeeGroup title="手続代行費用（課税）" lines={sections.taxableFees} total={totals.taxableFeeTotal} /><EstimateFeeGroup title="実費・預託金（非課税）" lines={sections.nonTaxableFees} total={totals.nonTaxableFeeTotal} /><div className="sales-estimate-fee-total"><span>諸費用合計</span><strong>{formatYen(totals.feesTotal)}</strong></div></section>
+  return <section className="sales-estimate-breakdown-card sales-estimate-fee-breakdown"><h4>諸費用内訳</h4><EstimateFeeGroup title="税金/保険料（非課税）（非課税）" lines={sections.legalNonTaxable} total={totals.legalNonTaxable} /><EstimateFeeGroup title="手続代行費用（課税）" lines={sections.taxableFees} total={totals.taxableFeeTotal} /><EstimateFeeGroup title="実費・預託金（非課税）" lines={sections.nonTaxableFees} total={totals.nonTaxableFeeTotal} /><div className="sales-estimate-fee-total"><span>諸費用合計</span><strong>{formatYen(totals.feesTotal)}</strong></div></section>
 }
 
 function EstimateAccessoryBreakdown({ sections, totals }: { sections: SalesEstimateSections; totals: SalesTotals }) {

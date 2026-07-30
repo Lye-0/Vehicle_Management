@@ -273,7 +273,7 @@ function feeCard(
     cursor += 32
     return body + subtotal
   }
-  const groups = group('法定費用（非課税）', legal, totals.legalNonTaxable, 3)
+  const groups = group('税金/保険料（非課税）', legal, totals.legalNonTaxable, 3)
     + group('手続代行費用（課税）', taxable, totals.taxableFeeTotal, 5)
     + group('実費・預託金（非課税）', actual, totals.nonTaxableFeeTotal, 3)
   return `${sectionHeader(x, y, w, '諸費用内訳')}

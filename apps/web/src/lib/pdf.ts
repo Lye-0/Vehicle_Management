@@ -344,7 +344,7 @@ function drawSalesEstimateBreakdown(state: PageState, document: SalesDocument, t
     { label: '残金／所要資金', amount: totals.remainingPayment, emphasis: true, dark: true },
   ]
   const feeGroups = [
-    { title: '法定費用（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
+    { title: '税金/保険料（非課税）', lines: sections.legalNonTaxable, total: totals.legalNonTaxable },
     { title: '手続代行費用（課税）', lines: sections.taxableFees, total: totals.taxableFeeTotal },
     { title: '実費・預託金（非課税）', lines: sections.nonTaxableFees, total: totals.nonTaxableFeeTotal },
   ]

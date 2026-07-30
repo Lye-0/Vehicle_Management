@@ -207,7 +207,7 @@ function shopBox(settings: AppSettings) {
   const infoX = companyX + 20
   const logoMarkup = hasLogo
     ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1265" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
-    : valueText(575, 1358, '▦', 'start', 120, '700', '#073c87')
+    : valueText(635, 1358, '▦', 'start', 120, '700', '#073c87')
   return `${logoMarkup}
   ${valueText(companyX, 1280, shop.name, 'start', 20, '700', '#073c87')}
   ${valueText(infoX, 1284, shop.registrationNumber, 'start', 12)}
