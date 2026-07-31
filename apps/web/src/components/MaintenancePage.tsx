@@ -24,6 +24,7 @@ import {
   defaultMaintenanceDocumentDetails,
   type IntakeCategory,
   type MandatoryFees,
+  type MaintenanceFeeKey,
   type MaintenanceCustomerDetails,
   type MaintenanceDocument,
   type MaintenanceDocumentDetails,
@@ -109,9 +110,13 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setSavedDocumentId('')
   }
 
-  function updateFee(key: keyof MandatoryFees, value: string) {
+  function updateFee(key: MaintenanceFeeKey, value: string) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, fees: { ...document.fees, [key]: Number(value) || 0 } }))
+    const nextValue = Number(value) || 0
+    setDocuments((current) => current.map((document) => {
+      if (document.id !== selectedDocument.id) return document
+      return key === '調整額' ? { ...document, adjustment: nextValue } : { ...document, fees: { ...document.fees, [key]: nextValue } }
+    }))
     setSavedDocumentId('')
   }
 
@@ -241,7 +246,7 @@ type MaintenanceDocumentDetailProps = {
   onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void
   onAddItem: () => void
   onRemoveItem: (itemId: string) => void
-  onUpdateFee: (key: keyof MandatoryFees, value: string) => void
+  onUpdateFee: (key: MaintenanceFeeKey, value: string) => void
 }
 
 function MaintenanceDocumentEditor({ document, customers, onUpdateHeader }: { document: MaintenanceDocument; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void }) {
@@ -252,7 +257,7 @@ function MaintenanceDocumentEditor({ document, customers, onUpdateHeader }: { do
   </>
 }
 
-function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: { document: MaintenanceDocument; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: keyof MandatoryFees, value: string) => void; onAddItem: () => void }) {
+function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: { document: MaintenanceDocument; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: MaintenanceFeeKey, value: string) => void; onAddItem: () => void }) {
   const bankName = document.details.bankName || settings.shop.bankName
   const bankAccount = document.details.bankAccount || settings.shop.bankAccount
   const svg = useMemo(() => buildMaintenanceStatementSvg(document, settings, { hideEditableValues: true }), [document, settings])
@@ -271,7 +276,7 @@ function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmi
 
 function FormField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) { return <label className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</label> }
 
-function toMaintenanceInput(document: MaintenanceDocument, taxRounding: AppSettings['tax']['rounding']): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding, fees: document.fees, adjustment: 0, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item) } }
+function toMaintenanceInput(document: MaintenanceDocument, taxRounding: AppSettings['tax']['rounding']): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item) } }
 function updateMaintenanceHeader(document: MaintenanceDocument, field: MaintenanceHeaderField, value: string, customers: Customer[]): MaintenanceDocument {
   if (field !== 'customerId' && field !== 'vehicleId') return { ...document, [field]: value }
 

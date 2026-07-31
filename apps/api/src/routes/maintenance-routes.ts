@@ -281,10 +281,11 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
 
 export function calculateMaintenanceTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const taxableAmount = Math.max(0, subtotal + adjustment)
+  const taxableAmount = Math.max(0, subtotal)
   const taxValue = taxableAmount * taxRate / 100
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
-  return { subtotal, tax, total: subtotal + Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment + tax }
+  const feesTotal = Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment
+  return { subtotal, tax, total: subtotal + feesTotal + tax }
 }
 
 async function ensureMaintenanceDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {

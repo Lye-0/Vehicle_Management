@@ -5,6 +5,7 @@ export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金�
 export type IntakeCategory = '車検' | '法定点検' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
+export type MaintenanceFeeKey = keyof MandatoryFees | '調整額'
 export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; postalCode: string; address: string }
 export type MaintenanceVehicleDetails = { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean }
 export type MaintenanceDocumentDetails = {

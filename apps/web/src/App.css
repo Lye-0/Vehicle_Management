@@ -787,7 +787,7 @@
 .maintenance-statement-control.is-item-text { padding-left: 14px; }
 .maintenance-statement-control.is-title { font-size: clamp(14px, 2vw, 25px); }
 .maintenance-statement-control.is-large { font-size: clamp(12px, 1.8vw, 22px); }
-.maintenance-statement-control.is-compact-date { font-size: clamp(6px, 0.9vw, 11px); }
+.maintenance-statement-control.is-compact-date { font-size: clamp(5px, 0.75vw, 9px); }
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
 .maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }

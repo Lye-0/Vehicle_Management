@@ -28,7 +28,7 @@ export function calculateMaintenanceStatementTotals(
   const taxValue = taxableSubtotal * document.taxRate
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   const workTotal = taxableSubtotal + tax
-  const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0)
+  const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0) + document.adjustment
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
 }
 
@@ -174,22 +174,22 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
 
 function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
-  return `${roundedBox(16, 1144, 350, 75)}
-  ${rect(17, 1145, 348, 36, '#dcecff')}
-  ${rect(250, 1145, 115, 73, '#dcecff')}
-  ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
-  ${headerText(74, 1170, '作業料金')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金＋税')}
-  ${valueText(74, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(190, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(307, 1207, number(totals.workTotal), 'middle', 18, '800', '#073c87')}
-  ${roundedBox(385, 1144, 435, 75)}
-  ${rect(386, 1145, 433, 36, '#dcecff')}
-  ${rect(734, 1145, 85, 73, '#dcecff')}
-  ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
-  ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
-  ${valueText(428, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 15)}${valueText(515, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 15)}${valueText(602, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 15)}${valueText(689, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
-  ${roundedBox(844, 1144, 238, 75, '#fff7b0')}
-  ${line(844, 1182, 1082, 1182)}
-  ${headerText(963, 1170, '作業料金＋税＋諸費用計')}
-  ${centerText(963, 1209, number(totals.total), 19, '800', '#073c87')}`
+  return `${roundedBox(16, 1144, 330, 75)}
+  ${rect(17, 1145, 328, 36, '#dcecff')}
+  ${rect(236, 1145, 109, 73, '#dcecff')}
+  ${gridLines([16, 126, 236, 346], [1144, 1182, 1219])}
+  ${headerText(71, 1170, '作業料金')}${headerText(181, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(291, 1170, '作業料金＋税')}
+  ${valueText(71, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(181, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(291, 1207, number(totals.workTotal), 'middle', 17, '800', '#073c87')}
+  ${roundedBox(365, 1144, 473, 75)}
+  ${rect(366, 1145, 471, 36, '#dcecff')}
+  ${rect(760, 1145, 77, 73, '#dcecff')}
+  ${gridLines([365, 444, 523, 602, 681, 760, 838], [1144, 1182, 1219])}
+  ${headerText(404.5, 1170, '自賠責')}${headerText(483.5, 1170, '重量税')}${headerText(562.5, 1170, '印紙代')}${headerText(641.5, 1170, otherFeeLabel)}${headerText(720.5, 1170, '調整額')}${headerText(799, 1170, '諸費用計')}
+  ${valueText(404.5, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 13)}${valueText(483.5, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 13)}${valueText(562.5, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 13)}${valueText(641.5, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 13)}${valueText(720.5, 1207, statementValue(number(document.adjustment), hideEditableValues), 'middle', 13)}${valueText(799, 1207, number(totals.feesTotal), 'middle', 14, '800', '#073c87')}
+  ${roundedBox(862, 1144, 220, 75, '#fff7b0')}
+  ${line(862, 1182, 1082, 1182)}
+  ${headerText(972, 1170, '作業料金＋税＋諸費用計')}
+  ${centerText(972, 1209, number(totals.total), 18, '800', '#073c87')}`
 }
 
 function bankBox(settings: AppSettings, details: MaintenanceDocument['details'], hideEditableValues: boolean) {

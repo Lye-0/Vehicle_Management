@@ -3,8 +3,8 @@ import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import type {
   MaintenanceDocument,
   MaintenanceDocumentDetails,
+  MaintenanceFeeKey,
   MaintenanceLineItem,
-  MandatoryFees,
 } from '../lib/maintenanceApi'
 import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/maintenanceStatement'
 
@@ -20,7 +20,7 @@ type Props = {
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
   onUpdateItem: (itemId: string, field: MaintenanceStatementItemField, value: string) => void
   onRemoveItem: (itemId: string) => void
-  onUpdateFee: (key: keyof MandatoryFees, value: string) => void
+  onUpdateFee: (key: MaintenanceFeeKey, value: string) => void
   onAddItem: () => void
 }
 
@@ -39,6 +39,13 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
 
   function updateVehicle(field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>, value: string | boolean) {
     updateDetails({ vehicleOverride: { ...vehicle, [field]: value } })
+  }
+
+  const bankValue = [bankName, bankAccount].filter(Boolean).join('　')
+
+  function updateBankValue(value: string) {
+    const [nextBankName = '', ...accountParts] = value.split('　')
+    updateDetails({ bankName: nextBankName, bankAccount: accountParts.join('　') })
   }
 
   return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
@@ -64,13 +71,13 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
 
     {document.items.slice(0, 18).map((item, index) => <LineEditor key={item.id} item={item} index={index} itemPresets={itemPresets} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />)}
 
-    <StatementNumberControl ariaLabel="自賠責" value={document.fees.自賠責} x={385} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('自賠責', String(value))} />
-    <StatementNumberControl ariaLabel="重量税" value={document.fees.重量税} x={472} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
-    <StatementNumberControl ariaLabel="印紙代" value={document.fees.印紙代} x={559} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
-    <StatementNumberControl ariaLabel="その他費用" value={document.fees.リサイクル料金} x={646} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
+    <StatementNumberControl ariaLabel="自賠責" value={document.fees.自賠責} x={365} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('自賠責', String(value))} />
+    <StatementNumberControl ariaLabel="重量税" value={document.fees.重量税} x={444} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
+    <StatementNumberControl ariaLabel="印紙代" value={document.fees.印紙代} x={523} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
+    <StatementNumberControl ariaLabel="その他費用" value={document.fees.リサイクル料金} x={602} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
+    <StatementNumberControl ariaLabel="調整額" value={document.adjustment} x={681} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
 
-    <StatementTextControl ariaLabel="振込先銀行名" value={bankName} x={50} y={1284} width={260} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankName: value })} />
-    <StatementTextControl ariaLabel="振込先口座番号" value={bankAccount} x={310} y={1284} width={205} height={64} className="is-bank-value" onChange={(value) => updateDetails({ bankAccount: value })} />
+    <StatementTextControl ariaLabel="振込先" value={bankValue} x={50} y={1284} width={465} height={64} className="is-bank-value" onChange={updateBankValue} />
   </div>
 }
 

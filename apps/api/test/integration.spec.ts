@@ -241,7 +241,7 @@ describe("CLI authenticated workflow", () => {
 			maintenanceDocumentId = stringValue(maintenanceDocument.id);
 			const maintenanceNumber = stringValue(maintenanceDocument.number);
 			expect(maintenanceNumber).toMatch(/^M-\d{4}-\d{5}$/);
-			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
+			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 300, total: 14700, status: "入金待ち" }));
 			expect(objectValue(maintenanceDocument.details).customerOverride).toBeNull();
 			expect(objectValue(maintenanceDocument.details).vehicleOverride).toBeNull();
 			expect(objectValue(maintenanceDocument.details)).toEqual(expect.objectContaining({ bankName: `${marker}銀行`, bankAccount: "7654321" }));

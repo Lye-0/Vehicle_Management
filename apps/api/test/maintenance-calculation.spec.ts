@@ -49,4 +49,12 @@ describe('maintenance document calculation', () => {
 
     expect(totals).toEqual({ subtotal: 1_500, tax: 150, total: 1_650 })
   })
+
+  it('treats the adjustment as a non-taxable fee', () => {
+    const totals = calculateMaintenanceTotals([
+      item('整備作業', 1, '式', 10_000, 0),
+    ], { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }, -3_000, 10, '切り捨て')
+
+    expect(totals).toEqual({ subtotal: 10_000, tax: 1_000, total: 8_000 })
+  })
 })
