@@ -51,9 +51,9 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
   return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
     <button className="maintenance-statement-add" type="button" aria-label="作業内容・部品明細を追加" style={controlStyle(942, 516, 132, 28)} disabled={document.items.length >= 18} onClick={onAddItem}><Plus size={12} aria-hidden="true" />明細を追加</button>
 
-    <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
-    <StatementTextControl ariaLabel="担当" value={details.staffName} x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
-    <StatementTextControl ariaLabel="請求番号" value={document.number} x={847} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('number', value)} />
+    <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} className="is-document-number" x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
+    <StatementTextControl ariaLabel="担当" value={details.staffName} className="is-document-number" x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
+    <StatementTextControl ariaLabel="請求番号" value={document.number} className="is-document-number" x={847} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('number', value)} />
 
     <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
     <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
@@ -103,7 +103,7 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
 function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { item: MaintenanceLineItem; index: number; itemPresets: string[]; onUpdateItem: Props['onUpdateItem']; onRemoveItem: Props['onRemoveItem'] }) {
   const y = 587 + index * 28
   return <>
-    <StatementNameCombobox value={item.description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
+    <StatementNameCombobox value={item.description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y - 6} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={item.quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
     <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={item.unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={item.unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />

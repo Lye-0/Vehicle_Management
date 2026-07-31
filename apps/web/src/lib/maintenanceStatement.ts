@@ -184,7 +184,7 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
   ${rect(336, 1145, 521, 36, '#dcecff')}
   ${rect(770, 1145, 87, 73, '#dcecff')}
   ${gridLines([335, 422, 509, 596, 683, 770, 858], [1144, 1182, 1219])}
-  ${headerText(378.5, 1170, '自賠責')}${headerText(465.5, 1170, '重量税')}${headerText(552.5, 1170, '印紙代')}${headerText(639.5, 1170, otherFeeLabel)}${headerText(726.5, 1170, '調整額')}${headerText(814, 1170, '諸費用計')}
+  ${headerText(378.5, 1170, '自賠責')}${headerText(465.5, 1170, '重量税')}${headerText(552.5, 1170, '印紙代')}${headerText(639.5, 1170, otherFeeLabel)}${headerText(726.5, 1170, '端数値引')}${headerText(814, 1170, '諸費用計')}
   ${valueText(378.5, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 13)}${valueText(465.5, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 13)}${valueText(552.5, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 13)}${valueText(639.5, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 13)}${valueText(726.5, 1207, statementValue(number(document.adjustment), hideEditableValues), 'middle', 13)}${valueText(814, 1207, number(totals.feesTotal), 'middle', 14, '800', '#073c87')}
   ${roundedBox(882, 1144, 200, 75, '#fff7b0')}
   ${line(882, 1182, 1082, 1182)}
