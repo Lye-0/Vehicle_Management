@@ -569,7 +569,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
 function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocument; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
   const left = hasImage
     ? { name: [84, 124, 230, 35], postalCode: [40, 169, 310, 27], address: [40, 201, 310, 27], phone: [40, 237, 310, 28] }
-    : { name: [84, 121, 230, 35], postalCode: [40, 166, 325, 26], address: [40, 198, 325, 26], phone: [40, 230, 325, 26] }
+    : { name: [84, 121, 230, 35], postalCode: [40, 163, 325, 26], address: [40, 193, 325, 26], phone: [40, 224, 325, 26] }
   return <>
     <SheetTextControl ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SheetTextControl ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
@@ -693,7 +693,7 @@ function SheetLineControl({ position, label, amount, exists, candidates, onChang
     height: `${position.height / 14.91}%`,
     '--sheet-label-width': `${position.labelWidth / position.width * 100}%`,
   } as CSSProperties
-  return <div className="sales-estimate-sheet-line-control" style={style}>
+  return <div className={`sales-estimate-sheet-line-control${position.bucket === 'accessories' ? ' is-accessory-line' : ''}`} style={style}>
     {position.fixedLabel
       ? <span className="sales-sheet-fixed-label">{position.fixedLabel}</span>
       : <SheetNameCombobox value={label} candidates={candidates} menuUp={position.menuUp} onCommit={(value) => onChange({ label: value })} />}

@@ -15,8 +15,13 @@ export type SalesEstimateSheetOptions = {
 }
 
 const UPPER_COMPRESSION = 24
+const META_TABLE_Y = 13
 const META_ROW_HEIGHT = 24
 const META_TABLE_HEIGHT = META_ROW_HEIGHT * 5
+const TOP_BLOCK_GAP = 12
+const AMOUNT_PANEL_HEIGHT = 318
+const REQUIRED_BLOCK_HEIGHT = 162
+const REQUIRED_NOTE_GAP = 9
 const FEE_CATEGORY_WIDTH = 36
 const FEE_DETAIL_WIDTH = 299
 const FEE_DETAIL_LABEL_WIDTH = 182
@@ -30,6 +35,10 @@ const ACCESSORY_AMOUNT_WIDTH = 114
 const ACCESSORY_ROW_HEIGHT = 34
 const ACCESSORY_ROW_COUNT = 14
 const ACCESSORY_TOTAL_HEIGHT = 48
+const VEHICLE_SECTION_HEADER_HEIGHT = 39
+const VEHICLE_PRICE_HEIGHT = 267
+const VEHICLE_TAX_HEIGHT = 144
+const VEHICLE_PAYMENT_HEIGHT = 95
 
 const feeGroupDefinitions = [
   { bucket: 'legalNonTaxable' as const, title: '税金／保険料（非課税）', rows: 5 },
@@ -39,6 +48,9 @@ const feeGroupDefinitions = [
 
 function createSalesEstimateSheetLayout() {
   const lowerY = 742 - UPPER_COMPRESSION
+  const amountPanelY = META_TABLE_Y + META_TABLE_HEIGHT + TOP_BLOCK_GAP
+  const requiredY = amountPanelY + AMOUNT_PANEL_HEIGHT + TOP_BLOCK_GAP
+  const noteY = requiredY + REQUIRED_BLOCK_HEIGHT + REQUIRED_NOTE_GAP
   const feeX = 363
   const feeDetailX = feeX + FEE_CATEGORY_WIDTH
   const feeBodyY = lowerY + 39
@@ -52,10 +64,16 @@ function createSalesEstimateSheetLayout() {
   })
   const feeTotalY = cursor
   const feeBottomY = feeTotalY + FEE_TOTAL_HEIGHT
+  const vehicleTopY = lowerY + VEHICLE_SECTION_HEADER_HEIGHT
+  const vehiclePaymentY = feeBottomY - VEHICLE_PAYMENT_HEIGHT
+  const vehicleSubBlockGap = (vehiclePaymentY - (vehicleTopY + VEHICLE_PRICE_HEIGHT) - VEHICLE_TAX_HEIGHT) / 2
   return {
     upperCompression: UPPER_COMPRESSION,
+    metaTableY: META_TABLE_Y,
     metaRowHeight: META_ROW_HEIGHT,
     metaTableHeight: META_TABLE_HEIGHT,
+    amountPanelY,
+    amountPanelHeight: AMOUNT_PANEL_HEIGHT,
     imageCustomerHeight: 178,
     expandedCustomerHeight: 155,
     imageVehicleY: 290,
@@ -63,13 +81,19 @@ function createSalesEstimateSheetLayout() {
     imageTradeInY: 533,
     expandedTradeInY: 519,
     taxCaptionY: 668,
-    requiredY: 477,
-    noteY: 646,
+    requiredY,
+    requiredHeight: REQUIRED_BLOCK_HEIGHT,
+    noteY,
     lowerY,
     vehicle: {
       x: 23,
       width: 324,
-      paymentY: feeBottomY - 95,
+      topY: vehicleTopY,
+      topHeight: VEHICLE_PRICE_HEIGHT,
+      taxY: vehicleTopY + VEHICLE_PRICE_HEIGHT + vehicleSubBlockGap,
+      taxHeight: VEHICLE_TAX_HEIGHT,
+      subBlockGap: vehicleSubBlockGap,
+      paymentY: vehiclePaymentY,
       bottomY: feeBottomY,
     },
     fee: {
@@ -170,9 +194,9 @@ function sheetTitle(document: SalesDocument) {
   return `
   <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">${escapeXml(title)}</text>
   <line x1="27" y1="86" x2="${lineEnd}" y2="86" stroke="${BLUE}" stroke-width="5"/>
-  <rect x="731" y="13" width="306" height="${salesEstimateSheetLayout.metaTableHeight}" rx="4" class="box"/>
+  <rect x="731" y="${salesEstimateSheetLayout.metaTableY}" width="306" height="${salesEstimateSheetLayout.metaTableHeight}" rx="4" class="box"/>
   ${rows.map(([label, value], index) => {
-    const y = 13 + index * salesEstimateSheetLayout.metaRowHeight
+    const y = salesEstimateSheetLayout.metaTableY + index * salesEstimateSheetLayout.metaRowHeight
     return `${index ? `<line x1="731" y1="${y}" x2="1037" y2="${y}" class="line"/>` : ''}
       <line x1="844" y1="${y}" x2="844" y2="${y + salesEstimateSheetLayout.metaRowHeight}" class="line"/>
       ${text(744, y + 17, label, 'label', 13)}
@@ -209,9 +233,9 @@ function expandedCustomerBlock(document: SalesDocument) {
   <circle cx="58" cy="139" r="19" fill="${BLUE}"/>
   <circle cx="58" cy="133" r="7" fill="#fff"/><path d="M46 153c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
   ${text(90, 147, `${customer.name || document.customerName || '未設定'} ${details.customerHonorific || '様'}`, 'blue heavy', 24)}
-  ${text(44, 184, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
-  ${text(44, 216, customer.address || '住所未登録', 'body')}
-  ${text(44, 246, `TEL：${customer.phone || document.phone || '未登録'}`, 'body')}
+  ${text(44, 181, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
+  ${text(44, 211, customer.address || '住所未登録', 'body')}
+  ${text(44, 240, `TEL：${customer.phone || document.phone || '未登録'}`, 'body')}
   ${rows.map(([label, value], index) => {
     const rowHeight = salesEstimateSheetLayout.expandedCustomerHeight / rows.length
     const y = 103 + index * rowHeight
@@ -224,18 +248,19 @@ function expandedCustomerBlock(document: SalesDocument) {
 }
 
 function amountPanel(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
+  const y = salesEstimateSheetLayout.amountPanelY
   return `
-  <rect x="707" y="157" width="330" height="318" rx="5" class="box"/>
-  <path d="M712 157h320a5 5 0 015 5v45H707v-45a5 5 0 015-5z" class="section"/>
-  ${text(872, 191, salesDocumentAmountTitle(document.type), 'sectionText', 20, 'middle')}
-  ${text(872, 260, formatYen(totals.total), 'blue heavy amount', 46, 'middle')}
-  <line x1="712" y1="284" x2="1032" y2="284" class="line"/>
-  ${amountLine(722, 310, `課税対象額（${formatPercent(document.taxRate)}）`, totals.taxableSubtotal)}
-  ${amountLine(722, 343, `消費税（${formatPercent(document.taxRate)}）`, totals.tax)}
-  ${amountLine(722, 376, '非課税対象額', totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}
-  <line x1="718" y1="393" x2="1026" y2="393" stroke="${LINE}" stroke-dasharray="2 2"/>
-  ${text(722, 426, `支払期限：${formatJapaneseDate(document.dueDate)}`, 'body')}
-  ${text(722, 458, `状態：${document.status}`, 'body')}`
+  <rect x="707" y="${y}" width="330" height="${salesEstimateSheetLayout.amountPanelHeight}" rx="5" class="box"/>
+  <path d="M712 ${y}h320a5 5 0 015 5v45H707v-45a5 5 0 015-5z" class="section"/>
+  ${text(872, y + 34, salesDocumentAmountTitle(document.type), 'sectionText', 20, 'middle')}
+  ${text(872, y + 103, formatYen(totals.total), 'blue heavy amount', 46, 'middle')}
+  <line x1="712" y1="${y + 127}" x2="1032" y2="${y + 127}" class="line"/>
+  ${amountLine(722, y + 153, `課税対象額（${formatPercent(document.taxRate)}）`, totals.taxableSubtotal)}
+  ${amountLine(722, y + 186, `消費税（${formatPercent(document.taxRate)}）`, totals.tax)}
+  ${amountLine(722, y + 219, '非課税対象額', totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}
+  <line x1="718" y1="${y + 236}" x2="1026" y2="${y + 236}" stroke="${LINE}" stroke-dasharray="2 2"/>
+  ${text(722, y + 269, `支払期限：${formatJapaneseDate(document.dueDate)}`, 'body')}
+  ${text(722, y + 301, `状態：${document.status}`, 'body')}`
 }
 
 function amountLine(x: number, y: number, label: string, amount: number) {
@@ -275,7 +300,7 @@ function taxCaption(document: SalesDocument, totals: ReturnType<typeof calculate
 function requiredBlock(rows: ReadonlyArray<readonly [string, boolean]>) {
   const y = salesEstimateSheetLayout.requiredY
   return `
-  <rect x="707" y="${y}" width="330" height="162" rx="5" class="box"/>
+  <rect x="707" y="${y}" width="330" height="${salesEstimateSheetLayout.requiredHeight}" rx="5" class="box"/>
   ${text(722, y + 31, '必要書類', 'blue bold', 20)}
   <line x1="707" y1="${y + 39}" x2="1037" y2="${y + 39}" class="line"/>
   ${rows.map(([label, checked], index) => {
@@ -296,12 +321,9 @@ function noteBlock(note: string) {
 }
 
 function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof buildSalesEstimateSections>, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
-  const { x, width: w, paymentY, bottomY } = salesEstimateSheetLayout.vehicle
+  const { x, width: w, topY, topHeight, taxY, paymentY, bottomY } = salesEstimateSheetLayout.vehicle
   const y = salesEstimateSheetLayout.lowerY
   const rowH = 35
-  const topY = y + 39
-  const topHeight = 267
-  const taxY = y + 316
   const rows = [
     ['車両本体価格', totals.vehicleBasePrice, ''],
     ['値引等', totals.discount, 'discount'],
@@ -361,7 +383,7 @@ function feeCard(
   const groups = layout.groups.map((group) => {
     const rows = fillRows(rowsByBucket[group.bucket], group.rows)
     const category = `<rect x="${layout.x}" y="${group.startY}" width="${layout.categoryWidth}" height="${group.endY - group.startY}" fill="#fff" stroke="${LINE}"/>
-      ${verticalText(layout.x + layout.categoryWidth / 2, group.startY + (group.endY - group.startY) / 2, group.title, 'label bold', 12)}`
+      ${verticalText(layout.x + layout.categoryWidth / 2, group.startY + (group.endY - group.startY) / 2, group.title, 'label bold', 13)}`
     const detailRows = rows.map((line, index) => valueRow(layout.detailX, group.startY + index * FEE_ROW_HEIGHT, layout.detailWidth, line.label, line.amount, FEE_ROW_HEIGHT, '')).join('')
     const subtotal = valueRow(layout.detailX, group.subtotalY, layout.detailWidth, '小計', totalsByBucket[group.bucket], FEE_SUBTOTAL_HEIGHT, 'bold pale')
     return category + detailRows + subtotal
@@ -463,7 +485,10 @@ function text(x: number, y: number, value: string, className = '', size?: number
 }
 
 function verticalText(x: number, y: number, value: string, className = '', size = 12) {
-  return `<text x="${x}" y="${y}" class="${className}" font-size="${size}" text-anchor="middle" dominant-baseline="middle" writing-mode="tb">${escapeXml(value)}</text>`
+  const characters = Array.from(value)
+  const lineHeight = size * 1.05
+  const firstY = y - ((characters.length - 1) * lineHeight) / 2
+  return characters.map((character, index) => `<text x="${x}" y="${firstY + index * lineHeight}" class="${className}" font-size="${size}" text-anchor="middle" dominant-baseline="middle">${escapeXml(character)}</text>`).join('')
 }
 
 function formatYen(amount: number) {
