@@ -196,7 +196,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
     <style>
       text{font-family:"Noto Sans JP","Yu Gothic","Meiryo",sans-serif;fill:#101820}
       .blue{fill:${BLUE}} .white{fill:#fff}.muted{fill:#334a6c}.bold{font-weight:700}.heavy{font-weight:800}
-      .label{fill:${BLUE};font-weight:700}.small{font-size:13px}.body{font-size:16px}.value{font-size:17px}
+      .label{fill:${BLUE};font-weight:700}.small{font-size:13px}.body{font-size:16px}.customerBody{font-size:13px}.customerValue{font-size:11px}.value{font-size:17px}
       .amount{font-variant-numeric:tabular-nums}.line{stroke:${LINE};stroke-width:1}.box{fill:#fff;stroke:${LINE};stroke-width:1.3}
       .section{fill:url(#sectionGradient)}.sectionText{fill:#fff;font-size:20px;font-weight:700;letter-spacing:2px}
     </style>
@@ -258,10 +258,10 @@ function imageCustomerBlock(document: SalesDocument, imageHref: string) {
   <rect x="${x}" y="${y}" width="${salesEstimateSheetLayout.customer.imageWidth}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5" class="box"/>
   <circle cx="57" cy="${y + 36}" r="19" fill="${BLUE}"/>
   <circle cx="57" cy="${y + 30}" r="7" fill="#fff"/><path d="M45 ${y + 50}c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
-  ${text(89, y + 43, `${customer.name || document.customerName || '未設定'} ${document.details.customerHonorific || '様'}`, 'blue heavy', 24)}
-  ${text(43, y + 82, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
-  ${text(43, y + 114, customer.address || '住所未登録', 'body')}
-  ${text(43, y + 151, `TEL：${customer.phone || document.phone || '未登録'}`, 'body')}
+  ${text(89, y + 43, `${customer.name || document.customerName || '未設定'} ${document.details.customerHonorific || '様'}`, 'blue heavy', 20)}
+  ${text(43, y + 82, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
+  ${text(43, y + 114, customer.address || '住所未登録', 'customerBody')}
+  ${text(43, y + 151, `TEL：${customer.phone || document.phone || '未登録'}`, 'customerBody')}
   <rect x="${imageX}" y="${y}" width="${imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5" fill="#f2f4f7" stroke="${LINE}" stroke-width="1"/>
   <image href="${escapeAttribute(imageHref)}" x="${imageX}" y="${y}" width="${imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" preserveAspectRatio="xMidYMid slice" clip-path="url(#vehiclePhotoClip)"/>`
 }
@@ -291,17 +291,17 @@ function expandedCustomerBlock(document: SalesDocument) {
   <line x1="${rightValueX}" y1="${y}" x2="${rightValueX}" y2="${y + height}" class="line"/>
   <line x1="${x}" y1="${y + height / 2}" x2="${leftContentEnd}" y2="${y + height / 2}" class="line"/>
   ${rows.map((_, index) => index ? `<line x1="${rightLabelX}" y1="${y + index * rightRowHeight}" x2="${x + width}" y2="${y + index * rightRowHeight}" class="line"/>` : '').join('')}
-  ${text(x + leftLabelWidth / 2, y + height / 4 + 5, 'お名前', 'label', 14, 'middle')}
-  ${text(x + leftLabelWidth / 2, y + height * 3 / 4 + 5, 'ご住所', 'label', 14, 'middle')}
-  ${text(x + 121, y + 37, `${customer.name || document.customerName || '未設定'} ${details.customerHonorific || '様'}`, 'blue heavy', 22)}
+  ${text(x + leftLabelWidth / 2, y + height / 4 + 5, 'お名前', 'label', 13, 'middle')}
+  ${text(x + leftLabelWidth / 2, y + height * 3 / 4 + 5, 'ご住所', 'label', 13, 'middle')}
+  ${text(x + 121, y + 37, `${customer.name || document.customerName || '未設定'} ${details.customerHonorific || '様'}`, 'blue heavy', 18)}
   ${text(x + 121, y + 60, customer.kana || 'ふりがな未登録', 'muted', 11)}
-  ${text(x + 121, y + 115, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
-  ${text(x + 121, y + 143, customer.address || '住所未登録', 'body')}
+  ${text(x + 121, y + 115, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
+  ${text(x + 121, y + 143, customer.address || '住所未登録', 'customerBody')}
   ${rows.map(([label, value], index) => {
     const rowY = y + index * rightRowHeight
     return `<rect x="${rightLabelX + 1}" y="${rowY + 1}" width="${rightLabelWidth - 2}" height="${rightRowHeight - 2}" fill="${PALE}"/>
-      ${text(rightLabelX + rightLabelWidth / 2, rowY + rightRowHeight / 2 + 5, label, 'label', 13, 'middle')}
-      ${text(rightValueX + 14, rowY + rightRowHeight / 2 + 5, value, '', 13)}`
+      ${text(rightLabelX + rightLabelWidth / 2, rowY + rightRowHeight / 2 + 5, label, 'label', 12, 'middle')}
+      ${text(rightValueX + 14, rowY + rightRowHeight / 2 + 5, value, 'customerValue', 12)}`
   }).join('')}`
 }
 

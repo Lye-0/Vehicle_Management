@@ -530,8 +530,8 @@
 .sales-estimate-sheet-field-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
 .sales-estimate-sheet-field-control.is-centered { text-align: center; }
 .sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
-.sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-size: clamp(16px, 2vw, 22px); font-weight: 800; }
-.sales-estimate-sheet-field-control.is-customer-value { font-size: clamp(11px, 1.5vw, 16px); }
+.sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-size: clamp(13px, 1.6vw, 18px); font-weight: 800; }
+.sales-estimate-sheet-field-control.is-customer-value { font-size: clamp(10px, 1.25vw, 13px); }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
 .sales-estimate-sheet-checkbox input { width: 100%; height: 100%; margin: 0; accent-color: #06377d; cursor: pointer; }

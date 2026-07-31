@@ -570,7 +570,7 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
   const customerLayout = salesEstimateSheetLayout.customer
   const left = hasImage
     ? { name: [84, customerLayout.y + 16, 230, 35], postalCode: [40, customerLayout.y + 61, 310, 27], address: [40, customerLayout.y + 93, 310, 27], phone: [40, customerLayout.y + 129, 310, 28] }
-    : { name: [customerLayout.x + 121, customerLayout.y + 14, 230, 35], postalCode: [customerLayout.x + 121, customerLayout.y + 89, 230, 26], address: [customerLayout.x + 121, customerLayout.y + 117, 230, 26] }
+    : { name: [customerLayout.x + 116, customerLayout.y + 14, 235, 35], postalCode: [customerLayout.x + 116, customerLayout.y + 86, 235, 31], address: [customerLayout.x + 116, customerLayout.y + 114, 235, 31] }
   return <>
     <SheetTextControl variant="customer-name" ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SheetTextControl variant="customer-value" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
@@ -665,7 +665,7 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
 
 function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, variant, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; variant?: 'customer-name' | 'customer-value'; onChange: (value: string) => void }) {
   const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}${variant ? ` is-${variant}` : ''}`
-  const props = { className, 'aria-label': ariaLabel, value, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value) }
+  const props = { className, 'aria-label': ariaLabel, spellCheck: false, value, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value) }
   return multiline ? <textarea {...props} /> : <input {...props} />
 }
 
