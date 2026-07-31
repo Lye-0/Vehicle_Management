@@ -572,7 +572,8 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
     ? { name: [84, customerLayout.y + 16, 230, 35], postalCode: [38, customerLayout.y + 61, 312, 27], address: [38, customerLayout.y + 93, 312, 27], phone: [38, customerLayout.y + 129, 312, 28] }
     : { name: [customerLayout.x + 116, customerLayout.y + 14, 235, 35], postalCode: [customerLayout.x + 116, customerLayout.y + 86, 235, 31], address: [customerLayout.x + 116, customerLayout.y + 114, 235, 31] }
   return <>
-    <SheetTextControl variant="customer-name" displaySuffix=" 様" ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
+    <SheetTextControl variant="customer-name" ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
+    <SalesSheetCustomerHonorific hasImage={hasImage} value={document.details.customerHonorific || '様'} y={left.name[1]} height={left.name[3]} />
     <SheetTextControl variant="customer-value" displayPrefix="〒" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
     <SheetTextControl variant="customer-value" ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
     {hasImage && left.phone ? <SheetTextControl variant="customer-value" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
@@ -583,6 +584,12 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
       <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
+}
+
+function SalesSheetCustomerHonorific({ hasImage, value, y, height }: { hasImage: boolean; value: string; y: number; height: number }) {
+  const customerLayout = salesEstimateSheetLayout.customer
+  const rightEdge = hasImage ? customerLayout.x + customerLayout.imageWidth - 18 : customerLayout.x + 353 - 16
+  return <span className="sales-estimate-sheet-customer-honorific" style={sheetPositionStyle(rightEdge - 60, y, 60, height)}>{value}</span>
 }
 
 function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: boolean; vehicle: NonNullable<SalesDocumentDetails['vehicleOverride']>; onUpdate: (field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) => void }) {
@@ -663,13 +670,12 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
   />
 }
 
-function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, variant, displayPrefix = '', displaySuffix = '', onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; displaySuffix?: string; onChange: (value: string) => void }) {
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, variant, displayPrefix = '', onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; onChange: (value: string) => void }) {
   const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}${variant ? ` is-${variant}` : ''}`
-  const displayValue = value ? `${displayPrefix}${value}${displaySuffix}` : value
+  const displayValue = value ? `${displayPrefix}${value}` : value
   function handleChange(nextValue: string) {
     const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
-    const withoutSuffix = displaySuffix && withoutPrefix.endsWith(displaySuffix) ? withoutPrefix.slice(0, -displaySuffix.length) : withoutPrefix
-    onChange(withoutSuffix)
+    onChange(withoutPrefix)
   }
   const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value) }
   return multiline ? <textarea {...props} /> : <input {...props} />

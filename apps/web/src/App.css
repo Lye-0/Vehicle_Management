@@ -532,6 +532,7 @@
 .sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
 .sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; }
 .sales-estimate-sheet-field-control.is-customer-value { font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(8px, 1.232cqw, 13px); }
+.sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
 .sales-estimate-sheet-checkbox input { width: 100%; height: 100%; margin: 0; accent-color: #06377d; cursor: pointer; }

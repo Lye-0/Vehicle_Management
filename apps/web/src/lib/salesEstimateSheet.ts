@@ -258,7 +258,8 @@ function imageCustomerBlock(document: SalesDocument, imageHref: string) {
   <rect x="${x}" y="${y}" width="${salesEstimateSheetLayout.customer.imageWidth}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5" class="box"/>
   <circle cx="57" cy="${y + 36}" r="19" fill="${BLUE}"/>
   <circle cx="57" cy="${y + 30}" r="7" fill="#fff"/><path d="M45 ${y + 50}c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
-  ${text(89, y + 43, `${customer.name || document.customerName || '未設定'} ${document.details.customerHonorific || '様'}`, 'blue heavy', 20)}
+  ${text(89, y + 43, customer.name || document.customerName || '未設定', 'blue heavy', 20)}
+  ${text(x + salesEstimateSheetLayout.customer.imageWidth - 18, y + 43, document.details.customerHonorific || '様', 'blue heavy', 20, 'end')}
   ${text(43, y + 82, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
   ${text(43, y + 114, customer.address || '住所未登録', 'customerBody')}
   ${text(43, y + 151, `TEL：${customer.phone || document.phone || '未登録'}`, 'customerBody')}
@@ -293,7 +294,8 @@ function expandedCustomerBlock(document: SalesDocument) {
   ${rows.map((_, index) => index ? `<line x1="${rightLabelX}" y1="${y + index * rightRowHeight}" x2="${x + width}" y2="${y + index * rightRowHeight}" class="line"/>` : '').join('')}
   ${text(x + leftLabelWidth / 2, y + height / 4 + 5, 'お名前', 'label', 13, 'middle')}
   ${text(x + leftLabelWidth / 2, y + height * 3 / 4 + 5, 'ご住所', 'label', 13, 'middle')}
-  ${text(x + 121, y + 37, `${customer.name || document.customerName || '未設定'} ${details.customerHonorific || '様'}`, 'blue heavy', 18)}
+  ${text(x + 121, y + 37, customer.name || document.customerName || '未設定', 'blue heavy', 18)}
+  ${text(leftContentEnd - 16, y + 37, details.customerHonorific || '様', 'blue heavy', 18, 'end')}
   ${text(x + 121, y + 60, customer.kana || 'ふりがな未登録', 'muted', 11)}
   ${text(x + 121, y + 115, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
   ${text(x + 121, y + 143, customer.address || '住所未登録', 'customerBody')}
