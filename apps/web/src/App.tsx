@@ -55,7 +55,7 @@ const pageMeta: Record<SectionId, PageMeta> = {
   dashboard: { title: 'ダッシュボード', description: '店舗の状況をひと目で確認できます。', actionLabel: 'クイック操作', icon: LayoutDashboard },
   customers: { title: '顧客・車両', description: '顧客情報と、顧客に紐づく複数の車両を管理します。', actionLabel: '顧客を登録', icon: CarFront },
   sales: { title: '販売', description: '見積書・請求書を車両情報と連動して管理します。', actionLabel: '販売書類を作成', icon: FileText },
-  maintenance: { title: '車検・点検・一般', description: '整備の受付から作業明細、納品書・請求書まで管理します。', actionLabel: '整備書類を作成', icon: ClipboardCheck },
+  maintenance: { title: '車検・点検・一般', description: '整備の受付から作業明細、見積書・請求書まで管理します。', actionLabel: '整備書類を作成', icon: ClipboardCheck },
   inspections: { title: '点検予定', description: '車検・定期点検の予定と完了状態を管理します。', actionLabel: '点検予定を登録', icon: CalendarClock },
   payments: { title: '入金管理', description: '請求に対する入金状況を確認し、未入金を管理します。', actionLabel: '入金を登録', icon: CircleDollarSign },
   settings: { title: '設定', description: '帳票、税金・保険料、作業項目などの共通設定を管理します。', actionLabel: '設定を追加', icon: Settings },

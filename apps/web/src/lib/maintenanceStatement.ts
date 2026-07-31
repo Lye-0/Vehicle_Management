@@ -230,7 +230,6 @@ const emptyVehicle: NonNullable<MaintenanceDocument['vehicleDetails']> = {
 
 function defaultDocumentTitle(type: MaintenanceDocument['type']) {
   if (type === '整備見積書') return '見積書'
-  if (type === '納品書') return '納品書'
   return '請求書'
 }
 

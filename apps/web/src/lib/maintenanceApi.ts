@@ -1,8 +1,8 @@
 import { apiFetch } from './api'
 
-export type MaintenanceDocumentType = '整備見積書' | '納品書' | '整備請求書'
+export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
 export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金待ち' | '下書き' | 'アーカイブ済み'
-export type IntakeCategory = '車検' | '法定点検' | '一般整備'
+export type IntakeCategory = '車検' | '板金' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
 export type MaintenanceFeeKey = keyof MandatoryFees | '調整額'
@@ -96,7 +96,7 @@ export type MaintenanceDocumentInput = {
   items: Array<Omit<MaintenanceLineItem, 'id'>>
 }
 
-type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
+type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
 
 export async function fetchMaintenanceDocuments() {
   const response = await apiFetch<{ documents: ApiMaintenanceDocument[] }>('/api/maintenance-documents')
@@ -124,6 +124,8 @@ export async function restoreMaintenanceDocument(id: string) {
 function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDocument {
   return {
     ...document,
+    type: document.type === '納品書' ? '整備請求書' : document.type,
+    category: document.category === '法定点検' ? '板金' : document.category,
     customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeMaintenanceDetails(document.details),

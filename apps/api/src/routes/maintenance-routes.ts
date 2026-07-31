@@ -6,9 +6,9 @@ import { createDatabase } from '../db/client'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
-const maintenanceDocumentTypes = new Set(['整備見積書', '納品書', '整備請求書'])
+const maintenanceDocumentTypes = new Set(['整備見積書', '整備請求書'])
 const maintenanceStatuses = new Set(['受付中', '作業中', '完了', '下書き', '入金待ち', 'アーカイブ済み'])
-const maintenanceCategories = new Set(['車検', '法定点検', '一般整備'])
+const maintenanceCategories = new Set(['車検', '板金', '一般整備'])
 const feeNames = ['自賠責', '重量税', '印紙代', 'リサイクル料金'] as const
 type FeeName = typeof feeNames[number]
 

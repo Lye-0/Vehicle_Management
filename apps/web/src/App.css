@@ -733,7 +733,7 @@
 .maintenance-card-top > svg { margin-left: auto; color: var(--text-muted); }
 .maintenance-category-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-category-車検 { color: #7c3aed; border-color: #ded0ff; background: #f4efff; }
-.maintenance-category-法定点検 { color: var(--primary); border-color: #c3d7fa; background: var(--primary-soft); }
+.maintenance-category-板金 { color: var(--primary); border-color: #c3d7fa; background: var(--primary-soft); }
 .maintenance-category-一般整備 { color: #0f766e; border-color: #bce9df; background: #ecfdf8; }
 .maintenance-status-tag { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-status-normal { color: var(--success); border-color: #ccefd7; background: var(--success-soft); }
