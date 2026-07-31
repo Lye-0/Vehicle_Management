@@ -37,6 +37,8 @@ const AMOUNT_X = 707
 const AMOUNT_PANEL_HEIGHT = 318
 const REQUIRED_BLOCK_HEIGHT = 162
 const REQUIRED_NOTE_GAP = 9
+const LOWER_SECTION_SHIFT = 14
+const CREDIT_TOP_GAP = 29
 const FEE_CATEGORY_WIDTH = 36
 const FEE_DETAIL_WIDTH = 299
 const FEE_DETAIL_LABEL_WIDTH = 182
@@ -62,7 +64,7 @@ const feeGroupDefinitions = [
 ]
 
 function createSalesEstimateSheetLayout() {
-  const lowerY = 742 - UPPER_COMPRESSION
+  const lowerY = 742 - UPPER_COMPRESSION - LOWER_SECTION_SHIFT
   const amountPanelY = META_TABLE_Y + META_TABLE_HEIGHT + TOP_BLOCK_GAP
   const requiredY = amountPanelY + AMOUNT_PANEL_HEIGHT + TOP_BLOCK_GAP
   const noteY = requiredY + REQUIRED_BLOCK_HEIGHT + REQUIRED_NOTE_GAP
@@ -162,7 +164,7 @@ function createSalesEstimateSheetLayout() {
       totalHeight: ACCESSORY_TOTAL_HEIGHT,
       bottomY: feeBottomY,
     },
-    creditY: feeBottomY + 15,
+    creditY: feeBottomY + CREDIT_TOP_GAP,
   }
 }
 
@@ -545,7 +547,7 @@ function verticalText(x: number, y: number, value: string, className = '', size 
   const characters = Array.from(value)
   const lineHeight = size * 1.05
   const firstY = y - ((characters.length - 1) * lineHeight) / 2
-  return characters.map((character, index) => `<text x="${x}" y="${firstY + index * lineHeight}" class="${className}" font-size="${size}" text-anchor="middle" dominant-baseline="middle">${escapeXml(character)}</text>`).join('')
+  return characters.map((character, index) => `<text x="${x}" y="${firstY + index * lineHeight}" class="${className}" font-size="${size}" text-anchor="middle" dominant-baseline="middle" writing-mode="tb" text-orientation="upright">${escapeXml(character)}</text>`).join('')
 }
 
 function formatYen(amount: number) {
