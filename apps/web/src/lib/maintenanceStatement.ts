@@ -74,11 +74,11 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
   ${roundedBox(611, 12, 472, 65)}
   ${gridLines([611, 729, 847, 965, 1083], [12, 43, 77])}
-  ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '請求番号')}${headerText(1024, 34, 'ページ')}
+  ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '書類番号')}${headerText(1024, 34, 'ページ')}
   ${valueText(670, 65, statementValue(dateDot(document.issuedAt), hideEditableValues), 'middle')}
   ${valueText(788, 65, statementValue(document.details.staffName, hideEditableValues), 'middle')}
   ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle')}
-  ${valueText(1024, 65, 'P.1', 'middle')}
+  ${valueText(1024, 65, '1/1', 'middle')}
 
   ${roundedBox(16, 90, 794, 168)}
   ${rect(17, 91, 107, 166, '#dcecff')}${rect(536, 91, 108, 166, '#dcecff')}

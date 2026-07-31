@@ -567,19 +567,20 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
 }
 
 function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocument; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
+  const customerLayout = salesEstimateSheetLayout.customer
   const left = hasImage
-    ? { name: [84, 124, 230, 35], postalCode: [40, 169, 310, 27], address: [40, 201, 310, 27], phone: [40, 237, 310, 28] }
-    : { name: [84, 121, 230, 35], postalCode: [40, 163, 325, 26], address: [40, 193, 325, 26], phone: [40, 224, 325, 26] }
+    ? { name: [84, customerLayout.y + 16, 230, 35], postalCode: [40, customerLayout.y + 61, 310, 27], address: [40, customerLayout.y + 93, 310, 27], phone: [40, customerLayout.y + 129, 310, 28] }
+    : { name: [84, customerLayout.y + 18, 230, 35], postalCode: [40, customerLayout.y + 60, 325, 26], address: [40, customerLayout.y + 90, 325, 26], phone: [40, customerLayout.y + 121, 325, 26] }
   return <>
     <SheetTextControl ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SheetTextControl ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
     <SheetTextControl ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
     <SheetTextControl ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} />
     {!hasImage ? <>
-      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={479} y={104} width={197} height={38.75} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
-      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={479} y={142.75} width={197} height={38.75} onChange={(value) => onUpdateCustomer('phone', value)} />
-      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={479} y={181.5} width={197} height={38.75} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
-      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={479} y={220.25} width={197} height={37.75} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
+      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={478} y={customerLayout.y + 1} width={207} height={41} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
+      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
 }
