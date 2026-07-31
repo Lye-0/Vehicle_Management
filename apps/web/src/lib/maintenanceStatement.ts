@@ -69,7 +69,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
   ${roundedBox(16, 12, 506, 55)}
   ${brandMark(32, 26)}
-  ${brandMark(485, 26)}
+  ${brandMark(485, 26, true)}
   ${centerText(269, 47, documentTitle, 25, '700', '#073c87')}
 
   ${roundedBox(611, 12, 472, 65)}
@@ -80,9 +80,9 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle')}
   ${valueText(1024, 65, 'P.1', 'middle')}
 
-  ${roundedBox(16, 90, 794, 185)}
-  ${rect(17, 91, 107, 183, '#dcecff')}${rect(536, 91, 108, 183, '#dcecff')}
-  ${line(125, 90, 125, 275)}${line(535, 90, 535, 275)}${line(645, 90, 645, 275)}
+  ${roundedBox(16, 90, 794, 168)}
+  ${rect(17, 91, 107, 166, '#dcecff')}${rect(536, 91, 108, 166, '#dcecff')}
+  ${line(125, 90, 125, 257)}${line(535, 90, 535, 257)}${line(645, 90, 645, 257)}
   ${line(16, 174, 810, 174)}${line(535, 132, 810, 132)}${line(535, 216, 810, 216)}
   ${headerText(70, 137, 'お名前')}${headerText(70, 224, 'ご住所')}
   ${valueText(145, 127, statementValue(customer.name, hideEditableValues), 'start', 24)}
@@ -90,11 +90,11 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(504, 143, statementValue(document.details.customerHonorific, hideEditableValues), 'end', 22)}
   ${valueText(145, 205, statementValue(customer.postalCode ? `〒${customer.postalCode}` : '', hideEditableValues), 'start')}
   ${valueText(145, 233, statementValue(customer.address, hideEditableValues), 'start')}
-  ${headerText(590, 119, '生年月日')}${headerText(590, 161, '電話番号')}${headerText(590, 203, '勤務先等')}${headerText(590, 245, '連絡先TEL')}
+  ${headerText(590, 115, '生年月日')}${headerText(590, 157, '電話番号')}${headerText(590, 200, '勤務先等')}${headerText(590, 242, '連絡先TEL')}
   ${valueText(665, 119, statementValue(dateDot(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
-  ${valueText(665, 161, statementValue(customer.phone, hideEditableValues), 'start', 14)}
-  ${valueText(665, 203, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
-  ${valueText(665, 245, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
+  ${valueText(665, 158, statementValue(customer.phone, hideEditableValues), 'start', 14)}
+  ${valueText(665, 200, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
+  ${valueText(665, 242, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
 
   ${roundedBox(832, 90, 250, 255)}
   ${rect(832, 90, 250, 43, 'url(#maintenance-blue)')}
@@ -286,6 +286,18 @@ function centerText(x: number, y: number, value: string, size: number, weight: s
   return valueText(x, y, value, 'middle', size, weight, fill)
 }
 
-function brandMark(x: number, y: number) {
-  return `<g fill="#073c87"><rect x="${x}" y="${y}" width="9" height="9"/><rect x="${x + 9}" y="${y + 9}" width="9" height="9"/><rect x="${x}" y="${y + 18}" width="9" height="9"/></g>`
+function brandMark(x: number, y: number, reversed = false) {
+  if (reversed) {
+    return `<g fill="#073c87">
+      <rect x="${x + 9}" y="${y}" width="9" height="9"/>
+      <rect x="${x}" y="${y + 9}" width="9" height="9"/>
+      <rect x="${x + 9}" y="${y + 18}" width="9" height="9"/>
+    </g>`
+  }
+
+  return `<g fill="#073c87">
+    <rect x="${x}" y="${y}" width="9" height="9"/>
+    <rect x="${x + 9}" y="${y + 9}" width="9" height="9"/>
+    <rect x="${x}" y="${y + 18}" width="9" height="9"/>
+  </g>`
 }

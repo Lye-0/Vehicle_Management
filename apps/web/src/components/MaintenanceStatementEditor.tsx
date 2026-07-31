@@ -51,12 +51,12 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
     <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
     <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
     <StatementTextControl ariaLabel="顧客敬称" value={details.customerHonorific} x={462} y={112} width={54} height={38} centered className="is-large" onChange={(value) => updateDetails({ customerHonorific: value })} />
-    <StatementTextControl ariaLabel="郵便番号" value={customer.postalCode} x={140} y={181} width={200} height={28} onChange={(value) => updateCustomer('postalCode', value)} />
+    <StatementTextControl ariaLabel="郵便番号" value={`〒${customer.postalCode}`} x={140} y={181} width={200} height={28} onChange={(value) => updateCustomer('postalCode', value)} />
     <StatementTextControl ariaLabel="顧客住所" value={customer.address} x={140} y={211} width={370} height={41} onChange={(value) => updateCustomer('address', value)} />
-    <StatementTextControl ariaLabel="生年月日" value={details.customerBirthDate} x={665} y={101} width={135} height={30} onChange={(value) => updateDetails({ customerBirthDate: value })} />
-    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={665} y={143} width={135} height={30} onChange={(value) => updateCustomer('phone', value)} />
-    <StatementTextControl ariaLabel="勤務先等" value={details.customerEmployer} x={665} y={185} width={135} height={30} onChange={(value) => updateDetails({ customerEmployer: value })} />
-    <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={665} y={227} width={135} height={30} onChange={(value) => updateDetails({ customerContactPhone: value })} />
+    <StatementTextControl ariaLabel="生年月日" value={details.customerBirthDate} x={665} y={95} width={135} height={30} onChange={(value) => updateDetails({ customerBirthDate: value })} />
+    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={665} y={137} width={135} height={30} onChange={(value) => updateCustomer('phone', value)} />
+    <StatementTextControl ariaLabel="勤務先等" value={details.customerEmployer} x={665} y={179} width={135} height={30} onChange={(value) => updateDetails({ customerEmployer: value })} />
+    <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={665} y={221} width={135} height={30} onChange={(value) => updateDetails({ customerContactPhone: value })} />
 
     <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
     <StatementTextControl ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
