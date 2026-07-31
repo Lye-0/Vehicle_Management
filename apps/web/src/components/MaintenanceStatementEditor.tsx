@@ -71,11 +71,11 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
 
     {document.items.slice(0, 18).map((item, index) => <LineEditor key={item.id} item={item} index={index} itemPresets={itemPresets} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />)}
 
-    <StatementNumberControl ariaLabel="自賠責" value={document.fees.自賠責} x={365} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('自賠責', String(value))} />
-    <StatementNumberControl ariaLabel="重量税" value={document.fees.重量税} x={444} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
-    <StatementNumberControl ariaLabel="印紙代" value={document.fees.印紙代} x={523} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
-    <StatementNumberControl ariaLabel="その他費用" value={document.fees.リサイクル料金} x={602} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
-    <StatementNumberControl ariaLabel="調整額" value={document.adjustment} x={681} y={1183} width={79} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="自賠責" value={document.fees.自賠責} x={335} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('自賠責', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="重量税" value={document.fees.重量税} x={422} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="印紙代" value={document.fees.印紙代} x={509} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="その他費用" value={document.fees.リサイクル料金} x={596} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="調整額" value={document.adjustment} x={683} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
 
     <StatementTextControl ariaLabel="振込先" value={bankValue} x={50} y={1284} width={465} height={64} className="is-bank-value" onChange={updateBankValue} />
   </div>
@@ -96,7 +96,7 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
     { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <StatementTextControl key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <StatementTextControl key={field} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
   </>
 }
 
@@ -104,11 +104,11 @@ function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { 
   const y = 587 + index * 28
   return <>
     <StatementNameCombobox value={item.description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
-    <StatementNumberControl ariaLabel={`明細${index + 1}の数量`} value={item.quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
-    <StatementTextControl ariaLabel={`明細${index + 1}の単位`} value={item.unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
-    <StatementNumberControl ariaLabel={`明細${index + 1}の部品単価`} value={item.unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
-    <StatementNumberControl ariaLabel={`明細${index + 1}の技術料`} value={item.technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
-    <StatementTextControl className="is-item-text" ariaLabel={`明細${index + 1}の摘要`} value={item.summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={item.quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
+    <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={item.unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={item.unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={item.technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
+    <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={item.summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
     <button className="maintenance-statement-remove" type="button" aria-label={`明細${index + 1}を削除`} style={controlStyle(1085, y + 3, 31, 22)} onClick={() => onRemoveItem(item.id)}><Trash2 size={13} /></button>
   </>
 }
@@ -149,7 +149,7 @@ function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange,
   return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={value} style={controlStyle(x, y, width, height)} onChange={(event) => onChange(event.target.value)} />
 }
 
-function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean }) {
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
   const [draft, setDraft] = useState(String(value))
   const [focused, setFocused] = useState(false)
   useEffect(() => { if (!focused) setDraft(String(value)) }, [focused, value])
@@ -171,7 +171,7 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
   }
 
   const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
 }
 
 const statementNumberFormatter = new Intl.NumberFormat('ja-JP')
