@@ -56,6 +56,13 @@ const VEHICLE_SECTION_HEADER_HEIGHT = 39
 const VEHICLE_PRICE_HEIGHT = 267
 const VEHICLE_TAX_HEIGHT = 144
 const VEHICLE_PAYMENT_HEIGHT = 95
+const FOOTER_X = 23
+const FOOTER_WIDTH = WIDTH - FOOTER_X * 2
+const FOOTER_GAP = 12
+const FOOTER_CREDIT_WIDTH = 350
+const FOOTER_BANK_WIDTH = 270
+const FOOTER_CREDIT_HEIGHT = 96
+const FOOTER_BANK_HEIGHT = 96
 
 const feeGroupDefinitions = [
   { bucket: 'legalNonTaxable' as const, title: '税金／保険料（非課税）', rows: 5 },
@@ -164,6 +171,26 @@ function createSalesEstimateSheetLayout() {
       totalHeight: ACCESSORY_TOTAL_HEIGHT,
       bottomY: feeBottomY,
     },
+    footer: {
+      x: FOOTER_X,
+      width: FOOTER_WIDTH,
+      gap: FOOTER_GAP,
+      credit: {
+        x: FOOTER_X,
+        width: FOOTER_CREDIT_WIDTH,
+        height: FOOTER_CREDIT_HEIGHT,
+      },
+      bank: {
+        x: FOOTER_X + FOOTER_CREDIT_WIDTH + FOOTER_GAP,
+        width: FOOTER_BANK_WIDTH,
+        height: FOOTER_BANK_HEIGHT,
+      },
+      shop: {
+        x: FOOTER_X + FOOTER_CREDIT_WIDTH + FOOTER_GAP + FOOTER_BANK_WIDTH + FOOTER_GAP,
+        width: FOOTER_WIDTH - FOOTER_CREDIT_WIDTH - FOOTER_BANK_WIDTH - FOOTER_GAP * 2,
+        height: FOOTER_BANK_HEIGHT,
+      },
+    },
     creditY: feeBottomY + CREDIT_TOP_GAP,
   }
 }
@@ -216,6 +243,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
   ${feeCard(legalLines, taxableLines, actualLines, totals)}
   ${accessoryCard(accessories, totals.accessoryTotal)}
   ${creditBlock(details.credit)}
+  ${bankBlock(settings)}
   ${shopBlock(settings)}
   </svg>`
 }
@@ -469,6 +497,8 @@ function accessoryCard(rows: Array<{ label: string; amount: number }>, total: nu
 
 function creditBlock(credit: SalesDocument['details']['credit']) {
   const y = salesEstimateSheetLayout.creditY
+  const layout = salesEstimateSheetLayout.footer.credit
+  const columnWidth = layout.width / 4
   const values = [
     credit.paymentCount,
     credit.bonusPayment ? formatYen(credit.bonusPayment) : '',
@@ -476,28 +506,49 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
     credit.bonusMonths,
   ]
   return `
-  <rect x="23" y="${y}" width="475" height="110" rx="5" class="box"/>
-  ${text(48, y + 32, '▣  クレジットお支払いプラン', 'blue bold', 21)}
-  <line x1="23" y1="${y + 44}" x2="498" y2="${y + 44}" class="line"/>
-  ${simpleColumns(23, y + 44, [119, 119, 119, 118], ['回数', 'ボーナス払', '金利', '支払開始月'], 32, true)}
-  ${simpleColumns(23, y + 76, [119, 119, 119, 118], values, 34, false)}`
+  <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
+  ${text(layout.x + 16, y + 26, '▣  クレジットお支払いプラン', 'blue bold', 18)}
+  <line x1="${layout.x}" y1="${y + 36}" x2="${layout.x + layout.width}" y2="${y + 36}" class="line"/>
+  ${simpleColumns(layout.x, y + 36, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true)}
+  ${simpleColumns(layout.x, y + 63, [columnWidth, columnWidth, columnWidth, columnWidth], values, 33, false)}`
+}
+
+function bankBlock(settings: AppSettings) {
+  const y = salesEstimateSheetLayout.creditY
+  const layout = salesEstimateSheetLayout.footer.bank
+  const headerHeight = 30
+  const labelWidth = 83
+  const rowHeight = (layout.height - headerHeight) / 2
+  const valueX = layout.x + labelWidth + 9
+  return `
+  <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
+  <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
+  ${text(layout.x + layout.width / 2, y + 21, 'お振込先', 'white bold', 16, 'middle')}
+  <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
+  <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
+  <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
+  <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 11, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 11, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 11)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 11)}`
 }
 
 function shopBlock(settings: AppSettings) {
   const y = salesEstimateSheetLayout.creditY
+  const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyLeft = hasLogo ? 780 : 733
-  const infoLeft = companyLeft + 20
+  const companyLeft = layout.x + (hasLogo ? 122 : 10)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="544" y="${y + 15}" width="207" height="95" preserveAspectRatio="xMidYMid meet"/>`
-    : text(597, y + 118, '▦', 'blue bold', 113)
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 10}" width="108" height="70" preserveAspectRatio="xMidYMid meet"/>`
+    : ''
   return `
   ${logoMarkup}
-  ${text(companyLeft, y + 35, shop.name || '店舗名未設定', 'blue heavy', 20)}
-  ${text(infoLeft, y + 62, shop.postalCode ? `〒${shop.postalCode}` : '', '', 13)}
-  ${text(infoLeft, y + 84, shop.address, '', 13)}
-  ${text(infoLeft, y + 107, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 13)}`
+  ${text(companyLeft, y + 24, shop.name || '店舗名未設定', 'blue heavy', 16)}
+  ${text(companyLeft, y + 46, shop.postalCode ? `〒${shop.postalCode}` : '', '', 10)}
+  ${text(companyLeft, y + 63, shop.address, '', 10)}
+  ${text(companyLeft, y + 80, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 10)}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
