@@ -1,7 +1,7 @@
 import { apiFetch } from './api'
 
 export type SalesDocumentType = '見積書' | '請求書'
-export type SalesStatus = '下書き' | '発行済み' | '入金待ち' | 'アーカイブ済み'
+export type SalesStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
 export type SalesTaxCategory = '課税' | '非課税' | '対象外'
 
 export type SalesCustomerDetails = {

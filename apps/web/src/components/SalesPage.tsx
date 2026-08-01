@@ -360,7 +360,7 @@ function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTota
       <div className="document-header-editor-title"><div><h3>書類基本情報</h3><span>顧客・車両、日付、状態などの基本情報を入力できます。</span></div></div>
       <div className="form-grid">
         <label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select></label>
-        <label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}><option>下書き</option><option>発行済み</option><option>入金待ち</option></select></label>
+        <label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}><option>下書き</option><option>入金待ち</option><option>完了</option></select></label>
         <label className="form-field"><span>顧客</span><select value={document.customerId} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
         <label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}><option value="">車両を指定しない</option>{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label>
         <label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label>
@@ -869,7 +869,7 @@ function onRemoveLineItemGuard(itemId: string, itemCount: number, onRemove: (ite
 }
 
 function StatusTag({ status }: { status: SalesDocument['status'] }) {
-  const tone = status === '入金待ち' ? 'warning' : status === '発行済み' ? 'normal' : status === 'アーカイブ済み' ? 'danger' : 'draft'
+  const tone = status === '入金待ち' ? 'warning' : status === '完了' ? 'normal' : status === 'アーカイブ済み' ? 'danger' : 'draft'
   return <span className={`sales-status-tag sales-status-${tone}`}><span className="status-dot" />{status}</span>
 }
 
