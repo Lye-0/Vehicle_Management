@@ -1,12 +1,14 @@
 import { apiFetch } from './api'
 
 export type PaymentMethod = '現金' | '銀行振込' | 'クレジットカード' | 'その他' | ''
+export type PaymentDocumentStatus = '入金待ち' | '完了'
 export type PaymentRecord = {
   id: string
   documentType: '販売請求書' | '整備請求書'
   documentId: string
   number: string
   sourceType: '販売請求書' | '整備請求書'
+  documentStatus: PaymentDocumentStatus
   customerName: string
   phone: string
   vehicle: string

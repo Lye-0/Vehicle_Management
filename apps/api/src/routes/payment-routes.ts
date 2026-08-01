@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -7,6 +7,7 @@ import { HttpError, jsonResponse, readJson } from '../http'
 
 const paymentDocumentTypes = new Set(['販売請求書', '整備請求書'])
 const paymentMethods = new Set(['現金', '銀行振込', 'クレジットカード', 'その他'])
+const paymentDocumentStatuses = ['入金待ち', '完了'] as const
 
 export async function handlePaymentRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -34,8 +35,8 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
 
 async function listPayments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [salesRows, maintenanceRows, paymentRows, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt)).all(),
-    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), inArray(salesDocuments.status, paymentDocumentStatuses), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), inArray(maintenanceDocuments.status, paymentDocumentStatuses), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
@@ -72,8 +73,8 @@ async function updatePayment(request: Request, env: Env, database: ReturnType<ty
 }
 
 async function findInvoice(database: ReturnType<typeof createDatabase>, documentType: string, documentId: string, organizationId: string) {
-  if (documentType === '販売請求書') return database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'))).get()
-  return database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'))).get()
+  if (documentType === '販売請求書') return database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), inArray(salesDocuments.status, paymentDocumentStatuses))).get()
+  return database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), inArray(maintenanceDocuments.status, paymentDocumentStatuses))).get()
 }
 
 function serializePayment(documentType: '販売請求書' | '整備請求書', document: InvoiceRow, payment: typeof paymentRecords.$inferSelect | undefined, customersById: Map<string, typeof customers.$inferSelect>, vehiclesById: Map<string, typeof vehicles.$inferSelect>) {
@@ -85,6 +86,7 @@ function serializePayment(documentType: '販売請求書' | '整備請求書', d
     documentId: document.id,
     number: document.number,
     sourceType: documentType,
+    documentStatus: document.status,
     customerName: customer?.name ?? '',
     phone: customer?.phone ?? '',
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
