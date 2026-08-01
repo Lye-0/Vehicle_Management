@@ -518,7 +518,7 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${layout.headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
   ${text(layout.x + 9, y + 22, '▣  クレジットお支払いプラン', 'white bold', 13)}
   <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
-  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 6)}
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 10)}
   ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 9)}`
 }
 
@@ -537,10 +537,10 @@ function bankBlock(settings: AppSettings) {
   <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
   <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
   <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 10, 'middle')}
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 10, 'middle')}
-  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 10)}
-  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 10)}`
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 12, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 12, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 12)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 12)}`
 }
 
 function shopBlock(settings: AppSettings) {
@@ -587,8 +587,9 @@ function simpleColumns(x: number, y: number, widths: number[], values: string[],
   let cursor = x
   return values.map((value, index) => {
     const width = widths[index]
+    const className = heading ? (fontSize === 13 ? 'label small' : 'label') : (fontSize === 13 ? 'small' : '')
     const result = `<rect x="${cursor}" y="${y}" width="${width}" height="${height}" fill="${heading ? PALE : '#fff'}" stroke="${LINE}"/>
-      ${text(cursor + width / 2, y + height / 2 + 6, value, heading ? 'label small' : 'small', fontSize, 'middle')}`
+      ${text(cursor + width / 2, y + height / 2 + 6, value, className, fontSize, 'middle')}`
     cursor += width
     return result
   }).join('')
