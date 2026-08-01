@@ -64,6 +64,13 @@
       "when": 1785344620461,
       "tag": "0008_lucky_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785589971991,
+      "tag": "0009_glossy_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

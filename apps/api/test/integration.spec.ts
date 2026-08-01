@@ -281,6 +281,28 @@ describe("CLI authenticated workflow", () => {
 			});
 			expect(payment.response.status).toBe(200);
 			expect(objectValue(payment.body.record)).toEqual(expect.objectContaining({ paidAmount: 50000, method: "銀行振込" }));
+			const initialPaymentHistory = arrayValue(objectValue(payment.body.record).paymentHistory);
+			expect(initialPaymentHistory).toHaveLength(1);
+			const addedPayment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}/entries`, "POST", {
+				amount: 10000,
+				paymentDate: "2026-07-27",
+				method: "現金",
+				note: `${marker} 追加入金`,
+			});
+			expect(addedPayment.response.status).toBe(201);
+			expect(objectValue(addedPayment.body.record)).toEqual(expect.objectContaining({ paidAmount: 60000 }));
+			const addedPaymentId = stringValue(objectValue(arrayValue(objectValue(addedPayment.body.record).paymentHistory)[0]).id);
+			const editedPayment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}/entries/${addedPaymentId}`, "PATCH", {
+				amount: 15000,
+				paymentDate: "2026-07-27",
+				method: "現金",
+				note: `${marker} 追加入金 更新`,
+			});
+			expect(editedPayment.response.status).toBe(200);
+			expect(objectValue(editedPayment.body.record)).toEqual(expect.objectContaining({ paidAmount: 65000 }));
+			const deletedPayment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}/entries/${addedPaymentId}`, "DELETE");
+			expect(deletedPayment.response.status).toBe(200);
+			expect(objectValue(deletedPayment.body.record)).toEqual(expect.objectContaining({ paidAmount: 50000 }));
 
 			const payments = await requestJson<JsonObject>("/api/payments");
 			expect(payments.response.status).toBe(200);
@@ -557,6 +579,7 @@ async function cleanupTestData(state: { attachmentId?: string; backupId?: string
 	}
 
 	for (const table of [
+		"payment_entries",
 		"payment_records",
 		"sales_document_items",
 		"maintenance_items",

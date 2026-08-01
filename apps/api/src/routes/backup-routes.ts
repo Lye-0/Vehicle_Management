@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, paymentRecords, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -88,7 +88,7 @@ async function deleteBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function loadSnapshot(database: ReturnType<typeof createDatabase>, organizationId: string, id: string, organizationName: string): Promise<BackupManifest> {
-  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, scheduleRows, settingsRows] = await Promise.all([
+  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, scheduleRows, settingsRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.createdAt)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.createdAt)).all(),
     database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
@@ -97,6 +97,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
     database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(asc(maintenanceDocuments.createdAt)).all(),
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(asc(paymentRecords.createdAt)).all(),
+    database.select().from(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).orderBy(asc(paymentEntries.createdAt)).all(),
     database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(asc(inspectionSchedules.createdAt)).all(),
     database.select().from(appSettings).where(eq(appSettings.organizationId, organizationId)).orderBy(asc(appSettings.key)).all(),
   ])
@@ -116,6 +117,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
       maintenanceDocuments: maintenanceRows,
       maintenanceItems: maintenanceItemRows,
       paymentRecords: paymentRows,
+      paymentEntries: paymentEntryRows,
       inspectionSchedules: scheduleRows,
       appSettings: settingsRows,
     },
@@ -123,6 +125,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
 }
 
 async function clearOrganizationData(database: ReturnType<typeof createDatabase>, organizationId: string) {
+  await database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).run()
   await database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).run()
   await database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).run()
   await database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).run()
@@ -147,6 +150,7 @@ async function insertSnapshot(database: ReturnType<typeof createDatabase>, manif
   for (const row of manifest.tables.maintenanceDocuments) await database.insert(maintenanceDocuments).values(row).run()
   for (const row of manifest.tables.maintenanceItems) await database.insert(maintenanceItems).values(row).run()
   for (const row of manifest.tables.paymentRecords) await database.insert(paymentRecords).values(row).run()
+  for (const row of manifest.tables.paymentEntries ?? []) await database.insert(paymentEntries).values(row).run()
   for (const row of manifest.tables.inspectionSchedules) await database.insert(inspectionSchedules).values(row).run()
   for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
 }
@@ -195,6 +199,7 @@ type BackupManifest = {
     maintenanceDocuments: Array<typeof maintenanceDocuments.$inferSelect>
     maintenanceItems: Array<typeof maintenanceItems.$inferSelect>
     paymentRecords: Array<typeof paymentRecords.$inferSelect>
+    paymentEntries?: Array<typeof paymentEntries.$inferSelect>
     inspectionSchedules: Array<typeof inspectionSchedules.$inferSelect>
     appSettings: Array<typeof appSettings.$inferSelect>
   }
