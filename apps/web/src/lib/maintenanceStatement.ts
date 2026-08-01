@@ -2,7 +2,7 @@ import type { MaintenanceDocument, MaintenanceLineItem } from './maintenanceApi'
 import type { AppSettings } from './settingsApi'
 
 export const maintenanceStatementWidth = 1122
-export const maintenanceStatementHeight = 1407
+export const maintenanceStatementHeight = 1437
 
 export type MaintenanceStatementTotals = {
   partsSubtotal: number
@@ -65,7 +65,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
       .pale { fill: #f4f8fd; }
     </style>
   </defs>
-  <rect width="1122" height="1407" fill="#fff"/>
+  <rect width="${maintenanceStatementWidth}" height="${maintenanceStatementHeight}" fill="#fff"/>
 
   ${roundedBox(16, 12, 506, 55)}
   ${brandMark(32, 26)}
@@ -193,14 +193,14 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
 }
 
 function bankBox(settings: AppSettings) {
-  return `${roundedBox(16, 1278, 510, 122)}
-  ${rect(16, 1278, 510, 42, 'url(#maintenance-blue)')}
-  ${centerText(271, 1307, 'お振込先', 20, '700', '#fff')}
-  ${rect(17, 1321, 107, 78, '#dcecff')}
-  ${gridLines([16, 124, 526], [1320, 1360, 1400])}
-  ${headerText(70, 1346, '振込口座')}${headerText(70, 1386, '口座名義')}
-  ${valueText(145, 1346, settings.shop.bankName, 'start', 13)}
-  ${valueText(145, 1386, settings.shop.bankAccount, 'start', 13)}`
+  return `${roundedBox(16, 1308, 510, 122)}
+  ${rect(16, 1308, 510, 42, 'url(#maintenance-blue)')}
+  ${centerText(271, 1337, 'お振込先', 20, '700', '#fff')}
+  ${rect(17, 1351, 107, 78, '#dcecff')}
+  ${gridLines([16, 124, 526], [1350, 1390, 1430])}
+  ${headerText(70, 1376, '振込口座')}${headerText(70, 1416, '口座名義')}
+  ${valueText(145, 1376, settings.shop.bankName, 'start', 13)}
+  ${valueText(145, 1416, settings.shop.bankAccount, 'start', 13)}`
 }
 
 function shopBox(settings: AppSettings) {
