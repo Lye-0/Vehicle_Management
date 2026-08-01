@@ -7,7 +7,7 @@ import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
 const salesDocumentTypes = new Set(['見積書', '請求書'])
-const salesStatuses = new Set(['下書き', '発行済み', '入金待ち', 'アーカイブ済み'])
+const salesStatuses = new Set(['下書き', '入金待ち', '完了', 'アーカイブ済み'])
 const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
 const salesItemInsertBatchSize = 7
@@ -188,7 +188,7 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   const type = stringValue(body, 'type')
   if (!salesDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
 
-  const status = stringValue(body, 'status') || '下書き'
+  const status = normalizeSalesStatus(stringValue(body, 'status') || '下書き')
   if (!salesStatuses.has(status)) throw new HttpError(400, '書類ステータスが不正です。')
 
   const customerId = stringValue(body, 'customerId')
@@ -226,7 +226,7 @@ function serializeSalesDocument(
     id: document.id,
     number: document.number,
     type: document.type,
-    status: document.status,
+    status: normalizeSalesStatus(document.status),
     customerId: document.customerId,
     customerName: customer?.name ?? '',
     phone: customer?.phone ?? '',
@@ -279,6 +279,10 @@ function serializeSalesDocument(
       amount: item.amount,
     })),
   }
+}
+
+function normalizeSalesStatus(status: string) {
+  return status === '発行済み' ? '完了' : status
 }
 
 export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {

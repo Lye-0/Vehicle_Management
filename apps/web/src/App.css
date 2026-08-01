@@ -520,7 +520,7 @@
 .sales-item-row select { min-width: 0; }
 
 .sales-estimate-paper { width: min(100%, 920px); padding: 34px 38px 28px; border-color: #aebbc9; border-radius: 2px; box-shadow: 0 10px 26px rgba(31, 48, 71, 0.08); }
-.sales-estimate-sheet-frame { position: relative; width: min(100%, 1055px); margin: 0 auto; overflow: hidden; background: #fff; border: 1px solid #c8d5e6; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.12); }
+.sales-estimate-sheet-frame { position: relative; container-type: inline-size; width: min(100%, 1055px); margin: 0 auto; overflow: hidden; background: #fff; border: 1px solid #c8d5e6; box-shadow: 0 14px 34px rgba(31, 48, 71, 0.12); }
 .sales-estimate-sheet { width: 100%; aspect-ratio: 1055 / 1491; background: #fff; }
 .sales-estimate-sheet svg { display: block; width: 100%; height: 100%; }
 .sales-estimate-sheet-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
@@ -530,10 +530,14 @@
 .sales-estimate-sheet-field-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
 .sales-estimate-sheet-field-control.is-centered { text-align: center; }
 .sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
+.sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; }
+.sales-estimate-sheet-field-control.is-customer-value { font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(8px, 1.232cqw, 13px); }
+.sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
 .sales-estimate-sheet-checkbox input { width: 100%; height: 100%; margin: 0; accent-color: #06377d; cursor: pointer; }
 .sales-estimate-sheet-line-control { position: absolute; display: flex; pointer-events: auto; color: #101820; font-size: clamp(6px, 1.1vw, 13px); }
+.sales-estimate-sheet-line-control.is-accessory-line::before { position: absolute; inset: 0 auto 0 0; z-index: 5; width: 1px; background: #86a5d0; content: ''; pointer-events: none; }
 .sales-estimate-sheet-line-control:not(.is-amount-only)::after { position: absolute; top: 0; bottom: 0; left: calc(var(--sheet-label-width) - 1px); z-index: 4; width: 2px; background: #86a5d0; content: ''; pointer-events: none; }
 .sales-estimate-sheet-line-control:focus-within { z-index: 20; }
 .sales-sheet-name-combobox { position: relative; width: var(--sheet-label-width); height: 100%; min-width: 0; }
@@ -729,7 +733,7 @@
 .maintenance-card-top > svg { margin-left: auto; color: var(--text-muted); }
 .maintenance-category-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-category-車検 { color: #7c3aed; border-color: #ded0ff; background: #f4efff; }
-.maintenance-category-法定点検 { color: var(--primary); border-color: #c3d7fa; background: var(--primary-soft); }
+.maintenance-category-板金 { color: var(--primary); border-color: #c3d7fa; background: var(--primary-soft); }
 .maintenance-category-一般整備 { color: #0f766e; border-color: #bce9df; background: #ecfdf8; }
 .maintenance-status-tag { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-status-normal { color: var(--success); border-color: #ccefd7; background: var(--success-soft); }
@@ -777,21 +781,24 @@
 .maintenance-statement-control:hover { border-color: #86a5d0; background: transparent; }
 .maintenance-statement-control:focus { z-index: 25; border-color: #2563eb; background: transparent; box-shadow: inset 0 0 0 1px #2563eb; }
 .maintenance-statement-control.is-centered { text-align: center; }
+.maintenance-statement-control.is-contact-value { padding-left: 5px; padding-right: 5px; }
+.maintenance-statement-control.is-compact-value { font-size: clamp(5px, 0.9vw, 11px); }
 .maintenance-statement-control.is-number { padding-right: 14px; text-align: right; font-variant-numeric: tabular-nums; }
 .maintenance-statement-control.is-number.is-centered { padding: 0 5px; text-align: center; }
 .maintenance-statement-control.is-item-text { padding-left: 14px; }
 .maintenance-statement-control.is-title { font-size: clamp(14px, 2vw, 25px); }
 .maintenance-statement-control.is-large { font-size: clamp(12px, 1.8vw, 22px); }
-.maintenance-statement-control.is-compact-date { font-size: clamp(6px, 0.9vw, 11px); }
+.maintenance-statement-control.is-compact-date { font-size: clamp(5px, 0.75vw, 9px); }
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
 .maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
+.maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
-.maintenance-statement-combobox > input { width: 100%; height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 0 22px 0 11px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1; }
+.maintenance-statement-combobox > input { width: 100%; height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 0 22px 0 11px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(5px, 0.9vw, 11px); line-height: 1; }
 .maintenance-statement-combobox:hover > input { background: transparent; }
 .maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: transparent; box-shadow: inset 0 0 0 2px #2563eb; }
-.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; }
+.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; transform: translateY(4px); }
 .maintenance-statement-combobox:hover > button, .maintenance-statement-combobox:focus-within > button { border-left-color: #86a5d0; opacity: 1; }
 .maintenance-statement-candidates { position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; display: grid; width: max(190px, 100%); max-height: 190px; overflow: auto; padding: 4px; border: 1px solid #86a5d0; border-radius: 5px; background: #fff; box-shadow: 0 8px 18px rgba(22, 44, 76, 0.2); }
 .maintenance-statement-candidates.is-up { top: auto; bottom: calc(100% + 2px); }

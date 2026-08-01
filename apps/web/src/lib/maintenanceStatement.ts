@@ -28,7 +28,7 @@ export function calculateMaintenanceStatementTotals(
   const taxValue = taxableSubtotal * document.taxRate
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   const workTotal = taxableSubtotal + tax
-  const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0)
+  const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0) + document.adjustment
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
 }
 
@@ -39,7 +39,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels
   const documentTitle = defaultDocumentTitle(document.type)
-  const amountTitle = 'お見積金額（税込）'
+  const amountTitle = document.type === '整備請求書' ? 'ご請求金額（税込）' : 'お見積金額（税込）'
   const workSectionTitle = '作業内容／部品名等'
   const rows = statementRows(document)
   const rowHeight = 28
@@ -69,20 +69,20 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
 
   ${roundedBox(16, 12, 506, 55)}
   ${brandMark(32, 26)}
-  ${brandMark(485, 26)}
+  ${brandMark(485, 26, true)}
   ${centerText(269, 47, documentTitle, 25, '700', '#073c87')}
 
   ${roundedBox(611, 12, 472, 65)}
   ${gridLines([611, 729, 847, 965, 1083], [12, 43, 77])}
-  ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '請求番号')}${headerText(1024, 34, 'ページ')}
-  ${valueText(670, 65, statementValue(dateDot(document.issuedAt), hideEditableValues), 'middle')}
-  ${valueText(788, 65, statementValue(document.details.staffName, hideEditableValues), 'middle')}
-  ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle')}
-  ${valueText(1024, 65, 'P.1', 'middle')}
+  ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '書類番号')}${headerText(1024, 34, 'ページ')}
+  ${valueText(670, 65, statementValue(dateDot(document.issuedAt), hideEditableValues), 'middle', 14)}
+  ${valueText(788, 65, statementValue(document.details.staffName, hideEditableValues), 'middle', 14)}
+  ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle', 14)}
+  ${valueText(1024, 65, '1/1', 'middle')}
 
-  ${roundedBox(16, 90, 794, 185)}
-  ${rect(17, 91, 107, 183, '#dcecff')}${rect(536, 91, 108, 183, '#dcecff')}
-  ${line(125, 90, 125, 275)}${line(535, 90, 535, 275)}${line(645, 90, 645, 275)}
+  ${roundedBox(16, 90, 794, 168)}
+  ${rect(17, 91, 107, 166, '#dcecff')}${rect(536, 91, 108, 166, '#dcecff')}
+  ${line(125, 90, 125, 257)}${line(535, 90, 535, 257)}${line(645, 90, 645, 257)}
   ${line(16, 174, 810, 174)}${line(535, 132, 810, 132)}${line(535, 216, 810, 216)}
   ${headerText(70, 137, 'お名前')}${headerText(70, 224, 'ご住所')}
   ${valueText(145, 127, statementValue(customer.name, hideEditableValues), 'start', 24)}
@@ -90,11 +90,11 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(504, 143, statementValue(document.details.customerHonorific, hideEditableValues), 'end', 22)}
   ${valueText(145, 205, statementValue(customer.postalCode ? `〒${customer.postalCode}` : '', hideEditableValues), 'start')}
   ${valueText(145, 233, statementValue(customer.address, hideEditableValues), 'start')}
-  ${headerText(590, 119, '生年月日')}${headerText(590, 161, '電話番号')}${headerText(590, 203, '勤務先等')}${headerText(590, 245, '連絡先TEL')}
+  ${headerText(590, 115, '生年月日')}${headerText(590, 157, '電話番号')}${headerText(590, 200, '勤務先等')}${headerText(590, 242, '連絡先TEL')}
   ${valueText(665, 119, statementValue(dateDot(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
-  ${valueText(665, 161, statementValue(customer.phone, hideEditableValues), 'start', 14)}
-  ${valueText(665, 203, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
-  ${valueText(665, 245, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
+  ${valueText(665, 158, statementValue(customer.phone, hideEditableValues), 'start', 14)}
+  ${valueText(665, 200, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
+  ${valueText(665, 242, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
 
   ${roundedBox(832, 90, 250, 255)}
   ${rect(832, 90, 250, 43, 'url(#maintenance-blue)')}
@@ -138,7 +138,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(868, 1117, number(totals.technicalSubtotal), 'middle', 14)}
 
   ${summaryBoxes(document, totals, labels.otherFee, hideEditableValues)}
-  ${bankBox(settings, document.details, hideEditableValues)}
+  ${document.type === '整備請求書' ? bankBox(settings) : ''}
   ${shopBox(settings)}
   </svg>`
 }
@@ -174,31 +174,33 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
 
 function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
-  return `${roundedBox(16, 1144, 350, 75)}
-  ${rect(17, 1145, 348, 36, '#dcecff')}
-  ${rect(250, 1145, 115, 73, '#dcecff')}
-  ${gridLines([16, 132, 249, 366], [1144, 1182, 1219])}
-  ${headerText(74, 1170, '作業料金')}${headerText(190, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(307, 1170, '作業料金＋税')}
-  ${valueText(74, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(190, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(307, 1207, number(totals.workTotal), 'middle', 18, '800', '#073c87')}
-  ${roundedBox(385, 1144, 435, 75)}
-  ${rect(386, 1145, 433, 36, '#dcecff')}
-  ${rect(734, 1145, 85, 73, '#dcecff')}
-  ${gridLines([385, 472, 559, 646, 733, 820], [1144, 1182, 1219])}
-  ${headerText(428, 1170, '自賠責')}${headerText(515, 1170, '重量税')}${headerText(602, 1170, '印紙代')}${headerText(689, 1170, otherFeeLabel)}${headerText(776, 1170, '諸費用計')}
-  ${valueText(428, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 15)}${valueText(515, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 15)}${valueText(602, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 15)}${valueText(689, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 15)}${valueText(776, 1207, number(totals.feesTotal), 'middle', 17, '800', '#073c87')}
-  ${roundedBox(844, 1144, 238, 75, '#fff7b0')}
-  ${line(844, 1182, 1082, 1182)}
-  ${headerText(963, 1170, '作業料金＋税＋諸費用計')}
-  ${centerText(963, 1209, number(totals.total), 19, '800', '#073c87')}`
+  return `${roundedBox(16, 1144, 300, 75)}
+  ${rect(17, 1145, 298, 36, '#dcecff')}
+  ${rect(216, 1145, 99, 73, '#dcecff')}
+  ${gridLines([16, 116, 216, 316], [1144, 1182, 1219])}
+  ${headerText(66, 1170, '作業料金')}${headerText(166, 1170, `消費税(${Math.round(document.taxRate * 100)}%)`)}${headerText(266, 1170, '作業料金＋税')}
+  ${valueText(66, 1207, number(totals.taxableSubtotal), 'middle', 16)}${valueText(166, 1207, number(totals.tax), 'middle', 16, '700')}${valueText(266, 1207, number(totals.workTotal), 'middle', 17, '800', '#073c87')}
+  ${roundedBox(335, 1144, 523, 75)}
+  ${rect(336, 1145, 521, 36, '#dcecff')}
+  ${rect(770, 1145, 87, 73, '#dcecff')}
+  ${gridLines([335, 422, 509, 596, 683, 770, 858], [1144, 1182, 1219])}
+  ${headerText(378.5, 1170, '自賠責')}${headerText(465.5, 1170, '重量税')}${headerText(552.5, 1170, '印紙代')}${headerText(639.5, 1170, otherFeeLabel)}${headerText(726.5, 1170, '端数値引')}${headerText(814, 1170, '諸費用計')}
+  ${valueText(378.5, 1207, statementValue(number(fee.自賠責), hideEditableValues), 'middle', 13)}${valueText(465.5, 1207, statementValue(number(fee.重量税), hideEditableValues), 'middle', 13)}${valueText(552.5, 1207, statementValue(number(fee.印紙代), hideEditableValues), 'middle', 13)}${valueText(639.5, 1207, statementValue(number(fee.リサイクル料金), hideEditableValues), 'middle', 13)}${valueText(726.5, 1207, statementValue(number(document.adjustment), hideEditableValues), 'middle', 13)}${valueText(814, 1207, number(totals.feesTotal), 'middle', 14, '800', '#073c87')}
+  ${roundedBox(882, 1144, 200, 75, '#fff7b0')}
+  ${line(882, 1182, 1082, 1182)}
+  ${headerText(982, 1170, '作業料金＋税＋諸費用計')}
+  ${centerText(982, 1209, number(totals.total), 18, '800', '#073c87')}`
 }
 
-function bankBox(settings: AppSettings, details: MaintenanceDocument['details'], hideEditableValues: boolean) {
-  const bankName = details.bankName || settings.shop.bankName
-  const bankAccount = details.bankAccount || settings.shop.bankAccount
-  return `${roundedBox(16, 1233, 510, 122)}
-  ${rect(16, 1233, 510, 42, 'url(#maintenance-blue)')}
-  ${centerText(271, 1262, 'お振込先', 20, '700', '#fff')}
-  ${valueText(54, 1341, statementValue(`${bankName}　${bankAccount}`, hideEditableValues), 'start', 17)}`
+function bankBox(settings: AppSettings) {
+  return `${roundedBox(16, 1263, 510, 114)}
+  ${rect(16, 1263, 510, 42, 'url(#maintenance-blue)')}
+  ${centerText(271, 1292, 'お振込先', 20, '700', '#fff')}
+  ${rect(17, 1306, 107, 70, '#dcecff')}
+  ${gridLines([16, 124, 526], [1305, 1340, 1377])}
+  ${headerText(70, 1329, '振込口座')}${headerText(70, 1365, '口座名義')}
+  ${valueText(145, 1329, settings.shop.bankName, 'start', 18)}
+  ${valueText(145, 1365, settings.shop.bankAccount, 'start', 18)}`
 }
 
 function shopBox(settings: AppSettings) {
@@ -206,15 +208,19 @@ function shopBox(settings: AppSettings) {
   const hasLogo = Boolean(shop.logoDataUrl)
   const companyX = hasLogo ? 830 : 780
   const infoX = companyX + 20
+  const infoLines = [
+    shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
+    shop.postalCode ? `〒 ${shop.postalCode}` : '',
+    shop.address,
+    shop.phone ? `TEL ${shop.phone}` : '',
+    shop.fax ? `FAX ${shop.fax}` : '',
+  ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1265" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
-    : valueText(635, 1358, '▦', 'start', 120, '700', '#073c87')
+    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1275" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
+    : valueText(635, 1365, '▦', 'start', 110, '700', '#073c87')
   return `${logoMarkup}
-  ${valueText(companyX, 1280, shop.name, 'start', 20, '700', '#073c87')}
-  ${valueText(infoX, 1284, shop.registrationNumber, 'start', 12)}
-  ${valueText(infoX, 1305, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
-  ${valueText(infoX, 1326, shop.address, 'start', 13)}
-  ${valueText(infoX, 1347, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
+  ${valueText(companyX, 1269, shop.name, 'start', 20, '700', '#073c87')}
+  ${infoLines.map((line, index) => valueText(infoX, 1292 + index * 19, line, 'start', 12)).join('')}`
 }
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
@@ -230,7 +236,6 @@ const emptyVehicle: NonNullable<MaintenanceDocument['vehicleDetails']> = {
 
 function defaultDocumentTitle(type: MaintenanceDocument['type']) {
   if (type === '整備見積書') return '見積書'
-  if (type === '納品書') return '納品書'
   return '請求書'
 }
 
@@ -286,6 +291,18 @@ function centerText(x: number, y: number, value: string, size: number, weight: s
   return valueText(x, y, value, 'middle', size, weight, fill)
 }
 
-function brandMark(x: number, y: number) {
-  return `<g fill="#073c87"><rect x="${x}" y="${y}" width="9" height="9"/><rect x="${x + 9}" y="${y + 9}" width="9" height="9"/><rect x="${x}" y="${y + 18}" width="9" height="9"/></g>`
+function brandMark(x: number, y: number, reversed = false) {
+  if (reversed) {
+    return `<g fill="#073c87">
+      <rect x="${x + 9}" y="${y}" width="9" height="9"/>
+      <rect x="${x}" y="${y + 9}" width="9" height="9"/>
+      <rect x="${x + 9}" y="${y + 18}" width="9" height="9"/>
+    </g>`
+  }
+
+  return `<g fill="#073c87">
+    <rect x="${x}" y="${y}" width="9" height="9"/>
+    <rect x="${x + 9}" y="${y + 9}" width="9" height="9"/>
+    <rect x="${x}" y="${y + 18}" width="9" height="9"/>
+  </g>`
 }

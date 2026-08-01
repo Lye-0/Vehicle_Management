@@ -14,6 +14,197 @@ export type SalesEstimateSheetOptions = {
   imageHref?: string
 }
 
+const UPPER_COMPRESSION = 24
+const META_TABLE_Y = 13
+const META_TABLE_X = 613
+const META_TABLE_WIDTH = 424
+const META_TABLE_HEADER_HEIGHT = 29
+const META_TABLE_HEIGHT = 65
+const META_COLUMN_WIDTHS = [94, 70, 70, 120, 70]
+const TOP_BLOCK_GAP = 12
+const TITLE_X = 24
+const TITLE_Y = 13
+const TITLE_WIDTH = 520
+const TITLE_HEIGHT = 55
+const CUSTOMER_X = 24
+const CUSTOMER_Y = 90
+const CUSTOMER_WIDTH = 661
+const CUSTOMER_HEIGHT = 168
+const IMAGE_CUSTOMER_WIDTH = 338
+const IMAGE_X = 392
+const IMAGE_WIDTH = 293
+const AMOUNT_X = 707
+const AMOUNT_PANEL_HEIGHT = 318
+const REQUIRED_BLOCK_HEIGHT = 162
+const REQUIRED_NOTE_GAP = 9
+const LOWER_SECTION_SHIFT = 14
+const CREDIT_TOP_GAP = 29
+const FEE_CATEGORY_WIDTH = 36
+const FEE_DETAIL_WIDTH = 299
+const FEE_DETAIL_LABEL_WIDTH = 182
+const FEE_ROW_HEIGHT = 26
+const FEE_SUBTOTAL_HEIGHT = 30
+const FEE_GROUP_GAP = 2
+const FEE_TOTAL_GAP = 12
+const FEE_TOTAL_HEIGHT = 39
+const ACCESSORY_NAME_WIDTH = 210
+const ACCESSORY_AMOUNT_WIDTH = 114
+const ACCESSORY_ROW_HEIGHT = 34
+const ACCESSORY_ROW_COUNT = 14
+const ACCESSORY_TOTAL_HEIGHT = 48
+const VEHICLE_SECTION_HEADER_HEIGHT = 39
+const VEHICLE_PRICE_HEIGHT = 267
+const VEHICLE_TAX_HEIGHT = 144
+const VEHICLE_PAYMENT_HEIGHT = 95
+const FOOTER_X = 23
+const FOOTER_WIDTH = WIDTH - FOOTER_X * 2
+const FOOTER_GAP = 12
+const FOOTER_CREDIT_WIDTH = 260
+const FOOTER_BANK_WIDTH = 300
+const FOOTER_CREDIT_HEIGHT = 96
+const FOOTER_BANK_HEIGHT = 96
+const FOOTER_CREDIT_HEADER_HEIGHT = 36
+const FOOTER_CREDIT_VALUE_Y = 63
+const FOOTER_CREDIT_VALUE_HEIGHT = 33
+const FOOTER_CREDIT_COLUMN_COUNT = 4
+
+const feeGroupDefinitions = [
+  { bucket: 'legalNonTaxable' as const, title: '税金／保険料（非課税）', rows: 5 },
+  { bucket: 'taxableFees' as const, title: '手続代行費用（課税）', rows: 6 },
+  { bucket: 'nonTaxableFees' as const, title: '実費・預託金（非課税）', rows: 5 },
+]
+
+function createSalesEstimateSheetLayout() {
+  const lowerY = 742 - UPPER_COMPRESSION - LOWER_SECTION_SHIFT
+  const amountPanelY = META_TABLE_Y + META_TABLE_HEIGHT + TOP_BLOCK_GAP
+  const requiredY = amountPanelY + AMOUNT_PANEL_HEIGHT + TOP_BLOCK_GAP
+  const noteY = requiredY + REQUIRED_BLOCK_HEIGHT + REQUIRED_NOTE_GAP
+  const vehicleY = CUSTOMER_Y + CUSTOMER_HEIGHT + TOP_BLOCK_GAP
+  const tradeInY = vehicleY + 227 + TOP_BLOCK_GAP
+  const taxCaptionY = tradeInY + 100 + 20
+  const feeX = 363
+  const feeDetailX = feeX + FEE_CATEGORY_WIDTH
+  const feeBodyY = lowerY + 39
+  let cursor = feeBodyY
+  const feeGroups = feeGroupDefinitions.map((group, index) => {
+    const startY = cursor
+    const subtotalY = startY + group.rows * FEE_ROW_HEIGHT
+    const endY = subtotalY + FEE_SUBTOTAL_HEIGHT
+    cursor = endY + (index === feeGroupDefinitions.length - 1 ? FEE_TOTAL_GAP : FEE_GROUP_GAP)
+    return { ...group, startY, subtotalY, endY }
+  })
+  const feeTotalY = cursor
+  const feeBottomY = feeTotalY + FEE_TOTAL_HEIGHT
+  const vehicleTopY = lowerY + VEHICLE_SECTION_HEADER_HEIGHT
+  const vehiclePaymentY = feeBottomY - VEHICLE_PAYMENT_HEIGHT
+  const vehicleSubBlockGap = (vehiclePaymentY - (vehicleTopY + VEHICLE_PRICE_HEIGHT) - VEHICLE_TAX_HEIGHT) / 2
+  return {
+    upperCompression: UPPER_COMPRESSION,
+    metaTableY: META_TABLE_Y,
+    metaTableX: META_TABLE_X,
+    metaTableWidth: META_TABLE_WIDTH,
+    metaHeaderHeight: META_TABLE_HEADER_HEIGHT,
+    metaTableHeight: META_TABLE_HEIGHT,
+    metaColumnWidths: META_COLUMN_WIDTHS,
+    title: {
+      x: TITLE_X,
+      y: TITLE_Y,
+      width: TITLE_WIDTH,
+      height: TITLE_HEIGHT,
+    },
+    customer: {
+      x: CUSTOMER_X,
+      y: CUSTOMER_Y,
+      width: CUSTOMER_WIDTH,
+      height: CUSTOMER_HEIGHT,
+      imageWidth: IMAGE_CUSTOMER_WIDTH,
+      imageX: IMAGE_X,
+      imageWidthTotal: IMAGE_WIDTH,
+    },
+    amountPanelY,
+    amountPanelX: AMOUNT_X,
+    amountPanelHeight: AMOUNT_PANEL_HEIGHT,
+    imageCustomerHeight: CUSTOMER_HEIGHT,
+    expandedCustomerHeight: CUSTOMER_HEIGHT,
+    imageVehicleY: vehicleY,
+    expandedVehicleY: vehicleY,
+    imageTradeInY: tradeInY,
+    expandedTradeInY: tradeInY,
+    taxCaptionY,
+    requiredY,
+    requiredHeight: REQUIRED_BLOCK_HEIGHT,
+    noteY,
+    lowerY,
+    vehicle: {
+      x: 23,
+      width: 324,
+      topY: vehicleTopY,
+      topHeight: VEHICLE_PRICE_HEIGHT,
+      taxY: vehicleTopY + VEHICLE_PRICE_HEIGHT + vehicleSubBlockGap,
+      taxHeight: VEHICLE_TAX_HEIGHT,
+      subBlockGap: vehicleSubBlockGap,
+      paymentY: vehiclePaymentY,
+      bottomY: feeBottomY,
+    },
+    fee: {
+      x: feeX,
+      categoryWidth: FEE_CATEGORY_WIDTH,
+      detailX: feeDetailX,
+      detailWidth: FEE_DETAIL_WIDTH,
+      detailLabelWidth: FEE_DETAIL_LABEL_WIDTH,
+      bodyY: feeBodyY,
+      bodyHeight: feeBottomY - feeBodyY,
+      groups: feeGroups,
+      totalY: feeTotalY,
+      totalHeight: FEE_TOTAL_HEIGHT,
+      totalWidth: FEE_CATEGORY_WIDTH + FEE_DETAIL_WIDTH,
+      totalSplitWidth: FEE_CATEGORY_WIDTH + FEE_DETAIL_LABEL_WIDTH,
+      bottomY: feeBottomY,
+    },
+    accessory: {
+      x: 713,
+      width: ACCESSORY_NAME_WIDTH + ACCESSORY_AMOUNT_WIDTH,
+      nameWidth: ACCESSORY_NAME_WIDTH,
+      amountWidth: ACCESSORY_AMOUNT_WIDTH,
+      bodyY: feeBodyY,
+      bodyHeight: feeBottomY - feeBodyY,
+      detailY: feeBodyY + 36,
+      rowHeight: ACCESSORY_ROW_HEIGHT,
+      rowCount: ACCESSORY_ROW_COUNT,
+      totalY: feeBottomY - ACCESSORY_TOTAL_HEIGHT,
+      totalHeight: ACCESSORY_TOTAL_HEIGHT,
+      bottomY: feeBottomY,
+    },
+    footer: {
+      x: FOOTER_X,
+      width: FOOTER_WIDTH,
+      gap: FOOTER_GAP,
+      credit: {
+        x: FOOTER_X,
+        width: FOOTER_CREDIT_WIDTH,
+        height: FOOTER_CREDIT_HEIGHT,
+        headerHeight: FOOTER_CREDIT_HEADER_HEIGHT,
+        valueY: FOOTER_CREDIT_VALUE_Y,
+        valueHeight: FOOTER_CREDIT_VALUE_HEIGHT,
+        columnCount: FOOTER_CREDIT_COLUMN_COUNT,
+      },
+      bank: {
+        x: FOOTER_X + FOOTER_CREDIT_WIDTH + FOOTER_GAP,
+        width: FOOTER_BANK_WIDTH,
+        height: FOOTER_BANK_HEIGHT,
+      },
+      shop: {
+        x: FOOTER_X + FOOTER_CREDIT_WIDTH + FOOTER_GAP + FOOTER_BANK_WIDTH + FOOTER_GAP,
+        width: FOOTER_WIDTH - FOOTER_CREDIT_WIDTH - FOOTER_BANK_WIDTH - FOOTER_GAP * 2,
+        height: FOOTER_BANK_HEIGHT,
+      },
+    },
+    creditY: feeBottomY + CREDIT_TOP_GAP,
+  }
+}
+
+export const salesEstimateSheetLayout = createSalesEstimateSheetLayout()
+
 export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: AppSettings, { imageHref = '' }: SalesEstimateSheetOptions = {}) {
   const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
   const sections = buildSalesEstimateSections(document)
@@ -30,75 +221,86 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
     ['納税証明書', details.requiredDocuments.taxPaymentCertificate],
     ['保証人印鑑証明', details.requiredDocuments.guarantorSealCertificate],
   ] as const
-  const legalLines = sections.legalNonTaxable.slice(0, 3)
-  const taxableLines = sections.taxableFees.slice(0, 5)
-  const actualLines = sections.nonTaxableFees.slice(0, 3)
-  const accessories = sections.accessories.slice(0, 13)
+  const legalLines = sections.legalNonTaxable.slice(0, 5)
+  const taxableLines = sections.taxableFees.slice(0, 6)
+  const actualLines = sections.nonTaxableFees.slice(0, 5)
+  const accessories = sections.accessories.slice(0, salesEstimateSheetLayout.accessory.rowCount)
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${salesDocumentTitle(document.type)}">
   <defs>
     <style>
       text{font-family:"Noto Sans JP","Yu Gothic","Meiryo",sans-serif;fill:#101820}
       .blue{fill:${BLUE}} .white{fill:#fff}.muted{fill:#334a6c}.bold{font-weight:700}.heavy{font-weight:800}
-      .label{fill:${BLUE};font-weight:700}.small{font-size:13px}.body{font-size:16px}.value{font-size:17px}
+      .label{fill:${BLUE};font-weight:700}.small{font-size:13px}.body{font-size:16px}.customerBody{font-size:13px}.customerValue{font-size:11px}.value{font-size:17px}
       .amount{font-variant-numeric:tabular-nums}.line{stroke:${LINE};stroke-width:1}.box{fill:#fff;stroke:${LINE};stroke-width:1.3}
       .section{fill:url(#sectionGradient)}.sectionText{fill:#fff;font-size:20px;font-weight:700;letter-spacing:2px}
     </style>
     <linearGradient id="sectionGradient" x1="0" x2="1"><stop stop-color="${BLUE_DARK}"/><stop offset="1" stop-color="#0050a9"/></linearGradient>
-    <clipPath id="vehiclePhotoClip"><rect x="392" y="106" width="293" height="194" rx="5"/></clipPath>
+    <clipPath id="vehiclePhotoClip"><rect x="${salesEstimateSheetLayout.customer.imageX}" y="${salesEstimateSheetLayout.customer.y}" width="${salesEstimateSheetLayout.customer.imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5"/></clipPath>
   </defs>
   <rect width="${WIDTH}" height="${HEIGHT}" fill="#fff"/>
   ${sheetTitle(document)}
   ${withImage ? imageCustomerBlock(document, imageHref) : expandedCustomerBlock(document)}
   ${amountPanel(document, totals)}
-  ${vehicleBlock(vehicle, withImage ? 314 : 296)}
-  ${tradeInBlock(details.tradeIn, withImage ? 557 : 543)}
-  ${taxCaption(document, totals, 692)}
+  ${vehicleBlock(vehicle, withImage ? salesEstimateSheetLayout.imageVehicleY : salesEstimateSheetLayout.expandedVehicleY)}
+  ${tradeInBlock(details.tradeIn, withImage ? salesEstimateSheetLayout.imageTradeInY : salesEstimateSheetLayout.expandedTradeInY)}
+  ${taxCaption(document, totals, salesEstimateSheetLayout.taxCaptionY)}
   ${requiredBlock(requiredDocuments)}
   ${noteBlock(document.note)}
   ${vehiclePriceCard(document, sections, totals)}
   ${feeCard(legalLines, taxableLines, actualLines, totals)}
   ${accessoryCard(accessories, totals.accessoryTotal)}
   ${creditBlock(details.credit)}
+  ${bankBlock(settings)}
   ${shopBlock(settings)}
   </svg>`
 }
 
 function sheetTitle(document: SalesDocument) {
   const rows: Array<[string, string]> = [
-    ['見積番号', document.number],
-    ['見積日', formatJapaneseDate(document.issuedAt)],
-    ['販売区分', document.details.salesCategory || '未設定'],
-    ['担当者', document.details.staffName || '未設定'],
+    ['日付', formatSlashDate(document.issuedAt)],
+    ['販売', document.details.salesCategory || '未設定'],
+    ['担当', document.details.staffName || '未設定'],
+    ['書類番号', document.number],
     ['ページ', '1 / 1'],
   ]
-  const title = document.type === '見積書' ? 'お見積書' : document.type;
-  const lineEnd = Math.round(27 + title.length * 50 + (title.length - 1) * 8);
+  const { title, metaTableX, metaTableY, metaTableWidth, metaHeaderHeight, metaTableHeight, metaColumnWidths } = salesEstimateSheetLayout
+  const titleText = salesDocumentTitle(document.type)
+  const metaRight = metaTableX + metaTableWidth
+  let columnX = metaTableX
   return `
-  <text x="28" y="73" class="blue heavy" font-size="50" letter-spacing="8">${escapeXml(title)}</text>
-  <line x1="27" y1="86" x2="${lineEnd}" y2="86" stroke="${BLUE}" stroke-width="5"/>
-  <rect x="731" y="13" width="306" height="130" rx="4" class="box"/>
+  <rect x="${title.x}" y="${title.y}" width="${title.width}" height="${title.height}" rx="5" class="box"/>
+  ${brandMark(title.x + 16, title.y + 14)}
+  ${brandMark(title.x + title.width - 37, title.y + 14, true)}
+  ${text(title.x + title.width / 2, title.y + 36, titleText, 'blue heavy', 25, 'middle')}
+  <rect x="${metaTableX}" y="${metaTableY}" width="${metaTableWidth}" height="${metaTableHeight}" rx="4" class="box"/>
+  <line x1="${metaTableX}" y1="${metaTableY + metaHeaderHeight}" x2="${metaRight}" y2="${metaTableY + metaHeaderHeight}" class="line"/>
   ${rows.map(([label, value], index) => {
-    const y = 13 + index * 26
-    return `${index ? `<line x1="731" y1="${y}" x2="1037" y2="${y}" class="line"/>` : ''}
-      <line x1="844" y1="${y}" x2="844" y2="${y + 26}" class="line"/>
-      ${text(744, y + 18, label, 'label body')}
-      ${text(865, y + 18, value, 'body')}`
-  }).join('')}`
+    const width = metaColumnWidths[index]
+    const center = columnX + width / 2
+    const result = `${index ? `<line x1="${columnX}" y1="${metaTableY}" x2="${columnX}" y2="${metaTableY + metaTableHeight}" class="line"/>` : ''}
+      ${text(center, metaTableY + 20, label, 'label', 11, 'middle')}
+      ${text(center, metaTableY + 52, value, '', 11, 'middle')}`
+    columnX += width
+    return result
+  }).join('')}
+  <line x1="${metaRight}" y1="${metaTableY}" x2="${metaRight}" y2="${metaTableY + metaTableHeight}" class="line"/>`
 }
 
 function imageCustomerBlock(document: SalesDocument, imageHref: string) {
   const customer = { ...document.customerDetails, ...document.details.customerOverride }
+  const { x, y, imageX, imageWidthTotal } = salesEstimateSheetLayout.customer
   return `
-  <rect x="24" y="108" width="338" height="186" rx="5" class="box"/>
-  <circle cx="57" cy="144" r="19" fill="${BLUE}"/>
-  <circle cx="57" cy="138" r="7" fill="#fff"/><path d="M45 158c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
-  ${text(89, 151, `${customer.name || document.customerName || '未設定'} ${document.details.customerHonorific || '様'}`, 'blue heavy', 24)}
-  ${text(43, 190, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
-  ${text(43, 222, customer.address || '住所未登録', 'body')}
-  ${text(43, 259, `TEL：${customer.phone || document.phone || '未登録'}`, 'body')}
-  <rect x="392" y="106" width="293" height="194" rx="5" fill="#f2f4f7" stroke="${LINE}" stroke-width="1"/>
-  <image href="${escapeAttribute(imageHref)}" x="392" y="106" width="293" height="194" preserveAspectRatio="xMidYMid slice" clip-path="url(#vehiclePhotoClip)"/>`
+  <rect x="${x}" y="${y}" width="${salesEstimateSheetLayout.customer.imageWidth}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5" class="box"/>
+  <circle cx="57" cy="${y + 36}" r="19" fill="${BLUE}"/>
+  <circle cx="57" cy="${y + 30}" r="7" fill="#fff"/><path d="M45 ${y + 50}c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
+  ${text(89, y + 43, customer.name || document.customerName || '未設定', 'blue heavy', 20)}
+  ${text(x + salesEstimateSheetLayout.customer.imageWidth - 18, y + 43, document.details.customerHonorific || '様', 'blue heavy', 20, 'end')}
+  ${text(43, y + 82, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
+  ${text(43, y + 114, customer.address || '住所未登録', 'customerBody')}
+  ${text(43, y + 151, `TEL：${customer.phone || document.phone || '未登録'}`, 'customerBody')}
+  <rect x="${imageX}" y="${y}" width="${imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" rx="5" fill="#f2f4f7" stroke="${LINE}" stroke-width="1"/>
+  <image href="${escapeAttribute(imageHref)}" x="${imageX}" y="${y}" width="${imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" preserveAspectRatio="xMidYMid slice" clip-path="url(#vehiclePhotoClip)"/>`
 }
 
 function expandedCustomerBlock(document: SalesDocument) {
@@ -110,42 +312,56 @@ function expandedCustomerBlock(document: SalesDocument) {
     ['勤務先等', details.customerEmployer || customer.employer || '未設定'],
     ['連絡先TEL', details.customerContactPhone || customer.contactPhone || '未設定'],
   ]
+  const { x, y, width, height } = salesEstimateSheetLayout.customer
+  const leftLabelWidth = 109
+  const leftContentEnd = x + 353
+  const rightLabelWidth = 101
+  const rightLabelX = leftContentEnd
+  const rightValueX = rightLabelX + rightLabelWidth
+  const rightRowHeight = height / rows.length
   return `
-  <rect x="27" y="103" width="650" height="179" rx="5" class="box"/>
-  <line x1="377" y1="103" x2="377" y2="282" class="line"/>
-  <circle cx="58" cy="139" r="19" fill="${BLUE}"/>
-  <circle cx="58" cy="133" r="7" fill="#fff"/><path d="M46 153c1-10 6-14 12-14s11 4 12 14" fill="#fff"/>
-  ${text(90, 147, `${customer.name || document.customerName || '未設定'} ${details.customerHonorific || '様'}`, 'blue heavy', 24)}
-  ${text(44, 184, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'body')}
-  ${text(44, 216, customer.address || '住所未登録', 'body')}
-  ${text(44, 252, `TEL：${customer.phone || document.phone || '未登録'}`, 'body')}
+  <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="5" class="box"/>
+  <rect x="${x + 1}" y="${y + 1}" width="${leftLabelWidth - 2}" height="${height / 2 - 1}" fill="${PALE}"/>
+  <rect x="${x + 1}" y="${y + height / 2}" width="${leftLabelWidth - 2}" height="${height / 2 - 1}" fill="${PALE}"/>
+  <line x1="${x + leftLabelWidth}" y1="${y}" x2="${x + leftLabelWidth}" y2="${y + height}" class="line"/>
+  <line x1="${leftContentEnd}" y1="${y}" x2="${leftContentEnd}" y2="${y + height}" class="line"/>
+  <line x1="${rightValueX}" y1="${y}" x2="${rightValueX}" y2="${y + height}" class="line"/>
+  <line x1="${x}" y1="${y + height / 2}" x2="${leftContentEnd}" y2="${y + height / 2}" class="line"/>
+  ${rows.map((_, index) => index ? `<line x1="${rightLabelX}" y1="${y + index * rightRowHeight}" x2="${x + width}" y2="${y + index * rightRowHeight}" class="line"/>` : '').join('')}
+  ${text(x + leftLabelWidth / 2, y + height / 4 + 5, 'お名前', 'label', 13, 'middle')}
+  ${text(x + leftLabelWidth / 2, y + height * 3 / 4 + 5, 'ご住所', 'label', 13, 'middle')}
+  ${text(x + 121, y + 37, customer.name || document.customerName || '未設定', 'blue heavy', 18)}
+  ${text(leftContentEnd - 16, y + 37, details.customerHonorific || '様', 'blue heavy', 18, 'end')}
+  ${text(x + 121, y + 60, customer.kana || 'ふりがな未登録', 'muted', 11)}
+  ${text(x + 121, y + 115, customer.postalCode ? `〒${customer.postalCode}` : '〒 未登録', 'customerBody')}
+  ${text(x + 121, y + 143, customer.address || '住所未登録', 'customerBody')}
   ${rows.map(([label, value], index) => {
-    const y = 103 + index * 44.75
-    return `${index ? `<line x1="377" y1="${y}" x2="677" y2="${y}" class="line"/>` : ''}
-      <rect x="377" y="${y}" width="101" height="44.75" fill="${PALE}"/>
-      <line x1="478" y1="${y}" x2="478" y2="${y + 44.75}" class="line"/>
-      ${text(397, y + 28, label, 'label body')}
-      ${text(492, y + 28, value, 'body')}`
+    const rowY = y + index * rightRowHeight
+    return `<rect x="${rightLabelX + 1}" y="${rowY + 1}" width="${rightLabelWidth - 2}" height="${rightRowHeight - 2}" fill="${PALE}"/>
+      ${text(rightLabelX + rightLabelWidth / 2, rowY + rightRowHeight / 2 + 5, label, 'label', 12, 'middle')}
+      ${text(rightValueX + 14, rowY + rightRowHeight / 2 + 5, value, 'customerValue', 12)}`
   }).join('')}`
 }
 
 function amountPanel(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
+  const y = salesEstimateSheetLayout.amountPanelY
+  const x = salesEstimateSheetLayout.amountPanelX
   return `
-  <rect x="707" y="157" width="330" height="318" rx="5" class="box"/>
-  <path d="M712 157h320a5 5 0 015 5v45H707v-45a5 5 0 015-5z" class="section"/>
-  ${text(872, 191, salesDocumentAmountTitle(document.type), 'sectionText', 20, 'middle')}
-  ${text(872, 260, formatYen(totals.total), 'blue heavy amount', 46, 'middle')}
-  <line x1="712" y1="284" x2="1032" y2="284" class="line"/>
-  ${amountLine(722, 310, `課税対象額（${formatPercent(document.taxRate)}）`, totals.taxableSubtotal)}
-  ${amountLine(722, 343, `消費税（${formatPercent(document.taxRate)}）`, totals.tax)}
-  ${amountLine(722, 376, '非課税対象額', totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}
-  <line x1="718" y1="393" x2="1026" y2="393" stroke="${LINE}" stroke-dasharray="2 2"/>
-  ${text(722, 426, `支払期限：${formatJapaneseDate(document.dueDate)}`, 'body')}
-  ${text(722, 458, `状態：${document.status}`, 'body')}`
+  <rect x="${x}" y="${y}" width="330" height="${salesEstimateSheetLayout.amountPanelHeight}" rx="5" class="box"/>
+  <path d="M${x + 5} ${y}h320a5 5 0 015 5v45H${x}v-45a5 5 0 015-5z" class="section"/>
+  ${text(x + 165, y + 34, salesDocumentAmountTitle(document.type), 'sectionText', 20, 'middle')}
+  ${text(x + 165, y + 103, formatYen(totals.total), 'blue heavy amount', 46, 'middle')}
+  <line x1="${x + 5}" y1="${y + 127}" x2="${x + 325}" y2="${y + 127}" class="line"/>
+  ${amountLine(x + 15, y + 153, `課税対象額（${formatPercent(document.taxRate)}）`, totals.taxableSubtotal, x + 314)}
+  ${amountLine(x + 15, y + 186, `消費税（${formatPercent(document.taxRate)}）`, totals.tax, x + 314)}
+  ${amountLine(x + 15, y + 219, '非課税対象額', totals.nonTaxableSubtotal + totals.outOfScopeSubtotal, x + 314)}
+  <line x1="${x + 11}" y1="${y + 236}" x2="${x + 319}" y2="${y + 236}" stroke="${LINE}" stroke-dasharray="2 2"/>
+  ${text(x + 15, y + 269, `支払期限：${formatJapaneseDate(document.dueDate)}`, 'body')}
+  ${text(x + 15, y + 301, `状態：${document.status}`, 'body')}`
 }
 
-function amountLine(x: number, y: number, label: string, amount: number) {
-  return `${text(x, y, label, 'body')}${text(1021, y, formatYen(amount), 'body amount', 16, 'end')}`
+function amountLine(x: number, y: number, label: string, amount: number, valueX = 1021) {
+  return `${text(x, y, label, 'body')}${text(valueX, y, formatYen(amount), 'body amount', 16, 'end')}`
 }
 
 function vehicleBlock(vehicle: SalesDocument['vehicleDetails'], y: number) {
@@ -179,35 +395,32 @@ function taxCaption(document: SalesDocument, totals: ReturnType<typeof calculate
 }
 
 function requiredBlock(rows: ReadonlyArray<readonly [string, boolean]>) {
+  const y = salesEstimateSheetLayout.requiredY
   return `
-  <rect x="707" y="489" width="330" height="162" rx="5" class="box"/>
-  ${text(722, 520, '必要書類', 'blue bold', 20)}
-  <line x1="707" y1="528" x2="1037" y2="528" class="line"/>
+  <rect x="707" y="${y}" width="330" height="${salesEstimateSheetLayout.requiredHeight}" rx="5" class="box"/>
+  ${text(722, y + 31, '必要書類', 'blue bold', 20)}
+  <line x1="707" y1="${y + 39}" x2="1037" y2="${y + 39}" class="line"/>
   ${rows.map(([label, checked], index) => {
     const col = index % 2
     const row = Math.floor(index / 2)
     const x = 725 + col * 156
-    const y = 554 + row * 26
-    return `<rect x="${x}" y="${y - 13}" width="11" height="11" fill="#fff" stroke="#222"/><text x="${x + 5.5}" y="${y - 3.5}" text-anchor="middle" font-size="12">${checked ? '✓' : ''}</text>${text(x + 20, y - 3, label, 'small')}`
+    const rowY = y + 65 + row * 26
+    return `<rect x="${x}" y="${rowY - 13}" width="11" height="11" fill="#fff" stroke="#222"/><text x="${x + 5.5}" y="${rowY - 3.5}" text-anchor="middle" font-size="12">${checked ? '✓' : ''}</text>${text(x + 20, rowY - 3, label, 'small')}`
   }).join('')}`
 }
 
 function noteBlock(note: string) {
-  return `<rect x="707" y="664" width="330" height="65" rx="5" class="box"/>
-  ${text(722, 692, '備考', 'blue bold', 19)}
-  <line x1="707" y1="700" x2="1037" y2="700" class="line"/>
-  ${text(722, 721, note || '特になし', 'small')}`
+  const y = salesEstimateSheetLayout.noteY
+  return `<rect x="707" y="${y}" width="330" height="65" rx="5" class="box"/>
+  ${text(722, y + 28, '備考', 'blue bold', 19)}
+  <line x1="707" y1="${y + 36}" x2="1037" y2="${y + 36}" class="line"/>
+  ${text(722, y + 57, note || '特になし', 'small')}`
 }
 
 function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof buildSalesEstimateSections>, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
-  const x = 23
-  const y = 742
-  const w = 324
+  const { x, width: w, topY, topHeight, taxY, paymentY, bottomY } = salesEstimateSheetLayout.vehicle
+  const y = salesEstimateSheetLayout.lowerY
   const rowH = 35
-  const topY = y + 39
-  const topHeight = 267
-  const taxY = y + 316
-  const paymentY = y + 470
   const rows = [
     ['車両本体価格', totals.vehicleBasePrice, ''],
     ['値引等', totals.discount, 'discount'],
@@ -224,7 +437,7 @@ function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof b
   ${valueRow(x, paymentY, w, '下取車価格', totals.tradeInPrice, 31, '')}
   ${valueRow(x, paymentY + 31, w, '頭金／現金／他', totals.downPayment, 31, '')}
   ${valueRow(x, paymentY + 62, w, '残金／所要資金', totals.remainingPayment, 33, 'bold dark')}
-  <rect x="${x}" y="${paymentY}" width="${w}" height="95" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
+  <rect x="${x}" y="${paymentY}" width="${w}" height="${bottomY - paymentY}" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
 }
 
 function taxMatrix(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, x: number, y: number, w: number) {
@@ -256,47 +469,44 @@ function feeCard(
   actual: Array<{ label: string; amount: number }>,
   totals: ReturnType<typeof calculateSalesEstimateTotals>,
 ) {
-  const x = 363
-  const y = 742
-  const w = 299
-  let cursor = y + 39
-  const group = (title: string, rows: Array<{ label: string; amount: number }>, total: number, slots: number) => {
-    const start = cursor
-    const rowH = 26
-    cursor += 27
+  const layout = salesEstimateSheetLayout.fee
+  const fillRows = (rows: Array<{ label: string; amount: number }>, slots: number) => {
     const visible = [...rows]
     while (visible.length < slots) visible.push({ label: '', amount: 0 })
-    const body = `${text(x + 14, start + 22, title, 'label bold', 15)}
-      ${visible.slice(0, slots).map((line, index) => valueRow(x, cursor + index * rowH, w, line.label, line.amount, rowH, '')).join('')}`
-    cursor += slots * rowH
-    const subtotal = valueRow(x, cursor, w, '小計', total, 30, 'bold pale')
-    cursor += 32
-    return body + subtotal
+    return visible.slice(0, slots)
   }
-  const groups = group('税金/保険料（非課税）', legal, totals.legalNonTaxable, 3)
-    + group('手続代行費用（課税）', taxable, totals.taxableFeeTotal, 5)
-    + group('実費・預託金（非課税）', actual, totals.nonTaxableFeeTotal, 3)
-  return `${sectionHeader(x, y, w, '諸費用内訳')}
-  <rect x="${x}" y="${y + 39}" width="${w}" height="526" class="box"/>
+  const rowsByBucket = { legalNonTaxable: legal, taxableFees: taxable, nonTaxableFees: actual }
+  const totalsByBucket = { legalNonTaxable: totals.legalNonTaxable, taxableFees: totals.taxableFeeTotal, nonTaxableFees: totals.nonTaxableFeeTotal }
+  const groups = layout.groups.map((group) => {
+    const rows = fillRows(rowsByBucket[group.bucket], group.rows)
+    const category = `<rect x="${layout.x}" y="${group.startY}" width="${layout.categoryWidth}" height="${group.endY - group.startY}" fill="#fff" stroke="${LINE}"/>
+      ${verticalText(layout.x + layout.categoryWidth / 2, group.startY + (group.endY - group.startY) / 2, group.title, 'label bold', 13)}`
+    const detailRows = rows.map((line, index) => valueRow(layout.detailX, group.startY + index * FEE_ROW_HEIGHT, layout.detailWidth, line.label, line.amount, FEE_ROW_HEIGHT, '')).join('')
+    const subtotal = valueRow(layout.detailX, group.subtotalY, layout.detailWidth, '小計', totalsByBucket[group.bucket], FEE_SUBTOTAL_HEIGHT, 'bold pale')
+    return category + detailRows + subtotal
+  }).join('')
+  return `${sectionHeader(layout.x, salesEstimateSheetLayout.lowerY, layout.totalWidth, '諸費用内訳')}
+  <rect x="${layout.x}" y="${layout.bodyY}" width="${layout.totalWidth}" height="${layout.bodyHeight}" class="box"/>
   ${groups}
-  ${valueRow(x, y + 526, w, '諸費用合計', totals.feesTotal, 39, 'bold pale')}`
+  ${valueRow(layout.x, layout.totalY, layout.totalWidth, '諸費用合計', totals.feesTotal, layout.totalHeight, 'bold pale', layout.totalSplitWidth)}`
 }
 
 function accessoryCard(rows: Array<{ label: string; amount: number }>, total: number) {
-  const x = 677
-  const y = 742
-  const w = 360
-  const rowH = 34
+  const layout = salesEstimateSheetLayout.accessory
+  const y = salesEstimateSheetLayout.lowerY
   const visible = [...rows]
-  while (visible.length < 13) visible.push({ label: '', amount: 0 })
-  return `${sectionHeader(x, y, w, '付属品・特別仕様明細')}
-  <rect x="${x}" y="${y + 39}" width="${w}" height="526" class="box"/>
-  ${simpleColumns(x, y + 39, [210, 150], ['品名', '金額'], 36, true)}
-  ${visible.slice(0, 13).map((line, index) => valueRow(x, y + 75 + index * rowH, w, line.label, line.amount, rowH, '', 210)).join('')}
-  ${valueRow(x, y + 517, w, '付属品・特別仕様合計', total, 48, 'bold pale', 210)}`
+  while (visible.length < layout.rowCount) visible.push({ label: '', amount: 0 })
+  return `${sectionHeader(layout.x, y, layout.width, '付属品・特別仕様明細')}
+  <rect x="${layout.x}" y="${layout.bodyY}" width="${layout.width}" height="${layout.bodyHeight}" class="box"/>
+  ${simpleColumns(layout.x, layout.bodyY, [layout.nameWidth, layout.amountWidth], ['品名', '金額'], 36, true)}
+  ${visible.slice(0, layout.rowCount).map((line, index) => valueRow(layout.x, layout.detailY + index * layout.rowHeight, layout.width, line.label, line.amount, layout.rowHeight, '', layout.nameWidth)).join('')}
+  ${valueRow(layout.x, layout.totalY, layout.width, '付属品・特別仕様合計', total, layout.totalHeight, 'bold pale', layout.nameWidth)}`
 }
 
 function creditBlock(credit: SalesDocument['details']['credit']) {
+  const y = salesEstimateSheetLayout.creditY
+  const layout = salesEstimateSheetLayout.footer.credit
+  const columnWidth = layout.width / layout.columnCount
   const values = [
     credit.paymentCount,
     credit.bonusPayment ? formatYen(credit.bonusPayment) : '',
@@ -304,27 +514,57 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
     credit.bonusMonths,
   ]
   return `
-  <rect x="23" y="1322" width="475" height="110" rx="5" class="box"/>
-  ${text(48, 1354, '▣  クレジットお支払いプラン', 'blue bold', 21)}
-  <line x1="23" y1="1366" x2="498" y2="1366" class="line"/>
-  ${simpleColumns(23, 1366, [119, 119, 119, 118], ['回数', 'ボーナス払', '金利', '支払開始月'], 32, true)}
-  ${simpleColumns(23, 1398, [119, 119, 119, 118], values, 34, false)}`
+  <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
+  <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${layout.headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
+  ${text(layout.x + layout.width / 2, y + 22, 'クレジットお支払いプラン', 'white bold', 17, 'middle')}
+  <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 11)}
+  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 9)}`
+}
+
+function bankBlock(settings: AppSettings) {
+  const y = salesEstimateSheetLayout.creditY
+  const layout = salesEstimateSheetLayout.footer.bank
+  const headerHeight = 32
+  const labelWidth = 80
+  const rowHeight = (layout.height - headerHeight) / 2
+  const valueX = layout.x + labelWidth + 8
+  return `
+  <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
+  <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
+  ${text(layout.x + layout.width / 2, y + 21, 'お振込先', 'white bold', 17, 'middle')}
+  <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
+  <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
+  <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
+  <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 12, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 12, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 12)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 12)}`
 }
 
 function shopBlock(settings: AppSettings) {
+  const y = salesEstimateSheetLayout.creditY 
+  const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyLeft = hasLogo ? 780 : 733
+  const signatureShift = hasLogo ? 40 : 0
+  const companyLeft = layout.x + (hasLogo ? 180 + signatureShift : 12)
   const infoLeft = companyLeft + 20
+  const infoLines = [
+    shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
+    shop.postalCode ? `〒 ${shop.postalCode}` : '',
+    shop.address,
+    shop.phone ? `TEL ${shop.phone}` : '',
+    shop.fax ? `FAX ${shop.fax}` : '',
+  ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="544" y="1337" width="207" height="95" preserveAspectRatio="xMidYMid meet"/>`
-    : text(597, 1440, '▦', 'blue bold', 113)
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x - 20 + signatureShift}" y="${y + 10}" width="180" height="68" preserveAspectRatio="xMidYMid meet"/>`
+    : ''
   return `
   ${logoMarkup}
-  ${text(companyLeft, 1357, shop.name || '店舗名未設定', 'blue heavy', 20)}
-  ${text(infoLeft, 1384, shop.postalCode ? `〒${shop.postalCode}` : '', '', 13)}
-  ${text(infoLeft, 1406, shop.address, '', 13)}
-  ${text(infoLeft, 1429, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 13)}`
+  ${text(companyLeft, y + 17, shop.name || '店舗名未設定', 'blue heavy', 20)}
+  ${infoLines.map((line, index) => text(infoLeft-7, y + 36 + index * 15, line, '', 11)).join('')}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
@@ -343,12 +583,13 @@ function tableRow(x: number, y: number, cells: Array<[string, number]>, height: 
   }).join('')
 }
 
-function simpleColumns(x: number, y: number, widths: number[], values: string[], height: number, heading: boolean) {
+function simpleColumns(x: number, y: number, widths: number[], values: string[], height: number, heading: boolean, fontSize = 13) {
   let cursor = x
   return values.map((value, index) => {
     const width = widths[index]
+    const className = heading ? (fontSize === 13 ? 'label small' : 'label') : (fontSize === 13 ? 'small' : '')
     const result = `<rect x="${cursor}" y="${y}" width="${width}" height="${height}" fill="${heading ? PALE : '#fff'}" stroke="${LINE}"/>
-      ${text(cursor + width / 2, y + height / 2 + 6, value, heading ? 'label small' : 'small', 13, 'middle')}`
+      ${text(cursor + width / 2, y + height / 2 + 6, value, className, fontSize, 'middle')}`
     cursor += width
     return result
   }).join('')
@@ -372,6 +613,13 @@ function text(x: number, y: number, value: string, className = '', size?: number
   return `<text x="${x}" y="${y}" class="${className}"${size ? ` font-size="${size}"` : ''} text-anchor="${anchor}"${style}>${escapeXml(value)}</text>`
 }
 
+function verticalText(x: number, y: number, value: string, className = '', size = 12) {
+  const characters = Array.from(value)
+  const lineHeight = size * 1.05
+  const firstY = y - ((characters.length - 1) * lineHeight) / 2
+  return characters.map((character, index) => `<text x="${x}" y="${firstY + index * lineHeight}" class="${className}" font-size="${size}" text-anchor="middle" dominant-baseline="middle" writing-mode="tb" text-orientation="upright">${escapeXml(character)}</text>`).join('')
+}
+
 function formatYen(amount: number) {
   return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}`
 }
@@ -384,6 +632,27 @@ function formatPercent(rate: number) {
 function formatJapaneseDate(value: string) {
   const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
   return match ? `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日` : value || '未設定'
+}
+
+function formatSlashDate(value: string) {
+  const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return match ? `${match[1]}/${match[2]}/${match[3]}` : value || '未設定'
+}
+
+function brandMark(x: number, y: number, reversed = false) {
+  if (reversed) {
+    return `<g fill="${BLUE}">
+      <rect x="${x + 9}" y="${y}" width="9" height="9"/>
+      <rect x="${x}" y="${y + 9}" width="9" height="9"/>
+      <rect x="${x + 9}" y="${y + 18}" width="9" height="9"/>
+    </g>`
+  }
+
+  return `<g fill="${BLUE}">
+    <rect x="${x}" y="${y}" width="9" height="9"/>
+    <rect x="${x + 9}" y="${y + 9}" width="9" height="9"/>
+    <rect x="${x}" y="${y + 18}" width="9" height="9"/>
+  </g>`
 }
 
 function escapeXml(value: string) {

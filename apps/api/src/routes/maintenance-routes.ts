@@ -6,9 +6,9 @@ import { createDatabase } from '../db/client'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
-const maintenanceDocumentTypes = new Set(['整備見積書', '納品書', '整備請求書'])
-const maintenanceStatuses = new Set(['受付中', '作業中', '完了', '下書き', '入金待ち', 'アーカイブ済み'])
-const maintenanceCategories = new Set(['車検', '法定点検', '一般整備'])
+const maintenanceDocumentTypes = new Set(['整備見積書', '整備請求書'])
+const maintenanceStatuses = new Set(['下書き', '入金待ち', '完了', 'アーカイブ済み'])
+const maintenanceCategories = new Set(['車検', '板金', '一般整備'])
 const feeNames = ['自賠責', '重量税', '印紙代', 'リサイクル料金'] as const
 type FeeName = typeof feeNames[number]
 
@@ -92,7 +92,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   const input = await parseMaintenanceInput({
     ...body,
     type: body.type ?? current.type,
-    status: body.status ?? current.status,
+    status: body.status ?? normalizeMaintenanceStatus(current.status),
     category: body.category ?? current.category,
     number: body.number === undefined ? current.number : body.number,
     customerId: body.customerId ?? current.customerId,
@@ -184,7 +184,7 @@ function parseMaintenanceInput(body: Record<string, unknown>, database: ReturnTy
 async function parseMaintenanceInputAsync(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<MaintenanceInput> {
   const type = stringValue(body, 'type') || '整備請求書'
   if (!maintenanceDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
-  const status = stringValue(body, 'status') || '受付中'
+  const status = stringValue(body, 'status') || '下書き'
   if (!maintenanceStatuses.has(status)) throw new HttpError(400, '整備書類ステータスが不正です。')
   const category = stringValue(body, 'category')
   if (!maintenanceCategories.has(category)) throw new HttpError(400, '入庫区分が不正です。')
@@ -231,7 +231,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     id: document.id,
     number: document.number,
     type: document.type,
-    status: document.status,
+    status: normalizeMaintenanceStatus(document.status),
     category: document.category,
     customerId: document.customerId,
     customerName: customer?.name ?? '',
@@ -281,10 +281,11 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
 
 export function calculateMaintenanceTotals(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, taxRate: number, rounding: '切り捨て' | '四捨五入') {
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0)
-  const taxableAmount = Math.max(0, subtotal + adjustment)
+  const taxableAmount = Math.max(0, subtotal)
   const taxValue = taxableAmount * taxRate / 100
   const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
-  return { subtotal, tax, total: subtotal + Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment + tax }
+  const feesTotal = Object.values(fees).reduce((sum, fee) => sum + fee, 0) + adjustment
+  return { subtotal, tax, total: subtotal + feesTotal + tax }
 }
 
 async function ensureMaintenanceDocumentNumberAvailable(database: ReturnType<typeof createDatabase>, number: string, organizationId: string, exceptId?: string) {
@@ -302,8 +303,12 @@ async function archiveMaintenanceDocument(env: Env, database: ReturnType<typeof 
 async function restoreMaintenanceDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
   const current = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
   if (!current) throw new HttpError(404, '整備書類が見つかりません。')
-  await database.update(maintenanceDocuments).set({ status: '受付中', archivedAt: null, updatedAt: new Date().toISOString() }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
+  await database.update(maintenanceDocuments).set({ status: '下書き', archivedAt: null, updatedAt: new Date().toISOString() }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
   return jsonResponse({ restored: true }, 200, env)
+}
+
+function normalizeMaintenanceStatus(status: string) {
+  return status === '受付中' || status === '作業中' ? '下書き' : status
 }
 
 function parseItems(value: unknown): MaintenanceItemInput[] {
@@ -395,6 +400,7 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     customerContactPhone: stringValue(source, 'customerContactPhone'),
     bankName: stringValue(source, 'bankName'),
     bankAccount: stringValue(source, 'bankAccount'),
+    bankAccountHolder: stringValue(source, 'bankAccountHolder'),
     customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
     vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
     labels: {
@@ -425,6 +431,7 @@ type MaintenanceDetails = {
   customerContactPhone: string
   bankName: string
   bankAccount: string
+  bankAccountHolder: string
   customerOverride: Record<string, string> | null
   vehicleOverride: Record<string, string | boolean> | null
   labels: Record<string, string>

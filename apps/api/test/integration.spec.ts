@@ -221,7 +221,7 @@ describe("CLI authenticated workflow", () => {
 				type: "整備請求書",
 				status: "入金待ち",
 				number: `${marker}-MAINT-001`,
-				category: "車検",
+				category: "板金",
 				customerId,
 				vehicleId,
 				intakeDate: "2026-07-26",
@@ -241,7 +241,7 @@ describe("CLI authenticated workflow", () => {
 			maintenanceDocumentId = stringValue(maintenanceDocument.id);
 			const maintenanceNumber = stringValue(maintenanceDocument.number);
 			expect(maintenanceNumber).toMatch(/^M-\d{4}-\d{5}$/);
-			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 290, total: 14690, status: "入金待ち" }));
+			expect(maintenanceDocument).toEqual(expect.objectContaining({ subtotal: 3000, tax: 300, total: 14700, status: "入金待ち" }));
 			expect(objectValue(maintenanceDocument.details).customerOverride).toBeNull();
 			expect(objectValue(maintenanceDocument.details).vehicleOverride).toBeNull();
 			expect(objectValue(maintenanceDocument.details)).toEqual(expect.objectContaining({ bankName: `${marker}銀行`, bankAccount: "7654321" }));
@@ -268,6 +268,10 @@ describe("CLI authenticated workflow", () => {
 			expect(objectValue(updatedMaintenance.body.document)).toEqual(expect.objectContaining({ status: "完了", plannedReleaseDate: "2026-07-27", completionDate: "2026-07-27" }));
 			const tamperedMaintenanceStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "不正状態" });
 			expect(tamperedMaintenanceStatus.response.status).toBe(400);
+			const removedMaintenanceIntakeStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "受付中" });
+			expect(removedMaintenanceIntakeStatus.response.status).toBe(400);
+			const removedMaintenanceWorkStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "作業中" });
+			expect(removedMaintenanceWorkStatus.response.status).toBe(400);
 
 			const payment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}`, "PATCH", {
 				paidAmount: 50000,
@@ -305,7 +309,7 @@ describe("CLI authenticated workflow", () => {
 			const vehicleHistory = await requestJson<JsonObject>(`/api/vehicles/${vehicleId}/history`);
 			expect(vehicleHistory.response.status).toBe(200);
 			expect(arrayValue(vehicleHistory.body.sales)).toEqual(expect.arrayContaining([expect.objectContaining({ id: salesDocumentId, number: expect.any(String) })]));
-			expect(arrayValue(vehicleHistory.body.maintenance)).toEqual(expect.arrayContaining([expect.objectContaining({ id: maintenanceDocumentId, category: '車検' })]));
+			expect(arrayValue(vehicleHistory.body.maintenance)).toEqual(expect.arrayContaining([expect.objectContaining({ id: maintenanceDocumentId, category: '板金' })]));
 			expect(arrayValue(vehicleHistory.body.inspections)).toEqual(expect.arrayContaining([expect.objectContaining({ id: inspectionScheduleId, status: '完了' })]));
 			expect(arrayValue(vehicleHistory.body.payments)).toEqual(expect.arrayContaining([expect.objectContaining({ documentId: salesDocumentId, paidAmount: 50000 })]));
 

@@ -1,10 +1,11 @@
 import { apiFetch } from './api'
 
-export type MaintenanceDocumentType = '整備見積書' | '納品書' | '整備請求書'
-export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金待ち' | '下書き' | 'アーカイブ済み'
-export type IntakeCategory = '車検' | '法定点検' | '一般整備'
+export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
+export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
+export type IntakeCategory = '車検' | '板金' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
+export type MaintenanceFeeKey = keyof MandatoryFees | '調整額'
 export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; postalCode: string; address: string }
 export type MaintenanceVehicleDetails = { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean }
 export type MaintenanceDocumentDetails = {
@@ -15,6 +16,7 @@ export type MaintenanceDocumentDetails = {
   customerContactPhone: string
   bankName: string
   bankAccount: string
+  bankAccountHolder: string
   customerOverride: MaintenanceCustomerDetails | null
   vehicleOverride: MaintenanceVehicleDetails | null
   labels: {
@@ -35,6 +37,7 @@ export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
   customerContactPhone: '',
   bankName: '',
   bankAccount: '',
+  bankAccountHolder: '',
   customerOverride: null,
   vehicleOverride: null,
   labels: {
@@ -95,7 +98,7 @@ export type MaintenanceDocumentInput = {
   items: Array<Omit<MaintenanceLineItem, 'id'>>
 }
 
-type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
+type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
 
 export async function fetchMaintenanceDocuments() {
   const response = await apiFetch<{ documents: ApiMaintenanceDocument[] }>('/api/maintenance-documents')
@@ -123,6 +126,9 @@ export async function restoreMaintenanceDocument(id: string) {
 function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDocument {
   return {
     ...document,
+    type: document.type === '納品書' ? '整備請求書' : document.type,
+    status: normalizeMaintenanceStatus(document.status),
+    category: document.category === '法定点検' ? '板金' : document.category,
     customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeMaintenanceDetails(document.details),
@@ -137,6 +143,10 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
   }
 }
 
+function normalizeMaintenanceStatus(status: ApiMaintenanceDocument['status']): MaintenanceStatus {
+  return status === '受付中' || status === '作業中' ? '下書き' : status
+}
+
 function toPayload(input: MaintenanceDocumentInput) {
   return { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
 }
@@ -148,6 +158,7 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
     ...details,
     bankName: typeof details.bankName === 'string' ? details.bankName : '',
     bankAccount: typeof details.bankAccount === 'string' ? details.bankAccount : '',
+    bankAccountHolder: typeof details.bankAccountHolder === 'string' ? details.bankAccountHolder : '',
     customerOverride: details.customerOverride && hasMaintenanceOverrideValue(details.customerOverride) ? {
       name: details.customerOverride.name,
       kana: details.customerOverride.kana,
