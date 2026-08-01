@@ -66,7 +66,7 @@ const FOOTER_BANK_HEIGHT = 96
 const FOOTER_CREDIT_HEADER_HEIGHT = 36
 const FOOTER_CREDIT_VALUE_Y = 63
 const FOOTER_CREDIT_VALUE_HEIGHT = 33
-const FOOTER_CREDIT_COLUMN_COUNT = 3
+const FOOTER_CREDIT_COLUMN_COUNT = 4
 
 const feeGroupDefinitions = [
   { bucket: 'legalNonTaxable' as const, title: '税金／保険料（非課税）', rows: 5 },
@@ -511,13 +511,14 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
     credit.paymentCount,
     credit.bonusPayment ? formatYen(credit.bonusPayment) : '',
     credit.fee ? String(credit.fee) : '',
+    credit.bonusMonths,
   ]
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
-  ${text(layout.x + 12, y + 24, '▣  クレジットお支払いプラン', 'blue bold', 16)}
+  ${text(layout.x + 10, y + 23, '▣  クレジットお支払いプラン', 'blue bold', 15)}
   <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
-  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利'], 27, true, 11)}
-  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 12)}`
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 8)}
+  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 10)}`
 }
 
 function bankBlock(settings: AppSettings) {
@@ -530,15 +531,15 @@ function bankBlock(settings: AppSettings) {
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
-  ${text(layout.x + layout.width / 2, y + 22, 'お振込先', 'white bold', 18, 'middle')}
+  ${text(layout.x + layout.width / 2, y + 23, 'お振込先', 'white bold', 20, 'middle')}
   <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
   <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
   <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
   <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 12, 'middle')}
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 12, 'middle')}
-  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 12)}
-  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 12)}`
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 13, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 13, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 13)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 13)}`
 }
 
 function shopBlock(settings: AppSettings) {
@@ -546,16 +547,22 @@ function shopBlock(settings: AppSettings) {
   const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyLeft = layout.x + (hasLogo ? 142 : 10)
+  const companyLeft = layout.x + (hasLogo ? 180 : 12)
+  const infoLeft = companyLeft + 20
+  const infoLines = [
+    shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
+    shop.postalCode ? `〒 ${shop.postalCode}` : '',
+    shop.address,
+    shop.phone ? `TEL ${shop.phone}` : '',
+    shop.fax ? `FAX ${shop.fax}` : '',
+  ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 7}" width="128" height="82" preserveAspectRatio="xMidYMid meet"/>`
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 10}" width="165" height="68" preserveAspectRatio="xMidYMid meet"/>`
     : ''
   return `
   ${logoMarkup}
-  ${text(companyLeft, y + 25, shop.name || '店舗名未設定', 'blue heavy', 18)}
-  ${text(companyLeft, y + 48, shop.postalCode ? `〒${shop.postalCode}` : '', '', 11)}
-  ${text(companyLeft, y + 66, shop.address, '', 11)}
-  ${text(companyLeft, y + 84, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 11)}`
+  ${text(companyLeft, y + 20, shop.name || '店舗名未設定', 'blue heavy', 20)}
+  ${infoLines.map((line, index) => text(infoLeft, y + 36 + index * 13, line, '', 11)).join('')}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
