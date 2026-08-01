@@ -59,7 +59,7 @@ const VEHICLE_PAYMENT_HEIGHT = 95
 const FOOTER_X = 23
 const FOOTER_WIDTH = WIDTH - FOOTER_X * 2
 const FOOTER_GAP = 12
-const FOOTER_CREDIT_WIDTH = 285
+const FOOTER_CREDIT_WIDTH = 260
 const FOOTER_BANK_WIDTH = 300
 const FOOTER_CREDIT_HEIGHT = 96
 const FOOTER_BANK_HEIGHT = 96
@@ -515,31 +515,31 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
   ]
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
-  ${text(layout.x + 10, y + 23, '▣  クレジットお支払いプラン', 'blue bold', 15)}
+  ${text(layout.x + 9, y + 22, '▣  クレジットお支払いプラン', 'blue bold', 14)}
   <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
-  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 8)}
-  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 10)}`
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 7)}
+  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 9)}`
 }
 
 function bankBlock(settings: AppSettings) {
   const y = salesEstimateSheetLayout.creditY
   const layout = salesEstimateSheetLayout.footer.bank
   const headerHeight = 32
-  const labelWidth = 94
+  const labelWidth = 80
   const rowHeight = (layout.height - headerHeight) / 2
-  const valueX = layout.x + labelWidth + 10
+  const valueX = layout.x + labelWidth + 8
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
-  ${text(layout.x + layout.width / 2, y + 23, 'お振込先', 'white bold', 20, 'middle')}
+  ${text(layout.x + layout.width / 2, y + 22, 'お振込先', 'white bold', 18, 'middle')}
   <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
   <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
   <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
   <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 13, 'middle')}
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 13, 'middle')}
-  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 13)}
-  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 13)}`
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 11, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 11, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 11)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 11)}`
 }
 
 function shopBlock(settings: AppSettings) {
