@@ -891,7 +891,8 @@
 .payment-filter-option-sales.is-active { background: #7c3aed; }
 .payment-filter-option-maintenance.is-active { background: #0f766e; }
 .payment-filter-option-pending.is-active { background: #b45309; }
-.payment-filter-option-completed.is-active, .payment-filter-option-paid.is-active { background: #16a34a; }
+.payment-filter-option-completed.is-active { background: #4f46e5; }
+.payment-filter-option-paid.is-active { background: #16a34a; }
 .payment-filter-option-unpaid.is-active { background: #dc2626; }
 .payment-filter-option-partial.is-active { background: #2563eb; }
 .payment-filter-reset { justify-self: end; }
@@ -912,7 +913,7 @@
 .payment-type-maintenance { color: #0f766e; border-color: #bce9df; background: #ecfdf8; }
 .payment-document-status { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .payment-document-status-pending { color: #b45309; border-color: #f6d98c; background: var(--warning-soft); }
-.payment-document-status-completed { color: var(--success); border-color: #ccefd7; background: var(--success-soft); }
+.payment-document-status-completed { color: #4f46e5; border-color: #c7d2fe; background: #eef2ff; }
 .payment-status-tag { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .payment-status-unpaid { color: var(--danger); border-color: #f6caca; background: var(--danger-soft); }
 .payment-status-partial { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
