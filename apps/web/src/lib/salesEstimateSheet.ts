@@ -547,7 +547,8 @@ function shopBlock(settings: AppSettings) {
   const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyLeft = layout.x + (hasLogo ? 180 : 12)
+  const signatureShift = hasLogo ? 20 : 0
+  const companyLeft = layout.x + (hasLogo ? 180 + signatureShift : 12)
   const infoLeft = companyLeft + 20
   const infoLines = [
     shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
@@ -557,7 +558,7 @@ function shopBlock(settings: AppSettings) {
     shop.fax ? `FAX ${shop.fax}` : '',
   ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 10}" width="165" height="68" preserveAspectRatio="xMidYMid meet"/>`
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2 + signatureShift}" y="${y + 10}" width="165" height="68" preserveAspectRatio="xMidYMid meet"/>`
     : ''
   return `
   ${logoMarkup}
