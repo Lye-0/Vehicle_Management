@@ -16,6 +16,7 @@ type Props = {
   itemPresets: string[]
   bankName: string
   bankAccount: string
+  bankAccountHolder: string
   onUpdateHeader: (field: MaintenanceStatementHeaderField, value: string) => void
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
   onUpdateItem: (itemId: string, field: MaintenanceStatementItemField, value: string) => void
@@ -24,7 +25,7 @@ type Props = {
   onAddItem: () => void
 }
 
-export function MaintenanceStatementEditor({ document, itemPresets, bankName, bankAccount, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
+export function MaintenanceStatementEditor({ document, itemPresets, bankName, bankAccount, bankAccountHolder, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
   const details = document.details
   const customer = details.customerOverride ?? document.customerDetails
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
@@ -77,7 +78,10 @@ export function MaintenanceStatementEditor({ document, itemPresets, bankName, ba
     <StatementNumberControl className="is-compact-value" ariaLabel="その他費用" value={document.fees.リサイクル料金} x={596} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel="調整額" value={document.adjustment} x={683} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
 
-    <StatementTextControl ariaLabel="振込先" value={bankValue} x={50} y={1284} width={465} height={64} className="is-bank-value" onChange={updateBankValue} />
+    {document.type === '整備請求書' && <>
+      <StatementTextControl ariaLabel="振込口座" value={bankValue} x={125} y={1277} width={401} height={38} className="is-bank-value" onChange={updateBankValue} />
+      <StatementTextControl ariaLabel="口座名義" value={bankAccountHolder} x={125} y={1317} width={401} height={38} className="is-bank-value" onChange={(value) => updateDetails({ bankAccountHolder: value })} />
+    </>}
   </div>
 }
 

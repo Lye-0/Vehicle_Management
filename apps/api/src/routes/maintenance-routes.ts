@@ -400,6 +400,7 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     customerContactPhone: stringValue(source, 'customerContactPhone'),
     bankName: stringValue(source, 'bankName'),
     bankAccount: stringValue(source, 'bankAccount'),
+    bankAccountHolder: stringValue(source, 'bankAccountHolder'),
     customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
     vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
     labels: {
@@ -430,6 +431,7 @@ type MaintenanceDetails = {
   customerContactPhone: string
   bankName: string
   bankAccount: string
+  bankAccountHolder: string
   customerOverride: Record<string, string> | null
   vehicleOverride: Record<string, string | boolean> | null
   labels: Record<string, string>

@@ -138,7 +138,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(868, 1117, number(totals.technicalSubtotal), 'middle', 14)}
 
   ${summaryBoxes(document, totals, labels.otherFee, hideEditableValues)}
-  ${bankBox(settings, document.details, hideEditableValues)}
+  ${document.type === '整備請求書' ? bankBox(settings, document.details, hideEditableValues) : ''}
   ${shopBox(settings)}
   </svg>`
 }
@@ -195,10 +195,15 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
 function bankBox(settings: AppSettings, details: MaintenanceDocument['details'], hideEditableValues: boolean) {
   const bankName = details.bankName || settings.shop.bankName
   const bankAccount = details.bankAccount || settings.shop.bankAccount
+  const bankAccountHolder = details.bankAccountHolder || settings.shop.name
   return `${roundedBox(16, 1233, 510, 122)}
   ${rect(16, 1233, 510, 42, 'url(#maintenance-blue)')}
   ${centerText(271, 1262, 'お振込先', 20, '700', '#fff')}
-  ${valueText(54, 1341, statementValue(`${bankName}　${bankAccount}`, hideEditableValues), 'start', 17)}`
+  ${rect(17, 1276, 107, 78, '#dcecff')}
+  ${gridLines([16, 124, 526], [1275, 1315, 1355])}
+  ${headerText(70, 1301, '振込口座')}${headerText(70, 1341, '口座名義')}
+  ${valueText(145, 1301, statementValue(`${bankName}　${bankAccount}`, hideEditableValues), 'start', 15)}
+  ${valueText(145, 1341, statementValue(bankAccountHolder, hideEditableValues), 'start', 15)}`
 }
 
 function shopBox(settings: AppSettings) {
@@ -206,15 +211,19 @@ function shopBox(settings: AppSettings) {
   const hasLogo = Boolean(shop.logoDataUrl)
   const companyX = hasLogo ? 830 : 780
   const infoX = companyX + 20
+  const infoLines = [
+    shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
+    shop.postalCode ? `〒${shop.postalCode}` : '',
+    shop.address,
+    shop.phone ? `TEL ${shop.phone}` : '',
+    shop.fax ? `FAX ${shop.fax}` : '',
+  ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1265" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
-    : valueText(635, 1358, '▦', 'start', 120, '700', '#073c87')
+    ? `<image href="${escapeXml(shop.logoDataUrl)}" x="578" y="1260" width="220" height="90" preserveAspectRatio="xMidYMid meet"/>`
+    : valueText(635, 1350, '▦', 'start', 110, '700', '#073c87')
   return `${logoMarkup}
-  ${valueText(companyX, 1280, shop.name, 'start', 20, '700', '#073c87')}
-  ${valueText(infoX, 1284, shop.registrationNumber, 'start', 12)}
-  ${valueText(infoX, 1305, shop.postalCode ? `〒${shop.postalCode}` : '', 'start', 13)}
-  ${valueText(infoX, 1326, shop.address, 'start', 13)}
-  ${valueText(infoX, 1347, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, 'start', 13)}`
+  ${valueText(companyX, 1254, shop.name, 'start', 20, '700', '#073c87')}
+  ${infoLines.map((line, index) => valueText(infoX, 1277 + index * 19, line, 'start', 12)).join('')}`
 }
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
