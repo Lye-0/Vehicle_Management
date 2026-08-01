@@ -193,14 +193,14 @@ function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatemen
 }
 
 function bankBox(settings: AppSettings) {
-  return `${roundedBox(16, 1248, 510, 122)}
-  ${rect(16, 1248, 510, 42, 'url(#maintenance-blue)')}
-  ${centerText(271, 1277, 'お振込先', 20, '700', '#fff')}
-  ${rect(17, 1291, 107, 78, '#dcecff')}
-  ${gridLines([16, 124, 526], [1290, 1330, 1370])}
-  ${headerText(70, 1316, '振込口座')}${headerText(70, 1356, '口座名義')}
-  ${valueText(145, 1316, settings.shop.bankName, 'start', 13)}
-  ${valueText(145, 1356, settings.shop.bankAccount, 'start', 13)}`
+  return `${roundedBox(16, 1278, 510, 122)}
+  ${rect(16, 1278, 510, 42, 'url(#maintenance-blue)')}
+  ${centerText(271, 1307, 'お振込先', 20, '700', '#fff')}
+  ${rect(17, 1321, 107, 78, '#dcecff')}
+  ${gridLines([16, 124, 526], [1320, 1360, 1400])}
+  ${headerText(70, 1346, '振込口座')}${headerText(70, 1386, '口座名義')}
+  ${valueText(145, 1346, settings.shop.bankName, 'start', 13)}
+  ${valueText(145, 1386, settings.shop.bankAccount, 'start', 13)}`
 }
 
 function shopBox(settings: AppSettings) {
