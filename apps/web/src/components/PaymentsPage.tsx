@@ -34,7 +34,7 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<PaymentFilter>('すべて')
   const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<InvoiceTypeFilter>('すべて')
-  const [documentStatusFilter, setDocumentStatusFilter] = useState<DocumentStatusFilter>('すべて')
+  const [documentStatusFilter, setDocumentStatusFilter] = useState<DocumentStatusFilter>('入金待ち')
   const [selectedRecordId, setSelectedRecordId] = useState(initialRecordId ?? '')
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
