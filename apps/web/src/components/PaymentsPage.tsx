@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertTriangle,
   Banknote,
   CalendarDays,
   CarFront,
@@ -130,17 +131,14 @@ function PaymentRecordList({ records, selectedRecordId, onSelect }: { records: P
 function PaymentRecordDetail({ record, saved, saving, onSaveEntry, onDeleteEntry, onOpenDocument, onPdf }: { record: PaymentRecord; saved: boolean; saving: boolean; onSaveEntry: (entryId: string | undefined, input: PaymentEntryInput) => Promise<boolean>; onDeleteEntry: (entryId: string) => Promise<boolean>; onOpenDocument?: () => void; onPdf: () => void }) {
   const status = getPaymentStatus(record)
   const outstanding = getOutstandingAmount(record)
-  const [editingEntryId, setEditingEntryId] = useState('')
   const [amount, setAmount] = useState('')
   const [paymentDate, setPaymentDate] = useState(todayDate())
   const [method, setMethod] = useState<PaymentMethod>('')
   const [note, setNote] = useState('')
-
-  const editingEntry = record.paymentHistory.find((entry) => entry.id === editingEntryId)
-  const maxAmount = Math.max(outstanding + (editingEntry?.amount ?? 0), 0)
+  const editingEntryId = ''
+  const maxAmount = outstanding
 
   function resetForm() {
-    setEditingEntryId('')
     setAmount('')
     setPaymentDate(todayDate())
     setMethod('')
@@ -148,12 +146,7 @@ function PaymentRecordDetail({ record, saved, saving, onSaveEntry, onDeleteEntry
   }
 
   function startEditing(entry: PaymentEntry) {
-    setEditingEntryId(entry.id)
-    setAmount(String(entry.amount))
-    setPaymentDate(entry.paymentDate)
-    setMethod(entry.method)
-    setNote(entry.note)
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+    return (input: PaymentEntryInput) => onSaveEntry(entry.id, input)
   }
 
   async function submitEntry(event: React.FormEvent<HTMLFormElement>) {
@@ -161,21 +154,92 @@ function PaymentRecordDetail({ record, saved, saving, onSaveEntry, onDeleteEntry
     if (!method) return
     const parsedAmount = Math.round(Number(amount))
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return
-    const succeeded = await onSaveEntry(editingEntryId || undefined, { amount: parsedAmount, paymentDate, method: method as PaymentInputMethod, note })
+    const succeeded = await onSaveEntry(undefined, { amount: parsedAmount, paymentDate, method: method as PaymentInputMethod, note })
     if (succeeded) resetForm()
   }
 
   async function removeEntry(entry: PaymentEntry) {
-    if (!window.confirm(`${formatYen(entry.amount)}の入金履歴を削除しますか？`)) return
-    const succeeded = await onDeleteEntry(entry.id)
-    if (succeeded && editingEntryId === entry.id) resetForm()
+    await onDeleteEntry(entry.id)
   }
 
   return <section className="panel payment-detail-panel"><div className="payment-detail-header"><div className="payment-detail-title"><div><div className="payment-detail-badges"><span className={`payment-type-badge payment-type-${record.sourceType === '販売請求書' ? 'sales' : 'maintenance'}`}>{record.sourceType}</span><DocumentStatusTag status={record.documentStatus} /></div><h2>{record.number}</h2><small>{record.issuedAt} 作成</small></div><PaymentStatusTag status={status} /></div><div className="payment-detail-actions"><button className="button button-primary" type="button" onClick={resetForm}><Plus size={16} />入金を追加</button>{onOpenDocument && <button className="button button-secondary" type="button" onClick={onOpenDocument}><FileText size={16} />書類を開く</button>}<button className="button button-secondary" type="button" onClick={onPdf}><FileDown size={16} />PDF出力</button></div></div><div className="payment-detail-content"><div className="payment-context-grid"><div className="payment-context-card"><span className="payment-context-label"><UserRound size={15} />顧客</span><strong>{record.customerName}</strong><small>{record.phone}</small></div><div className="payment-context-card"><span className="payment-context-label"><CarFront size={15} />対象車両</span><strong>{record.vehicle || '車両未指定'}</strong><small>{record.plate}</small></div></div><section className="payment-amount-panel"><div className="payment-amount-header"><div><h3>請求金額と入金状況</h3><span>入金履歴の合計から現在の残額を計算します</span></div><span className="payment-amount-icon"><CircleDollarSign size={20} /></span></div><div className="payment-amount-grid"><PaymentAmount label="請求金額" value={record.invoiceAmount} /><PaymentAmount label="入金済み" value={record.paidAmount} tone="paid" /><PaymentAmount label="未入金額" value={outstanding} tone={outstanding > 0 ? 'outstanding' : 'paid'} emphasized /></div></section><section className="payment-form-panel payment-entry-form-panel"><div className="payment-form-header"><div><h3>{editingEntryId ? '入金履歴を編集' : '今回の入金を登録'}</h3><span>{editingEntryId ? '入金履歴の内容を修正します' : '入金のたびに1件ずつ登録します'}</span></div><Banknote size={21} /></div><form onSubmit={(event) => void submitEntry(event)}><div className="payment-form-grid"><label className="form-field"><span>入金額<em>必須</em></span><div className="payment-input-with-prefix"><span>¥</span><input type="number" min="1" max={maxAmount || undefined} required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></div></label><label className="form-field"><span>入金日<em>必須</em></span><input type="date" required value={toDateInputValue(paymentDate)} onChange={(event) => setPaymentDate(fromDateInputValue(event.target.value))} /></label><label className="form-field"><span>入金方法<em>必須</em></span><select required value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}><option value="">選択してください</option><option>現金</option><option>銀行振込</option><option>クレジットカード</option><option>その他</option></select></label></div><label className="form-field payment-note-field"><span>メモ</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="入金に関するメモ" /></label><div className="payment-entry-submit-row"><span className="payment-current-note"><CalendarDays size={15} />{outstanding > 0 ? `残り ${formatYen(maxAmount)}` : '請求額の入金が完了しています'}</span><div><button className="button button-secondary" type="button" onClick={resetForm} disabled={!editingEntryId && !amount && !method && !note}>{editingEntryId ? <><X size={15} />キャンセル</> : '入力をクリア'}</button><button className="button button-primary" type="submit" disabled={saving || (!editingEntryId && outstanding <= 0)}>{saving ? '保存中…' : editingEntryId ? '履歴を更新' : '入金を追加'}</button></div></div>{saved && <span className="payment-saved"><CheckCircle2 size={15} />保存しました</span>}</form></section><PaymentHistory entries={record.paymentHistory} onEdit={startEditing} onDelete={(entry) => void removeEntry(entry)} /><div className="payment-detail-footer"><span><FileText size={15} />請求書発行日：{record.issuedAt}</span><span><CalendarDays size={15} />支払期限：{record.dueDate || '未設定'}{isOverdue(record) && status !== '入金済み' ? '（期限超過）' : ''}</span></div></div></section>
 }
 
-function PaymentHistory({ entries, onEdit, onDelete }: { entries: PaymentEntry[]; onEdit: (entry: PaymentEntry) => void; onDelete: (entry: PaymentEntry) => void }) {
-  return <section className="payment-history-panel"><div className="payment-history-header"><div><h3>入金履歴</h3><span>この請求に対する入金記録を新しい順に表示しています</span></div><span className="results-count">{entries.length}件</span></div>{entries.length ? <div className="payment-history-list">{entries.map((entry) => <article className="payment-history-entry" key={entry.id}><div className="payment-history-entry-main"><div><strong>{formatYen(entry.amount)}</strong><span>{entry.paymentDate || '入金日未登録'}</span></div><span className="payment-history-method">{entry.method || '入金方法未登録'}</span></div>{entry.note && <p>{entry.note}</p>}<div className="payment-history-actions"><button className="text-button" type="button" onClick={() => onEdit(entry)}><Pencil size={13} />編集</button><button className="text-button payment-history-delete" type="button" onClick={() => onDelete(entry)}><Trash2 size={13} />削除</button></div></article>)}</div> : <div className="payment-history-empty"><CalendarDays size={23} /><span>まだ入金履歴がありません。</span></div>}</section>
+function PaymentHistory({ entries, onEdit, onDelete }: { entries: PaymentEntry[]; onEdit: (entry: PaymentEntry) => (input: PaymentEntryInput) => Promise<boolean>; onDelete: (entry: PaymentEntry) => Promise<void> | void }) {
+  const [editingEntry, setEditingEntry] = useState<PaymentEntry | null>(null)
+  const [deleteEntry, setDeleteEntry] = useState<PaymentEntry | null>(null)
+  const [saveEditingEntry, setSaveEditingEntry] = useState<((input: PaymentEntryInput) => Promise<boolean>) | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function openEdit(entry: PaymentEntry) {
+    setEditingEntry(entry)
+    setSaveEditingEntry(() => onEdit(entry))
+    setError('')
+  }
+
+  function closeEdit() {
+    if (saving) return
+    setEditingEntry(null)
+    setSaveEditingEntry(null)
+    setError('')
+  }
+
+  async function saveEdit(input: PaymentEntryInput) {
+    if (!saveEditingEntry) return false
+    setSaving(true)
+    setError('')
+    try {
+      const succeeded = await saveEditingEntry(input)
+      if (succeeded) {
+        setEditingEntry(null)
+        setSaveEditingEntry(null)
+      } else {
+        setError('入金履歴を更新できませんでした。')
+      }
+      return succeeded
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteEntry) return
+    setSaving(true)
+    try {
+      await onDelete(deleteEntry)
+      setDeleteEntry(null)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <>
+    <section className="payment-history-panel"><div className="payment-history-header"><div><h3>入金履歴</h3><span>この請求に対する入金記録を新しい順に表示しています</span></div><span className="results-count">{entries.length}件</span></div>{entries.length ? <div className="payment-history-list">{entries.map((entry) => <article className="payment-history-entry" key={entry.id}><div className="payment-history-entry-main"><div><strong>{formatYen(entry.amount)}</strong><span>{entry.paymentDate || '入金日未登録'}</span></div><span className="payment-history-method">{entry.method || '入金方法未登録'}</span></div>{entry.note && <p>{entry.note}</p>}<div className="payment-history-actions"><button className="text-button" type="button" onClick={() => openEdit(entry)}><Pencil size={13} />編集</button><button className="text-button payment-history-delete" type="button" onClick={() => setDeleteEntry(entry)}><Trash2 size={13} />削除</button></div></article>)}</div> : <div className="payment-history-empty"><CalendarDays size={23} /><span>まだ入金履歴がありません。</span></div>}</section>
+    {editingEntry && <PaymentEntryEditModal entry={editingEntry} maxAmount={editingEntry.amount} saving={saving} error={error} onClose={closeEdit} onSave={saveEdit} />}
+    {deleteEntry && <PaymentEntryDeleteModal entry={deleteEntry} saving={saving} onClose={() => { if (!saving) setDeleteEntry(null) }} onConfirm={() => void confirmDelete()} />}
+  </>
+}
+
+function PaymentEntryEditModal({ entry, maxAmount, saving, error, onClose, onSave }: { entry: PaymentEntry; maxAmount: number; saving: boolean; error: string; onClose: () => void; onSave: (input: PaymentEntryInput) => Promise<boolean> }) {
+  const [amount, setAmount] = useState(String(entry.amount))
+  const [paymentDate, setPaymentDate] = useState(entry.paymentDate ?? todayDate())
+  const [method, setMethod] = useState<PaymentMethod>(entry.method)
+  const [note, setNote] = useState(entry.note)
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!method) return
+    const parsedAmount = Math.round(Number(amount))
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return
+    await onSave({ amount: parsedAmount, paymentDate, method: method as PaymentInputMethod, note })
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}><section className="modal payment-entry-modal" role="dialog" aria-modal="true" aria-labelledby="payment-entry-edit-title"><div className="modal-header"><div><span className="payment-modal-eyebrow">入金履歴</span><h2 id="payment-entry-edit-title">入金履歴を編集</h2></div><button className="modal-close" type="button" aria-label="編集を閉じる" disabled={saving} onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={(event) => void submit(event)}><p className="modal-description"><Pencil size={16} />入金額・入金日・入金方法・メモを編集できます。</p><div className="payment-form-grid"><label className="form-field"><span>入金額<em>必須</em></span><div className="payment-input-with-prefix"><span>¥</span><input autoFocus type="number" min="1" max={maxAmount || undefined} required value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label><label className="form-field"><span>入金日<em>必須</em></span><input type="date" required value={toDateInputValue(paymentDate)} onChange={(event) => setPaymentDate(fromDateInputValue(event.target.value))} /></label><label className="form-field"><span>入金方法<em>必須</em></span><select required value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}><option value="">選択してください</option><option>現金</option><option>銀行振込</option><option>クレジットカード</option><option>その他</option></select></label></div><label className="form-field payment-note-field"><span>メモ</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="入金に関するメモ" /></label>{error && <p className="payment-modal-error" role="alert">{error}</p>}<div className="modal-footer"><button className="button button-secondary" type="button" disabled={saving} onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={saving}>{saving ? '保存中…' : '変更を保存'}</button></div></form></section></div>
+}
+
+function PaymentEntryDeleteModal({ entry, saving, onClose, onConfirm }: { entry: PaymentEntry; saving: boolean; onClose: () => void; onConfirm: () => void }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}><section className="modal payment-delete-modal" role="dialog" aria-modal="true" aria-labelledby="payment-delete-title"><div className="modal-header"><div><span className="payment-modal-eyebrow payment-modal-eyebrow-danger">入金履歴の削除</span><h2 id="payment-delete-title">この入金履歴を削除しますか？</h2></div><button className="modal-close" type="button" aria-label="削除確認を閉じる" disabled={saving} onClick={onClose}><X size={19} /></button></div><div className="payment-delete-body"><div className="payment-delete-summary"><span className="payment-delete-icon"><AlertTriangle size={20} /></span><div><strong>{formatYen(entry.amount)}</strong><span>{entry.paymentDate || '入金日未登録'} ・ {entry.method || '入金方法未登録'}</span></div></div><p className="payment-delete-message">この入金履歴を削除すると、請求書の入金済み金額と未入金額が再計算されます。</p><p className="payment-delete-warning">削除した履歴は元に戻せません。</p><div className="modal-footer"><button className="button button-secondary" type="button" disabled={saving} onClick={onClose}>キャンセル</button><button className="button button-danger" type="button" disabled={saving} onClick={onConfirm}><Trash2 size={15} />{saving ? '削除中…' : '削除する'}</button></div></div></section></div>
 }
 
 function PaymentAmount({ label, value, tone = 'normal', emphasized = false }: { label: string; value: number; tone?: 'normal' | 'paid' | 'outstanding'; emphasized?: boolean }) { return <div className={`payment-amount-item payment-amount-${tone}${emphasized ? ' is-emphasized' : ''}`}><span>{label}</span><strong>{formatYen(value)}</strong></div> }
