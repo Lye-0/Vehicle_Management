@@ -516,9 +516,9 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${layout.headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
-  ${text(layout.x + 9, y + 22, '▣  クレジットお支払いプラン', 'white bold', 13)}
+  ${text(layout.x + layout.width / 2, y + 22, 'クレジットお支払いプラン', 'white bold', 17, 'middle')}
   <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
-  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 10)}
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 11)}
   ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 9)}`
 }
 
@@ -544,7 +544,7 @@ function bankBlock(settings: AppSettings) {
 }
 
 function shopBlock(settings: AppSettings) {
-  const y = salesEstimateSheetLayout.creditY
+  const y = salesEstimateSheetLayout.creditY 
   const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
@@ -559,12 +559,12 @@ function shopBlock(settings: AppSettings) {
     shop.fax ? `FAX ${shop.fax}` : '',
   ].filter(Boolean)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2 + signatureShift}" y="${y + 10}" width="165" height="68" preserveAspectRatio="xMidYMid meet"/>`
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x - 20 + signatureShift}" y="${y + 10}" width="180" height="68" preserveAspectRatio="xMidYMid meet"/>`
     : ''
   return `
   ${logoMarkup}
-  ${text(companyLeft, y + 20, shop.name || '店舗名未設定', 'blue heavy', 20)}
-  ${infoLines.map((line, index) => text(infoLeft, y + 36 + index * 13, line, '', 11)).join('')}`
+  ${text(companyLeft, y + 17, shop.name || '店舗名未設定', 'blue heavy', 20)}
+  ${infoLines.map((line, index) => text(infoLeft-7, y + 36 + index * 15, line, '', 11)).join('')}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {

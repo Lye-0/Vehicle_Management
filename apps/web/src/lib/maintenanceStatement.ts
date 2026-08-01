@@ -39,7 +39,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels
   const documentTitle = defaultDocumentTitle(document.type)
-  const amountTitle = document.type === '整備請求書' ? '請求金額（税込）' : 'お見積金額（税込）'
+  const amountTitle = document.type === '整備請求書' ? 'ご請求金額（税込）' : 'お見積金額（税込）'
   const workSectionTitle = '作業内容／部品名等'
   const rows = statementRows(document)
   const rowHeight = 28
@@ -199,8 +199,8 @@ function bankBox(settings: AppSettings) {
   ${rect(17, 1306, 107, 70, '#dcecff')}
   ${gridLines([16, 124, 526], [1305, 1340, 1377])}
   ${headerText(70, 1329, '振込口座')}${headerText(70, 1365, '口座名義')}
-  ${valueText(145, 1329, settings.shop.bankName, 'start', 13)}
-  ${valueText(145, 1365, settings.shop.bankAccount, 'start', 13)}`
+  ${valueText(145, 1329, settings.shop.bankName, 'start', 18)}
+  ${valueText(145, 1365, settings.shop.bankAccount, 'start', 18)}`
 }
 
 function shopBox(settings: AppSettings) {
@@ -210,7 +210,7 @@ function shopBox(settings: AppSettings) {
   const infoX = companyX + 20
   const infoLines = [
     shop.registrationNumber ? `インボイス番号 ${shop.registrationNumber}` : '',
-    shop.postalCode ? `〒${shop.postalCode}` : '',
+    shop.postalCode ? `〒 ${shop.postalCode}` : '',
     shop.address,
     shop.phone ? `TEL ${shop.phone}` : '',
     shop.fax ? `FAX ${shop.fax}` : '',
