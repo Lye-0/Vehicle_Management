@@ -374,7 +374,7 @@
 .sales-filter-tabs button { padding: 7px 10px; color: var(--text-secondary); border: 0; border-radius: 6px; background: transparent; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .sales-filter-tabs button:hover { color: var(--primary); }
 .sales-filter-tabs button.is-active { color: #fff; background: #111827; }
-.sales-filter-tabs button:nth-child(2).is-active { background: #db2777; }
+.sales-filter-tabs button:nth-child(2).is-active { background: #997595; }
 .sales-filter-tabs button:nth-child(3).is-active { background: #0f766e; }
 .sales-workspace { display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); align-items: start; gap: 20px; }
 .sales-list-panel { min-width: 0; padding: 0; overflow: hidden; }
@@ -388,7 +388,7 @@
 .sales-card-top { display: flex; align-items: center; gap: 7px; }
 .sales-card-top > svg { margin-left: auto; color: var(--text-muted); }
 .sales-type-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
-.sales-type-見積書 { color: #db2777; border-color: #fbcfe8; background: #fdf2f8; }
+.sales-type-見積書 { color: #997595; border-color: #ccb9c9; background: #f6f0f5; }
 .sales-type-注文書 { color: #7c3aed; border-color: #ded0ff; background: #f4efff; }
 .sales-type-請求書 { color: #0f766e; border-color: #61c4ae; background: #ecfdf8; }
 .sales-status-tag { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
@@ -742,7 +742,7 @@
 .maintenance-category-一般整備 { color: #65a30d; border-color: #d9f99d; background: #f7fee7; }
 .maintenance-document-type-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-document-type-invoice { color: #7c3aed; border-color: #ded0ff; background: #f4efff; }
-.maintenance-document-type-estimate { color: #db2777; border-color: #fbcfe8; background: #fdf2f8; }
+.maintenance-document-type-estimate { color: #997595; border-color: #ccb9c9; background: #f6f0f5; }
 .maintenance-status-tag { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .maintenance-status-normal { color: #2caeff; border-color: #23abff; background: #e2e7ff; }
 .maintenance-status-warning { color: #ee912d; border-color: #ffbe09; background: var(--warning-soft); }
