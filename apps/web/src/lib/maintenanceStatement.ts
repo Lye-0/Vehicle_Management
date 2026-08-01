@@ -39,7 +39,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels
   const documentTitle = defaultDocumentTitle(document.type)
-  const amountTitle = 'お見積金額（税込）'
+  const amountTitle = document.type === '整備請求書' ? '請求金額（税込）' : 'お見積金額（税込）'
   const workSectionTitle = '作業内容／部品名等'
   const rows = statementRows(document)
   const rowHeight = 28
