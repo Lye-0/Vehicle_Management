@@ -634,12 +634,13 @@ function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { re
   })}</>
 }
 
-function SalesSheetCreditEditor({ credit, onUpdate }: { credit: SalesDocumentDetails['credit']; onUpdate: (field: 'paymentCount' | 'bonusPayment' | 'fee' | 'bonusMonths', value: string) => void }) {
+function SalesSheetCreditEditor({ credit, onUpdate }: { credit: SalesDocumentDetails['credit']; onUpdate: (field: 'paymentCount' | 'bonusPayment' | 'fee', value: string) => void }) {
+  const layout = salesEstimateSheetLayout.footer.credit
+  const columnWidth = layout.width / layout.columnCount
   return <>
-    <SheetCreditInput ariaLabel="クレジット支払回数" value={credit.paymentCount} x={23} width={119} onCommit={(value) => onUpdate('paymentCount', value)} />
-    <SheetCreditInput currency ariaLabel="クレジットボーナス払" value={credit.bonusPayment ? String(credit.bonusPayment) : ''} x={142} width={119} onCommit={(value) => onUpdate('bonusPayment', value)} />
-    <SheetCreditInput decimal ariaLabel="クレジット金利" value={credit.fee ? String(credit.fee) : ''} x={261} width={119} onCommit={(value) => onUpdate('fee', value)} />
-    <SheetCreditInput ariaLabel="クレジット支払開始月" value={credit.bonusMonths} x={380} width={118} onCommit={(value) => onUpdate('bonusMonths', value)} />
+    <SheetCreditInput ariaLabel="クレジット支払回数" value={credit.paymentCount} x={layout.x} width={columnWidth} onCommit={(value) => onUpdate('paymentCount', value)} />
+    <SheetCreditInput currency ariaLabel="クレジットボーナス払" value={credit.bonusPayment ? String(credit.bonusPayment) : ''} x={layout.x + columnWidth} width={columnWidth} onCommit={(value) => onUpdate('bonusPayment', value)} />
+    <SheetCreditInput decimal ariaLabel="クレジット金利" value={credit.fee ? String(credit.fee) : ''} x={layout.x + columnWidth * 2} width={columnWidth} onCommit={(value) => onUpdate('fee', value)} />
   </>
 }
 
@@ -663,7 +664,7 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
     aria-label={ariaLabel}
     inputMode={decimal ? 'decimal' : 'numeric'}
     value={currency && !focused && draft ? formatSheetYen(Number(draft)) : draft}
-    style={sheetPositionStyle(x, salesEstimateSheetLayout.creditY + 76, width, 34)}
+    style={sheetPositionStyle(x, salesEstimateSheetLayout.creditY + salesEstimateSheetLayout.footer.credit.valueY, width, salesEstimateSheetLayout.footer.credit.valueHeight)}
     onFocus={() => setFocused(true)}
     onChange={(event) => update(event.target.value)}
     onBlur={finish}

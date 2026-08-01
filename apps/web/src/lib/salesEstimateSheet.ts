@@ -59,10 +59,14 @@ const VEHICLE_PAYMENT_HEIGHT = 95
 const FOOTER_X = 23
 const FOOTER_WIDTH = WIDTH - FOOTER_X * 2
 const FOOTER_GAP = 12
-const FOOTER_CREDIT_WIDTH = 350
-const FOOTER_BANK_WIDTH = 270
+const FOOTER_CREDIT_WIDTH = 285
+const FOOTER_BANK_WIDTH = 300
 const FOOTER_CREDIT_HEIGHT = 96
 const FOOTER_BANK_HEIGHT = 96
+const FOOTER_CREDIT_HEADER_HEIGHT = 36
+const FOOTER_CREDIT_VALUE_Y = 63
+const FOOTER_CREDIT_VALUE_HEIGHT = 33
+const FOOTER_CREDIT_COLUMN_COUNT = 3
 
 const feeGroupDefinitions = [
   { bucket: 'legalNonTaxable' as const, title: '税金／保険料（非課税）', rows: 5 },
@@ -179,6 +183,10 @@ function createSalesEstimateSheetLayout() {
         x: FOOTER_X,
         width: FOOTER_CREDIT_WIDTH,
         height: FOOTER_CREDIT_HEIGHT,
+        headerHeight: FOOTER_CREDIT_HEADER_HEIGHT,
+        valueY: FOOTER_CREDIT_VALUE_Y,
+        valueHeight: FOOTER_CREDIT_VALUE_HEIGHT,
+        columnCount: FOOTER_CREDIT_COLUMN_COUNT,
       },
       bank: {
         x: FOOTER_X + FOOTER_CREDIT_WIDTH + FOOTER_GAP,
@@ -498,40 +506,39 @@ function accessoryCard(rows: Array<{ label: string; amount: number }>, total: nu
 function creditBlock(credit: SalesDocument['details']['credit']) {
   const y = salesEstimateSheetLayout.creditY
   const layout = salesEstimateSheetLayout.footer.credit
-  const columnWidth = layout.width / 4
+  const columnWidth = layout.width / layout.columnCount
   const values = [
     credit.paymentCount,
     credit.bonusPayment ? formatYen(credit.bonusPayment) : '',
     credit.fee ? String(credit.fee) : '',
-    credit.bonusMonths,
   ]
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
-  ${text(layout.x + 16, y + 26, '▣  クレジットお支払いプラン', 'blue bold', 18)}
-  <line x1="${layout.x}" y1="${y + 36}" x2="${layout.x + layout.width}" y2="${y + 36}" class="line"/>
-  ${simpleColumns(layout.x, y + 36, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true)}
-  ${simpleColumns(layout.x, y + 63, [columnWidth, columnWidth, columnWidth, columnWidth], values, 33, false)}`
+  ${text(layout.x + 12, y + 24, '▣  クレジットお支払いプラン', 'blue bold', 16)}
+  <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利'], 27, true, 11)}
+  ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 12)}`
 }
 
 function bankBlock(settings: AppSettings) {
   const y = salesEstimateSheetLayout.creditY
   const layout = salesEstimateSheetLayout.footer.bank
-  const headerHeight = 30
-  const labelWidth = 83
+  const headerHeight = 32
+  const labelWidth = 94
   const rowHeight = (layout.height - headerHeight) / 2
-  const valueX = layout.x + labelWidth + 9
+  const valueX = layout.x + labelWidth + 10
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
-  ${text(layout.x + layout.width / 2, y + 21, 'お振込先', 'white bold', 16, 'middle')}
+  ${text(layout.x + layout.width / 2, y + 22, 'お振込先', 'white bold', 18, 'middle')}
   <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
   <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
   <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
   <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 11, 'middle')}
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 11, 'middle')}
-  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 11)}
-  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 11)}`
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 12, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 12, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 12)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 12)}`
 }
 
 function shopBlock(settings: AppSettings) {
@@ -539,16 +546,16 @@ function shopBlock(settings: AppSettings) {
   const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const companyLeft = layout.x + (hasLogo ? 122 : 10)
+  const companyLeft = layout.x + (hasLogo ? 142 : 10)
   const logoMarkup = hasLogo
-    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 10}" width="108" height="70" preserveAspectRatio="xMidYMid meet"/>`
+    ? `<image href="${escapeAttribute(shop.logoDataUrl)}" x="${layout.x + 2}" y="${y + 7}" width="128" height="82" preserveAspectRatio="xMidYMid meet"/>`
     : ''
   return `
   ${logoMarkup}
-  ${text(companyLeft, y + 24, shop.name || '店舗名未設定', 'blue heavy', 16)}
-  ${text(companyLeft, y + 46, shop.postalCode ? `〒${shop.postalCode}` : '', '', 10)}
-  ${text(companyLeft, y + 63, shop.address, '', 10)}
-  ${text(companyLeft, y + 80, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 10)}`
+  ${text(companyLeft, y + 25, shop.name || '店舗名未設定', 'blue heavy', 18)}
+  ${text(companyLeft, y + 48, shop.postalCode ? `〒${shop.postalCode}` : '', '', 11)}
+  ${text(companyLeft, y + 66, shop.address, '', 11)}
+  ${text(companyLeft, y + 84, `TEL ${shop.phone}${shop.fax ? `　FAX ${shop.fax}` : ''}`, '', 11)}`
 }
 
 function sectionHeader(x: number, y: number, width: number, title: string) {
@@ -567,12 +574,12 @@ function tableRow(x: number, y: number, cells: Array<[string, number]>, height: 
   }).join('')
 }
 
-function simpleColumns(x: number, y: number, widths: number[], values: string[], height: number, heading: boolean) {
+function simpleColumns(x: number, y: number, widths: number[], values: string[], height: number, heading: boolean, fontSize = 13) {
   let cursor = x
   return values.map((value, index) => {
     const width = widths[index]
     const result = `<rect x="${cursor}" y="${y}" width="${width}" height="${height}" fill="${heading ? PALE : '#fff'}" stroke="${LINE}"/>
-      ${text(cursor + width / 2, y + height / 2 + 6, value, heading ? 'label small' : 'small', 13, 'middle')}`
+      ${text(cursor + width / 2, y + height / 2 + 6, value, heading ? 'label small' : 'small', fontSize, 'middle')}`
     cursor += width
     return result
   }).join('')
