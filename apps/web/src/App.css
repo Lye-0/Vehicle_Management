@@ -403,7 +403,7 @@
 .sales-card-bottom strong { color: var(--text); font-size: 13px; }
 .sales-detail-panel { min-width: 0; padding: 0; overflow: hidden; }
 .sales-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px; border-bottom: 1px solid var(--border); }
-.sales-detail-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; flex: 1 1 auto; }
+.sales-detail-title { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 0 1 auto; }
 .sales-detail-title > div { min-width: 0; display: grid; }
 .sales-detail-title > .sales-status-tag { align-self: start; margin-top: 0; }
 .sales-detail-title h2 { margin: 5px 0 0; color: var(--text); font-size: 22px; letter-spacing: -0.03em; }
@@ -755,7 +755,7 @@
 .maintenance-card-bottom strong { color: var(--text-secondary); font-size: 10px; }
 .maintenance-detail-panel { min-width: 0; padding: 0; overflow: hidden; }
 .maintenance-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px; border-bottom: 1px solid var(--border); }
-.maintenance-detail-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; flex: 1 1 auto; }
+.maintenance-detail-title { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 0 1 auto; }
 .maintenance-detail-title > div { min-width: 0; display: grid; }
 .maintenance-detail-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .maintenance-detail-title > .maintenance-status-tag { align-self: start; margin-top: 0; }
