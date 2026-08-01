@@ -1,7 +1,7 @@
 import { apiFetch } from './api'
 
 export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
-export type MaintenanceStatus = '受付中' | '作業中' | '完了' | '入金待ち' | '下書き' | 'アーカイブ済み'
+export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
 export type IntakeCategory = '車検' | '板金' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
@@ -96,7 +96,7 @@ export type MaintenanceDocumentInput = {
   items: Array<Omit<MaintenanceLineItem, 'id'>>
 }
 
-type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
+type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
 
 export async function fetchMaintenanceDocuments() {
   const response = await apiFetch<{ documents: ApiMaintenanceDocument[] }>('/api/maintenance-documents')
@@ -125,6 +125,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
   return {
     ...document,
     type: document.type === '納品書' ? '整備請求書' : document.type,
+    status: normalizeMaintenanceStatus(document.status),
     category: document.category === '法定点検' ? '板金' : document.category,
     customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '' },
     vehicleDetails: document.vehicleDetails ?? null,
@@ -138,6 +139,10 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     note: document.note ?? '',
     items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
   }
+}
+
+function normalizeMaintenanceStatus(status: ApiMaintenanceDocument['status']): MaintenanceStatus {
+  return status === '受付中' || status === '作業中' ? '下書き' : status
 }
 
 function toPayload(input: MaintenanceDocumentInput) {

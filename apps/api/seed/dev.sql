@@ -54,9 +54,9 @@ INSERT OR IGNORE INTO sales_document_items (id, document_id, description, quanti
 VALUES ('sales-item-010', 'sales-quote-004', '付属品・特別仕様', 1, '式', 78000, 78000, 1);
 
 INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
-VALUES ('maintenance-001', 'M-2026-118', '整備見積書', '一般整備', '受付中', 'customer-sato', 'vehicle-sato-prius', '2026-07-25', '2026-07-27', '2026-07-25', '2026-08-08', 10, 23600, 2060, 22660, '左後ドア小傷を次回点検時に確認。');
+VALUES ('maintenance-001', 'M-2026-118', '整備見積書', '一般整備', '下書き', 'customer-sato', 'vehicle-sato-prius', '2026-07-25', '2026-07-27', '2026-07-25', '2026-08-08', 10, 23600, 2060, 22660, '左後ドア小傷を次回点検時に確認。');
 INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
-VALUES ('maintenance-002', 'M-2026-114', '整備請求書', '板金', '作業中', 'customer-tanaka', 'vehicle-tanaka-fit', '2026-07-24', '2026-07-26', '2026-07-24', '2026-08-07', 10, 27200, 2720, 29920, '代車：軽自動車を手配。');
+VALUES ('maintenance-002', 'M-2026-114', '整備請求書', '板金', '入金待ち', 'customer-tanaka', 'vehicle-tanaka-fit', '2026-07-24', '2026-07-26', '2026-07-24', '2026-08-07', 10, 27200, 2720, 29920, '代車：軽自動車を手配。');
 INSERT OR IGNORE INTO maintenance_documents (id, number, type, category, status, customer_id, vehicle_id, intake_date, completion_date, issued_at, due_date, tax_rate, subtotal, tax, total, note)
 VALUES ('maintenance-003', 'M-2026-108', '整備請求書', '車検', '完了', 'customer-suzuki', 'vehicle-suzuki-note', '2026-07-20', '2026-07-22', '2026-07-20', '2026-08-03', 10, 45000, 4500, 103350, '車検整備完了。次回オイル交換は3か月後。');
 

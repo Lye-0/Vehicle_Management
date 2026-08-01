@@ -268,6 +268,10 @@ describe("CLI authenticated workflow", () => {
 			expect(objectValue(updatedMaintenance.body.document)).toEqual(expect.objectContaining({ status: "完了", plannedReleaseDate: "2026-07-27", completionDate: "2026-07-27" }));
 			const tamperedMaintenanceStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "不正状態" });
 			expect(tamperedMaintenanceStatus.response.status).toBe(400);
+			const removedMaintenanceIntakeStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "受付中" });
+			expect(removedMaintenanceIntakeStatus.response.status).toBe(400);
+			const removedMaintenanceWorkStatus = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "PATCH", { status: "作業中" });
+			expect(removedMaintenanceWorkStatus.response.status).toBe(400);
 
 			const payment = await requestJson<JsonObject>(`/api/payments/${encodeURIComponent("販売請求書")}/${salesDocumentId}`, "PATCH", {
 				paidAmount: 50000,
