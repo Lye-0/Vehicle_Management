@@ -515,9 +515,10 @@ function creditBlock(credit: SalesDocument['details']['credit']) {
   ]
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
-  ${text(layout.x + 9, y + 22, '▣  クレジットお支払いプラン', 'blue bold', 14)}
+  <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${layout.headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
+  ${text(layout.x + 9, y + 22, '▣  クレジットお支払いプラン', 'white bold', 13)}
   <line x1="${layout.x}" y1="${y + layout.headerHeight}" x2="${layout.x + layout.width}" y2="${y + layout.headerHeight}" class="line"/>
-  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 7)}
+  ${simpleColumns(layout.x, y + layout.headerHeight, [columnWidth, columnWidth, columnWidth, columnWidth], ['回数', 'ボーナス払', '金利', '支払開始月'], 27, true, 6)}
   ${simpleColumns(layout.x, y + layout.valueY, [columnWidth, columnWidth, columnWidth, columnWidth], values, layout.valueHeight, false, 9)}`
 }
 
@@ -531,15 +532,15 @@ function bankBlock(settings: AppSettings) {
   return `
   <rect x="${layout.x}" y="${y}" width="${layout.width}" height="${layout.height}" rx="5" class="box"/>
   <path d="M${layout.x + 5} ${y}h${layout.width - 10}a5 5 0 015 5v${headerHeight - 5}H${layout.x}V${y + 5}a5 5 0 015-5z" class="section"/>
-  ${text(layout.x + layout.width / 2, y + 22, 'お振込先', 'white bold', 18, 'middle')}
+  ${text(layout.x + layout.width / 2, y + 21, 'お振込先', 'white bold', 17, 'middle')}
   <rect x="${layout.x + 1}" y="${y + headerHeight}" width="${labelWidth}" height="${rowHeight * 2 - 1}" fill="${PALE}"/>
   <line x1="${layout.x}" y1="${y + headerHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight}" class="line"/>
   <line x1="${layout.x}" y1="${y + headerHeight + rowHeight}" x2="${layout.x + layout.width}" y2="${y + headerHeight + rowHeight}" class="line"/>
   <line x1="${layout.x + labelWidth}" y1="${y + headerHeight}" x2="${layout.x + labelWidth}" y2="${y + layout.height}" class="line"/>
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 11, 'middle')}
-  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 11, 'middle')}
-  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 11)}
-  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 11)}`
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight / 2 + 4, '振込口座', 'label', 10, 'middle')}
+  ${text(layout.x + labelWidth / 2, y + headerHeight + rowHeight + rowHeight / 2 + 4, '口座名義', 'label', 10, 'middle')}
+  ${text(valueX, y + headerHeight + rowHeight / 2 + 4, settings.shop.bankName, '', 10)}
+  ${text(valueX, y + headerHeight + rowHeight + rowHeight / 2 + 4, settings.shop.bankAccount, '', 10)}`
 }
 
 function shopBlock(settings: AppSettings) {
@@ -547,7 +548,7 @@ function shopBlock(settings: AppSettings) {
   const layout = salesEstimateSheetLayout.footer.shop
   const shop = settings.shop
   const hasLogo = Boolean(shop.logoDataUrl)
-  const signatureShift = hasLogo ? 20 : 0
+  const signatureShift = hasLogo ? 40 : 0
   const companyLeft = layout.x + (hasLogo ? 180 + signatureShift : 12)
   const infoLeft = companyLeft + 20
   const infoLines = [
