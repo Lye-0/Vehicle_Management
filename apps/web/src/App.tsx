@@ -19,7 +19,7 @@ import {
   Settings,
   UserRound,
 } from 'lucide-react'
-import { CustomerVehiclePage, type VehicleHistoryNavigation } from './components/CustomerVehiclePage'
+import { CustomerVehiclePage, type CustomerVehicleNavigation, type VehicleHistoryNavigation } from './components/CustomerVehiclePage'
 import { DashboardCalendar } from './components/DashboardCalendar'
 import { InspectionSchedulesPage } from './components/InspectionSchedulesPage'
 import { MaintenancePage } from './components/MaintenancePage'
@@ -146,13 +146,18 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
 
 function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
-  const [navigationTarget, setNavigationTarget] = useState<VehicleHistoryNavigation | null>(null)
+  const [navigationTarget, setNavigationTarget] = useState<(VehicleHistoryNavigation | CustomerVehicleNavigation) | null>(null)
 
   useEffect(() => {
-    if (navigationTarget?.section === activeSection) setNavigationTarget(null)
+    if (navigationTarget?.section === activeSection && activeSection !== 'customers') setNavigationTarget(null)
   }, [activeSection, navigationTarget])
 
   function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
+    setNavigationTarget(target)
+    setActiveSection(target.section)
+  }
+
+  function navigateToCustomerVehicle(target: CustomerVehicleNavigation) {
     setNavigationTarget(target)
     setActiveSection(target.section)
   }
@@ -163,7 +168,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={navigateToCustomerVehicle} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
         </div>
       </main>
     </div>

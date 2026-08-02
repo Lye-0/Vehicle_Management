@@ -1609,6 +1609,10 @@
 .inspection-result-summary strong { color: var(--text); font-size: 17px; }
 .inspection-schedule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .inspection-schedule-card { padding: 18px; }
+.inspection-vehicle-card { padding: 0; overflow: hidden; }
+.inspection-vehicle-card-button { width: 100%; display: block; padding: 18px; color: inherit; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.inspection-vehicle-card-button:hover { background: #f7faff; }
+.inspection-vehicle-card-button:focus-visible { position: relative; z-index: 1; outline: 3px solid rgba(37, 99, 235, 0.22); outline-offset: -3px; }
 .inspection-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .inspection-type-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: var(--primary); border-radius: 6px; background: var(--primary-soft); font-size: 10px; font-weight: 800; }
 .inspection-state { padding: 4px 7px; border-radius: 5px; color: var(--text-muted); background: var(--surface-subtle); font-size: 10px; font-weight: 700; }
