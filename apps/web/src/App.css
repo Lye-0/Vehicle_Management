@@ -390,11 +390,21 @@
 .document-filter-reset { justify-self: end; }
 .document-filter-reset:disabled { color: var(--text-muted); cursor: default; opacity: 0.55; }
 .sales-workspace { display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); align-items: start; gap: 20px; }
+.sales-list-stack { display: grid; align-content: start; gap: 16px; min-width: 0; }
 .sales-list-panel { min-width: 0; padding: 0; overflow: hidden; }
 .sales-list-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 18px 16px; border-bottom: 1px solid var(--border); }
 .sales-list-header h2 { margin: 0; color: var(--text); font-size: 16px; }
 .sales-list-header span:not(.results-count) { display: block; margin-top: 5px; color: var(--text-muted); font-size: 10px; }
+.sales-list-empty { padding: 24px 18px; color: var(--text-muted); font-size: 11px; text-align: center; }
 .sales-document-list { display: grid; }
+.sales-completed-groups { border-top: 0; }
+.sales-completed-group { border-top: 1px solid #edf1f5; }
+.sales-completed-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; color: var(--text); background: var(--surface-subtle); font-size: 12px; font-weight: 800; cursor: pointer; list-style: none; }
+.sales-completed-group > summary::-webkit-details-marker { display: none; }
+.sales-completed-group > summary::after { content: '⌄'; color: var(--text-muted); font-size: 15px; line-height: 1; transition: transform 150ms ease; }
+.sales-completed-group[open] > summary::after { transform: rotate(180deg); }
+.sales-completed-group > summary:hover { color: var(--primary); background: #f7faff; }
+.sales-completed-group .sales-document-card:last-child { border-bottom: 0; }
 .sales-document-card { display: grid; gap: 8px; width: 100%; min-width: 0; padding: 15px 16px; color: var(--text-secondary); border: 0; border-bottom: 1px solid #edf1f5; background: var(--surface); text-align: left; transition: background 150ms ease, box-shadow 150ms ease; }
 .sales-document-card:hover { background: #f7faff; }
 .sales-document-card.is-selected { position: relative; background: #eef5ff; box-shadow: inset 3px 0 var(--primary); }
