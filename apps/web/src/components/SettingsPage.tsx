@@ -15,6 +15,8 @@ import { IconWithChain } from './IconWithChain'
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
+const initialBackupSettings: BackupSettings = { autoEnabled: false, frequency: 'daily', destination: 'b2', retentionDays: 30, archiveRetentionDays: 30, pcRetentionDays: 30 }
+
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗情報', description: '店舗情報と帳票に表示する内容', icon: Building2 },
   { id: 'tax', label: '税・端数処理', description: '消費税と請求期限の初期値', icon: ReceiptText },
@@ -32,6 +34,8 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
 
 export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
+  const [canManageBackupSettings, setCanManageBackupSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -41,10 +45,12 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   useEffect(() => {
     let cancelled = false
-    fetchSettings()
-      .then((nextSettings) => {
+    Promise.all([fetchSettings(), fetchBackupSettings()])
+      .then(([nextSettings, backupResponse]) => {
         if (!cancelled) {
           setSettings(nextSettings)
+          setBackupSettings(backupResponse.settings)
+          setCanManageBackupSettings(backupResponse.canManage)
           setError('')
         }
       })
@@ -116,8 +122,12 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setSaving(true)
     setSaved(false)
     try {
-      const nextSettings = await updateSettings(settings)
+      const [nextSettings, nextBackupSettings] = await Promise.all([
+        updateSettings(settings),
+        canManageBackupSettings ? updateBackupSettings({ ...backupSettings, destination: 'b2' }) : Promise.resolve(backupSettings),
+      ])
       setSettings(nextSettings)
+      setBackupSettings(nextBackupSettings)
       setSaved(true)
       setError('')
       onReloadSession?.()
@@ -127,6 +137,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSaving(false)
     }
   }
+
+  const updateBackupSettingsDraft = useCallback((nextSettings: BackupSettings) => {
+    setBackupSettings(nextSettings)
+    setSaved(false)
+  }, [])
 
   async function exportCsv(resource: CsvResource) {
     setExporting(resource)
@@ -154,7 +169,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
@@ -168,13 +183,12 @@ function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetG
   }
 }
 
-function DataSettingsPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
-  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel /></>
+function DataSettingsPanel({ exporting, onExport, backupSettings, onBackupSettingsChange }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void; backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
+  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></>
 }
 
-function ArchiveSettingsPanel() {
+function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   const [archives, setArchives] = useState<ArchiveRecord[]>([])
-  const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null)
   const [canManage, setCanManage] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState('')
@@ -183,10 +197,9 @@ function ArchiveSettingsPanel() {
 
   const load = useCallback(async () => {
     try {
-      const [response, backupSettingsResponse] = await Promise.all([fetchArchives(query), fetchBackupSettings()])
+      const response = await fetchArchives(query)
       setArchives(response.archives)
-      setBackupSettings(backupSettingsResponse.settings)
-      setCanManage(response.canManage && backupSettingsResponse.canManage)
+      setCanManage(response.canManage)
       setError('')
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'アーカイブ一覧を読み込めませんでした。')
@@ -243,23 +256,7 @@ function ArchiveSettingsPanel() {
     }
   }
 
-  async function runSaveArchiveRetention() {
-    if (!backupSettings || !canManage) return
-    setLoading('archive-retention')
-    setError('')
-    setMessage('')
-    try {
-      const next = await updateBackupSettings(backupSettings)
-      setBackupSettings(next)
-      setMessage('アーカイブ保管期間を保存しました。')
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'アーカイブ保管期間を保存できませんでした。')
-    } finally {
-      setLoading('')
-    }
-  }
-
-  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{backupSettings && <section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => current ? { ...current, archiveRetentionDays: Number(event.target.value) } : current)} /><span>日</span></span></label>{canManage && <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runSaveArchiveRetention()}>{loading === 'archive-retention' ? '保存中…' : <><Save size={14} />保管期間を保存</>}</button>}</section>}{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} chainWidth="112%" chainTop="-5%" chainDepth={22} linkThickness={3} linkSize={9}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small></div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />{record.purgeAt ? `${formatBackupDate(record.purgeAt)}まで` : '自動削除予定'}</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? '保存解除' : '永久保存'}</button>{canManage && <button className="text-button archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
+  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, archiveRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></section>{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} chainWidth="112%" chainTop="-5%" chainDepth={22} linkThickness={3} linkSize={9}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small></div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />{record.purgeAt ? `${formatBackupDate(record.purgeAt)}まで` : '自動削除予定'}</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? '保存解除' : '永久保存'}</button>{canManage && <button className="text-button archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
 }
 
 function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdated?: (user: User) => void }) {
