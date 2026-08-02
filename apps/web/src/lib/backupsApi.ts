@@ -6,6 +6,7 @@ export type BackupRecord = {
   rowCount: number
   status: string
   trigger: string
+  note: string
   protectedUntil: string | null
   keepForever: boolean
   createdAt: string
@@ -35,6 +36,7 @@ export type BackupExport = {
   organizationId: string
   organizationName: string
   createdAt: string
+  note?: string
   tables: Record<string, unknown[]>
   files: Array<{ id: string; fileName: string; contentType: string; data: string }>
 }
@@ -52,12 +54,13 @@ export async function updateBackupSettings(settings: BackupSettings) {
   return response.settings
 }
 
-export async function createBackup() {
-  return apiFetch<{ backup: BackupRecord }>('/api/backups', { method: 'POST' })
+export async function createBackup(note = '') {
+  return apiFetch<{ backup: BackupRecord }>('/api/backups', { method: 'POST', body: JSON.stringify({ note }) })
 }
 
-export async function exportBackup() {
-  const response = await apiFetch<{ backup: BackupExport }>('/api/backups/export')
+export async function exportBackup(note = '') {
+  const query = note.trim() ? `?note=${encodeURIComponent(note)}` : ''
+  const response = await apiFetch<{ backup: BackupExport }>(`/api/backups/export${query}`)
   return response.backup
 }
 

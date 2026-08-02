@@ -527,15 +527,16 @@ describe("CLI authenticated workflow", () => {
 				const backupSettings = await requestJson<JsonObject>("/api/backups/settings");
 				expect(backupSettings.response.status).toBe(200);
 				expect(objectValue(backupSettings.body.settings)).toEqual(expect.objectContaining({ destination: "b2", retentionDays: expect.any(Number) }));
-				const pcExport = await requestJson<JsonObject>("/api/backups/export");
+				const pcExport = await requestJson<JsonObject>(`/api/backups/export?note=${encodeURIComponent(marker + " PCメモ")}`);
 				expect(pcExport.response.status).toBe(200);
-				expect(objectValue(pcExport.body.backup)).toEqual(expect.objectContaining({ version: 1, organizationId }));
+				expect(objectValue(pcExport.body.backup)).toEqual(expect.objectContaining({ version: 1, organizationId, note: marker + " PCメモ" }));
 				expect(arrayValue(objectValue(objectValue(pcExport.body.backup).tables).vehicleFiles)).toEqual(expect.any(Array));
 				expect(arrayValue(objectValue(pcExport.body.backup).files)).toEqual(expect.any(Array));
-				const createdBackup = await requestJson<JsonObject>("/api/backups", "POST");
+				const createdBackup = await requestJson<JsonObject>("/api/backups", "POST", { note: marker + " 手動バックアップメモ" });
 				expect(createdBackup.response.status).toBe(201);
 				backupId = stringValue(objectValue(createdBackup.body.backup).id);
 				expect(objectValue(createdBackup.body.backup).rowCount).toEqual(expect.any(Number));
+				expect(objectValue(createdBackup.body.backup).note).toBe(marker + " 手動バックアップメモ");
 				const mismatchedRestoreConfirmation = await requestJson<JsonObject>(`/api/backups/${backupId}/restore`, "POST", { confirmId: "different-backup-id" });
 				expect(mismatchedRestoreConfirmation.response.status).toBe(400);
 

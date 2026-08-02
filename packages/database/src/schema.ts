@@ -287,6 +287,7 @@ export const backupRecords = sqliteTable('backup_records', {
   rowCount: integer('row_count').notNull().default(0),
   status: text('status').notNull().default('completed'),
   trigger: text('trigger').notNull().default('manual'),
+  note: text('note').notNull().default(''),
   protectedUntil: text('protected_until'),
   keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,

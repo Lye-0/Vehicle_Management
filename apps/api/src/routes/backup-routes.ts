@@ -59,7 +59,9 @@ async function listBackups(request: Request, env: Env, database: ReturnType<type
 
 async function createBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireAdminOrganizationContext(request, env, database)
-  const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual' })
+  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  const note = normalizeBackupNote(body.note)
+  const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual', note })
   return jsonResponse({ backup }, 201, env)
 }
 
@@ -67,6 +69,7 @@ async function exportBackup(request: Request, env: Env, database: ReturnType<typ
   const context = await requireAdminOrganizationContext(request, env, database)
   const storage = getStorage(env)
   const snapshot = await loadSnapshot(database, context.organization.organizationId, crypto.randomUUID(), context.organization.name)
+  snapshot.note = normalizeBackupNote(new URL(request.url).searchParams.get('note'))
   const files: BackupExportFile[] = []
   for (const file of snapshot.tables.vehicleFiles) {
     const response = await storage.getObject(file.objectKey)
@@ -184,11 +187,12 @@ async function rollbackToSafetyBackup(env: Env, database: ReturnType<typeof crea
   }
 }
 
-async function createBackupForOrganization(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, organizationName: string, options: { trigger: string; protectedUntil?: string; keepForever?: boolean }) {
+async function createBackupForOrganization(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, organizationName: string, options: { trigger: string; note?: string; protectedUntil?: string; keepForever?: boolean }) {
   const storage = getStorage(env)
   const id = crypto.randomUUID()
   const manifestKey = `backups/${organizationId}/${id}/manifest.json`
   const snapshot = await loadSnapshot(database, organizationId, id, organizationName)
+  snapshot.note = options.note ?? ''
   const copiedKeys: string[] = []
   try {
     for (const file of snapshot.tables.vehicleFiles) {
@@ -198,13 +202,13 @@ async function createBackupForOrganization(env: Env, database: ReturnType<typeof
       copiedKeys.push(backupObjectKey)
     }
     await storage.putText(manifestKey, JSON.stringify(snapshot), 'application/json; charset=utf-8')
-    await database.insert(backupRecords).values({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false }).run()
+    await database.insert(backupRecords).values({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, note: snapshot.note, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false }).run()
   } catch (error) {
     await deleteObjects(storage, copiedKeys)
     try { await storage.deleteObject(manifestKey) } catch { /* manifest may not exist */ }
     throw error
   }
-  return serializeBackup({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false, createdAt: snapshot.createdAt, updatedAt: snapshot.createdAt })
+  return serializeBackup({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, note: snapshot.note, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false, createdAt: snapshot.createdAt, updatedAt: snapshot.createdAt })
 }
 
 async function restoreManifest(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, manifest: BackupManifest) {
@@ -348,8 +352,8 @@ function countRows(tables: BackupManifest['tables']) {
   return Object.values(tables).reduce((total, rows) => total + rows.length, 0)
 }
 
-function serializeBackup(record: { id: string; organizationId: string; manifestKey: string; fileCount: number; rowCount: number; status: string; trigger: string; protectedUntil: string | null; keepForever: boolean; createdAt: string; updatedAt: string }) {
-  return { id: record.id, fileCount: record.fileCount, rowCount: record.rowCount, status: record.status, trigger: record.trigger, protectedUntil: record.protectedUntil, keepForever: record.keepForever, createdAt: record.createdAt, updatedAt: record.updatedAt }
+function serializeBackup(record: { id: string; organizationId: string; manifestKey: string; fileCount: number; rowCount: number; status: string; trigger: string; note: string; protectedUntil: string | null; keepForever: boolean; createdAt: string; updatedAt: string }) {
+  return { id: record.id, fileCount: record.fileCount, rowCount: record.rowCount, status: record.status, trigger: record.trigger, note: record.note, protectedUntil: record.protectedUntil, keepForever: record.keepForever, createdAt: record.createdAt, updatedAt: record.updatedAt }
 }
 
 function isAdmin(role: string) {
@@ -377,6 +381,7 @@ type BackupManifest = {
   organizationId: string
   organizationName: string
   createdAt: string
+  note?: string
   tables: {
     customers: Array<typeof customers.$inferSelect>
     vehicles: Array<typeof vehicles.$inferSelect>
@@ -394,3 +399,11 @@ type BackupManifest = {
 
 type BackupExportFile = { id: string; fileName: string; contentType: string; data: string }
 type BackupExport = BackupManifest & { files: BackupExportFile[] }
+
+function normalizeBackupNote(value: unknown) {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value !== 'string') throw new HttpError(400, 'バックアップメモは文字列で入力してください。')
+  const note = value.trim()
+  if (note.length > 500) throw new HttpError(400, 'バックアップメモは500文字以内で入力してください。')
+  return note
+}

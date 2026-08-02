@@ -85,6 +85,13 @@
       "when": 1785667555449,
       "tag": "0011_motionless_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785669203286,
+      "tag": "0012_cooing_silk_fever",
+      "breakpoints": true
     }
   ]
 }
