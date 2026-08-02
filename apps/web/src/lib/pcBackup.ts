@@ -20,6 +20,25 @@ type DirectoryHandleLike = {
 const directoryStoreName = 'backup-directory'
 const directoryKey = 'selected'
 const backupDirectoryName = 'Vehicle Management Backup'
+const backupFilePattern = /^vehicle-management-backup-.*\.json$/u
+
+export type PcBackupFile = {
+  name: string
+  size: number
+  lastModified: number
+  createdAt: string
+  note: string
+  keepForever: boolean
+}
+
+export type PcBackupListing = {
+  available: boolean
+  parentName: string | null
+  directoryName: string | null
+  files: PcBackupFile[]
+}
+
+let activeRestoreDirectory: DirectoryHandleLike | null = null
 
 export async function saveBackupToPc(backup: BackupExport, keepForever: boolean, retentionDays: number) {
   const directory = await getWritableDirectory()
@@ -51,6 +70,40 @@ export async function changePcBackupDirectory() {
   }
 }
 
+export async function listDefaultPcBackups(): Promise<PcBackupListing> {
+  const stored = await readStoredDirectory()
+  if (!stored || !(await ensureReadPermission(stored))) {
+    activeRestoreDirectory = null
+    return { available: false, parentName: stored?.name ?? null, directoryName: stored ? backupDirectoryName : null, files: [] }
+  }
+
+  const resolved = await resolveRestoreDirectory(stored)
+  activeRestoreDirectory = resolved.directory
+  return { available: true, parentName: stored.name, directoryName: resolved.directory.name, files: resolved.files }
+}
+
+export async function choosePcBackupDirectory() {
+  const picker = getDirectoryPicker()
+  if (!picker) return { mode: 'unsupported' as const }
+  try {
+    const selected = await picker({ mode: 'read' })
+    const resolved = await resolveRestoreDirectory(selected)
+    activeRestoreDirectory = resolved.directory
+    return { mode: 'selected' as const, available: true, parentName: selected.name, directoryName: resolved.directory.name, files: resolved.files }
+  } catch (reason: unknown) {
+    if (isAbortError(reason)) return { mode: 'cancelled' as const }
+    throw reason
+  }
+}
+
+export async function readPcBackup(name: string): Promise<BackupExport> {
+  if (!activeRestoreDirectory) throw new Error('復元元のPCバックアップフォルダが選択されていません。')
+  if (!backupFilePattern.test(name)) throw new Error('選択したファイルはバックアップ形式ではありません。')
+  const fileHandle = await activeRestoreDirectory.getFileHandle(name)
+  const file = await fileHandle.getFile()
+  return parseBackupExport(await file.text())
+}
+
 async function getWritableDirectory() {
   const stored = await readStoredDirectory()
   if (stored && await ensurePermission(stored)) return getBackupDirectory(stored)
@@ -71,8 +124,8 @@ function getDirectoryPicker() {
   return (window as Window & { showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<DirectoryHandleLike> }).showDirectoryPicker
 }
 
-async function getBackupDirectory(parent: DirectoryHandleLike) {
-  return parent.getDirectoryHandle(backupDirectoryName, { create: true })
+async function getBackupDirectory(parent: DirectoryHandleLike, create = true) {
+  return parent.getDirectoryHandle(backupDirectoryName, { create })
 }
 
 function isAbortError(reason: unknown) {
@@ -88,10 +141,74 @@ async function ensurePermission(directory: DirectoryHandleLike) {
   return (await directory.requestPermission(options)) === 'granted'
 }
 
+async function ensureReadPermission(directory: DirectoryHandleLike) {
+  if (!directory.queryPermission) return true
+  const options = { mode: 'read' as const }
+  const current = await directory.queryPermission(options)
+  if (current === 'granted') return true
+  if (current !== 'prompt' || !directory.requestPermission) return false
+  return (await directory.requestPermission(options)) === 'granted'
+}
+
+async function resolveRestoreDirectory(parent: DirectoryHandleLike) {
+  const directFiles = await readPcBackupFiles(parent)
+  let child: DirectoryHandleLike | null = null
+  let childFiles: PcBackupFile[] = []
+  try {
+    child = await getBackupDirectory(parent, false)
+    childFiles = await readPcBackupFiles(child)
+  } catch {
+    // A user-selected folder does not need to contain the standard subfolder.
+  }
+  if (child && childFiles.length > 0) return { directory: child, files: childFiles }
+  if (directFiles.length > 0) return { directory: parent, files: directFiles }
+  if (child) return { directory: child, files: childFiles }
+  return { directory: parent, files: directFiles }
+}
+
+async function readPcBackupFiles(directory: DirectoryHandleLike) {
+  const files: PcBackupFile[] = []
+  for await (const [name, entry] of directory.entries()) {
+    if (entry.kind !== 'file' || !backupFilePattern.test(name)) continue
+    try {
+      const file = await (entry as FileHandleLike).getFile()
+      const backup = parseBackupExport(await file.text())
+      files.push({
+        name,
+        size: file.size,
+        lastModified: file.lastModified,
+        createdAt: backup.createdAt,
+        note: backup.note?.trim() ?? '',
+        keepForever: name.includes('-permanent.json'),
+      })
+    } catch {
+      // Ignore unrelated or incomplete JSON files in the selected folder.
+    }
+  }
+  return files.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+}
+
+function parseBackupExport(serialized: string): BackupExport {
+  let value: unknown
+  try {
+    value = JSON.parse(serialized)
+  } catch {
+    throw new Error('バックアップファイルのJSONを読み込めませんでした。')
+  }
+  if (!isRecord(value) || value.version !== 1 || typeof value.organizationId !== 'string' || typeof value.createdAt !== 'string' || !isRecord(value.tables) || !Array.isArray(value.files)) {
+    throw new Error('バックアップファイルの形式が正しくありません。')
+  }
+  return value as BackupExport
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 async function prunePcBackups(directory: DirectoryHandleLike, retentionDays: number) {
   const cutoff = Date.now() - retentionDays * 86_400_000
   for await (const [name, entry] of directory.entries()) {
-    if (entry.kind !== 'file' || !/^vehicle-management-backup-.*\.json$/u.test(name) || name.includes('-permanent.json')) continue
+    if (entry.kind !== 'file' || !backupFilePattern.test(name) || name.includes('-permanent.json')) continue
     const file = await (entry as FileHandleLike).getFile()
     if (file.lastModified < cutoff) await directory.removeEntry(name)
   }

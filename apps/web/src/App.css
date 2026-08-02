@@ -1380,6 +1380,8 @@
 .backup-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .backup-history-heading h3 { margin: 0; color: var(--text); font-size: 13px; }
 .backup-history-heading span { color: var(--text-muted); font-size: 10px; font-weight: 800; }
+.backup-history-heading-actions { display: flex; align-items: center; gap: 10px; }
+.backup-history-restore-button { min-height: 34px; padding: 0 11px; font-size: 11px; box-shadow: none; }
 .backup-list { display: grid; gap: 8px; }
 .backup-empty { min-height: 120px; }
 .backup-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
@@ -1405,6 +1407,32 @@
 .backup-note-field textarea:focus { outline: none; border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .backup-note-field textarea:disabled { color: var(--text-muted); background: #f1f4f8; }
 .backup-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.pc-restore-backdrop { z-index: 40; }
+.pc-restore-modal { width: min(100%, 760px); }
+.pc-restore-modal-header { align-items: flex-start; }
+.pc-restore-modal-header > div { min-width: 0; }
+.pc-restore-modal-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; }
+.pc-restore-modal-content { display: grid; gap: 14px; padding: 18px 24px 24px; }
+.pc-restore-directory-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.pc-restore-directory-copy { display: grid; gap: 4px; min-width: 0; }
+.pc-restore-directory-copy strong { color: var(--text); font-size: 12px; }
+.pc-restore-directory-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-directory-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.pc-restore-directory-actions .button { min-height: 34px; padding: 0 10px; font-size: 10px; box-shadow: none; }
+.pc-restore-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding: 1px; }
+.pc-restore-file { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 11px 12px; color: inherit; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); text-align: left; cursor: pointer; }
+.pc-restore-file:hover, .pc-restore-file:focus-visible { border-color: #9eb9eb; background: #f8fbff; }
+.pc-restore-file.is-selected { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1); }
+.pc-restore-file-icon { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px; color: var(--primary); border-radius: 8px; background: var(--primary-soft); }
+.pc-restore-file-copy { display: grid; gap: 4px; min-width: 0; }
+.pc-restore-file-copy strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-file-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-empty { display: grid; place-items: center; align-content: center; gap: 7px; min-height: 150px; padding: 16px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
+.pc-restore-empty strong { color: var(--text); font-size: 12px; }
+.pc-restore-empty span { font-size: 10px; line-height: 1.5; }
+.pc-restore-error { padding: 9px 11px; color: var(--danger); border: 1px solid #f4c5c5; border-radius: 8px; background: #fff5f5; font-size: 11px; line-height: 1.5; }
+.pc-restore-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pc-restore-modal-footer .button { min-height: 38px; padding: 0 12px; font-size: 11px; }
 .archive-settings-panel { margin-top: 0; }
 .archive-retention-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 180px); align-items: center; gap: 14px; margin-bottom: 14px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .archive-retention-copy { display: grid; gap: 4px; min-width: 0; }
@@ -1596,6 +1624,15 @@
   .backup-retention-title-row { align-items: flex-start; flex-direction: column; }
   .backup-directory-button { align-self: stretch; justify-content: center; }
   .backup-retention-values { grid-template-columns: 1fr; }
+  .backup-history-heading { align-items: flex-start; flex-direction: column; }
+  .backup-history-heading-actions { width: 100%; justify-content: space-between; }
+  .backup-history-restore-button { flex: 1; justify-content: center; }
+  .pc-restore-modal-content { padding: 16px 18px 18px; }
+  .pc-restore-directory-bar { align-items: stretch; flex-direction: column; }
+  .pc-restore-directory-actions { justify-content: stretch; }
+  .pc-restore-directory-actions .button { flex: 1; justify-content: center; }
+  .pc-restore-modal-footer { flex-direction: column-reverse; }
+  .pc-restore-modal-footer .button { width: 100%; }
   .backup-settings-actions, .backup-destination-note { grid-column: auto; }
   .settings-field-wide { grid-column: auto; }
   .settings-logo-preview { align-items: stretch; flex-direction: column; }
