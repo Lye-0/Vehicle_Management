@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { updateCurrentProfile } from '../lib/organizationApi'
@@ -150,7 +150,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} onUpdateDocument={updateDocument} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
@@ -689,8 +689,41 @@ function formatBackupDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP')
 }
 
-function ShopSettingsPanel({ settings, onUpdate, onUpdateDocument }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先・帳票フッター</h2><p>請求書などに表示する支払情報を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /><SettingsField label="帳票フッター" value={settings.document.footerNote} onChange={(value) => onUpdateDocument('footerNote', value)} wide /><SettingsField label="支払案内" value={settings.document.paymentNote} onChange={(value) => onUpdateDocument('paymentNote', value)} wide /></div></section></div>
+function ShopSettingsPanel({ settings, onUpdate }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
+}
+
+function ShopLogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [error, setError] = useState('')
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('PNG・JPEG・WebPの画像を選択してください。')
+      return
+    }
+    if (file.size > 1_000_000) {
+      setError('企業ロゴは1MB以下にしてください。')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onerror = () => setError('企業ロゴを読み込めませんでした。')
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (!dataUrl) {
+        setError('企業ロゴを読み込めませんでした。')
+        return
+      }
+      setError('')
+      onChange(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone"><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
 }
 
 function TaxSettingsPanel({ settings, onUpdateTax, onUpdateDocument }: { settings: AppSettings; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
