@@ -245,11 +245,16 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 }
 
 function MaintenanceDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect }: { incompleteDocuments: MaintenanceDocument[]; completedGroups: CompletedMaintenanceGroup[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
-  return <section className="panel maintenance-list-panel">
-    <div className="maintenance-list-header"><div><h2>整備書類（未完了）</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{incompleteDocuments.length}件</span></div>
-    {incompleteDocuments.length > 0 ? <MaintenanceDocumentCards documents={incompleteDocuments} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /> : <div className="maintenance-list-empty">未完了の整備書類はありません。</div>}
-    {completedGroups.length > 0 && <div className="maintenance-completed-groups"><h3>完了書類</h3>{completedGroups.map((group, index) => <details className="maintenance-completed-group" key={group.key} open={index === 0 || group.documents.some((document) => document.id === selectedDocumentId)}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><MaintenanceDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>}
-  </section>
+  return <div className="maintenance-list-stack">
+    <section className="panel maintenance-list-panel">
+      <div className="maintenance-list-header"><div><h2>整備書類（未完了）</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{incompleteDocuments.length}件</span></div>
+      {incompleteDocuments.length > 0 ? <MaintenanceDocumentCards documents={incompleteDocuments} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /> : <div className="maintenance-list-empty">未完了の整備書類はありません。</div>}
+    </section>
+    {completedGroups.length > 0 && <section className="panel maintenance-list-panel maintenance-completed-panel">
+      <div className="maintenance-list-header"><div><h2>完了書類</h2><span>書類の作成月ごとに表示します</span></div><span className="results-count">{completedGroups.reduce((total, group) => total + group.documents.length, 0)}件</span></div>
+      <div className="maintenance-completed-groups">{completedGroups.map((group, index) => <details className="maintenance-completed-group" key={group.key} open={index === 0 || group.documents.some((document) => document.id === selectedDocumentId)}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><MaintenanceDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
+    </section>}
+  </div>
 }
 
 function MaintenanceDocumentCards({ documents, selectedDocumentId, onSelect }: { documents: MaintenanceDocument[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
