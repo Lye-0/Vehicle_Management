@@ -339,7 +339,7 @@ describe("CLI authenticated workflow", () => {
 				settings: {
 					shop: { name: `${marker} 店舗`, logoDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" },
 					document: { defaultDueDays: 30 },
-					tax: { consumptionTaxRate: 10, display: "税込", rounding: "四捨五入" },
+					tax: { consumptionTaxRate: 8, display: "税込", rounding: "四捨五入" },
 					salesItemPresetGroups: {
 						vehiclePrice: ["車両本体価格", `${marker}-vehicle`],
 						fees: ["登録代行費用", `${marker}-fees`],
@@ -353,6 +353,23 @@ describe("CLI authenticated workflow", () => {
 			expect(objectValue(savedSettings.shop).name).toBe(`${marker} 店舗`);
 			expect(objectValue(savedSettings.shop).logoDataUrl).toMatch(/^data:image\/png;base64,/);
 			expect(objectValue(savedSettings.document).defaultDueDays).toBe(30);
+			expect(objectValue(savedSettings.tax).consumptionTaxRate).toBe(8);
+			expect(objectValue(savedSettings.tax).rounding).toBe("四捨五入");
+
+			const newSalesWithSettings = await requestJson<JsonObject>("/api/sales-documents", "POST", {
+				type: "見積書",
+				status: "下書き",
+				customerId,
+				vehicleId,
+				issuedAt: "2026-07-26",
+				items: [{ itemType: "車両本体価格", description: "設定値確認", quantity: 1, unit: "式", unitPrice: 100007 }],
+			});
+			expect(newSalesWithSettings.response.status).toBe(201);
+			expect(objectValue(newSalesWithSettings.body.document)).toEqual(expect.objectContaining({ dueDate: "2026-08-25", taxRate: 8, taxRounding: "四捨五入", subtotal: 100007, tax: 8001, total: 108008 }));
+
+			const salesAfterSettingsChange = await requestJson<JsonObject>("/api/sales-documents");
+			const existingSalesAfterSettingsChange = arrayValue(salesAfterSettingsChange.body.documents).find((document) => objectValue(document).id === salesDocumentId);
+			expect(existingSalesAfterSettingsChange).toEqual(expect.objectContaining({ taxRate: 10, taxRounding: "切り捨て", tax: 21, total: 231 }));
 			const salesPresetGroups = objectValue(savedSettings.salesItemPresetGroups);
 			expect(stringArrayValue(salesPresetGroups.vehiclePrice)).toContain(`${marker}-vehicle`);
 			expect(stringArrayValue(salesPresetGroups.fees)).toContain(`${marker}-fees`);

@@ -72,6 +72,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -103,6 +104,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     issuedAt: body.issuedAt ?? current.issuedAt,
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
     taxRate: body.taxRate ?? current.taxRate,
+    rounding: body.rounding ?? current.taxRounding,
     note: body.note === undefined ? current.note : body.note,
     details: body.details === undefined ? parseDetailsJson(current.detailsJson) : body.details,
     items: body.items === undefined ? currentItems.filter((item) => item.itemType === '作業' || item.itemType === '部品').map(toInputItem) : body.items,
@@ -126,6 +128,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -267,6 +270,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
+    taxRounding: normalizeTaxRounding(document.taxRounding),
     subtotal: document.subtotal,
     tax: document.tax,
     total: document.total,
@@ -309,6 +313,10 @@ async function restoreMaintenanceDocument(env: Env, database: ReturnType<typeof 
 
 function normalizeMaintenanceStatus(status: string) {
   return status === '受付中' || status === '作業中' ? '下書き' : status
+}
+
+function normalizeTaxRounding(rounding: string | null | undefined): '切り捨て' | '四捨五入' {
+  return rounding === '四捨五入' ? '四捨五入' : '切り捨て'
 }
 
 function parseItems(value: unknown): MaintenanceItemInput[] {

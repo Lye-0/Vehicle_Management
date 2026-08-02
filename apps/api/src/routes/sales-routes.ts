@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { appSettings, customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -11,6 +11,7 @@ const salesStatuses = new Set(['下書き', '入金待ち', '完了', 'アーカ
 const salesItemTypes = new Set(['車両本体価格', '付属品・特別仕様', '取付工賃', '車両販売工賃', '値引き', '法定費用', '手続代行費用', '実費・預託金', '自動車税', '重量税', '自賠責保険', '環境性能割', '車庫証明費用', '登録費用', '納車費用', '下取車', 'リサイクル料金', '頭金', '残金', 'その他'])
 const salesTaxCategories = new Set(['課税', '非課税', '対象外'])
 const salesItemInsertBatchSize = 7
+const fallbackSalesDocumentDefaults: SalesDocumentDefaults = { taxRate: 10, rounding: '切り捨て', defaultDueDays: 14 }
 
 export async function handleSalesRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -62,7 +63,8 @@ async function listSalesDocuments(request: Request, env: Env, database: ReturnTy
 
 async function createSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const body = await readJson(request)
-  const input = await parseSalesDocumentInput(body, database, organizationId)
+  const defaults = await loadSalesDocumentDefaults(database, organizationId)
+  const input = await parseSalesDocumentInput(body, database, organizationId, defaults)
   const id = crypto.randomUUID()
   const number = await nextDocumentNumber(env.DB, organizationId, 'S')
   await ensureSalesDocumentNumberAvailable(database, number, organizationId)
@@ -79,6 +81,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -105,6 +108,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
     number: current.number,
     taxRate: body.taxRate ?? current.taxRate,
+    rounding: body.rounding ?? current.taxRounding,
     note: body.note === undefined ? current.note : body.note,
     details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
@@ -120,6 +124,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -184,7 +189,7 @@ async function insertSalesItems(database: ReturnType<typeof createDatabase>, doc
   }
 }
 
-async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<SalesDocumentInput> {
+async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string, defaults = fallbackSalesDocumentDefaults): Promise<SalesDocumentInput> {
   const type = stringValue(body, 'type')
   if (!salesDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
 
@@ -201,10 +206,10 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
-  const taxRate = parseTaxRate(body.taxRate)
-  const rounding = body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
+  const taxRate = parseTaxRate(body.taxRate, defaults.taxRate)
+  const rounding = body.rounding === undefined ? defaults.rounding : body.rounding === '四捨五入' ? '四捨五入' : '切り捨て'
   const issuedAt = dateValue(body.issuedAt) || today()
-  const dueDate = nullableDate(body.dueDate)
+  const dueDate = body.dueDate === undefined ? addDays(issuedAt, defaults.defaultDueDays) : nullableDate(body.dueDate)
   const number = nullableString(body, 'number')
   const details = parseSalesDetails(body.details)
   if (details.selectedImageAttachmentId) {
@@ -261,6 +266,7 @@ function serializeSalesDocument(
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
+    taxRounding: normalizeTaxRounding(document.taxRounding),
     subtotal: document.subtotal,
     tax: document.tax,
     total: document.total,
@@ -283,6 +289,10 @@ function serializeSalesDocument(
 
 function normalizeSalesStatus(status: string) {
   return status === '発行済み' ? '完了' : status
+}
+
+function normalizeTaxRounding(rounding: string | null | undefined): '切り捨て' | '四捨五入' {
+  return rounding === '四捨五入' ? '四捨五入' : '切り捨て'
 }
 
 export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {
@@ -492,10 +502,38 @@ function nullableDate(value: unknown) {
   return dateValue(value) || null
 }
 
-function parseTaxRate(value: unknown) {
+async function loadSalesDocumentDefaults(database: ReturnType<typeof createDatabase>, organizationId: string): Promise<SalesDocumentDefaults> {
+  const rows = await database.select({ key: appSettings.key, value: appSettings.value }).from(appSettings).where(eq(appSettings.organizationId, organizationId)).all()
+  const saved = new Map(rows.map((row) => [row.key, parseJsonRecord(row.value)]))
+  const tax = saved.get('tax') ?? {}
+  const document = saved.get('document') ?? {}
+  return {
+    taxRate: parseTaxRate(tax.consumptionTaxRate, fallbackSalesDocumentDefaults.taxRate),
+    rounding: tax.rounding === '四捨五入' ? '四捨五入' : '切り捨て',
+    defaultDueDays: integerSetting(document.defaultDueDays, fallbackSalesDocumentDefaults.defaultDueDays, 0, 365),
+  }
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function integerSetting(value: unknown, fallback: number, min: number, max: number) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(max, Math.max(min, Math.round(number)))
+}
+
+function parseTaxRate(value: unknown, fallback = fallbackSalesDocumentDefaults.taxRate) {
+  if (value === undefined || value === null || value === '') return fallback
   const number = typeof value === 'number' ? value : Number(value)
   const normalized = number > 0 && number < 1 ? number * 100 : number
-  if (!Number.isFinite(normalized) || normalized < 0 || normalized > 100) return 10
+  if (!Number.isFinite(normalized) || normalized < 0 || normalized > 100) return fallback
   return Math.round(normalized)
 }
 
@@ -511,6 +549,12 @@ function integerNumber(value: unknown, fallback: number) {
 
 function today() {
   return new Date().toISOString().slice(0, 10)
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
 }
 
 type SalesItemInput = {
@@ -538,6 +582,12 @@ type SalesDocumentInput = {
   note: string | null
   details: SalesDocumentDetails
   items: SalesItemInput[]
+}
+
+type SalesDocumentDefaults = {
+  taxRate: number
+  rounding: '切り捨て' | '四捨五入'
+  defaultDueDays: number
 }
 
 type SalesDocumentDetails = {

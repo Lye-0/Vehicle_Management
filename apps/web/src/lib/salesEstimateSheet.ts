@@ -206,7 +206,7 @@ function createSalesEstimateSheetLayout() {
 export const salesEstimateSheetLayout = createSalesEstimateSheetLayout()
 
 export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: AppSettings, { imageHref = '' }: SalesEstimateSheetOptions = {}) {
-  const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
+  const totals = calculateSalesEstimateTotals(document)
   const sections = buildSalesEstimateSections(document)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails
   const details = document.details

@@ -3,6 +3,8 @@ import { apiFetch } from './api'
 export type DashboardCalendarEvent = {
   id: string
   date: string
+  customerId?: string
+  vehicleId?: string
   category: 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
   categoryLabel: string
   title: string
