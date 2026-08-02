@@ -56,7 +56,7 @@ const pageMeta: Record<SectionId, PageMeta> = {
   customers: { title: '顧客・車両', description: '顧客情報と、顧客に紐づく複数の車両を管理します。', actionLabel: '顧客を登録', icon: CarFront },
   sales: { title: '販売', description: '見積書・請求書を車両情報と連動して管理します。', actionLabel: '販売書類を作成', icon: FileText },
   maintenance: { title: '車検・点検・一般', description: '整備の受付から作業明細、見積書・請求書まで管理します。', actionLabel: '整備書類を作成', icon: ClipboardCheck },
-  inspections: { title: '点検予定', description: '車検・定期点検の予定と完了状態を管理します。', actionLabel: '点検予定を登録', icon: CalendarClock },
+  inspections: { title: '点検予定', description: '顧客・車両に登録されている車検満了日を確認・管理します。', actionLabel: '車検予定', icon: CalendarClock },
   payments: { title: '入金管理', description: '請求に対する入金状況を確認し、未入金を管理します。', actionLabel: '入金を登録', icon: CircleDollarSign },
   settings: { title: '設定', description: '帳票、税金・保険料、作業項目などの共通設定を管理します。', actionLabel: '設定を追加', icon: Settings },
 }
@@ -163,7 +163,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage initialScheduleId={navigationTarget?.section === 'inspections' ? navigationTarget.recordId : undefined} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
+          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
         </div>
       </main>
     </div>
