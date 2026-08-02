@@ -98,14 +98,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        setSelectedDocumentId((current) => nextDocuments.some((document) => document.id === current) ? current : nextDocuments[0]?.id ?? '')
+        setSelectedDocumentId(initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : '')
         setCreateForm(createFormForCustomers(nextCustomers, nextSettings.document.defaultDueDays))
         setError('')
       })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '整備データを読み込めませんでした。') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [initialDocumentId])
 
   const filteredDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()

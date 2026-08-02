@@ -129,7 +129,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        setSelectedDocumentId((current) => nextDocuments.some((document) => document.id === current) ? current : nextDocuments[0]?.id ?? '')
+        setSelectedDocumentId(initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : '')
         setSyncError('')
       })
       .catch((error: unknown) => {
@@ -139,7 +139,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [initialDocumentId])
 
   const filteredDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()

@@ -48,11 +48,11 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   useEffect(() => {
     let cancelled = false
     fetchPayments()
-      .then((nextRecords) => { if (!cancelled) { setRecords(nextRecords); setSelectedRecordId((current) => nextRecords.some((record) => record.id === current) ? current : nextRecords[0]?.id ?? ''); setError('') } })
+      .then((nextRecords) => { if (!cancelled) { setRecords(nextRecords); setSelectedRecordId(initialRecordId && nextRecords.some((record) => record.id === initialRecordId) ? initialRecordId : ''); setError('') } })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '入金データを読み込めませんでした。') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [initialRecordId])
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
