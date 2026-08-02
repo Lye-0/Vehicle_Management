@@ -737,7 +737,17 @@
 .maintenance-list-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 18px 16px; border-bottom: 1px solid var(--border); }
 .maintenance-list-header h2 { margin: 0; color: var(--text); font-size: 16px; }
 .maintenance-list-header span:not(.results-count) { display: block; margin-top: 5px; color: var(--text-muted); font-size: 10px; }
+.maintenance-list-empty { padding: 24px 18px; color: var(--text-muted); font-size: 11px; text-align: center; }
 .maintenance-document-list { display: grid; }
+.maintenance-completed-groups { margin-top: 4px; border-top: 1px solid var(--border); }
+.maintenance-completed-groups h3 { margin: 0; padding: 16px 18px 10px; color: var(--text-secondary); font-size: 12px; }
+.maintenance-completed-group { border-top: 1px solid #edf1f5; }
+.maintenance-completed-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; color: var(--text); background: var(--surface-subtle); font-size: 12px; font-weight: 800; cursor: pointer; list-style: none; }
+.maintenance-completed-group > summary::-webkit-details-marker { display: none; }
+.maintenance-completed-group > summary::after { content: '⌄'; color: var(--text-muted); font-size: 15px; line-height: 1; transition: transform 150ms ease; }
+.maintenance-completed-group[open] > summary::after { transform: rotate(180deg); }
+.maintenance-completed-group > summary:hover { color: var(--primary); background: #f7faff; }
+.maintenance-completed-group .maintenance-document-card:last-child { border-bottom: 0; }
 .maintenance-document-card { display: grid; gap: 8px; width: 100%; min-width: 0; padding: 15px 16px; color: var(--text-secondary); border: 0; border-bottom: 1px solid #edf1f5; background: var(--surface); text-align: left; transition: background 150ms ease, box-shadow 150ms ease; }
 .maintenance-document-card:hover { background: #f7faff; }
 .maintenance-document-card.is-selected { position: relative; background: #eef5ff; box-shadow: inset 3px 0 var(--primary); }
