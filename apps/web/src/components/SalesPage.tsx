@@ -1062,7 +1062,7 @@ function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onS
 }
 
 function emptyCreateForm(): SalesCreateForm {
-  return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(14), taxRate: 10, taxRounding: '切り捨て', initialItemDescription: '車両本体価格' }
+  return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(defaultSettings.document.defaultDueDays), taxRate: defaultSettings.tax.consumptionTaxRate, taxRounding: defaultSettings.tax.rounding, initialItemDescription: '車両本体価格' }
 }
 
 function dateAfter(days: number) {

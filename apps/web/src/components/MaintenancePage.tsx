@@ -71,7 +71,7 @@ const maintenanceCategoryFilterOptions: DocumentFilterOption<CategoryFilter>[] =
   { value: '一般整備', label: '一般整備', tone: 'general' },
 ]
 const emptyFees: MandatoryFees = { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }
-const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerId: '', vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(14) }
+const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerId: '', vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(defaultSettings.document.defaultDueDays) }
 
 export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<MaintenanceDocument[]>([])

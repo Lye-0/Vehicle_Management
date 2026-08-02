@@ -78,4 +78,12 @@ describe('sales estimate calculation', () => {
 
     expect(totals).toEqual({ subtotal: 1095000, tax: 106000, total: 1201000 })
   })
+
+  it('applies the selected rounding mode to document tax', () => {
+    const items = [line('車両本体価格', '車両本体価格', 100005)]
+
+    const calculationDetails = { ...details, recycleFee: 0 }
+    expect(calculateSalesTotals(items, 10, '切り捨て', calculationDetails)).toEqual({ subtotal: 100005, tax: 10000, total: 110005 })
+    expect(calculateSalesTotals(items, 10, '四捨五入', calculationDetails)).toEqual({ subtotal: 100005, tax: 10001, total: 110006 })
+  })
 })

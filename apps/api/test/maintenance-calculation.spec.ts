@@ -57,4 +57,12 @@ describe('maintenance document calculation', () => {
 
     expect(totals).toEqual({ subtotal: 10_000, tax: 1_000, total: 8_000 })
   })
+
+  it('applies the selected rounding mode to document tax', () => {
+    const items = [item('端数確認', 1, '式', 100_005, 0)]
+    const fees = { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }
+
+    expect(calculateMaintenanceTotals(items, fees, 0, 10, '切り捨て')).toEqual({ subtotal: 100_005, tax: 10_000, total: 110_005 })
+    expect(calculateMaintenanceTotals(items, fees, 0, 10, '四捨五入')).toEqual({ subtotal: 100_005, tax: 10_001, total: 110_006 })
+  })
 })
