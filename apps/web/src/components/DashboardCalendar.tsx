@@ -3,7 +3,7 @@ import { CalendarClock, CalendarDays, CarFront, ChevronLeft, ChevronRight, Circl
 import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 
 const weekdayLabels = ['日', '月', '火', '水', '木', '金', '土']
-const legendCategories: Array<{ category: DashboardCalendarEvent['category']; label: string }> = [
+const defaultLegendCategories: Array<{ category: DashboardCalendarEvent['category']; label: string }> = [
   { category: 'vehicle-inspection', label: '車検満了' },
   { category: 'inspection', label: '点検予定' },
   { category: 'maintenance', label: '整備' },
@@ -12,7 +12,27 @@ const legendCategories: Array<{ category: DashboardCalendarEvent['category']; la
   { category: 'payment', label: '入金' },
 ]
 
-export function DashboardCalendar({ events, loading }: { events: DashboardCalendarEvent[]; loading: boolean }) {
+type DashboardCalendarProps = {
+  events: DashboardCalendarEvent[]
+  loading: boolean
+  eyebrow?: string
+  title?: string
+  description?: string
+  legendCategories?: Array<{ category: DashboardCalendarEvent['category']; label: string }>
+  titleId?: string
+  detailTitleId?: string
+}
+
+export function DashboardCalendar({
+  events,
+  loading,
+  eyebrow = '予定をまとめて確認',
+  title = '業務カレンダー',
+  description = '車検・点検、販売・整備書類、支払期限と入金日を表示しています。',
+  legendCategories = defaultLegendCategories,
+  titleId = 'dashboard-calendar-title',
+  detailTitleId = 'calendar-detail-title',
+}: DashboardCalendarProps) {
   const today = todayDateKey()
   const [viewDate, setViewDate] = useState(() => startOfMonth(parseDateKey(today) ?? new Date()))
   const [selectedDate, setSelectedDate] = useState(today)
@@ -40,13 +60,13 @@ export function DashboardCalendar({ events, loading }: { events: DashboardCalend
   }
 
   return (
-    <section className="panel dashboard-calendar-panel" aria-labelledby="dashboard-calendar-title">
+    <section className="panel dashboard-calendar-panel" aria-labelledby={titleId}>
       <div className="dashboard-calendar-top">
         <div className="dashboard-calendar-heading">
           <div>
-            <span className="calendar-heading-kicker"><CalendarDays size={15} />予定をまとめて確認</span>
-            <h2 id="dashboard-calendar-title">業務カレンダー</h2>
-            <p>車検・点検、販売・整備書類、支払期限と入金日を表示しています。</p>
+            <span className="calendar-heading-kicker"><CalendarDays size={15} />{eyebrow}</span>
+            <h2 id={titleId}>{title}</h2>
+            <p>{description}</p>
           </div>
         </div>
         <div className="calendar-legend" aria-label="予定の種類">
@@ -87,10 +107,10 @@ export function DashboardCalendar({ events, loading }: { events: DashboardCalend
           </div>
         </div>
 
-        <aside className="dashboard-calendar-detail" aria-live="polite" aria-labelledby="calendar-detail-title">
+        <aside className="dashboard-calendar-detail" aria-live="polite" aria-labelledby={detailTitleId}>
           <div className="calendar-detail-heading">
             <span className="calendar-heading-kicker">SELECTED DATE</span>
-            <h3 id="calendar-detail-title">{formatFullDate(parseDateKey(selectedDate) ?? new Date())}</h3>
+            <h3 id={detailTitleId}>{formatFullDate(parseDateKey(selectedDate) ?? new Date())}</h3>
             <span className="calendar-detail-count">{selectedEvents.length}件の予定</span>
           </div>
           {loading ? <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>予定を読み込んでいます</strong><span>店舗データを集計しています。</span></div> : selectedEvents.length ? <div className="calendar-detail-list">{selectedEvents.map((event) => <CalendarEventDetail event={event} key={event.id} />)}</div> : <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>この日の予定はありません</strong><span>別の日付を選択すると予定を確認できます。</span></div>}
