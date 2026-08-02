@@ -401,7 +401,7 @@
 .sales-completed-group { border-top: 1px solid #edf1f5; }
 .sales-completed-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; color: var(--text); background: var(--surface-subtle); font-size: 12px; font-weight: 800; cursor: pointer; list-style: none; }
 .sales-completed-group > summary::-webkit-details-marker { display: none; }
-.sales-completed-group > summary::after { content: '⌄'; color: var(--text-muted); font-size: 15px; line-height: 1; transition: transform 150ms ease; }
+.sales-completed-group > summary::after { content: ''; display: block; width: 0; height: 0; flex: 0 0 auto; border-top: 6px solid var(--text-muted); border-right: 4px solid transparent; border-left: 4px solid transparent; transform-origin: 50% 50%; transition: transform 150ms ease; }
 .sales-completed-group[open] > summary::after { transform: rotate(180deg); }
 .sales-completed-group > summary:hover { color: var(--primary); background: #f7faff; }
 .sales-completed-group .sales-document-card:last-child { border-bottom: 0; }
@@ -754,7 +754,7 @@
 .maintenance-completed-group { border-top: 1px solid #edf1f5; }
 .maintenance-completed-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; color: var(--text); background: var(--surface-subtle); font-size: 12px; font-weight: 800; cursor: pointer; list-style: none; }
 .maintenance-completed-group > summary::-webkit-details-marker { display: none; }
-.maintenance-completed-group > summary::after { content: '⌄'; color: var(--text-muted); font-size: 15px; line-height: 1; transition: transform 150ms ease; }
+.maintenance-completed-group > summary::after { content: ''; display: block; width: 0; height: 0; flex: 0 0 auto; border-top: 6px solid var(--text-muted); border-right: 4px solid transparent; border-left: 4px solid transparent; transform-origin: 50% 50%; transition: transform 150ms ease; }
 .maintenance-completed-group[open] > summary::after { transform: rotate(180deg); }
 .maintenance-completed-group > summary:hover { color: var(--primary); background: #f7faff; }
 .maintenance-completed-group .maintenance-document-card:last-child { border-bottom: 0; }
