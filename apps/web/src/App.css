@@ -1439,6 +1439,7 @@
 .pc-restore-error { padding: 9px 11px; color: var(--danger); border: 1px solid #f4c5c5; border-radius: 8px; background: #fff5f5; font-size: 11px; line-height: 1.5; }
 .pc-restore-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
 .pc-restore-modal-footer .button { min-height: 38px; padding: 0 12px; font-size: 11px; }
+.pc-restore-modal-footer .button-primary:disabled { color: #8996a8; border-color: #dce3ec; background: #e9edf3; box-shadow: none; cursor: not-allowed; }
 .archive-settings-panel { margin-top: 0; }
 .archive-retention-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 180px); align-items: center; gap: 14px; margin-bottom: 14px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .archive-retention-copy { display: grid; gap: 4px; min-width: 0; }
