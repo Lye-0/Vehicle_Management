@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
-import { Archive, ChevronDown, HardDrive, RotateCcw, Save, Upload } from 'lucide-react'
-import { createBackup, deleteBackup, exportBackup, fetchBackupSettings, fetchBackups, restoreBackup, restoreImportedBackup, updateBackupRetention, updateBackupSettings, type BackupExport, type BackupRecord, type BackupSettings } from '../lib/backupsApi'
+import { useCallback, useEffect, useState } from 'react'
+import { Archive, ChevronDown, HardDrive, RotateCcw, Save } from 'lucide-react'
+import { createBackup, deleteBackup, exportBackup, fetchBackupSettings, fetchBackups, restoreBackup, updateBackupRetention, updateBackupSettings, type BackupRecord, type BackupSettings } from '../lib/backupsApi'
 import { saveBackupToPc } from '../lib/pcBackup'
 
 const initialBackupSettings: BackupSettings = { autoEnabled: false, frequency: 'daily', destination: 'b2', retentionDays: 30, archiveRetentionDays: 30, pcRetentionDays: 30 }
@@ -12,7 +12,6 @@ export function BackupSettingsPanel() {
   const [loading, setLoading] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [pcKeepForever, setPcKeepForever] = useState(false)
   const [manualBackupNote, setManualBackupNote] = useState('')
   const [manualDestination, setManualDestination] = useState<BackupSettings['destination']>('b2')
   const [periodicOpen, setPeriodicOpen] = useState(false)
@@ -49,7 +48,7 @@ export function BackupSettingsPanel() {
       let pcMessage = ''
       if (hasPc) {
         const backup = await exportBackup(manualBackupNote)
-        const result = await saveBackupToPc(backup, pcKeepForever, backupSettings.pcRetentionDays)
+        const result = await saveBackupToPc(backup, false, backupSettings.pcRetentionDays)
         pcMessage = result.mode === 'folder' ? `${result.directoryName}にPC保存` : 'PCへダウンロード'
       }
       setManualBackupNote('')
@@ -88,27 +87,6 @@ export function BackupSettingsPanel() {
       window.setTimeout(() => window.location.reload(), 1_200)
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'バックアップを復元できませんでした。')
-    } finally {
-      setLoading('')
-    }
-  }
-
-  async function runImport(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-    if (!file) return
-    setLoading('pc-restore')
-    setError('')
-    setMessage('')
-    try {
-      const backup = JSON.parse(await file.text()) as BackupExport
-      if (backup.version !== 1 || !backup.organizationId || !backup.tables || !Array.isArray(backup.files)) throw new Error('バックアップファイルの形式が不正です。')
-      if (!window.confirm('復元前に現在の状態をB2へ保存してから、選択したPCバックアップで組織データを置き換えます。続行しますか？')) return
-      const response = await restoreImportedBackup(backup)
-      setMessage(`${response.rowCount}件のデータをPCバックアップから復元しました。画面を再読み込みします。`)
-      window.setTimeout(() => window.location.reload(), 1_200)
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'PCバックアップを復元できませんでした。')
     } finally {
       setLoading('')
     }
@@ -166,9 +144,7 @@ export function BackupSettingsPanel() {
           <div className="backup-settings-table-row backup-settings-table-head" role="row"><span role="columnheader">設定項目</span><span role="columnheader">オンライン（B2）</span><span role="columnheader">PC</span></div>
           <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">定期バックアップ</span><span className="backup-table-value" role="cell">上のトグルで設定</span><span className="backup-table-unavailable" role="cell">未実装</span></div>
           <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">頻度</span><span role="cell"><select value={backupSettings.frequency} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, frequency: event.target.value as BackupSettings['frequency'] }))}><option value="daily">毎日</option><option value="weekly">毎週</option></select></span><span className="backup-table-unavailable" role="cell">未実装</span></div>
-          <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">保存期間</span><span role="cell"><span className="settings-number-input"><input type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, retentionDays: Number(event.target.value) }))} /><span>日</span></span></span><span className="backup-table-value" role="cell">手動保存時のみ</span></div>
-          <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">アーカイブ保管期間</span><span className="backup-table-shared" role="cell"><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, archiveRetentionDays: Number(event.target.value) }))} /><span>日</span></span><small>共通</small></span><span className="backup-table-shared-note" role="cell">B2・PC共通</span></div>
-          <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">PC保存期間</span><span className="backup-table-value" role="cell">—</span><span role="cell"><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, pcRetentionDays: Number(event.target.value) }))} /><span>日</span></span></span></div>
+          <div className="backup-settings-table-row" role="row"><span className="backup-settings-table-label" role="rowheader">保存期間</span><span role="cell"><span className="settings-number-input"><input type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, retentionDays: Number(event.target.value) }))} /><span>日</span></span></span><span role="cell"><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => ({ ...current, pcRetentionDays: Number(event.target.value) }))} /><span>日</span></span></span></div>
         </div>
         <p className="backup-destination-note">定期バックアップは現在オンライン（B2）のみ対応しています。PCへの手動保存は下の「今すぐ手動バックアップ」から実行できます。</p>
         {canManage && <div className="backup-settings-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runSaveSettings()}>{loading === 'settings' ? '保存中…' : <><Save size={14} />バックアップ設定を保存</>}</button></div>}
@@ -181,11 +157,7 @@ export function BackupSettingsPanel() {
         <div className="backup-manual-grid">
           <label className="backup-note-field"><span>手動バックアップのメモ（任意）</span><textarea value={manualBackupNote} maxLength={500} rows={3} disabled={!canManage || Boolean(loading)} onChange={(event) => setManualBackupNote(event.target.value)} placeholder="例：請求書修正前" /></label>
           <label className="backup-settings-field"><span>保存先</span><select value={manualDestination} disabled={!canManage || Boolean(loading)} onChange={(event) => setManualDestination(event.target.value as BackupSettings['destination'])}><option value="b2">オンライン（B2）</option><option value="pc">PC</option><option value="both">両方</option></select></label>
-        </div>
-        <div className="backup-manual-actions">
-          {canManage && <button className="button button-secondary backup-execute-button" type="button" disabled={Boolean(loading)} onClick={() => void runManualBackup()}>{loading === 'manual-create' ? '作成中…' : <><HardDrive size={14} />バックアップを実行</>}</button>}
-          {canManage && <label className="backup-settings-checkbox"><input type="checkbox" checked={pcKeepForever} disabled={Boolean(loading)} onChange={(event) => setPcKeepForever(event.target.checked)} /><span>今回のPCバックアップを永久保存</span></label>}
-          {canManage && <label className="button button-secondary" htmlFor="pc-backup-import" aria-disabled={Boolean(loading)}><Upload size={14} />PCから復元<input id="pc-backup-import" className="backup-file-input" type="file" accept=".json,application/json" disabled={Boolean(loading)} onChange={(event) => void runImport(event)} /></label>}
+          {canManage && <div className="backup-manual-execute"><button className="button button-secondary backup-execute-button" type="button" disabled={Boolean(loading)} onClick={() => void runManualBackup()}>{loading === 'manual-create' ? '作成中…' : <><HardDrive size={14} />バックアップを実行</>}</button></div>}
         </div>
         <p className="backup-destination-note">PC保存では、ユーザーが選択したフォルダへバックアップファイルを保存します。フォルダを選択できない環境ではダウンロードとして保存されます。</p>
       </div>}

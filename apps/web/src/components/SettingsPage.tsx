@@ -7,6 +7,7 @@ import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, change
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
+import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '../lib/backupsApi'
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
 import { IconWithChain } from './IconWithChain'
@@ -173,6 +174,7 @@ function DataSettingsPanel({ exporting, onExport }: { exporting: CsvResource | '
 
 function ArchiveSettingsPanel() {
   const [archives, setArchives] = useState<ArchiveRecord[]>([])
+  const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null)
   const [canManage, setCanManage] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState('')
@@ -181,9 +183,10 @@ function ArchiveSettingsPanel() {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetchArchives(query)
+      const [response, backupSettingsResponse] = await Promise.all([fetchArchives(query), fetchBackupSettings()])
       setArchives(response.archives)
-      setCanManage(response.canManage)
+      setBackupSettings(backupSettingsResponse.settings)
+      setCanManage(response.canManage && backupSettingsResponse.canManage)
       setError('')
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'アーカイブ一覧を読み込めませんでした。')
@@ -240,7 +243,23 @@ function ArchiveSettingsPanel() {
     }
   }
 
-  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} chainWidth="112%" chainTop="-5%" chainDepth={22} linkThickness={3} linkSize={9}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small></div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />{record.purgeAt ? `${formatBackupDate(record.purgeAt)}まで` : '自動削除予定'}</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? '保存解除' : '永久保存'}</button>{canManage && <button className="text-button archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
+  async function runSaveArchiveRetention() {
+    if (!backupSettings || !canManage) return
+    setLoading('archive-retention')
+    setError('')
+    setMessage('')
+    try {
+      const next = await updateBackupSettings(backupSettings)
+      setBackupSettings(next)
+      setMessage('アーカイブ保管期間を保存しました。')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'アーカイブ保管期間を保存できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{backupSettings && <section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => setBackupSettings((current) => current ? { ...current, archiveRetentionDays: Number(event.target.value) } : current)} /><span>日</span></span></label>{canManage && <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runSaveArchiveRetention()}>{loading === 'archive-retention' ? '保存中…' : <><Save size={14} />保管期間を保存</>}</button>}</section>}{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} chainWidth="112%" chainTop="-5%" chainDepth={22} linkThickness={3} linkSize={9}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small></div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />{record.purgeAt ? `${formatBackupDate(record.purgeAt)}まで` : '自動削除予定'}</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? '保存解除' : '永久保存'}</button>{canManage && <button className="text-button archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
 }
 
 function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdated?: (user: User) => void }) {

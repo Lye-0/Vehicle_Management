@@ -1350,12 +1350,17 @@
 .backup-settings-table-label { color: var(--text-secondary); font-size: 11px; font-weight: 800; }
 .backup-settings-table select { width: 100%; min-height: 34px; padding: 0 8px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 11px; }
 .backup-settings-table select:disabled { color: var(--text-muted); background: #f1f4f8; }
+.backup-settings-table .settings-number-input { width: 100%; }
+.backup-settings-table .settings-number-input input { box-sizing: border-box; width: 100%; min-height: 34px; padding: 0 9px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font: inherit; font-size: 11px; }
+.backup-settings-table .settings-number-input input:focus { outline: none; border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.backup-settings-table .settings-number-input input:disabled { color: var(--text-muted); background: #f1f4f8; }
 .backup-table-value, .backup-table-unavailable, .backup-table-shared-note { color: var(--text-muted); font-size: 10px; }
 .backup-table-unavailable { justify-content: center; font-style: italic; }
 .backup-table-shared { gap: 8px; }
 .backup-table-shared small { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.backup-manual-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, .7fr); gap: 14px; margin-top: 14px; }
+.backup-manual-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(180px, .7fr) auto; align-items: end; gap: 14px; margin-top: 14px; }
 .backup-manual-grid .backup-note-field { min-width: 0; }
+.backup-manual-execute { display: flex; align-items: flex-end; height: 100%; }
 .backup-manual-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; }
 .backup-execute-button { min-height: 40px; }
 .backup-history-section { margin-top: 18px; }
@@ -1388,6 +1393,15 @@
 .backup-note-field textarea:disabled { color: var(--text-muted); background: #f1f4f8; }
 .backup-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 .archive-settings-panel { margin-top: 0; }
+.archive-retention-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) auto; align-items: center; gap: 14px; margin-bottom: 14px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.archive-retention-copy { display: grid; gap: 4px; min-width: 0; }
+.archive-retention-copy strong { color: var(--text); font-size: 12px; }
+.archive-retention-copy span { color: var(--text-muted); font-size: 10px; line-height: 1.5; }
+.archive-retention-field { min-width: 0; }
+.archive-retention-field .settings-number-input { width: 100%; }
+.archive-retention-field .settings-number-input input { box-sizing: border-box; width: 100%; min-height: 36px; padding: 0 9px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font: inherit; font-size: 11px; }
+.archive-retention-field .settings-number-input input:focus { outline: none; border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.archive-retention-field .settings-number-input input:disabled { color: var(--text-muted); background: #f1f4f8; }
 .archive-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .archive-search { display: flex; align-items: center; gap: 8px; min-width: 220px; flex: 1; padding: 9px 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .archive-search:focus-within { color: var(--primary); border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
@@ -1564,6 +1578,9 @@
   .backup-manual-grid { grid-template-columns: 1fr; }
   .backup-settings-table { overflow-x: auto; }
   .backup-settings-table-row { min-width: 620px; }
+  .archive-retention-settings { grid-template-columns: minmax(0, 1fr) 120px; }
+  .archive-retention-copy { grid-column: 1 / -1; }
+  .archive-retention-settings .button { grid-column: 1 / -1; justify-self: end; }
   .backup-settings-actions, .backup-destination-note { grid-column: auto; }
   .settings-field-wide { grid-column: auto; }
   .settings-logo-preview { align-items: stretch; flex-direction: column; }
