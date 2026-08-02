@@ -1364,9 +1364,11 @@
 .backup-manual-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; }
 .backup-execute-button { min-height: 40px; }
 .backup-retention-settings { margin-top: 12px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
-.backup-retention-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.backup-retention-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.backup-retention-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .backup-retention-heading strong { color: var(--text); font-size: 12px; }
 .backup-retention-heading span { color: var(--text-muted); font-size: 10px; }
+.backup-directory-button { flex: 0 0 auto; }
 .backup-retention-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 11px; }
 .backup-retention-values label { display: grid; gap: 5px; min-width: 0; }
 .backup-retention-values label > span:first-child { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
@@ -1591,6 +1593,8 @@
   .backup-settings-table-row { min-width: 620px; }
   .archive-retention-settings { grid-template-columns: minmax(0, 1fr) 120px; }
   .archive-retention-copy { grid-column: 1 / -1; }
+  .backup-retention-title-row { align-items: flex-start; flex-direction: column; }
+  .backup-directory-button { align-self: stretch; justify-content: center; }
   .backup-retention-values { grid-template-columns: 1fr; }
   .backup-settings-actions, .backup-destination-note { grid-column: auto; }
   .settings-field-wide { grid-column: auto; }

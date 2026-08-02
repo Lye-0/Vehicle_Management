@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Archive, ChevronDown, HardDrive, RotateCcw } from 'lucide-react'
+import { Archive, ChevronDown, FolderOpen, HardDrive, RotateCcw } from 'lucide-react'
 import { createBackup, deleteBackup, exportBackup, fetchBackups, restoreBackup, updateBackupRetention, type BackupRecord, type BackupSettings } from '../lib/backupsApi'
-import { saveBackupToPc } from '../lib/pcBackup'
+import { changePcBackupDirectory, saveBackupToPc } from '../lib/pcBackup'
 
 export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   const [backups, setBackups] = useState<BackupRecord[]>([])
@@ -26,6 +26,25 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  async function runChangePcBackupDirectory() {
+    setLoading('pc-directory')
+    setError('')
+    setMessage('')
+    try {
+      const result = await changePcBackupDirectory()
+      if (result.mode === 'cancelled') return
+      if (result.mode === 'unsupported') {
+        setError('このブラウザではPCの保存先を指定できません。バックアップ実行時はダウンロードとして保存されます。')
+        return
+      }
+      setMessage(`${result.directoryName}をPCバックアップ先に設定しました。`)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'PCバックアップ先を変更できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
 
   async function runManualBackup() {
     setLoading('manual-create')
@@ -109,6 +128,8 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
     {message && <div className="settings-success" role="status">{message}</div>}
     {!canManage && !error && <div className="backup-notice">バックアップの作成・復元・設定変更は管理者のみ実行できます。</div>}
 
+    <section className="backup-retention-settings"><div className="backup-retention-title-row"><div className="backup-retention-heading"><strong>保存期間</strong><span>定期・手動バックアップに共通</span></div>{canManage && <button className="button button-secondary backup-directory-button" type="button" disabled={Boolean(loading)} onClick={() => void runChangePcBackupDirectory()}>{loading === 'pc-directory' ? '選択中…' : <><FolderOpen size={14} />PCへのバックアップ先を変更</>}</button>}</div><div className="backup-retention-values"><label><span>オンライン（B2）</span><span className="settings-number-input"><input type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, retentionDays: Number(event.target.value) })} /><span>日</span></span></label><label><span>PC</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, pcRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></div><p className="backup-destination-note">永久保存に設定していないバックアップは、指定期間を過ぎると削除されます。PC保存では、選択した親フォルダ内の「Vehicle Management Backup」へ保存します。</p></section>
+
     <section className="backup-accordion">
       <div className="backup-accordion-header">
         <button className="backup-accordion-trigger" type="button" aria-expanded={periodicOpen} aria-controls="periodic-backup-settings" onClick={() => setPeriodicOpen((open) => !open)}>
@@ -137,8 +158,6 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
         <p className="backup-destination-note">PC保存では、ユーザーが選択したフォルダへバックアップファイルを保存します。フォルダを選択できない環境ではダウンロードとして保存されます。</p>
       </div>}
     </section>
-
-    <section className="backup-retention-settings"><div className="backup-retention-heading"><strong>保存期間</strong><span>定期・手動バックアップに共通</span></div><div className="backup-retention-values"><label><span>オンライン（B2）</span><span className="settings-number-input"><input type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, retentionDays: Number(event.target.value) })} /><span>日</span></span></label><label><span>PC</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, pcRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></div><p className="backup-destination-note">永久保存に設定していないバックアップは、指定期間を過ぎると削除されます。</p></section>
 
     <section className="backup-history-section"><div className="backup-history-heading"><h3>バックアップ一覧</h3><span>{backups.length}件</span></div>{backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}><span className="backup-icon"><Archive size={17} /></span><span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)} ・ {backup.trigger === 'automatic' ? '自動' : backup.trigger === 'pre-restore' ? '復元前' : '手動'}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件{backup.keepForever ? ' ・ 永久保存' : ''}{backup.protectedUntil ? ` ・ ${formatBackupDate(backup.protectedUntil)}まで保護` : ''}</small>{backup.note && <small className="backup-note-text">メモ：{backup.note}</small>}</span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackupKeepForever(backup)}>{loading === `keep-${backup.id}` ? '更新中…' : backup.keepForever ? '保存解除' : '永久保存'}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : '削除'}</button></span>}</div>)}</div>}</section>
   </section>

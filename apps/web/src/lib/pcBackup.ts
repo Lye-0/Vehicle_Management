@@ -11,6 +11,7 @@ type DirectoryHandleLike = {
   name: string
   queryPermission?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>
   requestPermission?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>
+  getDirectoryHandle: (name: string, options?: { create?: boolean }) => Promise<DirectoryHandleLike>
   getFileHandle: (name: string, options?: { create?: boolean }) => Promise<FileHandleLike>
   entries: () => AsyncIterableIterator<[string, FileHandleLike | DirectoryHandleLike]>
   removeEntry: (name: string) => Promise<void>
@@ -18,6 +19,7 @@ type DirectoryHandleLike = {
 
 const directoryStoreName = 'backup-directory'
 const directoryKey = 'selected'
+const backupDirectoryName = 'Vehicle Management Backup'
 
 export async function saveBackupToPc(backup: BackupExport, keepForever: boolean, retentionDays: number) {
   const directory = await getWritableDirectory()
@@ -35,14 +37,46 @@ export async function saveBackupToPc(backup: BackupExport, keepForever: boolean,
   return { mode: 'folder' as const, fileName, directoryName: directory.name }
 }
 
+export async function changePcBackupDirectory() {
+  const picker = getDirectoryPicker()
+  if (!picker) return { mode: 'unsupported' as const }
+  try {
+    const parent = await picker({ mode: 'readwrite' })
+    const directory = await getBackupDirectory(parent)
+    await storeDirectory(parent)
+    return { mode: 'selected' as const, directoryName: directory.name }
+  } catch (reason: unknown) {
+    if (isAbortError(reason)) return { mode: 'cancelled' as const }
+    throw reason
+  }
+}
+
 async function getWritableDirectory() {
   const stored = await readStoredDirectory()
-  if (stored && await ensurePermission(stored)) return stored
-  const picker = (window as Window & { showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<DirectoryHandleLike> }).showDirectoryPicker
+  if (stored && await ensurePermission(stored)) return getBackupDirectory(stored)
+  const picker = getDirectoryPicker()
   if (!picker) return null
-  const selected = await picker({ mode: 'readwrite' })
-  await storeDirectory(selected)
-  return selected
+  try {
+    const selected = await picker({ mode: 'readwrite' })
+    const directory = await getBackupDirectory(selected)
+    await storeDirectory(selected)
+    return directory
+  } catch (reason: unknown) {
+    if (isAbortError(reason)) return null
+    throw reason
+  }
+}
+
+function getDirectoryPicker() {
+  return (window as Window & { showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<DirectoryHandleLike> }).showDirectoryPicker
+}
+
+async function getBackupDirectory(parent: DirectoryHandleLike) {
+  return parent.getDirectoryHandle(backupDirectoryName, { create: true })
+}
+
+function isAbortError(reason: unknown) {
+  return reason instanceof DOMException && reason.name === 'AbortError'
 }
 
 async function ensurePermission(directory: DirectoryHandleLike) {
