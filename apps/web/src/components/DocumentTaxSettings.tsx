@@ -1,15 +1,21 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Lock, ShieldAlert, X } from 'lucide-react'
 
 type DocumentTaxSettingsProps = {
+  documentId?: string
   taxRate: number
   onTaxRateChange: (value: number) => void
 }
 
-export function DocumentTaxSettings({ taxRate, onTaxRateChange }: DocumentTaxSettingsProps) {
+export function DocumentTaxSettings({ documentId, taxRate, onTaxRateChange }: DocumentTaxSettingsProps) {
   const [unlocked, setUnlocked] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const taxRateRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setUnlocked(false)
+    setConfirmOpen(false)
+  }, [documentId])
 
   function requestUnlock() {
     if (!unlocked) setConfirmOpen(true)

@@ -435,7 +435,7 @@ function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTota
     </section>
     <details className="sales-details-accordion">
       <summary><span>詳細</span><ChevronDown size={16} aria-hidden="true" /></summary>
-      <div className="sales-details-accordion-content"><DocumentTaxSettings taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
+      <div className="sales-details-accordion-content"><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
     </details>
   </>
 }

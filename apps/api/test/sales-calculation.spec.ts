@@ -86,4 +86,12 @@ describe('sales estimate calculation', () => {
     expect(calculateSalesTotals(items, 10, '切り捨て', calculationDetails)).toEqual({ subtotal: 100005, tax: 10000, total: 110005 })
     expect(calculateSalesTotals(items, 10, '四捨五入', calculationDetails)).toEqual({ subtotal: 100005, tax: 10001, total: 110006 })
   })
+
+  it('applies the tax rate saved on the document instead of assuming ten percent', () => {
+    const items = [line('車両本体価格', '車両本体価格', 100007)]
+    const calculationDetails = { ...details, recycleFee: 0 }
+
+    expect(calculateSalesTotals(items, 8, '切り捨て', calculationDetails)).toEqual({ subtotal: 100007, tax: 8000, total: 108007 })
+    expect(calculateSalesTotals(items, 8, '四捨五入', calculationDetails)).toEqual({ subtotal: 100007, tax: 8001, total: 108008 })
+  })
 })
