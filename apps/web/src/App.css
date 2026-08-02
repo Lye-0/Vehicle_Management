@@ -1368,10 +1368,11 @@
 .backup-retention-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .backup-retention-heading strong { color: var(--text); font-size: 12px; }
 .backup-retention-heading span { color: var(--text-muted); font-size: 10px; }
-.backup-directory-button { flex: 0 0 auto; }
+.backup-retention-field { display: grid; gap: 5px; min-width: 0; }
+.backup-retention-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.backup-retention-field-heading label { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
+.backup-directory-button { min-height: 30px; flex: 0 0 auto; padding: 0 8px; font-size: 10px; box-shadow: none; }
 .backup-retention-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 11px; }
-.backup-retention-values label { display: grid; gap: 5px; min-width: 0; }
-.backup-retention-values label > span:first-child { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
 .backup-retention-values .settings-number-input { width: 100%; }
 .backup-retention-values .settings-number-input input { box-sizing: border-box; width: 100%; min-height: 36px; padding: 0 9px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font: inherit; font-size: 11px; }
 .backup-retention-values .settings-number-input input:focus { outline: none; border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
@@ -1621,8 +1622,8 @@
   .backup-settings-table-row { min-width: 620px; }
   .archive-retention-settings { grid-template-columns: minmax(0, 1fr) 120px; }
   .archive-retention-copy { grid-column: 1 / -1; }
-  .backup-retention-title-row { align-items: flex-start; flex-direction: column; }
-  .backup-directory-button { align-self: stretch; justify-content: center; }
+  .backup-retention-field-heading { align-items: flex-start; flex-wrap: wrap; }
+  .backup-directory-button { align-self: auto; justify-content: center; }
   .backup-retention-values { grid-template-columns: 1fr; }
   .backup-history-heading { align-items: flex-start; flex-direction: column; }
   .backup-history-heading-actions { width: 100%; justify-content: space-between; }

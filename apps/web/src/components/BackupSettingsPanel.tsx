@@ -209,12 +209,11 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
 
     <section className="backup-retention-settings">
       <div className="backup-retention-title-row">
-        <div className="backup-retention-heading"><strong>バックアップの保存期間</strong><span>定期・手動バックアップに適用</span></div>
-        {canManage && <button className="button button-secondary backup-directory-button" type="button" disabled={Boolean(loading)} onClick={() => void runChangePcBackupDirectory()}>{loading === 'pc-directory' ? '選択中…' : <><FolderOpen size={14} />PC保存先を変更</>}</button>}
+        <div className="backup-retention-heading"><strong>バックアップの保存設定</strong><span>保存期間とPC保存先</span></div>
       </div>
       <div className="backup-retention-values">
-        <label><span>オンライン（B2）</span><span className="settings-number-input"><input type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, retentionDays: Number(event.target.value) })} /><span>日</span></span></label>
-        <label><span>PC保存</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, pcRetentionDays: Number(event.target.value) })} /><span>日</span></span></label>
+        <div className="backup-retention-field"><div className="backup-retention-field-heading"><label htmlFor="backup-retention-b2">オンライン（B2）</label></div><span className="settings-number-input"><input id="backup-retention-b2" type="number" min={7} max={3650} value={backupSettings.retentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, retentionDays: Number(event.target.value) })} /><span>日</span></span></div>
+        <div className="backup-retention-field"><div className="backup-retention-field-heading"><label htmlFor="backup-retention-pc">PC保存（期間）</label>{canManage && <button className="button button-secondary backup-directory-button" type="button" disabled={Boolean(loading)} onClick={() => void runChangePcBackupDirectory()}>{loading === 'pc-directory' ? '選択中…' : <><FolderOpen size={14} />PC保存先を変更</>}</button>}</div><span className="settings-number-input"><input id="backup-retention-pc" type="number" min={1} max={3650} value={backupSettings.pcRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, pcRetentionDays: Number(event.target.value) })} /><span>日</span></span></div>
       </div>
       <p className="backup-destination-note">永久保存に設定していないバックアップは、指定期間を過ぎると自動削除されます。PC保存先には「Vehicle Management Backup」フォルダを作成して保存します。</p>
     </section>
