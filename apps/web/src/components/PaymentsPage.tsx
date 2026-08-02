@@ -28,10 +28,14 @@ type InvoiceType = PaymentRecord['sourceType']
 type InvoiceTypeFilter = 'すべて' | InvoiceType
 type DocumentStatusFilter = 'すべて' | PaymentDocumentStatus
 type PaymentInputMethod = Exclude<PaymentMethod, ''>
+type PaymentSortKey = 'issuedAt' | 'dueDate' | 'customerName' | 'vehicle'
+type PaymentSortDirection = 'asc' | 'desc'
 
 export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?: string; onNavigate?: (target: VehicleHistoryNavigation) => void } = {}) {
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [query, setQuery] = useState('')
+  const [sortKey, setSortKey] = useState<PaymentSortKey>('issuedAt')
+  const [sortDirection, setSortDirection] = useState<PaymentSortDirection>('desc')
   const [statusFilter, setStatusFilter] = useState<PaymentFilter>('すべて')
   const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<InvoiceTypeFilter>('すべて')
   const [documentStatusFilter, setDocumentStatusFilter] = useState<DocumentStatusFilter>('入金待ち')
@@ -58,8 +62,8 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
       const matchesDocumentStatus = documentStatusFilter === 'すべて' || record.documentStatus === documentStatusFilter
       const searchableText = `${record.number} ${record.customerName} ${record.vehicle} ${record.plate} ${record.sourceType} ${record.documentStatus}`.toLocaleLowerCase()
       return matchesStatus && matchesInvoiceType && matchesDocumentStatus && (!normalizedQuery || searchableText.includes(normalizedQuery))
-    })
-  }, [documentStatusFilter, invoiceTypeFilter, query, records, statusFilter])
+    }).sort((left, right) => comparePaymentRecords(left, right, sortKey, sortDirection))
+  }, [documentStatusFilter, invoiceTypeFilter, query, records, sortDirection, sortKey, statusFilter])
 
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0] ?? null
 
@@ -118,7 +122,7 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>請求・入金データを読み込んでいます。</span></div>}
     <div className="payment-scope-note"><Info size={17} /><div><strong>表示対象</strong><span>販売タブの請求書と、車検・点検・一般タブの整備請求書のうち、書類状態が「入金待ち」または「完了」のものを表示しています。</span></div></div>
-    <div className="payment-toolbar"><label className="payment-search"><Search size={18} /><span className="sr-only">入金情報を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="請求書番号、顧客名、車名で検索" /></label></div>
+    <div className="payment-toolbar"><label className="payment-search"><Search size={18} /><span className="sr-only">入金情報を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="請求書番号、顧客名、車名で検索" /></label><div className="payment-sort-controls" aria-label="請求一覧のソート"><select className="payment-sort-key" aria-label="ソート内容" value={sortKey} onChange={(event) => setSortKey(event.target.value as PaymentSortKey)}><option value="issuedAt">書類の作成日時</option><option value="dueDate">入金期限</option><option value="customerName">顧客名</option><option value="vehicle">車両名</option></select><select className="payment-sort-direction" aria-label="並び順" value={sortDirection} onChange={(event) => setSortDirection(event.target.value as PaymentSortDirection)}><option value="desc">降順</option><option value="asc">昇順</option></select></div></div>
     <div className="payment-filter-panel"><PaymentFilterGroup label="請求書の種類" kind="invoice-type" value={invoiceTypeFilter} options={['すべて', '販売請求書', '整備請求書'] as InvoiceTypeFilter[]} onChange={setInvoiceTypeFilter} /><PaymentFilterGroup label="書類状態（元タブ）" kind="document-status" value={documentStatusFilter} options={['すべて', '入金待ち', '完了'] as DocumentStatusFilter[]} onChange={setDocumentStatusFilter} /><PaymentFilterGroup label="入金状況" kind="payment-status" value={statusFilter} options={['すべて', '未入金', '一部入金', '入金済み'] as PaymentFilter[]} onChange={setStatusFilter} /><button className="text-button payment-filter-reset" type="button" onClick={resetFilters} disabled={statusFilter === 'すべて' && invoiceTypeFilter === 'すべて' && documentStatusFilter === 'すべて'}>条件をリセット</button></div>
     <div className="payment-workspace"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false) }} />{selectedRecord ? <PaymentRecordDetail key={selectedRecord.id} record={selectedRecord} saved={saved} saving={saving} onSaveEntry={saveEntry} onDeleteEntry={removeEntry} onOpenDocument={onNavigate ? () => onNavigate({ section: selectedRecord.sourceType === '販売請求書' ? 'sales' : 'maintenance', recordId: selectedRecord.documentId }) : undefined} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入金状況を変更してください。'}</span></div>}</div>
   </>
@@ -252,6 +256,14 @@ function getPaymentFilterTone(kind: PaymentFilterGroupKind, option: string) { if
 function DocumentStatusTag({ status }: { status: PaymentDocumentStatus }) { const tone = status === '完了' ? 'completed' : 'pending'; return <span className={`payment-document-status payment-document-status-${tone}`}><span className="status-dot" />{status}</span> }
 function PaymentStatusTag({ status }: { status: PaymentStatus }) { const tone = status === '入金済み' ? 'paid' : status === '一部入金' ? 'partial' : 'unpaid'; return <span className={`payment-status-tag payment-status-${tone}`}><span className="status-dot" />{status}</span> }
 function getPaymentStatus(record: PaymentRecord): PaymentStatus { if (record.paidAmount >= record.invoiceAmount && record.invoiceAmount > 0) return '入金済み'; if (record.paidAmount > 0) return '一部入金'; return '未入金' }
+function comparePaymentRecords(left: PaymentRecord, right: PaymentRecord, key: PaymentSortKey, direction: PaymentSortDirection) {
+  const leftValue = getPaymentSortValue(left, key)
+  const rightValue = getPaymentSortValue(right, key)
+  if (!leftValue || !rightValue) return !leftValue && !rightValue ? 0 : !leftValue ? 1 : -1
+  const comparison = leftValue.localeCompare(rightValue, 'ja-JP', { numeric: true, sensitivity: 'base' })
+  return direction === 'asc' ? comparison : -comparison
+}
+function getPaymentSortValue(record: PaymentRecord, key: PaymentSortKey) { return key === 'issuedAt' ? record.issuedAt : key === 'dueDate' ? record.dueDate : key === 'customerName' ? record.customerName : record.vehicle }
 function getOutstandingAmount(record: PaymentRecord) { return Math.max(record.invoiceAmount - record.paidAmount, 0) }
 function isOverdue(record: PaymentRecord) { return Boolean(record.dueDate) && new Date(record.dueDate.replace(/\//g, '-')).getTime() < Date.now() }
 function todayDate() { const date = new Date(); return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}` }
