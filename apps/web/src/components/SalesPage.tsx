@@ -34,6 +34,8 @@ import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetG
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
 import { buildSalesEstimateSheetSvg, salesEstimateSheetLayout } from '../lib/salesEstimateSheet'
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
+import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
+import { DocumentSortControls } from './DocumentSortControls'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesStatusFilter = 'すべて' | Exclude<SalesStatus, 'アーカイブ済み'>
@@ -95,6 +97,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [query, setQuery] = useState('')
+  const [sortKey, setSortKey] = useState<DocumentSortKey>('dueDate')
+  const [sortDirection, setSortDirection] = useState<DocumentSortDirection>('asc')
   const [filterType, setFilterType] = useState<DocumentFilter>('すべて')
   const [statusFilter, setStatusFilter] = useState<SalesStatusFilter>('すべて')
   const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
@@ -144,8 +148,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       const matchesStatus = statusFilter === 'すべて' || document.status === statusFilter
       const searchableText = `${document.number} ${document.customerName} ${document.vehicle} ${document.plate}`.toLocaleLowerCase()
       return matchesType && matchesStatus && (!normalizedQuery || searchableText.includes(normalizedQuery))
-    })
-  }, [documents, filterType, query, statusFilter])
+    }).sort((left, right) => compareSortableDocuments(left, right, sortKey, sortDirection))
+  }, [documents, filterType, query, sortDirection, sortKey, statusFilter])
 
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument, settings.tax.rounding) : null
@@ -352,7 +356,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       <div className="page-header sales-page-header"><div><span className="page-eyebrow">販売書類</span><h1>販売</h1><p>見積書・請求書を車両情報と連動して管理します。</p></div><button className="button button-primary" type="button" onClick={openCreateDialog}><Plus size={18} />販売書類を作成</button></div>
       {syncError && <div className="customer-sync-status is-error"><span>{syncError}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
-      <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label></div>
+      <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
       <div className="sales-workspace"><SalesDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} rounding={settings.tax.rounding} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}

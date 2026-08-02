@@ -896,11 +896,11 @@
 .payment-search:focus-within { color: var(--primary); border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .payment-search input { width: 100%; min-width: 0; padding: 0; color: var(--text); outline: 0; border: 0; background: transparent; font-size: 12px; }
 .payment-search input::placeholder { color: var(--text-muted); }
-.payment-sort-controls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.payment-sort-controls select { min-height: 43px; padding: 0 30px 0 12px; color: var(--text-secondary); outline: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-card); font-size: 12px; font-weight: 700; cursor: pointer; }
-.payment-sort-controls select:focus { border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-.payment-sort-key { min-width: 170px; }
-.payment-sort-direction { min-width: 88px; }
+.document-sort-controls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.document-sort-controls select { min-height: 43px; padding: 0 30px 0 12px; color: var(--text-secondary); outline: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-card); font-size: 12px; font-weight: 700; cursor: pointer; }
+.document-sort-controls select:focus { border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.document-sort-key { min-width: 170px; }
+.document-sort-direction { min-width: 88px; }
 .payment-filter-panel { display: grid; gap: 10px; margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .payment-filter-group { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; }
 .payment-filter-label { color: var(--text-secondary); font-size: 11px; font-weight: 800; }
@@ -1417,8 +1417,8 @@
   .maintenance-preview-placeholder { min-height: 520px; }
   .payment-toolbar { align-items: stretch; flex-direction: column; }
   .payment-search { min-width: 0; }
-  .payment-sort-controls { width: 100%; }
-  .payment-sort-controls select { min-width: 0; flex: 1; }
+  .document-sort-controls { width: 100%; }
+  .document-sort-controls select { min-width: 0; flex: 1; }
   .document-filter-group { grid-template-columns: 1fr; gap: 6px; }
   .document-filter-options { width: 100%; }
   .document-filter-options button { flex: 1; }

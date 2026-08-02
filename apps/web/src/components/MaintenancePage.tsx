@@ -38,6 +38,8 @@ import {
 import { buildMaintenanceStatementSvg, calculateMaintenanceStatementTotals } from '../lib/maintenanceStatement'
 import { defaultSettings, fetchSettings, type AppSettings } from '../lib/settingsApi'
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
+import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
+import { DocumentSortControls } from './DocumentSortControls'
 import { MaintenanceStatementEditor, type MaintenanceStatementItemField } from './MaintenanceStatementEditor'
 
 type CategoryFilter = 'すべて' | IntakeCategory
@@ -74,6 +76,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [customers, setCustomers] = useState<Customer[]>([])
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [query, setQuery] = useState('')
+  const [sortKey, setSortKey] = useState<DocumentSortKey>('dueDate')
+  const [sortDirection, setSortDirection] = useState<DocumentSortDirection>('asc')
   const [typeFilter, setTypeFilter] = useState<MaintenanceTypeFilter>('すべて')
   const [statusFilter, setStatusFilter] = useState<MaintenanceStatusFilter>('すべて')
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('すべて')
@@ -111,8 +115,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const matchesCategory = categoryFilter === 'すべて' || document.category === categoryFilter
       const searchableText = `${document.number} ${document.customerName} ${document.vehicle} ${document.plate}`.toLocaleLowerCase()
       return matchesType && matchesStatus && matchesCategory && (!normalizedQuery || searchableText.includes(normalizedQuery))
-    })
-  }, [categoryFilter, documents, query, statusFilter, typeFilter])
+    }).sort((left, right) => compareSortableDocuments(left, right, sortKey, sortDirection))
+  }, [categoryFilter, documents, query, sortDirection, sortKey, statusFilter, typeFilter])
 
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument, settings.tax.rounding) : null
@@ -229,7 +233,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     <div className="page-header maintenance-page-header"><div><span className="page-eyebrow">整備書類</span><h1>車検・点検・一般</h1><p>整備の受付から作業明細、見積書・請求書まで管理します。</p></div><button className="button button-primary" type="button" disabled={!customers.length} onClick={() => setCreateDialogOpen(true)}><Plus size={18} />整備書類を作成</button></div>
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
-    <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label></div>
+    <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
     <div className="maintenance-workspace"><MaintenanceDocumentList documents={filteredDocuments} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
