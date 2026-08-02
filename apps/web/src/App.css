@@ -1371,6 +1371,8 @@
 .backup-retention-field { display: grid; gap: 5px; min-width: 0; }
 .backup-retention-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .backup-retention-field-heading label { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
+.backup-retention-pc-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.backup-retention-pc-controls .settings-number-input { min-width: 0; flex: 1 1 auto; }
 .backup-directory-button { min-height: 30px; flex: 0 0 auto; padding: 0 8px; font-size: 10px; box-shadow: none; }
 .backup-retention-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 11px; }
 .backup-retention-values .settings-number-input { width: 100%; }
@@ -1624,6 +1626,8 @@
   .archive-retention-copy { grid-column: 1 / -1; }
   .backup-retention-field-heading { align-items: flex-start; flex-wrap: wrap; }
   .backup-directory-button { align-self: auto; justify-content: center; }
+  .backup-retention-pc-controls { align-items: stretch; flex-wrap: wrap; }
+  .backup-retention-pc-controls .settings-number-input { flex-basis: 160px; }
   .backup-retention-values { grid-template-columns: 1fr; }
   .backup-history-heading { align-items: flex-start; flex-direction: column; }
   .backup-history-heading-actions { width: 100%; justify-content: space-between; }
