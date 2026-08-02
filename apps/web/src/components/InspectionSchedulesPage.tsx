@@ -1,138 +1,152 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CalendarClock, Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CalendarClock, Search } from 'lucide-react'
+import { DashboardCalendar } from './DashboardCalendar'
+import type { CustomerVehicleNavigation } from './CustomerVehiclePage'
 import { fetchCustomers, type Customer } from '../lib/customerApi'
-import { createInspectionSchedule, deleteInspectionSchedule, fetchInspectionSchedules, updateInspectionSchedule, type InspectionSchedule, type InspectionScheduleInput, type InspectionStatus, type InspectionType } from '../lib/inspectionApi'
+import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 
-const inspectionTypes: InspectionType[] = ['車検', '12か月点検', '24か月点検', '一般点検']
-const inspectionStatuses: InspectionStatus[] = ['予定', '完了', 'キャンセル']
+const vehicleSearchFields = ['すべて', '顧客名', '車名', '登録番号', '車台番号'] as const
+type VehicleSearchField = (typeof vehicleSearchFields)[number]
 
-type ScheduleForm = InspectionScheduleInput
+const vehicleSearchPlaceholders: Record<VehicleSearchField, string> = {
+  すべて: '顧客名、車名、登録番号、車台番号で検索',
+  顧客名: '顧客名で検索',
+  車名: '車名で検索',
+  登録番号: '登録番号で検索',
+  車台番号: '車台番号で検索',
+}
 
-const emptyForm: ScheduleForm = { customerId: '', vehicleId: '', inspectionType: '車検', dueDate: today(), status: '予定', note: '' }
+const vehicleInspectionLegendCategories: Array<{ category: DashboardCalendarEvent['category']; label: string }> = [{ category: 'vehicle-inspection', label: '車検' }]
 
-export function InspectionSchedulesPage({ initialScheduleId }: { initialScheduleId?: string } = {}) {
-  const [schedules, setSchedules] = useState<InspectionSchedule[]>([])
+type InspectionVehicle = {
+  id: string
+  customerId: string
+  customerName: string
+  vehicleName: string
+  plate: string
+  vin: string
+  inspectionDate: string
+}
+
+export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?: (target: CustomerVehicleNavigation) => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'すべて' | InspectionStatus>('すべて')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<ScheduleForm>(emptyForm)
+  const [searchField, setSearchField] = useState<VehicleSearchField>('すべて')
+  const [selectedInspectionYear, setSelectedInspectionYear] = useState('')
+  const [selectedInspectionMonth, setSelectedInspectionMonth] = useState('')
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const initialScheduleIdRef = useRef(initialScheduleId)
 
   useEffect(() => {
     let active = true
     setLoading(true)
-    Promise.all([fetchInspectionSchedules(), fetchCustomers()]).then(([nextSchedules, nextCustomers]) => {
+    fetchCustomers().then((nextCustomers) => {
       if (!active) return
-      setSchedules(nextSchedules)
       setCustomers(nextCustomers)
-      const targetSchedule = initialScheduleIdRef.current ? nextSchedules.find((schedule) => schedule.id === initialScheduleIdRef.current) : undefined
-      if (targetSchedule) {
-        setEditingId(targetSchedule.id)
-        setForm({ customerId: targetSchedule.customerId, vehicleId: targetSchedule.vehicleId, inspectionType: targetSchedule.inspectionType, dueDate: toDisplayDate(targetSchedule.dueDate), status: targetSchedule.status, note: targetSchedule.note })
-        setDialogOpen(true)
-      }
       setError('')
     }).catch((reason: unknown) => {
-      if (active) setError(reason instanceof Error ? reason.message : '点検予定を読み込めませんでした。')
+      if (active) setError(reason instanceof Error ? reason.message : '車検予定を読み込めませんでした。')
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
   }, [])
 
-  const filteredSchedules = useMemo(() => {
+  const inspectionVehicles = useMemo(() => customers.flatMap((customer) => customer.vehicles.flatMap((vehicle) => {
+    if (!isValidDate(vehicle.inspectionDate)) return []
+    return [{
+      id: vehicle.id,
+      customerId: customer.id,
+      customerName: customer.name || '顧客未登録',
+      vehicleName: [vehicle.maker, vehicle.model].filter(Boolean).join(' ') || '車両未登録',
+      plate: vehicle.plate,
+      vin: vehicle.vin,
+      inspectionDate: vehicle.inspectionDate,
+    }]
+  })).sort((left, right) => normalizeDate(left.inspectionDate).localeCompare(normalizeDate(right.inspectionDate)) || left.customerName.localeCompare(right.customerName, 'ja')), [customers])
+
+  const inspectionYears = useMemo(() => Array.from(new Set(inspectionVehicles.map((vehicle) => getInspectionYear(vehicle.inspectionDate)))).sort((left, right) => Number(right) - Number(left)), [inspectionVehicles])
+  const inspectionMonths = useMemo(() => {
+    const source = selectedInspectionYear ? inspectionVehicles.filter((vehicle) => getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear) : inspectionVehicles
+    return Array.from(new Set(source.map((vehicle) => getInspectionMonth(vehicle.inspectionDate)))).sort((left, right) => left - right)
+  }, [inspectionVehicles, selectedInspectionYear])
+
+  const filteredVehicles = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    return schedules.filter((schedule) => {
-      const matchesStatus = statusFilter === 'すべて' || schedule.status === statusFilter
-      const searchable = `${schedule.customerName} ${schedule.vehicle} ${schedule.plate} ${schedule.inspectionType} ${schedule.note}`.toLocaleLowerCase()
-      return matchesStatus && (!normalizedQuery || searchable.includes(normalizedQuery))
+    return inspectionVehicles.filter((vehicle) => {
+      const matchesYear = !selectedInspectionYear || getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear
+      const matchesMonth = !selectedInspectionMonth || getInspectionMonth(vehicle.inspectionDate) === Number(selectedInspectionMonth)
+      const matchesText = !normalizedQuery || getVehicleSearchText(vehicle, searchField).toLocaleLowerCase().includes(normalizedQuery)
+      return matchesYear && matchesMonth && matchesText
     })
-  }, [query, schedules, statusFilter])
+  }, [inspectionVehicles, query, searchField, selectedInspectionMonth, selectedInspectionYear])
 
-  function openCreate() {
-    const customer = customers[0]
-    setEditingId(null)
-    setForm({ ...emptyForm, customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '' })
-    setDialogOpen(true)
-  }
-
-  function openEdit(schedule: InspectionSchedule) {
-    setEditingId(schedule.id)
-    setForm({ customerId: schedule.customerId, vehicleId: schedule.vehicleId, inspectionType: schedule.inspectionType, dueDate: toDisplayDate(schedule.dueDate), status: schedule.status, note: schedule.note })
-    setDialogOpen(true)
-  }
-
-  function closeDialog() {
-    setDialogOpen(false)
-    setEditingId(null)
-    setForm(emptyForm)
-  }
-
-  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!form.customerId || !form.vehicleId || !form.dueDate || saving) return
-    setSaving(true)
-    setError('')
-    try {
-      const saved = editingId ? await updateInspectionSchedule(editingId, form) : await createInspectionSchedule(form)
-      setSchedules((current) => editingId ? current.map((schedule) => schedule.id === saved.id ? saved : schedule) : [saved, ...current])
-      closeDialog()
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : '点検予定を保存できませんでした。')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function markCompleted(schedule: InspectionSchedule) {
-    setSaving(true)
-    setError('')
-    try {
-      const saved = await updateInspectionSchedule(schedule.id, { customerId: schedule.customerId, vehicleId: schedule.vehicleId, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status === '完了' ? '予定' : '完了', note: schedule.note })
-      setSchedules((current) => current.map((item) => item.id === saved.id ? saved : item))
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : '点検予定の状態を更新できませんでした。')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function removeSchedule(schedule: InspectionSchedule) {
-    if (!window.confirm(`${schedule.inspectionType}（${schedule.vehicle}）を削除しますか？`)) return
-    setSaving(true)
-    setError('')
-    try {
-      await deleteInspectionSchedule(schedule.id)
-      setSchedules((current) => current.filter((item) => item.id !== schedule.id))
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : '点検予定を削除できませんでした。')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
+  const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
+    id: `vehicle-${vehicle.id}-inspection`,
+    date: vehicle.inspectionDate,
+    category: 'vehicle-inspection',
+    categoryLabel: '車検',
+    title: `車検：${vehicle.customerName}`,
+    detail: `${vehicle.vehicleName}${vehicle.plate ? ` ・ ${vehicle.plate}` : ''}`,
+    status: '車検',
+    amount: null,
+  })), [filteredVehicles])
+  const hasActiveFilters = Boolean(query.trim() || searchField !== 'すべて' || selectedInspectionYear || selectedInspectionMonth)
 
   return <>
-    <div className="page-header inspection-page-header"><div><span className="page-eyebrow">点検予定</span><h1>車検・点検予定</h1><p>車検、12か月点検、24か月点検、一般点検の予定と完了状態を管理します。</p></div><button className="button button-primary" type="button" disabled={!customers.length} onClick={openCreate}><Plus size={18} />点検予定を登録</button></div>
+    <div className="page-header inspection-page-header"><div><span className="page-eyebrow">点検予定</span><h1>車検予定</h1><p>顧客・車両に登録されている車検満了日を確認・管理します。</p></div></div>
     {error && <div className="customer-sync-status is-error" role="alert"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
-    {loading && <div className="customer-sync-status" role="status"><span>点検予定を読み込んでいます。</span></div>}
-    <div className="inspection-toolbar"><label className="inspection-search"><Search size={18} /><span className="sr-only">点検予定を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="顧客名、車名、登録番号、点検種別で検索" /></label><div className="inspection-filter-tabs"><button className={statusFilter === 'すべて' ? 'is-active' : ''} type="button" onClick={() => setStatusFilter('すべて')}>すべて</button>{inspectionStatuses.map((status) => <button className={statusFilter === status ? 'is-active' : ''} key={status} type="button" onClick={() => setStatusFilter(status)}>{status}</button>)}</div><span className="inspection-result-summary"><strong>{filteredSchedules.length}件</strong><span>点検予定</span></span></div>
-    <section className="inspection-schedule-grid">{filteredSchedules.map((schedule) => <article className={`panel inspection-schedule-card inspection-status-${schedule.status}`} key={schedule.id}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />{schedule.inspectionType}</span><span className={`inspection-state inspection-state-${schedule.status}`}>{schedule.status}</span></div><h2>{schedule.customerName}</h2><p>{schedule.vehicle} {schedule.plate && `・ ${schedule.plate}`}</p><div className="inspection-card-date"><span>予定日</span><strong className={dateTone(schedule.dueDate, schedule.status)}>{formatDate(schedule.dueDate)}</strong></div>{schedule.note && <div className="inspection-card-note">{schedule.note}</div>}<div className="inspection-card-actions"><button className="button button-secondary" type="button" disabled={saving} onClick={() => void markCompleted(schedule)}><Check size={15} />{schedule.status === '完了' ? '予定に戻す' : '完了にする'}</button><button className="icon-button" type="button" aria-label="点検予定を編集" title="編集" onClick={() => openEdit(schedule)}><Pencil size={16} /></button><button className="icon-button danger" type="button" aria-label="点検予定を削除" title="削除" onClick={() => void removeSchedule(schedule)}><Trash2 size={16} /></button></div></article>)}{!filteredSchedules.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>点検予定がありません</strong><span>{loading ? '読み込み中です。' : '条件を変更するか、点検予定を登録してください。'}</span></div>}</section>
-    {dialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="inspection-modal-title"><div className="modal-header"><h2 id="inspection-modal-title">{editingId ? '点検予定を編集' : '点検予定を登録'}</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={closeDialog}><X size={19} /></button></div><form className="modal-form" onSubmit={(event) => void saveSchedule(event)}><div className="form-grid"><label className="form-field"><span>点検種別<em>必須</em></span><select required value={form.inspectionType} onChange={(event) => setForm({ ...form, inspectionType: event.target.value as InspectionType })}>{inspectionTypes.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as InspectionStatus })}>{inspectionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>顧客<em>必須</em></span><select required value={form.customerId} onChange={(event) => { const nextCustomer = customers.find((customer) => customer.id === event.target.value); setForm({ ...form, customerId: event.target.value, vehicleId: nextCustomer?.vehicles[0]?.id ?? '' }) }}><option value="">顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両<em>必須</em></span><select required disabled={!selectedCustomer?.vehicles.length} value={form.vehicleId} onChange={(event) => setForm({ ...form, vehicleId: event.target.value })}><option value="">車両を選択してください</option>{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>予定日<em>必須</em></span><input required type="date" value={form.dueDate.replaceAll('/', '-')} onChange={(event) => setForm({ ...form, dueDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>備考</span><textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="案内方法や作業メモ" /></label></div><div className="modal-footer"><button className="button button-secondary" type="button" disabled={saving} onClick={closeDialog}>キャンセル</button><button className="button button-primary" type="submit" disabled={saving}>{saving ? '保存中…' : editingId ? '変更を保存' : '登録する'}</button></div></form></section></div>}
+    {loading && <div className="customer-sync-status" role="status"><span>車検予定を読み込んでいます。</span></div>}
+    <DashboardCalendar events={vehicleInspectionEvents} loading={loading} eyebrow="車検期限を確認" title="車検満了カレンダー" description="顧客・車両に登録されている車検満了日のみを表示しています。" legendCategories={vehicleInspectionLegendCategories} titleId="inspection-calendar-title" detailTitleId="inspection-calendar-detail-title" />
+    <div className="customer-toolbar inspection-vehicle-toolbar">
+      <label className="customer-search"><Search size={19} /><span className="sr-only">車検予定を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={vehicleSearchPlaceholders[searchField]} /></label>
+      <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as VehicleSearchField)}>{vehicleSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
+      <span className="inspection-result-summary"><strong>{filteredVehicles.length}件</strong><span>車検</span></span>
+    </div>
+    <div className="inspection-date-filter-row" aria-label="車検満了日で絞り込み">
+      <span className="inspection-date-filter-label">満了日</span>
+      <label className="inspection-date-filter"><span className="sr-only">満了年</span><select value={selectedInspectionYear} onChange={(event) => { setSelectedInspectionYear(event.target.value); setSelectedInspectionMonth('') }}><option value="">すべての年</option>{inspectionYears.map((year) => <option key={year} value={year}>{year}年</option>)}</select></label>
+      <label className="inspection-date-filter"><span className="sr-only">満了月</span><select value={selectedInspectionMonth} disabled={!selectedInspectionYear} onChange={(event) => setSelectedInspectionMonth(event.target.value)}><option value="">{selectedInspectionYear ? 'すべての月' : '満了年を先に選択'}</option>{inspectionMonths.map((month) => <option key={month} value={month}>{month}月</option>)}</select></label>
+      {hasActiveFilters && <button className="text-button inspection-date-filter-reset" type="button" onClick={() => { setQuery(''); setSearchField('すべて'); setSelectedInspectionYear(''); setSelectedInspectionMonth('') }}>条件をリセット</button>}
+    </div>
+    <section className="inspection-schedule-grid">{filteredVehicles.map((vehicle) => <article className="panel inspection-schedule-card inspection-vehicle-card" key={vehicle.id}><button className="inspection-vehicle-card-button" type="button" onClick={() => onSelectVehicle?.({ section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })} aria-label={`${vehicle.customerName}の${vehicle.vehicleName}の車検詳細を開く`}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />車検</span><span className="inspection-state">車検</span></div><h2>{vehicle.customerName}</h2><p>{vehicle.vehicleName}</p><div className="inspection-card-date"><span>車検満了日</span><strong className={dateTone(vehicle.inspectionDate)}>{formatDate(vehicle.inspectionDate)}</strong></div><div className="inspection-card-note">登録番号：{vehicle.plate || '未登録'}<br />車台番号：{vehicle.vin || '未登録'}</div></button></article>)}{!filteredVehicles.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>車検満了日が登録された車両がありません</strong><span>{loading ? '読み込み中です。' : hasActiveFilters ? '検索条件を変更してください。' : '顧客・車両タブで車検満了日を登録してください。'}</span></div>}</section>
   </>
 }
 
-function today() { return new Date().toISOString().slice(0, 10).replaceAll('-', '/') }
-function toDisplayDate(value: string) { return value.slice(0, 10).replaceAll('-', '/') }
-function formatDate(value: string) { return toDisplayDate(value) }
-function dateTone(value: string, status: InspectionStatus) {
-  if (status !== '予定') return ''
-  const diff = Math.ceil((new Date(`${value.slice(0, 10)}T00:00:00`).getTime() - new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00').getTime()) / 86_400_000)
+function getVehicleSearchText(vehicle: InspectionVehicle, field: VehicleSearchField) {
+  const values = {
+    顧客名: vehicle.customerName,
+    車名: vehicle.vehicleName,
+    登録番号: vehicle.plate,
+    車台番号: vehicle.vin,
+  }
+  return field === 'すべて' ? Object.values(values).join(' ') : values[field]
+}
+
+function normalizeDate(value: string) {
+  return value.slice(0, 10).replaceAll('/', '-')
+}
+
+function getInspectionYear(value: string) {
+  return normalizeDate(value).slice(0, 4)
+}
+
+function getInspectionMonth(value: string) {
+  return Number(normalizeDate(value).slice(5, 7))
+}
+
+function isValidDate(value: string) {
+  const normalized = normalizeDate(value)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return false
+  const date = new Date(`${normalized}T00:00:00`)
+  return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(normalized.slice(0, 4)) && date.getMonth() + 1 === Number(normalized.slice(5, 7)) && date.getDate() === Number(normalized.slice(8, 10))
+}
+
+function formatDate(value: string) {
+  return normalizeDate(value).replaceAll('-', '/')
+}
+
+function dateTone(value: string) {
+  const diff = Math.ceil((new Date(`${normalizeDate(value)}T00:00:00`).getTime() - new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00').getTime()) / 86_400_000)
   return diff < 0 ? 'is-danger' : diff <= 30 ? 'is-warning' : ''
 }

@@ -52,6 +52,7 @@ const customerSearchPlaceholders: Record<CustomerSearchField, string> = {
   車台番号: '車台番号で検索',
 }
 type AttachmentPreview = { vehicleId: string; attachment: Attachment; url: string }
+export type CustomerVehicleNavigation = { section: 'customers'; customerId: string; vehicleId: string }
 export type VehicleHistoryNavigation = { section: 'sales' | 'maintenance' | 'inspections' | 'payments'; recordId: string }
 type OcrStatus = 'idle' | 'running' | 'ready' | 'empty' | 'error'
 type OcrTextRegion = { text: string; x0: number; y0: number; x1: number; y1: number; confidence: number }
@@ -72,7 +73,7 @@ function getCustomerSearchText(customer: Customer, field: CustomerSearchField) {
   return field === 'すべて' ? Object.values(values).join(' ') : values[field]
 }
 
-export function CustomerVehiclePage({ onNavigate }: { onNavigate?: (target: VehicleHistoryNavigation) => void } = {}) {
+export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehicleId, onNavigationConsumed }: { onNavigate?: (target: VehicleHistoryNavigation) => void; initialCustomerId?: string; initialVehicleId?: string; onNavigationConsumed?: () => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [query, setQuery] = useState('')
   const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
@@ -88,6 +89,9 @@ export function CustomerVehiclePage({ onNavigate }: { onNavigate?: (target: Vehi
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null)
+  const initialNavigationRef = useRef({ customerId: initialCustomerId, vehicleId: initialVehicleId })
+  const onNavigationConsumedRef = useRef(onNavigationConsumed)
+  onNavigationConsumedRef.current = onNavigationConsumed
 
   useEffect(() => {
     let active = true
@@ -95,6 +99,12 @@ export function CustomerVehiclePage({ onNavigate }: { onNavigate?: (target: Vehi
     void fetchCustomers().then((nextCustomers) => {
       if (!active) return
       setCustomers(nextCustomers)
+      const targetCustomer = initialNavigationRef.current.customerId ? nextCustomers.find((customer) => customer.id === initialNavigationRef.current.customerId) : undefined
+      if (targetCustomer) {
+        setSelectedCustomerId(targetCustomer.id)
+        setSelectedVehicleId(targetCustomer.vehicles.some((vehicle) => vehicle.id === initialNavigationRef.current.vehicleId) ? initialNavigationRef.current.vehicleId ?? '' : targetCustomer.vehicles[0]?.id ?? '')
+        onNavigationConsumedRef.current?.()
+      }
       setError('')
     }).catch((reason: unknown) => {
       if (active) setError(getErrorMessage(reason))
