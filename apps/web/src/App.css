@@ -801,10 +801,11 @@
 .maintenance-details-accordion[open] > summary { border-bottom: 1px solid var(--border); }
 .maintenance-details-accordion[open] > summary svg { transform: rotate(180deg); }
 .maintenance-details-accordion-content { padding: 20px 16px 18px; }
-.document-tax-settings { min-width: 0; margin: 0; padding: 0; }
+.document-tax-settings { width: 50%; min-width: 0; margin: 0; padding: 0; }
 .document-tax-rate-control { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: #f1f3f5; color: var(--text-muted); }
 .document-tax-rate-control.is-unlocked { background: var(--surface); color: var(--text); }
 .document-tax-rate-input { min-width: 0; flex: 1; height: 38px; padding: 0; color: inherit; border: 0; outline: 0; background: transparent; font: inherit; font-size: 12px; }
+.document-tax-rate-control .document-tax-rate-input { background: transparent; }
 .document-tax-rate-input[readonly] { cursor: pointer; }
 .document-tax-rate-control:focus-within { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .document-tax-confirm-backdrop { z-index: 40; }
