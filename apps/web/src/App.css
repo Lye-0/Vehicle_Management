@@ -1385,6 +1385,10 @@
   .customer-toolbar { align-items: stretch; flex-direction: column; }
   .customer-search { min-width: 0; }
   .customer-search-filter { flex-basis: auto; }
+  .inspection-date-filter-row { align-items: stretch; flex-wrap: wrap; }
+  .inspection-date-filter-label { width: 100%; }
+  .inspection-date-filter { flex: 1 1 0; min-width: 140px; }
+  .inspection-date-filter-reset { width: 100%; margin-left: 0; text-align: right; }
   .customer-panel-header { padding-left: 18px; padding-right: 18px; }
   .customer-table-head, .customer-table-row { padding-left: 18px; padding-right: 18px; }
   .vehicle-detail-body { padding-left: 18px; padding-right: 18px; }
@@ -1613,6 +1617,14 @@
 .inspection-vehicle-card-button { width: 100%; display: block; padding: 18px; color: inherit; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .inspection-vehicle-card-button:hover { background: #f7faff; }
 .inspection-vehicle-card-button:focus-visible { position: relative; z-index: 1; outline: 3px solid rgba(37, 99, 235, 0.22); outline-offset: -3px; }
+.inspection-date-filter-row { display: flex; align-items: center; gap: 10px; margin: -2px 0 20px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); }
+.inspection-date-filter-label { flex: 0 0 auto; color: var(--text-secondary); font-size: 12px; font-weight: 800; }
+.inspection-date-filter { flex: 0 0 170px; }
+.inspection-date-filter select { width: 100%; min-height: 40px; padding: 0 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; font-weight: 700; cursor: pointer; }
+.inspection-date-filter select:focus { border-color: #9eb9eb; outline: 0; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.inspection-date-filter select:disabled { color: var(--text-muted); background: #f3f5f8; cursor: not-allowed; }
+.inspection-date-filter-reset { margin-left: auto; color: var(--text-muted); font-size: 11px; }
+.inspection-date-filter-reset:hover { color: var(--primary); }
 .inspection-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .inspection-type-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: var(--primary); border-radius: 6px; background: var(--primary-soft); font-size: 10px; font-weight: 800; }
 .inspection-state { padding: 4px 7px; border-radius: 5px; color: var(--text-muted); background: var(--surface-subtle); font-size: 10px; font-weight: 700; }

@@ -32,6 +32,8 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   const [customers, setCustomers] = useState<Customer[]>([])
   const [query, setQuery] = useState('')
   const [searchField, setSearchField] = useState<VehicleSearchField>('すべて')
+  const [selectedInspectionYear, setSelectedInspectionYear] = useState('')
+  const [selectedInspectionMonth, setSelectedInspectionMonth] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -63,11 +65,21 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
     }]
   })).sort((left, right) => normalizeDate(left.inspectionDate).localeCompare(normalizeDate(right.inspectionDate)) || left.customerName.localeCompare(right.customerName, 'ja')), [customers])
 
+  const inspectionYears = useMemo(() => Array.from(new Set(inspectionVehicles.map((vehicle) => getInspectionYear(vehicle.inspectionDate)))).sort((left, right) => Number(right) - Number(left)), [inspectionVehicles])
+  const inspectionMonths = useMemo(() => {
+    const source = selectedInspectionYear ? inspectionVehicles.filter((vehicle) => getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear) : inspectionVehicles
+    return Array.from(new Set(source.map((vehicle) => getInspectionMonth(vehicle.inspectionDate)))).sort((left, right) => left - right)
+  }, [inspectionVehicles, selectedInspectionYear])
+
   const filteredVehicles = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    if (!normalizedQuery) return inspectionVehicles
-    return inspectionVehicles.filter((vehicle) => getVehicleSearchText(vehicle, searchField).toLocaleLowerCase().includes(normalizedQuery))
-  }, [inspectionVehicles, query, searchField])
+    return inspectionVehicles.filter((vehicle) => {
+      const matchesYear = !selectedInspectionYear || getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear
+      const matchesMonth = !selectedInspectionMonth || getInspectionMonth(vehicle.inspectionDate) === Number(selectedInspectionMonth)
+      const matchesText = !normalizedQuery || getVehicleSearchText(vehicle, searchField).toLocaleLowerCase().includes(normalizedQuery)
+      return matchesYear && matchesMonth && matchesText
+    })
+  }, [inspectionVehicles, query, searchField, selectedInspectionMonth, selectedInspectionYear])
 
   const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
     id: `vehicle-${vehicle.id}-inspection`,
@@ -79,6 +91,7 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
     status: '車検',
     amount: null,
   })), [filteredVehicles])
+  const hasActiveFilters = Boolean(query.trim() || searchField !== 'すべて' || selectedInspectionYear || selectedInspectionMonth)
 
   return <>
     <div className="page-header inspection-page-header"><div><span className="page-eyebrow">点検予定</span><h1>車検予定</h1><p>顧客・車両に登録されている車検満了日を確認・管理します。</p></div></div>
@@ -90,7 +103,13 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
       <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as VehicleSearchField)}>{vehicleSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
       <span className="inspection-result-summary"><strong>{filteredVehicles.length}件</strong><span>車検</span></span>
     </div>
-    <section className="inspection-schedule-grid">{filteredVehicles.map((vehicle) => <article className="panel inspection-schedule-card inspection-vehicle-card" key={vehicle.id}><button className="inspection-vehicle-card-button" type="button" onClick={() => onSelectVehicle?.({ section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })} aria-label={`${vehicle.customerName}の${vehicle.vehicleName}の車検詳細を開く`}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />車検</span><span className="inspection-state">車検</span></div><h2>{vehicle.customerName}</h2><p>{vehicle.vehicleName}</p><div className="inspection-card-date"><span>車検満了日</span><strong className={dateTone(vehicle.inspectionDate)}>{formatDate(vehicle.inspectionDate)}</strong></div><div className="inspection-card-note">登録番号：{vehicle.plate || '未登録'}<br />車台番号：{vehicle.vin || '未登録'}</div></button></article>)}{!filteredVehicles.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>車検満了日が登録された車両がありません</strong><span>{loading ? '読み込み中です。' : query ? '検索条件を変更してください。' : '顧客・車両タブで車検満了日を登録してください。'}</span></div>}</section>
+    <div className="inspection-date-filter-row" aria-label="車検満了日で絞り込み">
+      <span className="inspection-date-filter-label">満了日</span>
+      <label className="inspection-date-filter"><span className="sr-only">満了年</span><select value={selectedInspectionYear} onChange={(event) => { setSelectedInspectionYear(event.target.value); setSelectedInspectionMonth('') }}><option value="">すべての年</option>{inspectionYears.map((year) => <option key={year} value={year}>{year}年</option>)}</select></label>
+      <label className="inspection-date-filter"><span className="sr-only">満了月</span><select value={selectedInspectionMonth} disabled={!selectedInspectionYear} onChange={(event) => setSelectedInspectionMonth(event.target.value)}><option value="">{selectedInspectionYear ? 'すべての月' : '満了年を先に選択'}</option>{inspectionMonths.map((month) => <option key={month} value={month}>{month}月</option>)}</select></label>
+      {hasActiveFilters && <button className="text-button inspection-date-filter-reset" type="button" onClick={() => { setQuery(''); setSearchField('すべて'); setSelectedInspectionYear(''); setSelectedInspectionMonth('') }}>条件をリセット</button>}
+    </div>
+    <section className="inspection-schedule-grid">{filteredVehicles.map((vehicle) => <article className="panel inspection-schedule-card inspection-vehicle-card" key={vehicle.id}><button className="inspection-vehicle-card-button" type="button" onClick={() => onSelectVehicle?.({ section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })} aria-label={`${vehicle.customerName}の${vehicle.vehicleName}の車検詳細を開く`}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />車検</span><span className="inspection-state">車検</span></div><h2>{vehicle.customerName}</h2><p>{vehicle.vehicleName}</p><div className="inspection-card-date"><span>車検満了日</span><strong className={dateTone(vehicle.inspectionDate)}>{formatDate(vehicle.inspectionDate)}</strong></div><div className="inspection-card-note">登録番号：{vehicle.plate || '未登録'}<br />車台番号：{vehicle.vin || '未登録'}</div></button></article>)}{!filteredVehicles.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>車検満了日が登録された車両がありません</strong><span>{loading ? '読み込み中です。' : hasActiveFilters ? '検索条件を変更してください。' : '顧客・車両タブで車検満了日を登録してください。'}</span></div>}</section>
   </>
 }
 
@@ -106,6 +125,14 @@ function getVehicleSearchText(vehicle: InspectionVehicle, field: VehicleSearchFi
 
 function normalizeDate(value: string) {
   return value.slice(0, 10).replaceAll('/', '-')
+}
+
+function getInspectionYear(value: string) {
+  return normalizeDate(value).slice(0, 4)
+}
+
+function getInspectionMonth(value: string) {
+  return Number(normalizeDate(value).slice(5, 7))
 }
 
 function isValidDate(value: string) {
