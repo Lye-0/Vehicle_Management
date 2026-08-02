@@ -1,5 +1,4 @@
 import type { SalesDocument, SalesDocumentDetails, SalesLineItem, SalesTaxCategory } from './salesApi'
-import type { AppSettings } from './settingsApi'
 
 export function salesDocumentTitle(type: SalesDocument['type']) {
   return type === '請求書' ? '請求書' : 'お見積書'
@@ -77,7 +76,7 @@ export function calculateSalesLineAmount(item: Pick<SalesLineItem, 'quantity' | 
   return Math.round(quantity * unitPrice) + Math.round(otherAmount)
 }
 
-export function calculateSalesEstimateTotals(document: SalesDocument, rounding: AppSettings['tax']['rounding']): SalesTotals {
+export function calculateSalesEstimateTotals(document: SalesDocument): SalesTotals {
   const sections = buildSalesEstimateSections(document)
   const sum = (lines: SalesEstimateLine[]) => lines.reduce((total, line) => total + line.amount, 0)
   const lineItemsSubtotal = document.items.reduce((total, item) => total + calculateSalesLineAmount(item), 0)
@@ -96,7 +95,7 @@ export function calculateSalesEstimateTotals(document: SalesDocument, rounding: 
   const subtotal = taxableSubtotal + nonTaxableSubtotal + outOfScopeSubtotal
   // SalesDocument.taxRate is kept as a decimal in the web layer (0.1 = 10%).
   const taxValue = Math.max(0, taxableSubtotal) * document.taxRate
-  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
+  const tax = document.taxRounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   const total = subtotal + tax
   const tradeInPrice = sum(sections.tradeIns)
   const downPayment = Math.max(0, Number.isFinite(document.details.downPayment) ? document.details.downPayment : 0)

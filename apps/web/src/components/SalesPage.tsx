@@ -36,6 +36,7 @@ import { buildSalesEstimateSheetSvg, salesEstimateSheetLayout } from '../lib/sal
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
 import { DocumentSortControls } from './DocumentSortControls'
+import { DocumentTaxSettings, type TaxRounding } from './DocumentTaxSettings'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesStatusFilter = 'すべて' | Exclude<SalesStatus, 'アーカイブ済み'>
@@ -156,7 +157,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const completedGroups = useMemo(() => groupCompletedSalesDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
-  const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument, settings.tax.rounding) : null
+  const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
 
   function updateLineItem(itemId: string, field: SalesItemField, value: string) {
     if (!selectedDocument) return
@@ -252,6 +253,18 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     markDirty()
   }
 
+  function updateTaxRate(value: number) {
+    if (!selectedDocument) return
+    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, taxRate: value / 100 } : document))
+    markDirty()
+  }
+
+  function updateTaxRounding(value: TaxRounding) {
+    if (!selectedDocument) return
+    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, taxRounding: value } : document))
+    markDirty()
+  }
+
   function updateTradeIn(field: keyof SalesDocumentDetails['tradeIn'], value: string) {
     if (!selectedDocument) return
     updateDetails({ tradeIn: { ...selectedDocument.details.tradeIn, [field]: value } })
@@ -304,7 +317,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setSaving(true)
     setSaved(false)
     try {
-      const nextDocument = await updateSalesDocument(documentToSave, settings.tax.rounding)
+      const nextDocument = await updateSalesDocument(documentToSave)
       replaceDocuments((current) => current.map((document) => document.id === nextDocument.id ? nextDocument : document))
       setDirty(false)
       setSaved(true)
@@ -362,27 +375,27 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} rounding={settings.tax.rounding} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTaxRounding={updateTaxRounding} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
     </>
   )
 }
 
-function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, rounding, onSelect }: { incompleteDocuments: SalesDocument[]; completedGroups: CompletedSalesGroup[]; selectedDocumentId: string; rounding: AppSettings['tax']['rounding']; onSelect: (id: string) => void }) {
+function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect }: { incompleteDocuments: SalesDocument[]; completedGroups: CompletedSalesGroup[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
   return <div className="sales-list-stack">
     <section className="panel sales-list-panel">
       <div className="sales-list-header"><div><h2>販売書類（未完了）</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{incompleteDocuments.length}件</span></div>
-      {incompleteDocuments.length > 0 ? <SalesDocumentCards documents={incompleteDocuments} selectedDocumentId={selectedDocumentId} rounding={rounding} onSelect={onSelect} /> : <div className="sales-list-empty">未完了の販売書類はありません。</div>}
+      {incompleteDocuments.length > 0 ? <SalesDocumentCards documents={incompleteDocuments} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /> : <div className="sales-list-empty">未完了の販売書類はありません。</div>}
     </section>
     {completedGroups.length > 0 && <section className="panel sales-list-panel sales-completed-panel">
       <div className="sales-list-header"><div><h2>完了書類</h2><span>書類の作成月ごとに表示します</span></div><span className="results-count">{completedGroups.reduce((total, group) => total + group.documents.length, 0)}件</span></div>
-      <div className="sales-completed-groups">{completedGroups.map((group) => <details className="sales-completed-group" key={group.key}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><SalesDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} rounding={rounding} onSelect={onSelect} /></details>)}</div>
+      <div className="sales-completed-groups">{completedGroups.map((group) => <details className="sales-completed-group" key={group.key}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><SalesDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
     </section>}
   </div>
 }
 
-function SalesDocumentCards({ documents, selectedDocumentId, rounding, onSelect }: { documents: SalesDocument[]; selectedDocumentId: string; rounding: AppSettings['tax']['rounding']; onSelect: (id: string) => void }) {
-  return <div className="sales-document-list">{documents.map((document) => <button className={`sales-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="sales-card-top"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} /><ChevronRight size={16} /></div><strong className="sales-card-number">{document.number}</strong><span className="sales-card-customer"><UserRound size={14} /><strong>{document.customerName}</strong></span><span className="sales-card-vehicle"><CarFront size={14} />{document.vehicle || '車両未指定'}{document.plate ? ` ・ ${document.plate}` : ''}</span><div className="sales-card-bottom"><span>{document.issuedAt}</span><strong>{formatYen(calculateTotals(document, rounding).total)}</strong></div></button>)}</div>
+function SalesDocumentCards({ documents, selectedDocumentId, onSelect }: { documents: SalesDocument[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
+  return <div className="sales-document-list">{documents.map((document) => <button className={`sales-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="sales-card-top"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} /><ChevronRight size={16} /></div><strong className="sales-card-number">{document.number}</strong><span className="sales-card-customer"><UserRound size={14} /><strong>{document.customerName}</strong></span><span className="sales-card-vehicle"><CarFront size={14} />{document.vehicle || '車両未指定'}{document.plate ? ` ・ ${document.plate}` : ''}</span><div className="sales-card-bottom"><span>{document.issuedAt}</span><strong>{formatYen(calculateTotals(document).total)}</strong></div></button>)}</div>
 }
 
 function groupCompletedSalesDocuments(documents: SalesDocument[]): CompletedSalesGroup[] {
@@ -407,11 +420,11 @@ function salesDocumentMonth(issuedAt: string) {
   return { key: `${year}-${month.padStart(2, '0')}`, label: `${year}年${Number(month)}月（完了）` }
 }
 
-function SalesDocumentDetail({ document, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
-  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} /></div><h2>{document.number}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
+function SalesDocumentDetail({ document, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onUpdateTaxRounding, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTaxRounding: (value: TaxRounding) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
+  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} /></div><h2>{document.number}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} onUpdateTaxRounding={onUpdateTaxRounding} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
 }
 
-function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
+function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTaxRounding: (value: TaxRounding) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
   const { document, customers, onUpdateHeader } = props
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   return <>
@@ -428,7 +441,7 @@ function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTota
     </section>
     <details className="sales-details-accordion">
       <summary><span>詳細</span><ChevronDown size={16} aria-hidden="true" /></summary>
-      <div className="sales-details-accordion-content" />
+      <div className="sales-details-accordion-content"><DocumentTaxSettings taxRate={Math.round(document.taxRate * 100)} taxRounding={document.taxRounding} onTaxRateChange={props.onUpdateTaxRate} onTaxRoundingChange={props.onUpdateTaxRounding} /></div>
     </details>
   </>
 }
@@ -934,8 +947,8 @@ function StatusTag({ status }: { status: SalesDocument['status'] }) {
   return <span className={`sales-status-tag sales-status-${tone}`}><span className="status-dot" />{status}</span>
 }
 
-function calculateTotals(document: SalesDocument, rounding: AppSettings['tax']['rounding']): SalesTotals {
-  return calculateSalesEstimateTotals(document, rounding)
+function calculateTotals(document: SalesDocument): SalesTotals {
+  return calculateSalesEstimateTotals(document)
 }
 
 function formatYen(amount: number) {

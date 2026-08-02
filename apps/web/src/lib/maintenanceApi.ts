@@ -71,6 +71,7 @@ export type MaintenanceDocument = {
   issuedAt: string
   dueDate: string
   taxRate: number
+  taxRounding: '切り捨て' | '四捨五入'
   fees: MandatoryFees
   adjustment: number
   note: string
@@ -138,6 +139,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     issuedAt: formatDate(document.issuedAt),
     dueDate: formatDate(document.dueDate),
     taxRate: document.taxRate / 100,
+    taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
     items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
   }

@@ -20,13 +20,12 @@ export type MaintenanceStatementSvgOptions = {
 
 export function calculateMaintenanceStatementTotals(
   document: MaintenanceDocument,
-  rounding: AppSettings['tax']['rounding'],
 ): MaintenanceStatementTotals {
   const partsSubtotal = document.items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice), 0)
   const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0)
   const taxableSubtotal = Math.max(0, partsSubtotal + technicalSubtotal)
   const taxValue = taxableSubtotal * document.taxRate
-  const tax = rounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
+  const tax = document.taxRounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
   const workTotal = taxableSubtotal + tax
   const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0) + document.adjustment
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
@@ -34,7 +33,7 @@ export function calculateMaintenanceStatementTotals(
 
 export function buildMaintenanceStatementSvg(document: MaintenanceDocument, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
   const hideEditableValues = options.hideEditableValues ?? false
-  const totals = calculateMaintenanceStatementTotals(document, settings.tax.rounding)
+  const totals = calculateMaintenanceStatementTotals(document)
   const customer = document.details.customerOverride ?? document.customerDetails
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels

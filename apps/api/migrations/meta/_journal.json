@@ -71,6 +71,13 @@
       "when": 1785589971991,
       "tag": "0009_glossy_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785655946143,
+      "tag": "0010_curious_gideon",
+      "breakpoints": true
     }
   ]
 }

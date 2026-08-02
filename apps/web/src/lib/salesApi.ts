@@ -120,6 +120,7 @@ export type SalesDocument = {
   issuedAt: string
   dueDate: string
   taxRate: number
+  taxRounding: '切り捨て' | '四捨五入'
   note: string
   archivedAt: string | null
   items: SalesLineItem[]
@@ -168,7 +169,7 @@ export async function createSalesDocument(input: SalesCreateInput) {
   return mapSalesDocument(response.document)
 }
 
-export async function updateSalesDocument(document: SalesDocument, taxRounding: '切り捨て' | '四捨五入') {
+export async function updateSalesDocument(document: SalesDocument) {
   const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${document.id}`, {
     method: 'PATCH',
     body: JSON.stringify({
@@ -180,7 +181,7 @@ export async function updateSalesDocument(document: SalesDocument, taxRounding: 
       issuedAt: toApiDate(document.issuedAt),
       dueDate: toApiDate(document.dueDate),
       taxRate: Math.round(document.taxRate * 100),
-      rounding: taxRounding,
+      rounding: document.taxRounding,
       note: document.note,
       details: document.details,
       items: document.items.map((item) => ({
@@ -215,6 +216,7 @@ function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
     issuedAt: formatDate(document.issuedAt),
     dueDate: formatDate(document.dueDate),
     taxRate: document.taxRate / 100,
+    taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
     items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '' })),
   }

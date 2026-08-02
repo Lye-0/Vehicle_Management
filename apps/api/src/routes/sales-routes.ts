@@ -79,6 +79,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -105,6 +106,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     dueDate: body.dueDate === undefined ? current.dueDate : body.dueDate,
     number: current.number,
     taxRate: body.taxRate ?? current.taxRate,
+    rounding: body.rounding ?? current.taxRounding,
     note: body.note === undefined ? current.note : body.note,
     details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
     items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
@@ -120,6 +122,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     issuedAt: input.issuedAt,
     dueDate: input.dueDate,
     taxRate: input.taxRate,
+    taxRounding: input.rounding,
     subtotal: totals.subtotal,
     tax: totals.tax,
     total: totals.total,
@@ -261,6 +264,7 @@ function serializeSalesDocument(
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
+    taxRounding: normalizeTaxRounding(document.taxRounding),
     subtotal: document.subtotal,
     tax: document.tax,
     total: document.total,
@@ -283,6 +287,10 @@ function serializeSalesDocument(
 
 function normalizeSalesStatus(status: string) {
   return status === '発行済み' ? '完了' : status
+}
+
+function normalizeTaxRounding(rounding: string | null | undefined): '切り捨て' | '四捨五入' {
+  return rounding === '四捨五入' ? '四捨五入' : '切り捨て'
 }
 
 export function calculateSalesTotals(items: SalesItemInput[], taxRate: number, rounding: '切り捨て' | '四捨五入', details: SalesDocumentDetails) {

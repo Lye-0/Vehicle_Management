@@ -302,7 +302,7 @@ function drawSalesDocumentIntroLayout(state: PageState, document: SalesDocument,
   ], [16, 17])
   state.y -= 33 + gap
 
-  const totals = calculateSalesEstimateTotals(document, state.settings.tax.rounding)
+  const totals = calculateSalesEstimateTotals(document)
   const summaryTop = state.y
   drawSalesGridBlock(state, MARGIN, summaryTop, [112, 93], [[{ text: salesDocumentAmountTitle(document.type), fill: rgb(0.86, 0.93, 1), bold: true, align: 'center', size: 8.2 }, { text: formatYen(totals.total), bold: true, align: 'right', size: 12 }]], [30])
   const taxX = MARGIN + 205 + 12
@@ -465,7 +465,7 @@ function drawSalesPdfAccessoryCard(state: PageState, x: number, top: number, wid
 
 function drawSalesDocumentBottom(state: PageState, document: SalesDocument, settings: AppSettings) {
   const details = document.details
-  const totals = calculateSalesEstimateTotals(document, settings.tax.rounding)
+  const totals = calculateSalesEstimateTotals(document)
   const creditContentHeight = details.credit.enabled ? 28 : 18
   const blockHeight = 18 + 4 + 18 + 4 + 15 + creditContentHeight + 4 + 24 + 4 + 24
   ensureSpace(state, blockHeight)
