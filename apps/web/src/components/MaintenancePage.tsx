@@ -252,7 +252,7 @@ function MaintenanceDocumentList({ incompleteDocuments, completedGroups, selecte
     </section>
     {completedGroups.length > 0 && <section className="panel maintenance-list-panel maintenance-completed-panel">
       <div className="maintenance-list-header"><div><h2>完了書類</h2><span>書類の作成月ごとに表示します</span></div><span className="results-count">{completedGroups.reduce((total, group) => total + group.documents.length, 0)}件</span></div>
-      <div className="maintenance-completed-groups">{completedGroups.map((group, index) => <details className="maintenance-completed-group" key={group.key} open={index === 0 || group.documents.some((document) => document.id === selectedDocumentId)}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><MaintenanceDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
+      <div className="maintenance-completed-groups">{completedGroups.map((group) => <details className="maintenance-completed-group" key={group.key}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><MaintenanceDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
     </section>}
   </div>
 }
