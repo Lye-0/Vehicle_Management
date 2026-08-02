@@ -84,6 +84,8 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
     id: `vehicle-${vehicle.id}-inspection`,
     date: vehicle.inspectionDate,
+    customerId: vehicle.customerId,
+    vehicleId: vehicle.id,
     category: 'vehicle-inspection',
     categoryLabel: '車検',
     title: `車検：${vehicle.customerName}`,
@@ -93,11 +95,16 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   })), [filteredVehicles])
   const hasActiveFilters = Boolean(query.trim() || searchField !== 'すべて' || selectedInspectionYear || selectedInspectionMonth)
 
+  function selectCalendarVehicle(event: DashboardCalendarEvent) {
+    if (!event.customerId || !event.vehicleId) return
+    onSelectVehicle?.({ section: 'customers', customerId: event.customerId, vehicleId: event.vehicleId })
+  }
+
   return <>
     <div className="page-header inspection-page-header"><div><span className="page-eyebrow">点検予定</span><h1>車検予定</h1><p>顧客・車両に登録されている車検満了日を確認・管理します。</p></div></div>
     {error && <div className="customer-sync-status is-error" role="alert"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status" role="status"><span>車検予定を読み込んでいます。</span></div>}
-    <DashboardCalendar events={vehicleInspectionEvents} loading={loading} eyebrow="車検期限を確認" title="車検満了カレンダー" description="顧客・車両に登録されている車検満了日のみを表示しています。" legendCategories={vehicleInspectionLegendCategories} titleId="inspection-calendar-title" detailTitleId="inspection-calendar-detail-title" />
+    <DashboardCalendar events={vehicleInspectionEvents} loading={loading} onSelectEvent={selectCalendarVehicle} eyebrow="車検期限を確認" title="車検満了カレンダー" description="顧客・車両に登録されている車検満了日のみを表示しています。" legendCategories={vehicleInspectionLegendCategories} titleId="inspection-calendar-title" detailTitleId="inspection-calendar-detail-title" />
     <div className="customer-toolbar inspection-vehicle-toolbar">
       <label className="customer-search"><Search size={19} /><span className="sr-only">車検予定を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={vehicleSearchPlaceholders[searchField]} /></label>
       <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as VehicleSearchField)}>{vehicleSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>

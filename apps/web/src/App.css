@@ -174,6 +174,9 @@
 .calendar-detail-item h4 { margin: 10px 0 4px; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-detail-item p { margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-detail-amount { display: block; margin-top: 9px; color: var(--text); font-size: 12px; }
+.calendar-detail-item-action { width: 100%; font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, box-shadow 150ms ease; }
+.calendar-detail-item-action:hover { background: #fff9e9; box-shadow: 0 3px 10px rgba(23, 46, 84, 0.08); }
+.calendar-detail-item-action:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.22); outline-offset: 2px; }
 .calendar-detail-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
 .calendar-detail-empty svg { color: var(--primary); }
 .calendar-detail-empty strong { color: var(--text); font-size: 12px; }

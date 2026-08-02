@@ -15,6 +15,7 @@ const defaultLegendCategories: Array<{ category: DashboardCalendarEvent['categor
 type DashboardCalendarProps = {
   events: DashboardCalendarEvent[]
   loading: boolean
+  onSelectEvent?: (event: DashboardCalendarEvent) => void
   eyebrow?: string
   title?: string
   description?: string
@@ -26,6 +27,7 @@ type DashboardCalendarProps = {
 export function DashboardCalendar({
   events,
   loading,
+  onSelectEvent,
   eyebrow = '予定をまとめて確認',
   title = '業務カレンダー',
   description = '車検・点検、販売・整備書類、支払期限と入金日を表示しています。',
@@ -113,16 +115,18 @@ export function DashboardCalendar({
             <h3 id={detailTitleId}>{formatFullDate(parseDateKey(selectedDate) ?? new Date())}</h3>
             <span className="calendar-detail-count">{selectedEvents.length}件の予定</span>
           </div>
-          {loading ? <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>予定を読み込んでいます</strong><span>店舗データを集計しています。</span></div> : selectedEvents.length ? <div className="calendar-detail-list">{selectedEvents.map((event) => <CalendarEventDetail event={event} key={event.id} />)}</div> : <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>この日の予定はありません</strong><span>別の日付を選択すると予定を確認できます。</span></div>}
+          {loading ? <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>予定を読み込んでいます</strong><span>店舗データを集計しています。</span></div> : selectedEvents.length ? <div className="calendar-detail-list">{selectedEvents.map((event) => <CalendarEventDetail event={event} key={event.id} onSelectEvent={onSelectEvent} />)}</div> : <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>この日の予定はありません</strong><span>別の日付を選択すると予定を確認できます。</span></div>}
         </aside>
       </div>
     </section>
   )
 }
 
-function CalendarEventDetail({ event }: { event: DashboardCalendarEvent }) {
+function CalendarEventDetail({ event, onSelectEvent }: { event: DashboardCalendarEvent; onSelectEvent?: (event: DashboardCalendarEvent) => void }) {
   const Icon = event.category === 'vehicle-inspection' ? CarFront : event.category === 'inspection' ? CalendarClock : event.category === 'maintenance' ? ClipboardCheck : event.category === 'sales' ? FileText : CircleDollarSign
-  return <article className={`calendar-detail-item calendar-event-${event.category}`}><div className="calendar-detail-item-header"><span className="calendar-detail-type"><Icon size={14} />{event.categoryLabel}</span>{event.status && <span className="calendar-detail-status">{event.status}</span>}</div><h4>{event.title}</h4><p>{event.detail}</p>{event.amount !== null && <strong className="calendar-detail-amount">{formatYen(event.amount)}</strong>}</article>
+  const content = <><div className="calendar-detail-item-header"><span className="calendar-detail-type"><Icon size={14} />{event.categoryLabel}</span>{event.status && <span className="calendar-detail-status">{event.status}</span>}</div><h4>{event.title}</h4><p>{event.detail}</p>{event.amount !== null && <strong className="calendar-detail-amount">{formatYen(event.amount)}</strong>}</>
+  const isSelectable = Boolean(onSelectEvent && event.customerId && event.vehicleId)
+  return isSelectable ? <button className={`calendar-detail-item calendar-detail-item-action calendar-event-${event.category}`} type="button" onClick={() => onSelectEvent?.(event)} aria-label={`${event.title}の詳細を開く`}>{content}</button> : <article className={`calendar-detail-item calendar-event-${event.category}`}>{content}</article>
 }
 
 function groupEventsByDate(events: DashboardCalendarEvent[]) {
