@@ -1332,6 +1332,38 @@
 .backup-copy strong { color: var(--text); font-size: 12px; }
 .backup-copy small { color: var(--text-muted); font-size: 10px; }
 .backup-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.backup-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.backup-settings-field { display: grid; gap: 6px; min-width: 0; }
+.backup-settings-field > span { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
+.backup-settings-field input, .backup-settings-field select { width: 100%; min-height: 36px; padding: 0 9px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 11px; }
+.backup-settings-field input:disabled, .backup-settings-field select:disabled { color: var(--text-muted); background: #f1f4f8; }
+.backup-settings-checkbox { display: flex; align-items: center; gap: 8px; min-height: 36px; color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.backup-settings-checkbox input { width: 16px; height: 16px; }
+.backup-settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; grid-column: 1 / -1; }
+.backup-destination-note { grid-column: 1 / -1; color: var(--text-muted); font-size: 10px; line-height: 1.6; }
+.backup-manual-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+.backup-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.archive-settings-panel { margin-top: 0; }
+.archive-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.archive-search { display: flex; align-items: center; gap: 8px; min-width: 220px; flex: 1; padding: 9px 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.archive-search:focus-within { color: var(--primary); border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.archive-search input { width: 100%; min-width: 0; color: var(--text); border: 0; outline: 0; background: transparent; font-size: 11px; }
+.archive-count { color: var(--text-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.archive-list { display: grid; gap: 8px; }
+.archive-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.archive-kind { display: grid; place-items: center; width: 43px; height: 30px; border-radius: 7px; font-size: 10px; font-weight: 800; }
+.archive-kind-sales { color: #0f766e; background: #e5f8f3; }
+.archive-kind-maintenance { color: #7c3aed; background: #f2edff; }
+.archive-copy { display: grid; gap: 3px; min-width: 0; }
+.archive-copy strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.archive-copy span { overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.archive-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.archive-meta { display: grid; justify-items: end; gap: 8px; }
+.archive-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.archive-retention.is-forever { color: var(--success); }
+.archive-actions { display: flex; align-items: center; gap: 8px; }
+.archive-delete-button { color: var(--danger); }
+.archive-empty { min-height: 220px; }
 .settings-empty strong { color: var(--text); font-size: 14px; }
 .settings-empty span { font-size: 11px; }
 
@@ -1480,11 +1512,16 @@
   .settings-nav { grid-template-columns: 1fr; }
   .settings-panel { padding: 18px; }
   .settings-form-grid { grid-template-columns: 1fr; }
+  .backup-settings-grid { grid-template-columns: 1fr; }
+  .backup-settings-actions, .backup-destination-note { grid-column: auto; }
   .settings-field-wide { grid-column: auto; }
   .settings-logo-preview { align-items: stretch; flex-direction: column; }
   .settings-logo-preview img { width: 100%; }
   .settings-section-heading { flex-wrap: wrap; }
   .settings-section-heading .settings-add-button { margin-left: auto; }
+  .archive-row { grid-template-columns: auto minmax(0, 1fr); }
+  .archive-meta { grid-column: 1 / -1; justify-items: start; }
+  .archive-actions { flex-wrap: wrap; }
   .customer-profile-header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }
   .customer-profile-header .button { width: 100%; }
   .customer-info-grid { grid-template-columns: 1fr; gap: 17px; padding: 18px; }

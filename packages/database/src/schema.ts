@@ -135,6 +135,10 @@ export const salesDocuments = sqliteTable('sales_documents', {
   note: text('note'),
   detailsJson: text('details_json').notNull().default('{}'),
   archivedAt: text('archived_at'),
+  archivedPreviousStatus: text('archived_previous_status'),
+  archivedBy: text('archived_by'),
+  purgeAt: text('purge_at'),
+  keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 }, (table) => [
   uniqueIndex('sales_documents_organization_number_uq').on(table.organizationId, table.number),
@@ -185,6 +189,10 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   note: text('note'),
   detailsJson: text('details_json').notNull().default('{}'),
   archivedAt: text('archived_at'),
+  archivedPreviousStatus: text('archived_previous_status'),
+  archivedBy: text('archived_by'),
+  purgeAt: text('purge_at'),
+  keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 }, (table) => [
   uniqueIndex('maintenance_documents_organization_number_uq').on(table.organizationId, table.number),
@@ -278,6 +286,9 @@ export const backupRecords = sqliteTable('backup_records', {
   fileCount: integer('file_count').notNull().default(0),
   rowCount: integer('row_count').notNull().default(0),
   status: text('status').notNull().default('completed'),
+  trigger: text('trigger').notNull().default('manual'),
+  protectedUntil: text('protected_until'),
+  keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 }, (table) => [
   uniqueIndex('backup_records_manifest_key_uq').on(table.manifestKey),

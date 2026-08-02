@@ -11,6 +11,9 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"triggers": {
+		"crons": ["0 2 * * *"]
+	},
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
@@ -53,6 +56,9 @@
 	"env": {
 		"development": {
 			"name": "vehicle-management-api-development",
+			"triggers": {
+				"crons": ["0 * * * *"]
+			},
 			"d1_databases": [
 				{
 					"binding": "DB",
@@ -63,6 +69,9 @@
 		},
 		"production": {
 			"name": "vehicle-management-api-production",
+			"triggers": {
+				"crons": ["0 2 * * *"]
+			},
 			"vars": {
 				"APP_ENV": "production",
 				"DATA_ENV": "production",

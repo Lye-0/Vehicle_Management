@@ -34,6 +34,7 @@ describe("CLI authenticated workflow", () => {
 		let inspectionScheduleId: string | undefined;
 		let attachmentId: string | undefined;
 		let backupId: string | undefined;
+		let safetyBackupId: string | undefined;
 
 		await prepareTestOrganizations();
 
@@ -320,12 +321,17 @@ describe("CLI authenticated workflow", () => {
 			expect(arrayValue(hiddenArchivedSales.body.documents).some((document) => objectValue(document).id === salesDocumentId)).toBe(false);
 			const visibleArchivedSales = await requestJson<JsonObject>("/api/sales-documents?includeArchived=true");
 			expect(arrayValue(visibleArchivedSales.body.documents)).toEqual(expect.arrayContaining([expect.objectContaining({ id: salesDocumentId, status: "アーカイブ済み" })]));
-			const restoredSales = await requestJson<JsonObject>(`/api/sales-documents/${salesDocumentId}/restore`, "POST");
+			const archiveList = await requestJson<JsonObject>("/api/archives?q=" + encodeURIComponent(marker));
+			expect(archiveList.response.status).toBe(200);
+			expect(arrayValue(archiveList.body.archives)).toEqual(expect.arrayContaining([expect.objectContaining({ id: salesDocumentId, kind: "sales", status: "アーカイブ済み" })]));
+			const archiveKeepForever = await requestJson<JsonObject>(`/api/archives/sales/${salesDocumentId}`, "PATCH", { keepForever: true });
+			expect(archiveKeepForever.response.status).toBe(200);
+			const restoredSales = await requestJson<JsonObject>(`/api/archives/sales/${salesDocumentId}/restore`, "POST");
 			expect(restoredSales.response.status).toBe(200);
 
 			const archivedMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}`, "DELETE");
 			expect(archivedMaintenance.response.status).toBe(200);
-			const restoredMaintenance = await requestJson<JsonObject>(`/api/maintenance-documents/${maintenanceDocumentId}/restore`, "POST");
+			const restoredMaintenance = await requestJson<JsonObject>(`/api/archives/maintenance/${maintenanceDocumentId}/restore`, "POST");
 			expect(restoredMaintenance.response.status).toBe(200);
 
 			const vehicleHistory = await requestJson<JsonObject>(`/api/vehicles/${vehicleId}/history`);
@@ -518,6 +524,14 @@ describe("CLI authenticated workflow", () => {
 			expect(crossTenantVehicleHistory.response.status).toBe(404);
 
 			if (b2Configured) {
+				const backupSettings = await requestJson<JsonObject>("/api/backups/settings");
+				expect(backupSettings.response.status).toBe(200);
+				expect(objectValue(backupSettings.body.settings)).toEqual(expect.objectContaining({ destination: "b2", retentionDays: expect.any(Number) }));
+				const pcExport = await requestJson<JsonObject>("/api/backups/export");
+				expect(pcExport.response.status).toBe(200);
+				expect(objectValue(pcExport.body.backup)).toEqual(expect.objectContaining({ version: 1, organizationId }));
+				expect(arrayValue(objectValue(objectValue(pcExport.body.backup).tables).vehicleFiles)).toEqual(expect.any(Array));
+				expect(arrayValue(objectValue(pcExport.body.backup).files)).toEqual(expect.any(Array));
 				const createdBackup = await requestJson<JsonObject>("/api/backups", "POST");
 				expect(createdBackup.response.status).toBe(201);
 				backupId = stringValue(objectValue(createdBackup.body.backup).id);
@@ -534,6 +548,8 @@ describe("CLI authenticated workflow", () => {
 				const restored = await requestJson<JsonObject>(`/api/backups/${backupId}/restore`, "POST", { confirmId: backupId });
 				expect(restored.response.status).toBe(200);
 				expect(restored.body.restored).toBe(true);
+				safetyBackupId = stringValue(restored.body.safetyBackupId);
+				expect(safetyBackupId).toEqual(expect.any(String));
 
 				const afterRestore = await requestJson<JsonObject>(`/api/customers?q=${encodeURIComponent(marker)}`);
 				expect(afterRestore.response.status).toBe(200);
@@ -546,13 +562,16 @@ describe("CLI authenticated workflow", () => {
 				const deletedBackup = await requestJson<JsonObject>(`/api/backups/${backupId}`, "DELETE");
 				expect(deletedBackup.response.status).toBe(200);
 				backupId = undefined;
+				const deletedSafetyBackup = await requestJson<JsonObject>(`/api/backups/${safetyBackupId}`, "DELETE");
+				expect(deletedSafetyBackup.response.status).toBe(200);
+				safetyBackupId = undefined;
 
 				const deletedAttachment = await requestJson<JsonObject>(`/api/vehicles/${vehicleId}/files/${attachmentId}`, "DELETE");
 				expect(deletedAttachment.response.status).toBe(200);
 				attachmentId = undefined;
 			}
 		} finally {
-			await cleanupTestData({ attachmentId, backupId, vehicleId });
+		await cleanupTestData({ attachmentId, backupId, safetyBackupId, vehicleId });
 		}
 	}, 60000);
 });
@@ -587,12 +606,15 @@ async function prepareTestOrganizations() {
 		.run();
 }
 
-async function cleanupTestData(state: { attachmentId?: string; backupId?: string; vehicleId?: string }) {
+async function cleanupTestData(state: { attachmentId?: string; backupId?: string; safetyBackupId?: string; vehicleId?: string }) {
 	if (state.attachmentId && state.vehicleId) {
 		await requestJson<JsonObject>(`/api/vehicles/${state.vehicleId}/files/${state.attachmentId}`, "DELETE").catch(() => undefined);
 	}
 	if (state.backupId) {
 		await requestJson<JsonObject>(`/api/backups/${state.backupId}`, "DELETE").catch(() => undefined);
+	}
+	if (state.safetyBackupId) {
+		await requestJson<JsonObject>(`/api/backups/${state.safetyBackupId}`, "DELETE").catch(() => undefined);
 	}
 
 	for (const table of [

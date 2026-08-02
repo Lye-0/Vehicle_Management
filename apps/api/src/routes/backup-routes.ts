@@ -1,27 +1,35 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
-import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { and, asc, desc, eq, lte } from 'drizzle-orm'
+import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
+import { addDays, loadBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
+import { purgeExpiredArchivedDocuments } from '../document-archive'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { createB2Storage } from '../storage/b2'
 
+const preRestoreProtectionDays = 30
+
 export async function handleBackupRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const collectionPath = pathname === '/api/backups'
+  const settingsPath = pathname === '/api/backups/settings'
+  const exportPath = pathname === '/api/backups/export'
+  const importPath = pathname === '/api/backups/import'
   const restoreMatch = pathname.match(/^\/api\/backups\/([^/]+)\/restore$/)
   const itemMatch = pathname.match(/^\/api\/backups\/([^/]+)$/)
-  if (!collectionPath && !restoreMatch && !itemMatch) return null
+  if (!collectionPath && !settingsPath && !exportPath && !importPath && !restoreMatch && !itemMatch) return null
 
   try {
     const database = createDatabase(env.DB)
-    if (collectionPath && request.method === 'GET') {
-      const context = await requireOrganizationContext(request, env, database)
-      const records = await database.select().from(backupRecords).where(eq(backupRecords.organizationId, context.organization.organizationId)).orderBy(desc(backupRecords.createdAt)).all()
-      return jsonResponse({ canManage: context.organization.role === 'owner' || context.organization.role === 'admin', backups: records.map(serializeBackup) }, 200, env)
-    }
+    if (settingsPath && request.method === 'GET') return await getSettings(request, env, database)
+    if (settingsPath && request.method === 'PATCH') return await updateSettings(request, env, database)
+    if (collectionPath && request.method === 'GET') return await listBackups(request, env, database)
     if (collectionPath && request.method === 'POST') return await createBackup(request, env, database)
+    if (exportPath && request.method === 'GET') return await exportBackup(request, env, database)
+    if (importPath && request.method === 'POST') return await importBackup(request, env, database)
     if (restoreMatch && request.method === 'POST') return await restoreBackup(request, env, database, decodeURIComponent(restoreMatch[1]))
+    if (itemMatch && request.method === 'PATCH') return await updateBackup(request, env, database, decodeURIComponent(itemMatch[1]))
     if (itemMatch && request.method === 'DELETE') return await deleteBackup(request, env, database, decodeURIComponent(itemMatch[1]))
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
@@ -32,13 +40,155 @@ export async function handleBackupRoutes(request: Request, env: Env): Promise<Re
   }
 }
 
+async function getSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const context = await requireOrganizationContext(request, env, database)
+  return jsonResponse({ canManage: isAdmin(context.organization.role), settings: await loadBackupSettings(database, context.organization.organizationId) }, 200, env)
+}
+
+async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const body = await readJson(request)
+  return jsonResponse({ settings: await saveBackupSettings(database, context.organization.organizationId, body.settings) }, 200, env)
+}
+
+async function listBackups(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const context = await requireOrganizationContext(request, env, database)
+  const records = await database.select().from(backupRecords).where(eq(backupRecords.organizationId, context.organization.organizationId)).orderBy(desc(backupRecords.createdAt)).all()
+  return jsonResponse({ canManage: isAdmin(context.organization.role), backups: records.map(serializeBackup) }, 200, env)
+}
+
 async function createBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireAdminOrganizationContext(request, env, database)
+  const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual' })
+  return jsonResponse({ backup }, 201, env)
+}
+
+async function exportBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const context = await requireAdminOrganizationContext(request, env, database)
   const storage = getStorage(env)
-  const organizationId = context.organization.organizationId
+  const snapshot = await loadSnapshot(database, context.organization.organizationId, crypto.randomUUID(), context.organization.name)
+  const files: BackupExportFile[] = []
+  for (const file of snapshot.tables.vehicleFiles) {
+    const response = await storage.getObject(file.objectKey)
+    files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(await response.arrayBuffer()) })
+  }
+  return jsonResponse({ backup: { ...snapshot, files } }, 200, env)
+}
+
+async function importBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const body = await readJson(request)
+  const source = assertExportManifest(body.backup, context.organization.organizationId)
+  const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
+  const storage = getStorage(env)
+  const restoreId = crypto.randomUUID()
+  const stagedKeys: string[] = []
+  try {
+    const filesById = new Map(source.files.map((file) => [file.id, file]))
+    const vehicleFilesWithKeys = []
+    for (const file of source.tables.vehicleFiles) {
+      const sourceFile = filesById.get(file.id)
+      if (!sourceFile) throw new HttpError(400, `添付ファイルが見つかりません: ${file.fileName}`)
+      const backupObjectKey = `imports/${context.organization.organizationId}/${restoreId}/files/${file.id}`
+      await storage.putObject({ key: backupObjectKey, body: base64ToArrayBuffer(sourceFile.data), contentType: sourceFile.contentType })
+      stagedKeys.push(backupObjectKey)
+      vehicleFilesWithKeys.push({ ...file, backupObjectKey })
+    }
+    const manifest: BackupManifest = { ...source, tables: { ...source.tables, vehicleFiles: vehicleFilesWithKeys } }
+    await restoreManifest(env, database, context.organization.organizationId, manifest)
+    return jsonResponse({ restored: true, backupId: source.id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
+  } catch (error) {
+    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    throw error instanceof HttpError ? error : new HttpError(500, 'PCバックアップからの復元に失敗しました。復元前の状態へ戻しました。')
+  } finally {
+    await deleteObjects(storage, stagedKeys)
+  }
+}
+
+async function restoreBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
+  const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
+  if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+  const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
+  try {
+    const manifest = await readManifest(getStorage(env), record.manifestKey, context.organization.organizationId)
+    await restoreManifest(env, database, context.organization.organizationId, manifest)
+    return jsonResponse({ restored: true, backupId: id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
+  } catch (error) {
+    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    if (error instanceof HttpError) throw error
+    throw new HttpError(500, 'バックアップの復元に失敗しました。復元前の状態へ戻しました。')
+  }
+}
+
+async function deleteBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
+  if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+  await deleteBackupRecord(database, env, record)
+  return jsonResponse({ deleted: true }, 200, env)
+}
+
+async function updateBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const body = await readJson(request)
+  if (typeof body.keepForever !== 'boolean') throw new HttpError(400, '永久保存の指定が不正です。')
+  const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
+  if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+  await database.update(backupRecords).set({ keepForever: body.keepForever, updatedAt: new Date().toISOString() }).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).run()
+  return jsonResponse({ updated: true, keepForever: body.keepForever }, 200, env)
+}
+
+export async function runScheduledBackupMaintenance(env: Env, scheduledTime = Date.now()) {
+  const database = createDatabase(env.DB)
+  const now = new Date(scheduledTime)
+  const organizationRows = await database.select({ id: organizations.id, name: organizations.name }).from(organizations).all()
+  for (const organization of organizationRows) {
+    const settings = await loadBackupSettings(database, organization.id)
+    try {
+      getStorage(env)
+      if (settings.autoEnabled && ['b2', 'both'].includes(settings.destination)) {
+        const latestAutomatic = await database.select().from(backupRecords).where(and(eq(backupRecords.organizationId, organization.id), eq(backupRecords.trigger, 'automatic'))).orderBy(desc(backupRecords.createdAt)).get()
+        const intervalDays = settings.frequency === 'weekly' ? 7 : 1
+        const due = !latestAutomatic || new Date(latestAutomatic.createdAt).getTime() <= now.getTime() - intervalDays * 86_400_000
+        if (due) {
+          await createBackupForOrganization(env, database, organization.id, organization.name, { trigger: 'automatic' })
+        }
+      }
+      await cleanupBackups(database, env, organization.id, settings, now)
+    } catch (error) {
+      console.error(`[backup] scheduled backup failed for ${organization.id}`, error)
+    }
+    try {
+      await purgeExpiredArchivedDocuments(database, organization.id, now.toISOString())
+    } catch (error) {
+      console.error(`[archive] scheduled purge failed for ${organization.id}`, error)
+    }
+  }
+}
+
+async function createSafetyBackup(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, organizationName: string) {
+  return createBackupForOrganization(env, database, organizationId, organizationName, { trigger: 'pre-restore', protectedUntil: addDays(new Date(), preRestoreProtectionDays), keepForever: false })
+}
+
+async function rollbackToSafetyBackup(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, safetyBackupId: string) {
+  try {
+    const safety = await database.select().from(backupRecords).where(and(eq(backupRecords.id, safetyBackupId), eq(backupRecords.organizationId, organizationId))).get()
+    if (!safety) return
+    const manifest = await readManifest(getStorage(env), safety.manifestKey, organizationId)
+    await restoreManifest(env, database, organizationId, manifest)
+  } catch (rollbackError) {
+    console.error(`[backup] rollback failed for ${organizationId}`, rollbackError)
+  }
+}
+
+async function createBackupForOrganization(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, organizationName: string, options: { trigger: string; protectedUntil?: string; keepForever?: boolean }) {
+  const storage = getStorage(env)
   const id = crypto.randomUUID()
   const manifestKey = `backups/${organizationId}/${id}/manifest.json`
-  const snapshot = await loadSnapshot(database, organizationId, id, context.organization.name)
+  const snapshot = await loadSnapshot(database, organizationId, id, organizationName)
   const copiedKeys: string[] = []
   try {
     for (const file of snapshot.tables.vehicleFiles) {
@@ -48,43 +198,45 @@ async function createBackup(request: Request, env: Env, database: ReturnType<typ
       copiedKeys.push(backupObjectKey)
     }
     await storage.putText(manifestKey, JSON.stringify(snapshot), 'application/json; charset=utf-8')
-    await database.insert(backupRecords).values({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed' }).run()
+    await database.insert(backupRecords).values({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false }).run()
   } catch (error) {
     await deleteObjects(storage, copiedKeys)
     try { await storage.deleteObject(manifestKey) } catch { /* manifest may not exist */ }
     throw error
   }
-  return jsonResponse({ backup: serializeBackup({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', createdAt: snapshot.createdAt, updatedAt: snapshot.createdAt }) }, 201, env)
+  return serializeBackup({ id, organizationId, manifestKey, fileCount: snapshot.tables.vehicleFiles.length, rowCount: countRows(snapshot.tables), status: 'completed', trigger: options.trigger, protectedUntil: options.protectedUntil ?? null, keepForever: options.keepForever ?? false, createdAt: snapshot.createdAt, updatedAt: snapshot.createdAt })
 }
 
-async function restoreBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
-  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
-  if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
-  const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
-  if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+async function restoreManifest(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, manifest: BackupManifest) {
+  assertManifest(manifest, organizationId)
   const storage = getStorage(env)
-  const manifest = await readManifest(storage, record.manifestKey)
-  if (manifest.organizationId !== context.organization.organizationId || manifest.version !== 1) throw new HttpError(400, 'このバックアップは現在の組織へ復元できません。')
-  for (const file of manifest.tables.vehicleFiles) await storage.copyObject(file.backupObjectKey, file.objectKey)
-  const currentFiles = await database.select({ objectKey: vehicleFiles.objectKey }).from(vehicleFiles).where(eq(vehicleFiles.organizationId, context.organization.organizationId)).all()
-  await clearOrganizationData(database, context.organization.organizationId)
+  for (const file of manifest.tables.vehicleFiles) {
+    if (!file.backupObjectKey) throw new HttpError(400, `バックアップ内の添付ファイル情報が不正です: ${file.fileName}`)
+    await storage.copyObject(file.backupObjectKey, file.objectKey)
+  }
+  const currentFiles = await database.select({ objectKey: vehicleFiles.objectKey }).from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).all()
+  await clearOrganizationData(database, organizationId)
   await insertSnapshot(database, manifest)
   const backupObjectKeys = new Set(manifest.tables.vehicleFiles.map((file) => file.objectKey))
   await deleteObjects(storage, currentFiles.map((file) => file.objectKey).filter((key) => !backupObjectKeys.has(key)))
-  return jsonResponse({ restored: true, backupId: id, rowCount: countRows(manifest.tables) }, 200, env)
 }
 
-async function deleteBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
-  const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
-  if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+async function cleanupBackups(database: ReturnType<typeof createDatabase>, env: Env, organizationId: string, settings: BackupSettings, now: Date) {
+  const cutoff = new Date(now)
+  cutoff.setUTCDate(cutoff.getUTCDate() - settings.retentionDays)
+  const records = await database.select().from(backupRecords).where(and(eq(backupRecords.organizationId, organizationId), lte(backupRecords.createdAt, cutoff.toISOString()))).all()
+  for (const record of records) {
+    if (record.keepForever || (record.protectedUntil && record.protectedUntil > now.toISOString())) continue
+    await deleteBackupRecord(database, env, record)
+  }
+}
+
+async function deleteBackupRecord(database: ReturnType<typeof createDatabase>, env: Env, record: typeof backupRecords.$inferSelect) {
   const storage = getStorage(env)
-  const manifest = await readManifest(storage, record.manifestKey)
+  const manifest = await readManifest(storage, record.manifestKey, record.organizationId)
   await deleteObjects(storage, manifest.tables.vehicleFiles.map((file) => file.backupObjectKey))
   await storage.deleteObject(record.manifestKey)
-  await database.delete(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).run()
-  return jsonResponse({ deleted: true }, 200, env)
+  await database.delete(backupRecords).where(and(eq(backupRecords.id, record.id), eq(backupRecords.organizationId, record.organizationId))).run()
 }
 
 async function loadSnapshot(database: ReturnType<typeof createDatabase>, organizationId: string, id: string, organizationName: string): Promise<BackupManifest> {
@@ -155,19 +307,35 @@ async function insertSnapshot(database: ReturnType<typeof createDatabase>, manif
   for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
 }
 
-async function readManifest(storage: ReturnType<typeof createB2Storage>, key: string) {
+async function readManifest(storage: ReturnType<typeof createB2Storage>, key: string, organizationId: string) {
   const response = await storage.getObject(key)
   const value: unknown = await response.json().catch(() => null)
-  if (!value || typeof value !== 'object') throw new HttpError(400, 'バックアップマニフェストが不正です。')
-  return value as BackupManifest
+  return assertManifest(value, organizationId)
+}
+
+function assertManifest(value: unknown, organizationId: string): BackupManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'バックアップマニフェストが不正です。')
+  const manifest = value as Partial<BackupManifest>
+  if (manifest.version !== 1 || typeof manifest.id !== 'string' || manifest.organizationId !== organizationId || !manifest.tables || !Array.isArray(manifest.tables.customers) || !Array.isArray(manifest.tables.vehicles) || !Array.isArray(manifest.tables.vehicleFiles) || !Array.isArray(manifest.tables.salesDocuments) || !Array.isArray(manifest.tables.salesDocumentItems) || !Array.isArray(manifest.tables.maintenanceDocuments) || !Array.isArray(manifest.tables.maintenanceItems) || !Array.isArray(manifest.tables.paymentRecords) || !Array.isArray(manifest.tables.inspectionSchedules) || !Array.isArray(manifest.tables.appSettings)) {
+    throw new HttpError(400, 'このバックアップは現在の組織へ復元できません。')
+  }
+  const tables = manifest.tables as BackupManifest['tables']
+  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.inspectionSchedules, tables.appSettings]
+  if (organizationRows.some((rows) => rows.some((row) => !row || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
+  const expectedObjectKeyPrefix = `organizations/${organizationId}/`
+  if (tables.vehicleFiles.some((file) => typeof file.objectKey !== 'string' || !file.objectKey.startsWith(expectedObjectKeyPrefix))) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
+  return manifest as BackupManifest
+}
+
+function assertExportManifest(value: unknown, organizationId: string): BackupExport {
+  const manifest = assertManifest(value, organizationId)
+  const files = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray((value as { files?: unknown }).files) ? (value as { files: unknown[] }).files : []
+  if (files.length !== manifest.tables.vehicleFiles.length || files.some((file) => !file || typeof file !== 'object' || typeof (file as BackupExportFile).id !== 'string' || typeof (file as BackupExportFile).data !== 'string' || typeof (file as BackupExportFile).contentType !== 'string' || typeof (file as BackupExportFile).fileName !== 'string')) throw new HttpError(400, 'PCバックアップの添付ファイル情報が不正です。')
+  return { ...manifest, files: files as BackupExportFile[] }
 }
 
 function getStorage(env: Env) {
-  try {
-    return createB2Storage(env)
-  } catch {
-    throw new HttpError(503, 'B2のバックアップ設定がありません。')
-  }
+  try { return createB2Storage(env) } catch { throw new HttpError(503, 'B2のバックアップ設定がありません。') }
 }
 
 async function deleteObjects(storage: ReturnType<typeof createB2Storage>, keys: string[]) {
@@ -180,8 +348,27 @@ function countRows(tables: BackupManifest['tables']) {
   return Object.values(tables).reduce((total, rows) => total + rows.length, 0)
 }
 
-function serializeBackup(record: { id: string; organizationId: string; manifestKey: string; fileCount: number; rowCount: number; status: string; createdAt: string; updatedAt: string }) {
-  return { id: record.id, fileCount: record.fileCount, rowCount: record.rowCount, status: record.status, createdAt: record.createdAt, updatedAt: record.updatedAt }
+function serializeBackup(record: { id: string; organizationId: string; manifestKey: string; fileCount: number; rowCount: number; status: string; trigger: string; protectedUntil: string | null; keepForever: boolean; createdAt: string; updatedAt: string }) {
+  return { id: record.id, fileCount: record.fileCount, rowCount: record.rowCount, status: record.status, trigger: record.trigger, protectedUntil: record.protectedUntil, keepForever: record.keepForever, createdAt: record.createdAt, updatedAt: record.updatedAt }
+}
+
+function isAdmin(role: string) {
+  return role === 'owner' || role === 'admin'
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < bytes.length; index += chunkSize) binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  return btoa(binary)
+}
+
+function base64ToArrayBuffer(value: string) {
+  let binary: string
+  try { binary = atob(value) } catch { throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。') }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  return bytes.buffer
 }
 
 type BackupManifest = {
@@ -199,8 +386,11 @@ type BackupManifest = {
     maintenanceDocuments: Array<typeof maintenanceDocuments.$inferSelect>
     maintenanceItems: Array<typeof maintenanceItems.$inferSelect>
     paymentRecords: Array<typeof paymentRecords.$inferSelect>
-    paymentEntries?: Array<typeof paymentEntries.$inferSelect>
+    paymentEntries: Array<typeof paymentEntries.$inferSelect>
     inspectionSchedules: Array<typeof inspectionSchedules.$inferSelect>
     appSettings: Array<typeof appSettings.$inferSelect>
   }
 }
+
+type BackupExportFile = { id: string; fileName: string; contentType: string; data: string }
+type BackupExport = BackupManifest & { files: BackupExportFile[] }
