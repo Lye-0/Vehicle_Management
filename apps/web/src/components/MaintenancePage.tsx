@@ -40,7 +40,7 @@ import { defaultSettings, fetchSettings, type AppSettings } from '../lib/setting
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
 import { DocumentSortControls } from './DocumentSortControls'
-import { DocumentTaxSettings, type TaxRounding } from './DocumentTaxSettings'
+import { DocumentTaxSettings } from './DocumentTaxSettings'
 import { MaintenanceStatementEditor, type MaintenanceStatementItemField } from './MaintenanceStatementEditor'
 
 type CategoryFilter = 'すべて' | IntakeCategory
@@ -168,12 +168,6 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setSavedDocumentId('')
   }
 
-  function updateTaxRounding(value: TaxRounding) {
-    if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, taxRounding: value } : document))
-    setSavedDocumentId('')
-  }
-
   function updateHeader(field: 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note', value: string) {
     if (!selectedDocument) return
     setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
@@ -252,7 +246,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTaxRounding={updateTaxRounding} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
   </>
 }
@@ -298,7 +292,7 @@ function maintenanceDocumentMonth(issuedAt: string) {
 
 type MaintenanceHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note'
 
-function MaintenanceDocumentDetail({ document, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onUpdateTaxRounding, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
+function MaintenanceDocumentDetail({ document, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
   return <section className="panel maintenance-detail-panel">
     <div className="maintenance-detail-header">
       <div className="maintenance-detail-title"><div><div className="maintenance-detail-badges"><MaintenanceDocumentTypeTag type={document.type} /><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><MaintenanceStatusTag status={document.status} /></div><h2>{document.number}</h2><small>{document.type} ・ 発行元 {settings.shop.name}</small></div></div>
@@ -306,7 +300,7 @@ function MaintenanceDocumentDetail({ document, customers, settings, itemPresets,
     </div>
     <div className="maintenance-document-tabs" role="tablist" aria-label="整備書類の表示"><button id="maintenance-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="maintenance-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="maintenance-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="maintenance-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>
     {view === 'edit'
-      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateTaxRate={onUpdateTaxRate} onUpdateTaxRounding={onUpdateTaxRounding} /></div>
+      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateTaxRate={onUpdateTaxRate} /></div>
       : <div id="maintenance-document-preview-panel" className="maintenance-detail-content maintenance-preview-content" role="tabpanel" aria-labelledby="maintenance-document-preview-tab"><MaintenancePreview document={document} settings={settings} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div>}
   </section>
 }
@@ -323,7 +317,6 @@ type MaintenanceDocumentDetailProps = {
   onViewChange: (view: MaintenanceDocumentView) => void
   onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void
   onUpdateTaxRate: (value: number) => void
-  onUpdateTaxRounding: (value: TaxRounding) => void
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
   onSave: () => void
   onArchive: () => void
@@ -335,11 +328,11 @@ type MaintenanceDocumentDetailProps = {
   onUpdateFee: (key: MaintenanceFeeKey, value: string) => void
 }
 
-function MaintenanceDocumentEditor({ document, customers, onUpdateHeader, onUpdateTaxRate, onUpdateTaxRounding }: { document: MaintenanceDocument; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateTaxRate: (value: number) => void; onUpdateTaxRounding: (value: TaxRounding) => void }) {
+function MaintenanceDocumentEditor({ document, customers, onUpdateHeader, onUpdateTaxRate }: { document: MaintenanceDocument; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateTaxRate: (value: number) => void }) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   return <>
     <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}><option value="">車両を指定しない</option>{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>完了日</span><input type="date" value={document.completionDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('completionDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>支払期限</span><input type="date" value={document.dueDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('dueDate', event.target.value.replaceAll('-', '/'))} /></label></div></section>
-    <details className="maintenance-details-accordion"><summary><span>詳細設定</span><ChevronDown size={16} aria-hidden="true" /></summary><div className="maintenance-details-accordion-content"><DocumentTaxSettings taxRate={Math.round(document.taxRate * 100)} taxRounding={document.taxRounding} onTaxRateChange={onUpdateTaxRate} onTaxRoundingChange={onUpdateTaxRounding} /></div></details>
+    <details className="maintenance-details-accordion"><summary><span>詳細設定</span><ChevronDown size={16} aria-hidden="true" /></summary><div className="maintenance-details-accordion-content"><DocumentTaxSettings taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={onUpdateTaxRate} /></div></details>
   </>
 }
 
