@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Archive, ChevronDown, FileUp, FolderOpen, HardDrive, RotateCcw, X } from 'lucide-react'
+import { AlertTriangle, Archive, ChevronDown, FileUp, FolderOpen, HardDrive, RotateCcw, X } from 'lucide-react'
 import { createBackup, deleteBackup, exportBackup, fetchBackups, restoreBackup, restoreImportedBackup, updateBackupRetention, type BackupRecord, type BackupSettings } from '../lib/backupsApi'
-import { changePcBackupDirectory, choosePcBackupDirectory, listDefaultPcBackups, readPcBackup, saveBackupToPc, type PcBackupFile, type PcBackupListing } from '../lib/pcBackup'
+import { changePcBackupDirectory, choosePcBackupDirectory, listDefaultPcBackups, preparePcBackupDestination, readPcBackup, saveBackupToPc, type PcBackupFile, type PcBackupListing } from '../lib/pcBackup'
 
 export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   const [backups, setBackups] = useState<BackupRecord[]>([])
@@ -21,6 +21,7 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
   const [pcRestoreDirectoryName, setPcRestoreDirectoryName] = useState<string | null>(null)
   const [pcRestoreLoading, setPcRestoreLoading] = useState(false)
   const [pcRestoreError, setPcRestoreError] = useState('')
+  const [pcBackupWarningOpen, setPcBackupWarningOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -133,6 +134,10 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
     const hasPc = manualDestination === 'pc' || manualDestination === 'both'
     try {
       let b2Created = false
+      if (hasPc && !await preparePcBackupDestination()) {
+        setPcBackupWarningOpen(true)
+        return
+      }
       if (hasB2) {
         await createBackup(manualBackupNote)
         b2Created = true
@@ -141,7 +146,11 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
       if (hasPc) {
         const backup = await exportBackup(manualBackupNote)
         const result = await saveBackupToPc(backup, false, backupSettings.pcRetentionDays)
-        pcMessage = result.mode === 'folder' ? `${result.directoryName}にPC保存` : 'PCへダウンロード'
+        if (result.mode === 'unavailable') {
+          setPcBackupWarningOpen(true)
+          return
+        }
+        pcMessage = `${result.directoryName}にPC保存`
       }
       setManualBackupNote('')
       setMessage(hasB2 && hasPc ? `B2保存と${pcMessage}が完了しました。` : b2Created ? 'B2へのバックアップを作成しました。' : `${pcMessage}が完了しました。`)
@@ -261,6 +270,18 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
           {pcRestoreError && <div className="pc-restore-error" role="alert">{pcRestoreError}</div>}
           {pcRestoreLoading ? <div className="pc-restore-empty"><span>バックアップ一覧を読み込んでいます…</span></div> : pcRestoreFiles.length === 0 ? <div className="pc-restore-empty"><Archive size={26} /><strong>バックアップが見つかりません</strong><span>選択したフォルダ内に復元できるバックアップファイルがありません。</span></div> : <div className="pc-restore-list" role="listbox" aria-label="PCバックアップ一覧">{pcRestoreFiles.map((file) => <button className={`pc-restore-file${pcRestoreSelected?.name === file.name ? ' is-selected' : ''}`} key={file.name} type="button" role="option" aria-selected={pcRestoreSelected?.name === file.name} onClick={() => setPcRestoreSelected(file)}><span className="pc-restore-file-icon"><Archive size={16} /></span><span className="pc-restore-file-copy"><strong>{formatBackupDate(file.createdAt)}{file.keepForever ? ' ・ 永久保存' : ''}</strong><small>{file.note ? `メモ：${file.note} ・ ` : ''}{formatFileSize(file.size)} ・ {file.name}</small></span></button>)}</div>}
           <div className="pc-restore-modal-footer"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setPcRestoreOpen(false)}>キャンセル</button><button className="button button-primary" type="button" disabled={!pcRestoreSelected || Boolean(loading) || pcRestoreLoading} onClick={() => void runPcRestore()}>{loading === 'pc-restore' ? '復元中…' : <><RotateCcw size={14} />選択したバックアップを復元</>}</button></div>
+        </div>
+      </section>
+    </div>}
+
+    {pcBackupWarningOpen && <div className="modal-backdrop pc-backup-warning-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPcBackupWarningOpen(false) }}>
+      <section className="modal pc-backup-warning-modal" role="dialog" aria-modal="true" aria-labelledby="pc-backup-warning-title">
+        <div className="modal-header pc-backup-warning-header"><div className="pc-backup-warning-title"><AlertTriangle size={20} /><h2 id="pc-backup-warning-title">PCへバックアップできませんでした</h2></div><button className="modal-close" type="button" aria-label="閉じる" onClick={() => setPcBackupWarningOpen(false)}><X size={18} /></button></div>
+        <div className="pc-backup-warning-content">
+          <p className="pc-backup-warning-lead">選択したフォルダをPC保存先として利用できないため、今回のバックアップ処理を中止しました。通常のダウンロード保存は行っていません。</p>
+          <div className="pc-backup-warning-instructions"><strong>PCに保存する場合</strong><ol><li>システムファイルを含まない空の親フォルダを作成します。</li><li>その中に <code>Vehicle Management Backup</code> フォルダを手動で作成します。</li><li>「PC保存先を変更」から、作成したフォルダを含む親フォルダを選択します。</li></ol></div>
+          <p className="pc-backup-warning-note">例：新しく作成した空のフォルダを選択すると、その中の「Vehicle Management Backup」にバックアップを保存できます。</p>
+          <div className="pc-backup-warning-footer"><button className="button button-secondary" type="button" onClick={() => setPcBackupWarningOpen(false)}>閉じる</button></div>
         </div>
       </section>
     </div>}

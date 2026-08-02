@@ -39,21 +39,33 @@ export type PcBackupListing = {
 }
 
 let activeRestoreDirectory: DirectoryHandleLike | null = null
+let preparedWritableDirectory: DirectoryHandleLike | null = null
 
 export async function saveBackupToPc(backup: BackupExport, keepForever: boolean, retentionDays: number) {
   const directory = await getWritableDirectory()
   const serialized = JSON.stringify(backup)
   const fileName = `vehicle-management-backup-${formatFileTimestamp(new Date(backup.createdAt))}${keepForever ? '-permanent' : ''}.json`
-  if (!directory) {
-    downloadBackup(serialized, fileName)
-    return { mode: 'download' as const, fileName }
+  if (!directory) return { mode: 'unavailable' as const, fileName }
+  try {
+    const fileHandle = await directory.getFileHandle(fileName, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(serialized)
+    await writable.close()
+    await prunePcBackups(directory, retentionDays)
+    return { mode: 'folder' as const, fileName, directoryName: directory.name }
+  } catch {
+    preparedWritableDirectory = null
+    return { mode: 'unavailable' as const, fileName }
   }
-  const fileHandle = await directory.getFileHandle(fileName, { create: true })
-  const writable = await fileHandle.createWritable()
-  await writable.write(serialized)
-  await writable.close()
-  await prunePcBackups(directory, retentionDays)
-  return { mode: 'folder' as const, fileName, directoryName: directory.name }
+}
+
+export async function preparePcBackupDestination() {
+  try {
+    return Boolean(await getWritableDirectory())
+  } catch {
+    preparedWritableDirectory = null
+    return false
+  }
 }
 
 export async function changePcBackupDirectory() {
@@ -63,6 +75,7 @@ export async function changePcBackupDirectory() {
     const parent = await picker({ mode: 'readwrite' })
     const directory = await getBackupDirectory(parent)
     await storeDirectory(parent)
+    preparedWritableDirectory = directory
     return { mode: 'selected' as const, directoryName: directory.name }
   } catch (reason: unknown) {
     if (isAbortError(reason)) return { mode: 'cancelled' as const }
@@ -105,14 +118,19 @@ export async function readPcBackup(name: string): Promise<BackupExport> {
 }
 
 async function getWritableDirectory() {
+  if (preparedWritableDirectory) return preparedWritableDirectory
   const stored = await readStoredDirectory()
-  if (stored && await ensurePermission(stored)) return getBackupDirectory(stored)
+  if (stored && await ensurePermission(stored)) {
+    preparedWritableDirectory = await getBackupDirectory(stored)
+    return preparedWritableDirectory
+  }
   const picker = getDirectoryPicker()
   if (!picker) return null
   try {
     const selected = await picker({ mode: 'readwrite' })
     const directory = await getBackupDirectory(selected)
     await storeDirectory(selected)
+    preparedWritableDirectory = directory
     return directory
   } catch (reason: unknown) {
     if (isAbortError(reason)) return null
@@ -212,18 +230,6 @@ async function prunePcBackups(directory: DirectoryHandleLike, retentionDays: num
     const file = await (entry as FileHandleLike).getFile()
     if (file.lastModified < cutoff) await directory.removeEntry(name)
   }
-}
-
-function downloadBackup(serialized: string, fileName: string) {
-  const blob = new Blob([serialized], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 function formatFileTimestamp(value: Date) {
