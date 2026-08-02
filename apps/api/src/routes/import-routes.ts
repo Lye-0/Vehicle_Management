@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm'
-import { customers, maintenanceDocuments, maintenanceItems, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
+import { customers, maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -296,6 +296,11 @@ async function importPayment(database: ReturnType<typeof createDatabase>, organi
   }
   if (existing) await database.update(paymentRecords).set(data).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.id, existing.id))).run()
   else await database.insert(paymentRecords).values({ id: crypto.randomUUID(), ...data }).run()
+  await database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))).run()
+  if (data.paidAmount > 0 || data.paymentDate || data.method || data.note) {
+    const now = new Date().toISOString()
+    await database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: data.paidAmount, paymentDate: data.paymentDate, method: data.method, note: data.note ?? '', createdAt: now, updatedAt: now }).run()
+  }
   return existing ? 'updated' : 'imported'
 }
 

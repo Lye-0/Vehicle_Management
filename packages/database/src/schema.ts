@@ -227,6 +227,21 @@ export const paymentRecords = sqliteTable('payment_records', {
   index('payment_records_payment_date_idx').on(table.paymentDate),
 ])
 
+export const paymentEntries = sqliteTable('payment_entries', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull().default('org-default'),
+  documentType: text('document_type').notNull(),
+  documentId: text('document_id').notNull(),
+  amount: integer('amount').notNull().default(0),
+  paymentDate: text('payment_date'),
+  method: text('method'),
+  note: text('note').notNull().default(''),
+  ...timestamps,
+}, (table) => [
+  index('payment_entries_organization_document_idx').on(table.organizationId, table.documentType, table.documentId),
+  index('payment_entries_payment_date_idx').on(table.paymentDate),
+])
+
 export const inspectionSchedules = sqliteTable('inspection_schedules', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id').notNull().default('org-default'),
@@ -281,6 +296,7 @@ export const databaseSchema = {
   maintenanceDocuments,
   maintenanceItems,
   paymentRecords,
+  paymentEntries,
   inspectionSchedules,
   appSettings,
   backupRecords,

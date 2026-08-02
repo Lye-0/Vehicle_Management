@@ -1,0 +1,5 @@
+import type { DocumentSortDirection, DocumentSortKey } from './DocumentSort'
+
+export function DocumentSortControls({ sortKey, sortDirection, onSortKeyChange, onSortDirectionChange }: { sortKey: DocumentSortKey; sortDirection: DocumentSortDirection; onSortKeyChange: (value: DocumentSortKey) => void; onSortDirectionChange: (value: DocumentSortDirection) => void }) {
+  return <div className="document-sort-controls" aria-label="一覧のソート"><select className="document-sort-key" aria-label="ソート内容" value={sortKey} onChange={(event) => onSortKeyChange(event.target.value as DocumentSortKey)}><option value="issuedAt">書類の作成日時</option><option value="dueDate">入金期限</option><option value="customerName">顧客名</option><option value="vehicle">車両名</option></select><select className="document-sort-direction" aria-label="並び順" value={sortDirection} onChange={(event) => onSortDirectionChange(event.target.value as DocumentSortDirection)}><option value="asc">昇順</option><option value="desc">降順</option></select></div>
+}
