@@ -1371,14 +1371,16 @@
 .backup-retention-field { display: grid; gap: 5px; min-width: 0; }
 .backup-retention-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .backup-retention-field-heading label { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
-.backup-retention-pc-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.backup-retention-pc-controls .settings-number-input { min-width: 0; flex: 1 1 auto; }
 .backup-directory-button { min-height: 30px; flex: 0 0 auto; padding: 0 8px; font-size: 10px; box-shadow: none; }
 .backup-retention-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 11px; }
 .backup-retention-values .settings-number-input { width: 100%; }
 .backup-retention-values .settings-number-input input { box-sizing: border-box; width: 100%; min-height: 36px; padding: 0 9px; color: var(--text); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font: inherit; font-size: 11px; }
 .backup-retention-values .settings-number-input input:focus { outline: none; border-color: #9eb9eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .backup-retention-values .settings-number-input input:disabled { color: var(--text-muted); background: #f1f4f8; }
+.backup-retention-destination-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.backup-retention-destination-copy { display: grid; gap: 4px; min-width: 0; }
+.backup-retention-destination-copy strong { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
+.backup-retention-destination-copy span { color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 .backup-history-section { margin-top: 18px; }
 .backup-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .backup-history-heading h3 { margin: 0; color: var(--text); font-size: 13px; }
@@ -1625,9 +1627,8 @@
   .archive-retention-settings { grid-template-columns: minmax(0, 1fr) 120px; }
   .archive-retention-copy { grid-column: 1 / -1; }
   .backup-retention-field-heading { align-items: flex-start; flex-wrap: wrap; }
-  .backup-directory-button { align-self: auto; justify-content: center; }
-  .backup-retention-pc-controls { align-items: stretch; flex-wrap: wrap; }
-  .backup-retention-pc-controls .settings-number-input { flex-basis: 160px; }
+  .backup-retention-destination-row { align-items: stretch; flex-direction: column; }
+  .backup-retention-destination-row .backup-directory-button { width: 100%; justify-content: center; }
   .backup-retention-values { grid-template-columns: 1fr; }
   .backup-history-heading { align-items: flex-start; flex-direction: column; }
   .backup-history-heading-actions { width: 100%; justify-content: space-between; }
