@@ -42,14 +42,17 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
     setMessage('')
     try {
       const result = await changePcBackupDirectory()
-      if (result.mode === 'cancelled') return
+      if (result.mode === 'cancelled') {
+        setPcBackupWarningOpen(true)
+        return
+      }
       if (result.mode === 'unsupported') {
-        setError('このブラウザではPCの保存先を指定できません。バックアップ実行時はダウンロードとして保存されます。')
+        setPcBackupWarningOpen(true)
         return
       }
       setMessage(`${result.directoryName}をPCバックアップ先に設定しました。`)
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'PCバックアップ先を変更できませんでした。')
+    } catch {
+      setPcBackupWarningOpen(true)
     } finally {
       setLoading('')
     }
