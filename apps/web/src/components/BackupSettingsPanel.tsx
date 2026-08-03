@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Archive, ChevronDown, FileUp, FolderOpen, HardDrive, RotateCcw, X } from 'lucide-react'
+import { AlertTriangle, Archive, ChevronDown, Clock3, FileUp, FolderOpen, HardDrive, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react'
 import { createBackup, deleteBackup, exportBackup, fetchBackups, restoreBackup, restoreImportedBackup, updateBackupRetention, type BackupRecord, type BackupSettings } from '../lib/backupsApi'
-import { changePcBackupDirectory, choosePcBackupDirectory, listDefaultPcBackups, preparePcBackupDestination, readPcBackup, saveBackupToPc, type PcBackupFile, type PcBackupListing } from '../lib/pcBackup'
+import { changePcBackupDirectory, choosePcBackupDirectory, deletePcBackupFile, listDefaultPcBackups, preparePcBackupDestination, readPcBackup, saveBackupToPc, updatePcBackupFileRetention, type PcBackupFile, type PcBackupListing } from '../lib/pcBackup'
+import { IconWithChain } from './IconWithChain'
 
 export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   const [backups, setBackups] = useState<BackupRecord[]>([])
@@ -20,6 +21,7 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
   const [pcRestoreParentName, setPcRestoreParentName] = useState<string | null>(null)
   const [pcRestoreDirectoryName, setPcRestoreDirectoryName] = useState<string | null>(null)
   const [pcRestoreLoading, setPcRestoreLoading] = useState(false)
+  const [pcRestoreAction, setPcRestoreAction] = useState('')
   const [pcRestoreError, setPcRestoreError] = useState('')
   const [pcBackupWarningOpen, setPcBackupWarningOpen] = useState(false)
 
@@ -126,6 +128,35 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
       setPcRestoreError(reason instanceof Error ? reason.message : 'PCバックアップを復元できませんでした。')
     } finally {
       setLoading('')
+    }
+  }
+
+  async function runPcRestoreKeepForever(file: PcBackupFile) {
+    setPcRestoreAction(`keep-${file.name}`)
+    setPcRestoreError('')
+    try {
+      const updated = await updatePcBackupFileRetention(file.name, !file.keepForever)
+      setPcRestoreFiles((current) => current.map((item) => item.name === file.name ? updated : item))
+      setPcRestoreSelected((current) => current?.name === file.name ? updated : current)
+    } catch (reason: unknown) {
+      setPcRestoreError(reason instanceof Error ? reason.message : 'PCバックアップの保存期間を変更できませんでした。')
+    } finally {
+      setPcRestoreAction('')
+    }
+  }
+
+  async function runDeletePcBackup(file: PcBackupFile) {
+    if (!window.confirm(`このPCバックアップ（${formatBackupDate(file.createdAt)}）を削除しますか？この操作は元に戻せません。`)) return
+    setPcRestoreAction(`delete-${file.name}`)
+    setPcRestoreError('')
+    try {
+      await deletePcBackupFile(file.name)
+      setPcRestoreFiles((current) => current.filter((item) => item.name !== file.name))
+      setPcRestoreSelected((current) => current?.name === file.name ? null : current)
+    } catch (reason: unknown) {
+      setPcRestoreError(reason instanceof Error ? reason.message : 'PCバックアップを削除できませんでした。')
+    } finally {
+      setPcRestoreAction('')
     }
   }
 
@@ -256,11 +287,18 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
           <label className="backup-settings-field"><span>保存先</span><select value={manualDestination} disabled={!canManage || Boolean(loading)} onChange={(event) => setManualDestination(event.target.value as BackupSettings['destination'])}><option value="b2">オンライン（B2）</option><option value="pc">PC</option><option value="both">両方</option></select></label>
           {canManage && <div className="backup-manual-execute"><button className="button button-secondary backup-execute-button" type="button" disabled={Boolean(loading)} onClick={() => void runManualBackup()}>{loading === 'manual-create' ? '作成中…' : <><HardDrive size={14} />バックアップを実行</>}</button></div>}
         </div>
-        <p className="backup-destination-note">PC保存では、ユーザーが選択したフォルダへバックアップファイルを保存します。フォルダを選択できない環境ではダウンロードとして保存されます。</p>
+        <p className="backup-destination-note">PC保存では、選択した親フォルダ内の「Vehicle Management Backup」へ保存します。PC保存先を利用できない場合は警告を表示して処理を中止します。</p>
       </div>}
     </section>
 
-    <section className="backup-history-section"><div className="backup-history-heading"><h3>バックアップ一覧</h3><div className="backup-history-heading-actions"><span>{backups.length}件</span>{canManage && <button className="button button-secondary backup-history-restore-button" type="button" disabled={Boolean(loading) || pcRestoreLoading} onClick={() => void openPcRestore()}><FileUp size={14} />PCからバックアップを復元</button>}</div></div>{backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}><span className="backup-icon"><Archive size={17} /></span><span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)} ・ {backup.trigger === 'automatic' ? '自動' : backup.trigger === 'pre-restore' ? '復元前' : '手動'}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件{backup.keepForever ? ' ・ 永久保存' : ''}{backup.protectedUntil ? ` ・ ${formatBackupDate(backup.protectedUntil)}まで保護` : ''}</small>{backup.note && <small className="backup-note-text">メモ：{backup.note}</small>}</span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackupKeepForever(backup)}>{loading === `keep-${backup.id}` ? '更新中…' : backup.keepForever ? '保存解除' : '永久保存'}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : '削除'}</button></span>}</div>)}</div>}</section>
+    <section className="backup-history-section">
+      <div className="backup-history-heading"><h3>バックアップ一覧</h3><div className="backup-history-heading-actions"><span>{backups.length}件</span>{canManage && <button className="button button-secondary backup-history-restore-button" type="button" disabled={Boolean(loading) || pcRestoreLoading || Boolean(pcRestoreAction)} onClick={() => void openPcRestore()}><FileUp size={14} />PCからバックアップを復元</button>}</div></div>
+      {backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}>
+        <IconWithChain visible={backup.keepForever} className="backup-icon-chain" chainWidth="100%" chainTop="-2%" chainDepth={18} linkThickness={2.5} linkSize={6}><span className="backup-icon"><Archive size={17} /></span></IconWithChain>
+        <span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)} ・ {backup.trigger === 'automatic' ? '自動' : backup.trigger === 'pre-restore' ? '復元前' : '手動'}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件{backup.protectedUntil ? ` ・ ${formatBackupDate(backup.protectedUntil)}まで保護` : ''}</small>{backup.note && <small className="backup-note-text">メモ：{backup.note}</small>}</span>
+        <div className="backup-meta"><span className={`backup-retention-status${backup.keepForever ? ' is-forever' : ''}`}>{backup.keepForever ? <><ShieldCheck size={13} />永久保存</> : <><Clock3 size={13} />自動削除予定</>}</span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="button button-secondary backup-retention-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackupKeepForever(backup)}>{loading === `keep-${backup.id}` ? '更新中…' : backup.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button><button className="button button-danger backup-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : <><Trash2 size={13} />削除</>}</button></span>}</div>
+      </div>)}</div>}
+    </section>
 
     {pcRestoreOpen && <div className="modal-backdrop pc-restore-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPcRestoreOpen(false) }}>
       <section className="modal pc-restore-modal" role="dialog" aria-modal="true" aria-labelledby="pc-restore-title">
@@ -268,11 +306,17 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
         <div className="pc-restore-modal-content">
           <div className="pc-restore-directory-bar">
             <div className="pc-restore-directory-copy"><strong>{pcRestoreSource === 'default' ? '既定の保存先' : '一時的に選択したフォルダ'}</strong><small>{formatPcDirectoryLabel(pcRestoreParentName, pcRestoreDirectoryName)}</small></div>
-            <div className="pc-restore-directory-actions"><button className="button button-secondary" type="button" disabled={pcRestoreLoading || Boolean(loading)} onClick={() => void runChoosePcRestoreDirectory()}><FolderOpen size={14} />別のフォルダを選択</button><button className="button button-secondary" type="button" disabled={pcRestoreSource === 'default' || pcRestoreLoading || Boolean(loading)} onClick={() => void loadDefaultPcBackups()}>既定のフォルダを選択</button></div>
+            <div className="pc-restore-directory-actions"><button className="button button-secondary" type="button" disabled={pcRestoreLoading || Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void runChoosePcRestoreDirectory()}><FolderOpen size={14} />別のフォルダを選択</button><button className="button button-secondary" type="button" disabled={pcRestoreSource === 'default' || pcRestoreLoading || Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void loadDefaultPcBackups()}>既定のフォルダを選択</button></div>
           </div>
           {pcRestoreError && <div className="pc-restore-error" role="alert">{pcRestoreError}</div>}
-          {pcRestoreLoading ? <div className="pc-restore-empty"><span>バックアップ一覧を読み込んでいます…</span></div> : pcRestoreFiles.length === 0 ? <div className="pc-restore-empty"><Archive size={26} /><strong>バックアップが見つかりません</strong><span>選択したフォルダ内に復元できるバックアップファイルがありません。</span></div> : <div className="pc-restore-list" role="listbox" aria-label="PCバックアップ一覧">{pcRestoreFiles.map((file) => <button className={`pc-restore-file${pcRestoreSelected?.name === file.name ? ' is-selected' : ''}`} key={file.name} type="button" role="option" aria-selected={pcRestoreSelected?.name === file.name} onClick={() => setPcRestoreSelected(file)}><span className="pc-restore-file-icon"><Archive size={16} /></span><span className="pc-restore-file-copy"><strong>{formatBackupDate(file.createdAt)}{file.keepForever ? ' ・ 永久保存' : ''}</strong><small>{file.note ? `メモ：${file.note} ・ ` : ''}{formatFileSize(file.size)} ・ {file.name}</small></span></button>)}</div>}
-          <div className="pc-restore-modal-footer"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setPcRestoreOpen(false)}>キャンセル</button><button className="button button-primary" type="button" disabled={!pcRestoreSelected || Boolean(loading) || pcRestoreLoading} onClick={() => void runPcRestore()}>{loading === 'pc-restore' ? '復元中…' : <><RotateCcw size={14} />選択したバックアップを復元</>}</button></div>
+          {pcRestoreLoading ? <div className="pc-restore-empty"><span>バックアップ一覧を読み込んでいます…</span></div> : pcRestoreFiles.length === 0 ? <div className="pc-restore-empty"><Archive size={26} /><strong>バックアップが見つかりません</strong><span>選択したフォルダ内に復元できるバックアップファイルがありません。</span></div> : <div className="pc-restore-list" role="listbox" aria-label="PCバックアップ一覧">{pcRestoreFiles.map((file) => <div className={`pc-restore-file${pcRestoreSelected?.name === file.name ? ' is-selected' : ''}`} key={file.name} role="option" aria-selected={pcRestoreSelected?.name === file.name}>
+            <button className="pc-restore-file-select" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => setPcRestoreSelected(file)}>
+              <IconWithChain visible={file.keepForever} className="pc-restore-icon-chain" chainWidth="100%" chainTop="-2%" chainDepth={18} linkThickness={2.5} linkSize={6}><span className="pc-restore-file-icon"><Archive size={16} /></span></IconWithChain>
+              <span className="pc-restore-file-copy"><strong>{formatBackupDate(file.createdAt)}</strong><small>{file.note ? `メモ：${file.note} ・ ` : ''}{formatFileSize(file.size)} ・ {file.name}</small><span className={`pc-restore-retention${file.keepForever ? ' is-forever' : ''}`}>{file.keepForever ? <><ShieldCheck size={13} />永久保存</> : <><Clock3 size={13} />自動削除予定</>}</span></span>
+            </button>
+            <span className="pc-restore-file-actions"><button className="button button-secondary pc-restore-retention-button" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void runPcRestoreKeepForever(file)}>{pcRestoreAction === `keep-${file.name}` ? '更新中…' : file.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button><button className="button button-danger pc-restore-delete-button" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void runDeletePcBackup(file)}>{pcRestoreAction === `delete-${file.name}` ? '削除中…' : <><Trash2 size={13} />削除</>}</button></span>
+          </div>)}</div>}
+          <div className="pc-restore-modal-footer"><button className="button button-secondary" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => setPcRestoreOpen(false)}>キャンセル</button><button className="button button-primary" type="button" disabled={!pcRestoreSelected || Boolean(loading) || pcRestoreLoading || Boolean(pcRestoreAction)} onClick={() => void runPcRestore()}>{loading === 'pc-restore' ? '復元中…' : <><RotateCcw size={14} />選択したバックアップを復元</>}</button></div>
         </div>
       </section>
     </div>}

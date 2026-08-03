@@ -117,6 +117,35 @@ export async function readPcBackup(name: string): Promise<BackupExport> {
   return parseBackupExport(await file.text())
 }
 
+export async function updatePcBackupFileRetention(name: string, keepForever: boolean): Promise<PcBackupFile> {
+  if (!activeRestoreDirectory) throw new Error('復元元のPCバックアップフォルダが選択されていません。')
+  if (!backupFilePattern.test(name)) throw new Error('選択したファイルはバックアップ形式ではありません。')
+
+  const sourceHandle = await activeRestoreDirectory.getFileHandle(name)
+  const sourceFile = await sourceHandle.getFile()
+  const serialized = await sourceFile.text()
+  const backup = parseBackupExport(serialized)
+  const nextName = getPcBackupFileName(name, keepForever)
+
+  if (nextName !== name) {
+    const targetHandle = await activeRestoreDirectory.getFileHandle(nextName, { create: true })
+    const writable = await targetHandle.createWritable()
+    await writable.write(serialized)
+    await writable.close()
+    await activeRestoreDirectory.removeEntry(name)
+  }
+
+  const targetHandle = await activeRestoreDirectory.getFileHandle(nextName)
+  const targetFile = await targetHandle.getFile()
+  return toPcBackupFile(nextName, targetFile, backup, keepForever)
+}
+
+export async function deletePcBackupFile(name: string) {
+  if (!activeRestoreDirectory) throw new Error('復元元のPCバックアップフォルダが選択されていません。')
+  if (!backupFilePattern.test(name)) throw new Error('選択したファイルはバックアップ形式ではありません。')
+  await activeRestoreDirectory.removeEntry(name)
+}
+
 async function getWritableDirectory() {
   if (preparedWritableDirectory) return preparedWritableDirectory
   const stored = await readStoredDirectory()
@@ -191,19 +220,32 @@ async function readPcBackupFiles(directory: DirectoryHandleLike) {
     try {
       const file = await (entry as FileHandleLike).getFile()
       const backup = parseBackupExport(await file.text())
-      files.push({
-        name,
-        size: file.size,
-        lastModified: file.lastModified,
-        createdAt: backup.createdAt,
-        note: backup.note?.trim() ?? '',
-        keepForever: name.includes('-permanent.json'),
-      })
+      files.push(toPcBackupFile(name, file, backup, isPermanentPcBackupFile(name)))
     } catch {
       // Ignore unrelated or incomplete JSON files in the selected folder.
     }
   }
   return files.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+}
+
+function toPcBackupFile(name: string, file: File, backup: BackupExport, keepForever: boolean): PcBackupFile {
+  return {
+    name,
+    size: file.size,
+    lastModified: file.lastModified,
+    createdAt: backup.createdAt,
+    note: backup.note?.trim() ?? '',
+    keepForever,
+  }
+}
+
+function isPermanentPcBackupFile(name: string) {
+  return /-permanent\.json$/u.test(name)
+}
+
+function getPcBackupFileName(name: string, keepForever: boolean) {
+  if (keepForever) return name.endsWith('.json') && !isPermanentPcBackupFile(name) ? name.replace(/\.json$/u, '-permanent.json') : name
+  return name.replace(/-permanent\.json$/u, '.json')
 }
 
 function parseBackupExport(serialized: string): BackupExport {

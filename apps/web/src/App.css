@@ -1396,7 +1396,13 @@
 .backup-copy strong { color: var(--text); font-size: 12px; }
 .backup-copy small { color: var(--text-muted); font-size: 10px; }
 .backup-note-text { color: var(--text-secondary) !important; overflow-wrap: anywhere; }
-.backup-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.backup-meta { display: grid; justify-items: end; gap: 8px; margin-left: auto; }
+.backup-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
+.backup-actions .button { min-height: 30px; padding: 0 9px; font-size: 10px; box-shadow: none; }
+.backup-retention-button { color: var(--primary); }
+.backup-delete-button { color: var(--danger); }
+.backup-retention-status { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.backup-retention-status.is-forever { color: var(--success); }
 .backup-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .backup-settings-field { display: grid; gap: 6px; min-width: 0; }
 .backup-settings-field > span { color: var(--text-secondary); font-size: 10px; font-weight: 800; }
@@ -1426,13 +1432,23 @@
 .pc-restore-directory-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .pc-restore-directory-actions .button { min-height: 34px; padding: 0 10px; font-size: 10px; box-shadow: none; }
 .pc-restore-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding: 1px; }
-.pc-restore-file { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 11px 12px; color: inherit; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); text-align: left; cursor: pointer; }
-.pc-restore-file:hover, .pc-restore-file:focus-visible { border-color: #9eb9eb; background: #f8fbff; }
+.pc-restore-file { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 10px 11px; color: inherit; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.pc-restore-file:hover, .pc-restore-file:focus-within { border-color: #9eb9eb; background: #f8fbff; }
 .pc-restore-file.is-selected { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1); }
+.pc-restore-file-select { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 0; color: inherit; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.pc-restore-file-select:disabled { cursor: default; opacity: .7; }
 .pc-restore-file-icon { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px; color: var(--primary); border-radius: 8px; background: var(--primary-soft); }
+.backup-icon-chain, .pc-restore-icon-chain { width: 32px; min-width: 32px; height: 32px; overflow: hidden; }
+.pc-restore-icon-chain { flex: 0 0 32px; }
 .pc-restore-file-copy { display: grid; gap: 4px; min-width: 0; }
 .pc-restore-file-copy strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .pc-restore-file-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.pc-restore-retention.is-forever { color: var(--success); }
+.pc-restore-file-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.pc-restore-file-actions .button { min-height: 30px; padding: 0 8px; font-size: 10px; box-shadow: none; }
+.pc-restore-retention-button { color: var(--primary); }
+.pc-restore-delete-button { color: var(--danger); }
 .pc-restore-empty { display: grid; place-items: center; align-content: center; gap: 7px; min-height: 150px; padding: 16px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
 .pc-restore-empty strong { color: var(--text); font-size: 12px; }
 .pc-restore-empty span { font-size: 10px; line-height: 1.5; }
@@ -1485,7 +1501,9 @@
 .archive-meta { display: grid; justify-items: end; gap: 8px; }
 .archive-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .archive-retention.is-forever { color: var(--success); }
-.archive-actions { display: flex; align-items: center; gap: 8px; }
+.archive-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.archive-actions .button { min-height: 30px; padding: 0 9px; font-size: 10px; box-shadow: none; }
+.archive-retention-button { color: var(--primary); }
 .archive-delete-button { color: var(--danger); }
 .archive-empty { min-height: 220px; }
 .settings-empty strong { color: var(--text); font-size: 14px; }
@@ -1648,10 +1666,18 @@
   .backup-history-heading { align-items: flex-start; flex-direction: column; }
   .backup-history-heading-actions { width: 100%; justify-content: space-between; }
   .backup-history-restore-button { flex: 1; justify-content: center; }
+  .backup-row { align-items: flex-start; flex-wrap: wrap; }
+  .backup-copy { flex: 1 1 calc(100% - 55px); }
+  .backup-meta { width: 100%; justify-items: start; margin-left: 43px; }
+  .backup-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
   .pc-restore-modal-content { padding: 16px 18px 18px; }
   .pc-restore-directory-bar { align-items: stretch; flex-direction: column; }
   .pc-restore-directory-actions { justify-content: stretch; }
   .pc-restore-directory-actions .button { flex: 1; justify-content: center; }
+  .pc-restore-file { align-items: flex-start; flex-wrap: wrap; }
+  .pc-restore-file-select { flex-basis: 100%; }
+  .pc-restore-file-actions { width: 100%; }
+  .pc-restore-file-actions .button { flex: 1; justify-content: center; }
   .pc-restore-modal-footer { flex-direction: column-reverse; }
   .pc-restore-modal-footer .button { width: 100%; }
   .pc-backup-warning-content { padding: 16px 18px 18px; }
