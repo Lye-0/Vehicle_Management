@@ -1489,10 +1489,10 @@
 .archive-count { color: var(--text-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .archive-list { display: grid; gap: 8px; }
 .archive-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
-.archive-kind { display: grid; place-items: center; width: 43px; height: 30px; border-radius: 7px; font-size: 10px; font-weight: 800; }
+.archive-kind { display: grid; place-items: center; width: 38px; height: 32px; border-radius: 8px; font-size: 10px; font-weight: 800; }
 .archive-kind-sales { color: #0f766e; background: #e5f8f3; }
 .archive-kind-maintenance { color: #7c3aed; background: #f2edff; }
-.icon-with-chain.archive-icon-chain { width: 43px; min-width: 43px; height: 30px; overflow: hidden; }
+.icon-with-chain.archive-icon-chain { width: 38px; min-width: 38px; height: 32px; overflow: hidden; }
 .icon-with-chain.archive-icon-chain .icon-with-chain-svg { top: 3%; width: 88%; height: 94%; }
 .icon-with-chain { position: relative; z-index: 0; display: inline-grid; place-items: center; width: max-content; min-width: 43px; height: 30px; overflow: visible; vertical-align: middle; }
 .icon-with-chain-content { position: relative; z-index: 1; display: inline-grid; }
