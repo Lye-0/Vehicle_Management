@@ -1439,10 +1439,12 @@
 .pc-restore-file-select:disabled { cursor: default; opacity: .7; }
 .pc-restore-file-icon { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px; color: var(--primary); border-radius: 8px; background: var(--primary-soft); }
 .backup-icon-chain, .pc-restore-icon-chain { width: 32px; min-width: 32px; height: 32px; overflow: hidden; }
+.backup-icon-chain .icon-with-chain-svg, .pc-restore-icon-chain .icon-with-chain-svg { top: 3%; width: 78%; height: 94%; }
 .pc-restore-icon-chain { flex: 0 0 32px; }
 .pc-restore-file-copy { display: grid; gap: 4px; min-width: 0; }
 .pc-restore-file-copy strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .pc-restore-file-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-file-meta { display: grid; justify-items: end; gap: 8px; flex: 0 0 auto; }
 .pc-restore-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .pc-restore-retention.is-forever { color: var(--success); }
 .pc-restore-file-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
@@ -1676,6 +1678,7 @@
   .pc-restore-directory-actions .button { flex: 1; justify-content: center; }
   .pc-restore-file { align-items: flex-start; flex-wrap: wrap; }
   .pc-restore-file-select { flex-basis: 100%; }
+  .pc-restore-file-meta { width: 100%; justify-items: start; margin-left: 43px; }
   .pc-restore-file-actions { width: 100%; }
   .pc-restore-file-actions .button { flex: 1; justify-content: center; }
   .pc-restore-modal-footer { flex-direction: column-reverse; }

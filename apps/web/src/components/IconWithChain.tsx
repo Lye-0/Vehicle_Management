@@ -31,7 +31,7 @@ export function IconWithChain({
   const depth = Math.max(18, Math.min(42, chainDepth))
   const centerY = 10 + depth
   const innerY = 10 + depth * 0.58
-  const size = Math.max(8, Math.min(18, linkSize))
+  const size = Math.max(4, Math.min(18, linkSize))
   const rx = size
   const ry = size * 0.48
   const style = {
