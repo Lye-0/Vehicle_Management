@@ -146,9 +146,10 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
   const [navigationTarget, setNavigationTarget] = useState<(VehicleHistoryNavigation | CustomerVehicleNavigation) | null>(null)
 
-  useEffect(() => {
-    if (navigationTarget?.section === activeSection && activeSection !== 'customers') setNavigationTarget(null)
-  }, [activeSection, navigationTarget])
+  function selectSection(nextSection: SectionId) {
+    if (nextSection !== activeSection) setNavigationTarget(null)
+    setActiveSection(nextSection)
+  }
 
   function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
     setNavigationTarget(target)
@@ -167,7 +168,7 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
 
   return (
     <div className="app-shell">
-      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={setActiveSection} onSignOut={onSignOut} />
+      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={selectSection} onSignOut={onSignOut} />
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
