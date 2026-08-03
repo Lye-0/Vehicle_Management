@@ -123,6 +123,10 @@ export type SalesDocument = {
   taxRounding: '切り捨て' | '四捨五入'
   note: string
   archivedAt: string | null
+  archivedPreviousStatus: SalesStatus | null
+  archivedBy: string | null
+  purgeAt: string | null
+  keepForever: boolean
   items: SalesLineItem[]
 }
 

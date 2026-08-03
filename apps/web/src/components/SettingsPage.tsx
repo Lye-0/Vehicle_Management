@@ -1,21 +1,27 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
-import { Archive, Banknote, Building2, CheckCircle2, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
+import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
-import { createBackup, deleteBackup, fetchBackups, restoreBackup, type BackupRecord } from '../lib/backupsApi'
+import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '../lib/backupsApi'
+import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
+import { BackupSettingsPanel } from './BackupSettingsPanel'
+import { IconWithChain } from './IconWithChain'
 
-type SettingsTab = 'shop' | 'tax' | 'masters' | 'data' | 'members'
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
+
+const initialBackupSettings: BackupSettings = { autoEnabled: false, frequency: 'daily', destination: 'b2', retentionDays: 30, archiveRetentionDays: 30, pcRetentionDays: 30 }
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗情報', description: '店舗情報と帳票に表示する内容', icon: Building2 },
   { id: 'tax', label: '税・端数処理', description: '消費税と請求期限の初期値', icon: ReceiptText },
   { id: 'masters', label: '明細候補', description: '販売・整備で選べる項目', icon: Settings2 },
+  { id: 'archive', label: 'アーカイブ', description: '削除した書類の復元と整理', icon: Archive },
   { id: 'data', label: 'データ', description: 'データの入出力とバックアップ', icon: Table2 },
   { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
 ]
@@ -28,6 +34,8 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
 
 export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
+  const [canManageBackupSettings, setCanManageBackupSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -37,10 +45,12 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   useEffect(() => {
     let cancelled = false
-    fetchSettings()
-      .then((nextSettings) => {
+    Promise.all([fetchSettings(), fetchBackupSettings()])
+      .then(([nextSettings, backupResponse]) => {
         if (!cancelled) {
           setSettings(nextSettings)
+          setBackupSettings(backupResponse.settings)
+          setCanManageBackupSettings(backupResponse.canManage)
           setError('')
         }
       })
@@ -112,8 +122,12 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setSaving(true)
     setSaved(false)
     try {
-      const nextSettings = await updateSettings(settings)
+      const [nextSettings, nextBackupSettings] = await Promise.all([
+        updateSettings(settings),
+        canManageBackupSettings ? updateBackupSettings({ ...backupSettings, destination: 'b2' }) : Promise.resolve(backupSettings),
+      ])
       setSettings(nextSettings)
+      setBackupSettings(nextBackupSettings)
       setSaved(true)
       setError('')
       onReloadSession?.()
@@ -123,6 +137,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSaving(false)
     }
   }
+
+  const updateBackupSettingsDraft = useCallback((nextSettings: BackupSettings) => {
+    setBackupSettings(nextSettings)
+    setSaved(false)
+  }, [])
 
   async function exportCsv(resource: CsvResource) {
     setExporting(resource)
@@ -150,7 +169,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
@@ -164,8 +183,80 @@ function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetG
   }
 }
 
-function DataSettingsPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
-  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupPanel /></>
+function DataSettingsPanel({ exporting, onExport, backupSettings, onBackupSettingsChange }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void; backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
+  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></>
+}
+
+function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
+  const [archives, setArchives] = useState<ArchiveRecord[]>([])
+  const [canManage, setCanManage] = useState(false)
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetchArchives(query)
+      setArchives(response.archives)
+      setCanManage(response.canManage)
+      setError('')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'アーカイブ一覧を読み込めませんでした。')
+    }
+  }, [query])
+
+  useEffect(() => { void load() }, [load])
+
+  async function runRestore(record: ArchiveRecord) {
+    if (!window.confirm(`${record.number}を通常の一覧へ復元しますか？`)) return
+    setLoading(`restore-${record.kind}-${record.id}`)
+    setError('')
+    setMessage('')
+    try {
+      await restoreArchive(record)
+      setArchives((current) => current.filter((item) => item.id !== record.id || item.kind !== record.kind))
+      setMessage(`${record.number}を復元しました。`)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '書類を復元できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runPermanentDelete(record: ArchiveRecord) {
+    if (!canManage) return
+    if (!window.confirm(`${record.number}を完全に削除しますか？この操作は取り消せません。`)) return
+    setLoading(`delete-${record.kind}-${record.id}`)
+    setError('')
+    setMessage('')
+    try {
+      await deleteArchive(record)
+      setArchives((current) => current.filter((item) => item.id !== record.id || item.kind !== record.kind))
+      setMessage(`${record.number}を完全に削除しました。`)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '書類を完全に削除できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function runKeepForever(record: ArchiveRecord) {
+    setLoading(`keep-${record.kind}-${record.id}`)
+    setError('')
+    setMessage('')
+    try {
+      const response = await updateArchiveRetention(record, !record.keepForever)
+      setArchives((current) => current.map((item) => item.id === record.id && item.kind === record.kind ? { ...item, keepForever: response.keepForever, purgeAt: response.purgeAt } : item))
+      setMessage(response.keepForever ? `${record.number}を永久保存にしました。` : `${record.number}の永久保存を解除しました。`)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '保存期間を変更できませんでした。')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, archiveRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></section>{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} className="archive-icon-chain" chainWidth="88%" chainTop="-2%" chainDepth={18} linkThickness={2} linkSize={5}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small>{!record.keepForever && getArchiveExpiration(record, backupSettings.archiveRetentionDays) && <small className="archive-expiration-text">期限：{formatBackupDate(getArchiveExpiration(record, backupSettings.archiveRetentionDays) ?? '')}</small>}</div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />自動削除予定</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="button button-secondary archive-retention-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button>{canManage && <button className="button button-danger archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
 }
 
 function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdated?: (user: User) => void }) {
@@ -614,79 +705,20 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function BackupPanel() {
-  const [backups, setBackups] = useState<BackupRecord[]>([])
-  const [canManage, setCanManage] = useState(false)
-  const [loading, setLoading] = useState('')
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-
-  async function load() {
-    try {
-      const response = await fetchBackups()
-      setBackups(response.backups)
-      setCanManage(response.canManage)
-      setError('')
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'バックアップ一覧を読み込めませんでした。')
-    }
-  }
-
-  useEffect(() => { void load() }, [])
-
-  async function runBackup() {
-    setLoading('create')
-    setError('')
-    setMessage('')
-    try {
-      await createBackup()
-      setMessage('バックアップを作成しました。')
-      await load()
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'バックアップを作成できませんでした。')
-    } finally {
-      setLoading('')
-    }
-  }
-
-  async function runRestore(backup: BackupRecord) {
-    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）で現在の組織データを置き換えます。続行しますか？`)) return
-    setLoading(`restore-${backup.id}`)
-    setError('')
-    setMessage('')
-    try {
-      const response = await restoreBackup(backup.id)
-      setMessage(`${response.rowCount}件のデータを復元しました。画面を再読み込みします。`)
-      window.setTimeout(() => window.location.reload(), 800)
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'バックアップを復元できませんでした。')
-    } finally {
-      setLoading('')
-    }
-  }
-
-  async function runDelete(backup: BackupRecord) {
-    if (!window.confirm(`このバックアップ（${formatBackupDate(backup.createdAt)}）を削除しますか？`)) return
-    setLoading(`delete-${backup.id}`)
-    setError('')
-    setMessage('')
-    try {
-      await deleteBackup(backup.id)
-      setBackups((current) => current.filter((item) => item.id !== backup.id))
-      setMessage('バックアップを削除しました。')
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'バックアップを削除できませんでした。')
-    } finally {
-      setLoading('')
-    }
-  }
-
-  return <section className="panel settings-panel backup-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>バックアップ・復元</h2><p>D1の組織データとB2の車両添付ファイルをまとめて保存します。</p></div>{canManage && <button className="button button-secondary settings-add-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackup()}>{loading === 'create' ? '作成中…' : '今すぐバックアップ'}</button>}</div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}{!canManage && !error && <div className="backup-notice">バックアップの作成・復元は管理者のみ実行できます。</div>}{backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}><span className="backup-icon"><Archive size={17} /></span><span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件</small></span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : '削除'}</button></span>}</div>)}</div>}</section>
-}
-
 function formatBackupDate(value: string) {
   const date = new Date(value.replace(' ', 'T'))
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP')
+}
+
+function getArchiveExpiration(record: ArchiveRecord, retentionDays: number) {
+  return record.purgeAt ?? addRetentionDays(record.archivedAt ?? '', retentionDays)
+}
+
+function addRetentionDays(value: string, days: number) {
+  const date = new Date(value.replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return null
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString()
 }
 
 function ShopSettingsPanel({ settings, onUpdate }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void }) {

@@ -3,6 +3,8 @@ import { appSettings, customers, salesDocumentItems, salesDocuments, vehicleFile
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
+import { restoreArchivedDocument } from '../document-archive'
+import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -38,7 +40,7 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
 
     if (!documentMatch) throw new HttpError(404, '販売書類のAPIが見つかりません。')
     if (request.method === 'PATCH') return await updateSalesDocument(request, env, database, documentMatch[1], organizationId)
-    if (request.method === 'DELETE') return await archiveSalesDocument(env, database, documentMatch[1], organizationId)
+    if (request.method === 'DELETE') return await archiveSalesDocument(env, database, documentMatch[1], organizationId, context.user.uid)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -272,6 +274,10 @@ function serializeSalesDocument(
     total: document.total,
     note: document.note ?? '',
     archivedAt: document.archivedAt,
+    archivedPreviousStatus: document.archivedPreviousStatus,
+    archivedBy: document.archivedBy,
+    purgeAt: document.purgeAt,
+    keepForever: document.keepForever,
     items: items.map((item) => ({
       id: item.id,
       itemType: item.itemType,
@@ -460,17 +466,15 @@ async function ensureSalesDocumentNumberAvailable(database: ReturnType<typeof cr
   if (duplicate && duplicate.id !== exceptId) throw new HttpError(409, '同じ書類番号の販売書類がすでに存在します。')
 }
 
-async function archiveSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
-  const current = await database.select({ id: salesDocuments.id }).from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
-  if (!current) throw new HttpError(404, '販売書類が見つかりません。')
-  await database.update(salesDocuments).set({ status: 'アーカイブ済み', archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+async function archiveSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string, userId: string) {
+  const archived = await archiveDocumentFromRoute(database, 'sales', documentId, organizationId, userId)
+  if (!archived) throw new HttpError(404, '販売書類が見つかりません。')
   return jsonResponse({ archived: true }, 200, env)
 }
 
 async function restoreSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
-  const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
-  if (!current) throw new HttpError(404, '販売書類が見つかりません。')
-  await database.update(salesDocuments).set({ status: '下書き', archivedAt: null, updatedAt: new Date().toISOString() }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+  const restored = await restoreArchivedDocument(database, 'sales', documentId, organizationId)
+  if (!restored) throw new HttpError(404, '販売書類が見つかりません。')
   return jsonResponse({ restored: true }, 200, env)
 }
 

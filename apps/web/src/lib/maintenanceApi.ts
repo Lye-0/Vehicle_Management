@@ -75,6 +75,11 @@ export type MaintenanceDocument = {
   fees: MandatoryFees
   adjustment: number
   note: string
+  archivedAt: string | null
+  archivedPreviousStatus: MaintenanceStatus | null
+  archivedBy: string | null
+  purgeAt: string | null
+  keepForever: boolean
   items: MaintenanceLineItem[]
 }
 

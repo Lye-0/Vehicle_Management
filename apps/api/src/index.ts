@@ -9,7 +9,9 @@ import { handleOrganizationRoutes } from './routes/organization-routes'
 import { handleMemberRoutes } from './routes/member-routes'
 import { handleImportRoutes } from './routes/import-routes'
 import { handleBackupRoutes } from './routes/backup-routes'
+import { handleArchiveRoutes } from './routes/archive-routes'
 import { handleInspectionRoutes } from './routes/inspection-routes'
+import { runScheduledBackupMaintenance } from './routes/backup-routes'
 import { corsHeaders, jsonResponse } from './http'
 import { getEnvironmentIssues } from './environment'
 
@@ -38,6 +40,9 @@ export default {
 
     const backupRouteResponse = await handleBackupRoutes(request, env)
     if (backupRouteResponse) return backupRouteResponse
+
+    const archiveRouteResponse = await handleArchiveRoutes(request, env)
+    if (archiveRouteResponse) return archiveRouteResponse
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
@@ -75,6 +80,9 @@ export default {
     }
 
     return jsonResponse({ error: "Not Found" }, 404, env)
+  },
+  async scheduled(controller, env): Promise<void> {
+    await runScheduledBackupMaintenance(env, controller.scheduledTime)
   },
 } satisfies ExportedHandler<Env>;
 
