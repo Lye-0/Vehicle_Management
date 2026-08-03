@@ -1396,6 +1396,7 @@
 .backup-copy strong { color: var(--text); font-size: 12px; }
 .backup-copy small { color: var(--text-muted); font-size: 10px; }
 .backup-note-text { color: var(--text-secondary) !important; overflow-wrap: anywhere; }
+.backup-expiration-text { color: var(--text-secondary) !important; }
 .backup-meta { display: grid; justify-items: end; gap: 8px; margin-left: auto; }
 .backup-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .backup-actions .button { min-height: 30px; padding: 0 9px; font-size: 10px; box-shadow: none; }
@@ -1444,6 +1445,8 @@
 .pc-restore-file-copy { display: grid; gap: 4px; min-width: 0; }
 .pc-restore-file-copy strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .pc-restore-file-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pc-restore-expiration-text, .pc-restore-note-text { color: var(--text-secondary) !important; }
+.pc-restore-file-name { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .pc-restore-file-meta { display: grid; justify-items: end; gap: 8px; flex: 0 0 auto; }
 .pc-restore-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .pc-restore-retention.is-forever { color: var(--success); }
@@ -1502,6 +1505,7 @@
 .archive-copy strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .archive-copy span { overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .archive-copy small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.archive-expiration-text { color: var(--text-secondary) !important; }
 .archive-meta { display: grid; justify-items: end; gap: 8px; }
 .archive-retention { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .archive-retention.is-forever { color: var(--success); }

@@ -234,7 +234,7 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
     setMessage('')
     try {
       const response = await updateBackupRetention(backup.id, !backup.keepForever)
-      setBackups((current) => current.map((item) => item.id === backup.id ? { ...item, keepForever: response.keepForever } : item))
+      setBackups((current) => current.map((item) => item.id === backup.id ? { ...item, keepForever: response.keepForever, protectedUntil: response.protectedUntil } : item))
       setMessage(response.keepForever ? 'バックアップを永久保存にしました。' : 'バックアップの永久保存を解除しました。')
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'バックアップの保存期間を変更できませんでした。')
@@ -295,7 +295,7 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
       <div className="backup-history-heading"><h3>バックアップ一覧</h3><div className="backup-history-heading-actions"><span>{backups.length}件</span>{canManage && <button className="button button-secondary backup-history-restore-button" type="button" disabled={Boolean(loading) || pcRestoreLoading || Boolean(pcRestoreAction)} onClick={() => void openPcRestore()}><FileUp size={14} />PCからバックアップを復元</button>}</div></div>
       {backups.length === 0 ? <div className="settings-empty backup-empty"><Archive size={26} /><span>バックアップ履歴はありません。</span></div> : <div className="backup-list">{backups.map((backup) => <div className="backup-row" key={backup.id}>
         <IconWithChain visible={backup.keepForever} className="backup-icon-chain" chainWidth="100%" chainTop="-2%" chainDepth={18} linkThickness={2.5} linkSize={6}><span className="backup-icon"><Archive size={17} /></span></IconWithChain>
-        <span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)} ・ {backup.trigger === 'automatic' ? '自動' : backup.trigger === 'pre-restore' ? '復元前' : '手動'}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件{backup.protectedUntil ? ` ・ ${formatBackupDate(backup.protectedUntil)}まで保護` : ''}</small>{backup.note && <small className="backup-note-text">メモ：{backup.note}</small>}</span>
+        <span className="backup-copy"><strong>{formatBackupDate(backup.createdAt)} ・ {backup.trigger === 'automatic' ? '自動' : backup.trigger === 'pre-restore' ? '復元前' : '手動'}</strong><small>{backup.rowCount}行 ・ 添付{backup.fileCount}件</small>{!backup.keepForever && getBackupExpiration(backup, backupSettings.retentionDays) && <small className="backup-expiration-text">期限：{formatBackupDate(getBackupExpiration(backup, backupSettings.retentionDays) ?? '')}</small>}{backup.note && <small className="backup-note-text">メモ：{backup.note}</small>}</span>
         <div className="backup-meta"><span className={`backup-retention-status${backup.keepForever ? ' is-forever' : ''}`}>{backup.keepForever ? <><ShieldCheck size={13} />永久保存</> : <><Clock3 size={13} />自動削除予定</>}</span>{canManage && <span className="backup-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(backup)}>{loading === `restore-${backup.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="button button-secondary backup-retention-button" type="button" disabled={Boolean(loading)} onClick={() => void runBackupKeepForever(backup)}>{loading === `keep-${backup.id}` ? '更新中…' : backup.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button><button className="button button-danger backup-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runDelete(backup)}>{loading === `delete-${backup.id}` ? '削除中…' : <><Trash2 size={13} />削除</>}</button></span>}</div>
       </div>)}</div>}
     </section>
@@ -312,7 +312,7 @@ export function BackupSettingsPanel({ backupSettings, onBackupSettingsChange }: 
           {pcRestoreLoading ? <div className="pc-restore-empty"><span>バックアップ一覧を読み込んでいます…</span></div> : pcRestoreFiles.length === 0 ? <div className="pc-restore-empty"><Archive size={26} /><strong>バックアップが見つかりません</strong><span>選択したフォルダ内に復元できるバックアップファイルがありません。</span></div> : <div className="pc-restore-list" role="listbox" aria-label="PCバックアップ一覧">{pcRestoreFiles.map((file) => <div className={`pc-restore-file${pcRestoreSelected?.name === file.name ? ' is-selected' : ''}`} key={file.name} role="option" aria-selected={pcRestoreSelected?.name === file.name}>
             <button className="pc-restore-file-select" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => setPcRestoreSelected(file)}>
               <IconWithChain visible={file.keepForever} className="pc-restore-icon-chain" chainWidth="88%" chainTop="-2%" chainDepth={18} linkThickness={2} linkSize={5}><span className="pc-restore-file-icon"><Archive size={16} /></span></IconWithChain>
-              <span className="pc-restore-file-copy"><strong>{formatBackupDate(file.createdAt)}</strong><small>{file.note ? `メモ：${file.note} ・ ` : ''}{formatFileSize(file.size)} ・ {file.name}</small></span>
+              <span className="pc-restore-file-copy"><strong>{formatBackupDate(file.createdAt)}</strong><small>{file.rowCount}行 ・ 添付{file.fileCount}件</small>{!file.keepForever && getPcBackupExpiration(file, backupSettings.pcRetentionDays) && <small className="pc-restore-expiration-text">期限：{formatBackupDate(getPcBackupExpiration(file, backupSettings.pcRetentionDays) ?? '')}</small>}{file.note && <small className="pc-restore-note-text">メモ：{file.note}</small>}<small className="pc-restore-file-name">{formatFileSize(file.size)} ・ {file.name}</small></span>
             </button>
             <div className="pc-restore-file-meta"><span className={`pc-restore-retention${file.keepForever ? ' is-forever' : ''}`}>{file.keepForever ? <><ShieldCheck size={13} />永久保存</> : <><Clock3 size={13} />自動削除予定</>}</span><span className="pc-restore-file-actions"><button className="button button-secondary pc-restore-retention-button" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void runPcRestoreKeepForever(file)}>{pcRestoreAction === `keep-${file.name}` ? '更新中…' : file.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button><button className="button button-danger pc-restore-delete-button" type="button" disabled={Boolean(loading) || Boolean(pcRestoreAction)} onClick={() => void runDeletePcBackup(file)}>{pcRestoreAction === `delete-${file.name}` ? '削除中…' : <><Trash2 size={13} />削除</>}</button></span></div>
           </div>)}</div>}
@@ -350,4 +350,19 @@ function formatFileSize(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 ** 2).toFixed(1)} MB`
+}
+
+function getBackupExpiration(backup: BackupRecord, retentionDays: number) {
+  return backup.protectedUntil ?? addRetentionDays(backup.createdAt, retentionDays)
+}
+
+function getPcBackupExpiration(file: PcBackupFile, retentionDays: number) {
+  return addRetentionDays(file.lastModified, retentionDays)
+}
+
+function addRetentionDays(value: string | number, days: number) {
+  const date = typeof value === 'number' ? new Date(value) : new Date(value.replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return null
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString()
 }

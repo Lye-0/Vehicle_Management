@@ -140,8 +140,11 @@ async function updateBackup(request: Request, env: Env, database: ReturnType<typ
   if (typeof body.keepForever !== 'boolean') throw new HttpError(400, '永久保存の指定が不正です。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
-  await database.update(backupRecords).set({ keepForever: body.keepForever, updatedAt: new Date().toISOString() }).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).run()
-  return jsonResponse({ updated: true, keepForever: body.keepForever }, 200, env)
+  const settings = await loadBackupSettings(database, context.organization.organizationId)
+  const updatedAt = new Date()
+  const protectedUntil = body.keepForever ? null : record.keepForever ? addDays(updatedAt, settings.retentionDays) : record.protectedUntil
+  await database.update(backupRecords).set({ keepForever: body.keepForever, protectedUntil, updatedAt: updatedAt.toISOString() }).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).run()
+  return jsonResponse({ updated: true, keepForever: body.keepForever, protectedUntil }, 200, env)
 }
 
 export async function runScheduledBackupMaintenance(env: Env, scheduledTime = Date.now()) {

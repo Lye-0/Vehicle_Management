@@ -27,6 +27,8 @@ export type PcBackupFile = {
   size: number
   lastModified: number
   createdAt: string
+  rowCount: number
+  fileCount: number
   note: string
   keepForever: boolean
 }
@@ -234,9 +236,15 @@ function toPcBackupFile(name: string, file: File, backup: BackupExport, keepFore
     size: file.size,
     lastModified: file.lastModified,
     createdAt: backup.createdAt,
+    rowCount: countBackupRows(backup),
+    fileCount: backup.files.length,
     note: backup.note?.trim() ?? '',
     keepForever,
   }
+}
+
+function countBackupRows(backup: BackupExport) {
+  return Object.values(backup.tables).reduce((total, rows) => total + rows.length, 0)
 }
 
 function isPermanentPcBackupFile(name: string) {

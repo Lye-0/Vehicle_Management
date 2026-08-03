@@ -73,7 +73,7 @@ export async function restoreImportedBackup(backup: BackupExport) {
 }
 
 export async function updateBackupRetention(id: string, keepForever: boolean) {
-  return apiFetch<{ updated: boolean; keepForever: boolean }>(`/api/backups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ keepForever }) })
+  return apiFetch<{ updated: boolean; keepForever: boolean; protectedUntil: string | null }>(`/api/backups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ keepForever }) })
 }
 
 export async function deleteBackup(id: string) {
