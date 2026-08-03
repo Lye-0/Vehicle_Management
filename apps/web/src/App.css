@@ -1492,6 +1492,8 @@
 .archive-kind { display: grid; place-items: center; width: 43px; height: 30px; border-radius: 7px; font-size: 10px; font-weight: 800; }
 .archive-kind-sales { color: #0f766e; background: #e5f8f3; }
 .archive-kind-maintenance { color: #7c3aed; background: #f2edff; }
+.icon-with-chain.archive-icon-chain { width: 43px; min-width: 43px; height: 30px; overflow: hidden; }
+.icon-with-chain.archive-icon-chain .icon-with-chain-svg { top: 3%; width: 88%; height: 94%; }
 .icon-with-chain { position: relative; z-index: 0; display: inline-grid; place-items: center; width: max-content; min-width: 43px; height: 30px; overflow: visible; vertical-align: middle; }
 .icon-with-chain-content { position: relative; z-index: 1; display: inline-grid; }
 .icon-with-chain-svg { position: absolute; z-index: 3; top: var(--icon-chain-top); left: 50%; width: var(--icon-chain-width); height: 118%; overflow: visible; transform: translateX(-50%); pointer-events: none; }
