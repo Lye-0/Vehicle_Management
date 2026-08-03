@@ -194,6 +194,9 @@
 .text-button:hover { color: var(--primary-hover); }
 .data-list-row, .activity-row { display: grid; align-items: center; gap: 12px; padding: 15px 0; border-bottom: 1px solid #edf1f5; }
 .data-list-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.data-list-row-action { width: 100%; color: inherit; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, box-shadow 150ms ease; }
+.data-list-row-action:hover { position: relative; z-index: 1; background: #f7faff; box-shadow: inset 0 0 0 1px #d8e5f7; }
+.data-list-row-action:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--primary); outline-offset: -2px; }
 .data-list-row:last-child, .activity-row:last-child { border-bottom: 0; }
 .dashboard-empty { padding: 28px 0; color: var(--text-muted); font-size: 11px; text-align: center; }
 .row-icon, .activity-icon, .placeholder-icon, .quick-action-icon { display: grid; place-items: center; border-radius: 10px; }

@@ -35,6 +35,8 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
   const today = startOfDay(new Date())
   const inspections = buildInspectionRows(vehicleRows, customersById, today)
+  const upcomingIntakeVehicles = buildMaintenanceDateRows(maintenanceRows, customersById, vehiclesById, today, 'intakeDate')
+  const upcomingReleaseVehicles = buildMaintenanceDateRows(maintenanceRows, customersById, vehiclesById, today, 'plannedReleaseDate')
   const unpaidInvoices = buildUnpaidInvoices(salesRows, maintenanceRows, paymentRows, customersById, vehiclesById, today)
   const monthlySales = sumMonthlySales(salesRows, maintenanceRows, today)
 
@@ -48,6 +50,8 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
       unpaidAmount: unpaidInvoices.reduce((sum, invoice) => sum + invoice.amount, 0),
     },
     inspections,
+    upcomingIntakeVehicles,
+    upcomingReleaseVehicles,
     unpaidInvoices,
     recentActivities: buildRecentActivities(salesRows, vehicleRows, paymentRows, customersById, vehiclesById),
     calendarEvents: buildCalendarEvents(vehicleRows, scheduleRows, salesRows, maintenanceRows, paymentRows, customersById, vehiclesById),
@@ -162,6 +166,8 @@ function buildInspectionRows(
     const diffDays = daysBetween(today, date)
     const tone = diffDays < 0 ? 'danger' : diffDays <= 30 ? 'warning' : 'normal'
     return {
+      customerId: vehicle.customerId,
+      vehicleId: vehicle.id,
       customer: customersById.get(vehicle.customerId)?.name ?? '顧客未登録',
       vehicle: [vehicle.maker, vehicle.name].filter(Boolean).join(' '),
       plate: vehicle.registrationNumber ?? '',
@@ -170,6 +176,35 @@ function buildInspectionRows(
       diffDays,
     }
   }).filter((inspection): inspection is NonNullable<typeof inspection> => inspection !== null && inspection.diffDays <= 30).sort((left, right) => left.diffDays - right.diffDays).slice(0, 5).map(({ diffDays: _diffDays, ...inspection }) => inspection)
+}
+
+function buildMaintenanceDateRows(
+  maintenanceRows: Array<typeof maintenanceDocuments.$inferSelect>,
+  customersById: Map<string, typeof customers.$inferSelect>,
+  vehiclesById: Map<string, typeof vehicles.$inferSelect>,
+  today: Date,
+  dateField: 'intakeDate' | 'plannedReleaseDate',
+) {
+  return maintenanceRows.map((document) => {
+    if (!document.vehicleId) return null
+    const vehicle = vehiclesById.get(document.vehicleId)
+    if (!vehicle) return null
+    const dateValue = dateField === 'intakeDate' ? document.intakeDate : document.plannedReleaseDate
+    const date = parseDate(dateValue)
+    if (!date) return null
+    const diffDays = daysBetween(today, date)
+    const tone = diffDays < 0 ? 'danger' : diffDays <= 30 ? 'warning' : 'normal'
+    return {
+      customerId: document.customerId,
+      vehicleId: vehicle.id,
+      customer: customersById.get(document.customerId)?.name ?? '顧客未登録',
+      vehicle: [vehicle.maker, vehicle.name].filter(Boolean).join(' '),
+      plate: vehicle.registrationNumber ?? '',
+      date: formatDate(date),
+      tone,
+      diffDays,
+    }
+  }).filter((row): row is NonNullable<typeof row> => row !== null && row.diffDays <= 30).sort((left, right) => left.diffDays - right.diffDays).slice(0, 5).map(({ diffDays: _diffDays, ...row }) => row)
 }
 
 function buildUnpaidInvoices(
@@ -207,6 +242,8 @@ function buildUnpaidInvoices(
     const dueDate = parseDate(invoice.dueDate)
     const diffDays = dueDate ? daysBetween(today, dueDate) : null
     return {
+      documentId: invoice.documentId,
+      section: invoice.source === '販売請求書' ? 'sales' as const : 'maintenance' as const,
       customer: customersById.get(invoice.customerId)?.name ?? '顧客未登録',
       document: `${invoice.source} #${invoice.number}`,
       vehicle: invoice.vehicleId ? [vehiclesById.get(invoice.vehicleId)?.maker, vehiclesById.get(invoice.vehicleId)?.name].filter(Boolean).join(' ') : '',

@@ -23,6 +23,26 @@ export type DashboardData = {
     unpaidAmount: number
   }
   inspections: Array<{
+    customerId: string
+    vehicleId: string
+    customer: string
+    vehicle: string
+    plate: string
+    date: string
+    tone: 'normal' | 'warning' | 'danger'
+  }>
+  upcomingIntakeVehicles: Array<{
+    customerId: string
+    vehicleId: string
+    customer: string
+    vehicle: string
+    plate: string
+    date: string
+    tone: 'normal' | 'warning' | 'danger'
+  }>
+  upcomingReleaseVehicles: Array<{
+    customerId: string
+    vehicleId: string
     customer: string
     vehicle: string
     plate: string
@@ -30,6 +50,8 @@ export type DashboardData = {
     tone: 'normal' | 'warning' | 'danger'
   }>
   unpaidInvoices: Array<{
+    documentId: string
+    section: 'sales' | 'maintenance'
     customer: string
     document: string
     vehicle: string
