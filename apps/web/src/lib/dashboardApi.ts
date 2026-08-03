@@ -1,16 +1,19 @@
 import { apiFetch } from './api'
 
+export type DashboardNavigationTarget =
+  | { section: 'customers'; customerId: string; vehicleId: string }
+  | { section: 'sales' | 'maintenance' | 'payments'; recordId: string }
+
 export type DashboardCalendarEvent = {
   id: string
   date: string
-  customerId?: string
-  vehicleId?: string
   category: 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
   categoryLabel: string
   title: string
   detail: string
   status: string | null
   amount: number | null
+  navigation?: DashboardNavigationTarget
 }
 
 export type DashboardData = {

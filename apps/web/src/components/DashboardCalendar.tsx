@@ -125,7 +125,7 @@ export function DashboardCalendar({
 function CalendarEventDetail({ event, onSelectEvent }: { event: DashboardCalendarEvent; onSelectEvent?: (event: DashboardCalendarEvent) => void }) {
   const Icon = event.category === 'vehicle-inspection' ? CarFront : event.category === 'inspection' ? CalendarClock : event.category === 'maintenance' ? ClipboardCheck : event.category === 'sales' ? FileText : CircleDollarSign
   const content = <><div className="calendar-detail-item-header"><span className="calendar-detail-type"><Icon size={14} />{event.categoryLabel}</span>{event.status && <span className="calendar-detail-status">{event.status}</span>}</div><h4>{event.title}</h4><p>{event.detail}</p>{event.amount !== null && <strong className="calendar-detail-amount">{formatYen(event.amount)}</strong>}</>
-  const isSelectable = Boolean(onSelectEvent && event.customerId && event.vehicleId)
+  const isSelectable = Boolean(onSelectEvent && event.navigation)
   return isSelectable ? <button className={`calendar-detail-item calendar-detail-item-action calendar-event-${event.category}`} type="button" onClick={() => onSelectEvent?.(event)} aria-label={`${event.title}の詳細を開く`}>{content}</button> : <article className={`calendar-detail-item calendar-event-${event.category}`}>{content}</article>
 }
 
