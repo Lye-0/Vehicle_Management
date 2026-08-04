@@ -92,10 +92,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
       throw new HttpError(400, '走行距離が書類内容と一致しません。')
     }
     // For new documents, openedMileage should match the current vehicle mileage
-    const currentVehicleMileage = await getCurrentVehicleMileage(database, input.vehicleId, organizationId)
-    if (mileageSync.openedMileage !== currentVehicleMileage) {
-      throw new HttpError(409, '車両の走行距離が開いた時点から変更されています。再読み込みしてください。')
-    }
+    // If vehicle has no mileage (null), openedMileage can be 0 or null (both mean "no previous value")
   } else {
     // No mileageSync: verify the mileage on the document matches the vehicle (no change intended)
     const inputMileage = parseMileageValue(input.details.vehicleOverride?.mileage)
@@ -208,7 +205,10 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     if (mileageSync.inputMileage !== overrideMileage) {
       throw new HttpError(400, '走行距離が書類内容と一致しません。')
     }
-    if (mileageSync.openedMileage !== persistedDocumentMileage) {
+    // Compare openedMileage with persistedDocumentMileage, treating null/undefined and 0 as equivalent
+    const openedForComparison = mileageSync.openedMileage ?? 0
+    const persistedForComparison = persistedDocumentMileage ?? 0
+    if (openedForComparison !== persistedForComparison) {
       throw new HttpError(409, '走行距離が開いた時点から変更されています。再読み込みしてください。')
     }
   } else {

@@ -229,14 +229,23 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     if (!selectedDocument) return
     const inputMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
     const openedMileage = documentOpenedMileageRef.current
-    if (inputMileage === null || openedMileage === null || inputMileage === openedMileage) {
+    const mileageChanged = inputMileage !== null && inputMileage !== openedMileage
+    if (!mileageChanged) {
       void saveSelectedDocument()
       return
     }
     // Mileage changed - show confirmation dialog
     const currentVehicleMileage = parseMileageString(selectedDocument.mileage) ?? 0
-    setMileageDialogInfo({ openedMileage, inputMileage, currentVehicleMileage })
+    setMileageDialogInfo({ openedMileage: openedMileage ?? 0, inputMileage, currentVehicleMileage })
     setMileageDialogOpen(true)
+  }
+
+  function handleMileageDialogConfirm(sync: { confirmed: true; openedMileage: number; inputMileage: number }) {
+    setMileageDialogOpen(false)
+    setMileageDialogInfo(null)
+    // Use the actual openedMileage from the ref, not the dialog value
+    const actualOpenedMileage = documentOpenedMileageRef.current ?? 0
+    void saveSelectedDocument({ ...sync, openedMileage: actualOpenedMileage })
   }
 
   async function createDocument(event: FormEvent<HTMLFormElement>) {
@@ -281,7 +290,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
     <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
-    {mileageDialogOpen && mileageDialogInfo && <MileageConfirmationDialog openedMileage={mileageDialogInfo.openedMileage} inputMileage={mileageDialogInfo.inputMileage} currentVehicleMileage={mileageDialogInfo.currentVehicleMileage} onConfirm={(sync) => { setMileageDialogOpen(false); setMileageDialogInfo(null); void saveSelectedDocument(sync) }} onCancel={() => { setMileageDialogOpen(false); setMileageDialogInfo(null) }} />}
+    {mileageDialogOpen && mileageDialogInfo && <MileageConfirmationDialog openedMileage={mileageDialogInfo.openedMileage} inputMileage={mileageDialogInfo.inputMileage} currentVehicleMileage={mileageDialogInfo.currentVehicleMileage} onConfirm={handleMileageDialogConfirm} onCancel={() => { setMileageDialogOpen(false); setMileageDialogInfo(null) }} />}
   </>
 }
 
