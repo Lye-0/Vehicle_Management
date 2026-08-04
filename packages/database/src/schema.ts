@@ -269,6 +269,20 @@ export const inspectionSchedules = sqliteTable('inspection_schedules', {
   index('inspection_schedules_due_date_idx').on(table.dueDate),
 ])
 
+export const sharedSchedules = sqliteTable('shared_schedules', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull().default('org-default'),
+  title: text('title').notNull(),
+  startDate: text('start_date').notNull(),
+  endDate: text('end_date').notNull(),
+  detail: text('detail').notNull().default(''),
+  createdByUid: text('created_by_uid').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('shared_schedules_organization_date_idx').on(table.organizationId, table.startDate, table.endDate),
+  index('shared_schedules_created_by_uid_idx').on(table.createdByUid),
+])
+
 export const appSettings = sqliteTable('app_settings', {
   organizationId: text('organization_id').notNull().default('org-default'),
   key: text('key').notNull(),
@@ -312,6 +326,7 @@ export const databaseSchema = {
   paymentRecords,
   paymentEntries,
   inspectionSchedules,
+  sharedSchedules,
   appSettings,
   backupRecords,
 }

@@ -84,20 +84,20 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
     id: `vehicle-${vehicle.id}-inspection`,
     date: vehicle.inspectionDate,
-    customerId: vehicle.customerId,
-    vehicleId: vehicle.id,
+    endDate: vehicle.inspectionDate,
     category: 'vehicle-inspection',
     categoryLabel: '車検',
     title: `車検：${vehicle.customerName}`,
     detail: `${vehicle.vehicleName}${vehicle.plate ? ` ・ ${vehicle.plate}` : ''}`,
     status: '車検',
     amount: null,
+    navigation: { section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id },
   })), [filteredVehicles])
   const hasActiveFilters = Boolean(query.trim() || searchField !== 'すべて' || selectedInspectionYear || selectedInspectionMonth)
 
   function selectCalendarVehicle(event: DashboardCalendarEvent) {
-    if (!event.customerId || !event.vehicleId) return
-    onSelectVehicle?.({ section: 'customers', customerId: event.customerId, vehicleId: event.vehicleId })
+    if (event.navigation?.section !== 'customers') return
+    onSelectVehicle?.(event.navigation)
   }
 
   return <>

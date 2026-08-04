@@ -516,6 +516,33 @@ describe("CLI authenticated workflow", () => {
 			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(readdedEmployeeAccess.response.status).toBe(200);
 
+			const ownerSharedSchedule = await requestJson<JsonObject>("/api/shared-schedules", "POST", {
+				title: `${marker} オーナー予定`,
+				startDate: "2026-08-20",
+				endDate: "2026-08-22",
+				detail: `${marker} オーナー詳細`,
+			}, ownerUid);
+			expect(ownerSharedSchedule.response.status).toBe(201);
+			expect(objectValue(ownerSharedSchedule.body.schedule)).toEqual(expect.objectContaining({ title: `${marker} オーナー予定`, startDate: "2026-08-20", endDate: "2026-08-22", detail: `${marker} オーナー詳細`, authorName: `${marker} 表示名変更` }));
+			const employeeSharedSchedule = await requestJson<JsonObject>("/api/shared-schedules", "POST", {
+				title: `${marker} 従業員予定`,
+				startDate: "2026-08-24",
+				endDate: "2026-08-24",
+				detail: `${marker} 従業員詳細`,
+			}, employeeUid);
+			expect(employeeSharedSchedule.response.status).toBe(201);
+			const listedSharedSchedules = await requestJson<JsonObject>("/api/shared-schedules", "GET", undefined, employeeUid);
+			expect(listedSharedSchedules.response.status).toBe(200);
+			expect(arrayValue(listedSharedSchedules.body.schedules)).toEqual(expect.arrayContaining([
+				expect.objectContaining({ title: `${marker} オーナー予定`, authorName: `${marker} 表示名変更` }),
+				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 再追加従業員` }),
+			]));
+			const dashboardWithSharedSchedules = await requestJson<JsonObject>("/api/dashboard", "GET", undefined, employeeUid);
+			expect(dashboardWithSharedSchedules.response.status).toBe(200);
+			expect(arrayValue(objectValue(dashboardWithSharedSchedules.body.dashboard).calendarEvents)).toEqual(expect.arrayContaining([
+				expect.objectContaining({ date: "2026-08-20", endDate: "2026-08-22", category: "shared", title: `${marker} オーナー予定`, authorName: `${marker} 表示名変更`, detail: `${marker} オーナー詳細` }),
+			]));
+
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);
 			const crossTenantCustomerMutation = await requestJson<JsonObject>(`/api/customers/other-customer-${marker.toLowerCase()}`, "PATCH", { name: `${marker} 越境更新` });
@@ -629,6 +656,7 @@ async function cleanupTestData(state: { attachmentId?: string; backupId?: string
 		"vehicles",
 		"customers",
 		"inspection_schedules",
+		"shared_schedules",
 		"app_settings",
 		"backup_records",
 	]) {

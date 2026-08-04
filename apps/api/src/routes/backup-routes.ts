@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
-import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { addDays, loadBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
@@ -247,7 +247,7 @@ async function deleteBackupRecord(database: ReturnType<typeof createDatabase>, e
 }
 
 async function loadSnapshot(database: ReturnType<typeof createDatabase>, organizationId: string, id: string, organizationName: string): Promise<BackupManifest> {
-  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, scheduleRows, settingsRows] = await Promise.all([
+  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, scheduleRows, sharedScheduleRows, settingsRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.createdAt)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.createdAt)).all(),
     database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
@@ -258,6 +258,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(asc(paymentRecords.createdAt)).all(),
     database.select().from(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).orderBy(asc(paymentEntries.createdAt)).all(),
     database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(asc(inspectionSchedules.createdAt)).all(),
+    database.select().from(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).orderBy(asc(sharedSchedules.createdAt)).all(),
     database.select().from(appSettings).where(eq(appSettings.organizationId, organizationId)).orderBy(asc(appSettings.key)).all(),
   ])
   const createdAt = new Date().toISOString()
@@ -278,6 +279,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
       paymentRecords: paymentRows,
       paymentEntries: paymentEntryRows,
       inspectionSchedules: scheduleRows,
+      sharedSchedules: sharedScheduleRows,
       appSettings: settingsRows,
     },
   }
@@ -286,6 +288,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
 async function clearOrganizationData(database: ReturnType<typeof createDatabase>, organizationId: string) {
   await database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).run()
   await database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).run()
+  await database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).run()
   await database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).run()
   await database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).run()
   await database.delete(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).run()
@@ -311,6 +314,7 @@ async function insertSnapshot(database: ReturnType<typeof createDatabase>, manif
   for (const row of manifest.tables.paymentRecords) await database.insert(paymentRecords).values(row).run()
   for (const row of manifest.tables.paymentEntries ?? []) await database.insert(paymentEntries).values(row).run()
   for (const row of manifest.tables.inspectionSchedules) await database.insert(inspectionSchedules).values(row).run()
+  for (const row of manifest.tables.sharedSchedules ?? []) await database.insert(sharedSchedules).values(row).run()
   for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
 }
 
@@ -327,7 +331,7 @@ function assertManifest(value: unknown, organizationId: string): BackupManifest 
     throw new HttpError(400, 'このバックアップは現在の組織へ復元できません。')
   }
   const tables = manifest.tables as BackupManifest['tables']
-  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.inspectionSchedules, tables.appSettings]
+  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
   if (organizationRows.some((rows) => rows.some((row) => !row || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
   const expectedObjectKeyPrefix = `organizations/${organizationId}/`
   if (tables.vehicleFiles.some((file) => typeof file.objectKey !== 'string' || !file.objectKey.startsWith(expectedObjectKeyPrefix))) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
@@ -352,7 +356,7 @@ async function deleteObjects(storage: ReturnType<typeof createB2Storage>, keys: 
 }
 
 function countRows(tables: BackupManifest['tables']) {
-  return Object.values(tables).reduce((total, rows) => total + rows.length, 0)
+  return Object.values(tables).reduce((total, rows) => total + (rows?.length ?? 0), 0)
 }
 
 function serializeBackup(record: { id: string; organizationId: string; manifestKey: string; fileCount: number; rowCount: number; status: string; trigger: string; note: string; protectedUntil: string | null; keepForever: boolean; createdAt: string; updatedAt: string }) {
@@ -396,6 +400,7 @@ type BackupManifest = {
     paymentRecords: Array<typeof paymentRecords.$inferSelect>
     paymentEntries: Array<typeof paymentEntries.$inferSelect>
     inspectionSchedules: Array<typeof inspectionSchedules.$inferSelect>
+    sharedSchedules?: Array<typeof sharedSchedules.$inferSelect>
     appSettings: Array<typeof appSettings.$inferSelect>
   }
 }

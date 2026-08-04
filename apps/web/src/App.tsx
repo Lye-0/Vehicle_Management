@@ -7,15 +7,12 @@ import {
   CalendarClock,
   CalendarDays,
   CarFront,
-  ChevronRight,
   CircleDollarSign,
   ClipboardCheck,
   FileText,
   LayoutDashboard,
   LogOut,
   Mail,
-  Plus,
-  Search,
   Settings,
   UserRound,
 } from 'lucide-react'
@@ -30,6 +27,7 @@ import { changeCurrentPassword, createAccountWithEmailPassword, observeAuthState
 import { setActiveOrganizationId } from './lib/api'
 import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
+import { createSharedSchedule } from './lib/sharedSchedulesApi'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'inspections' | 'payments' | 'settings'
@@ -148,9 +146,10 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
   const [navigationTarget, setNavigationTarget] = useState<(VehicleHistoryNavigation | CustomerVehicleNavigation) | null>(null)
 
-  useEffect(() => {
-    if (navigationTarget?.section === activeSection && activeSection !== 'customers') setNavigationTarget(null)
-  }, [activeSection, navigationTarget])
+  function selectSection(nextSection: SectionId) {
+    if (nextSection !== activeSection) setNavigationTarget(null)
+    setActiveSection(nextSection)
+  }
 
   function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
     setNavigationTarget(target)
@@ -162,13 +161,18 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
     setActiveSection(target.section)
   }
 
+  function navigateFromDashboard(target: CustomerVehicleNavigation | VehicleHistoryNavigation) {
+    setNavigationTarget(target)
+    setActiveSection(target.section)
+  }
+
   return (
     <div className="app-shell">
-      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={setActiveSection} onSignOut={onSignOut} />
+      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={selectSection} onSignOut={onSignOut} />
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={navigateToCustomerVehicle} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
+          {activeSection === 'dashboard' ? <Dashboard onNavigate={navigateFromDashboard} /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={navigateToCustomerVehicle} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
         </div>
       </main>
     </div>
@@ -391,13 +395,15 @@ function Topbar({ currentPage }: { currentPage: PageMeta }) {
   )
 }
 
-function Dashboard() {
+function Dashboard({ onNavigate }: { onNavigate: (target: CustomerVehicleNavigation | VehicleHistoryNavigation) => void }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
     fetchDashboard()
       .then((nextDashboard) => {
         if (!cancelled) {
@@ -412,12 +418,17 @@ function Dashboard() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [reloadToken])
+
+  async function handleCreateSharedSchedule(input: Parameters<typeof createSharedSchedule>[0]) {
+    await createSharedSchedule(input)
+    setReloadToken((current) => current + 1)
+  }
 
   const summary = dashboard?.summary
   return (
     <>
-      <PageHeader eyebrow="本日の状況" title="ダッシュボード" description="店舗の状況をひと目で確認できます。" action={<button className="button button-primary" type="button"><Plus size={18} />クイック操作</button>} />
+      <PageHeader eyebrow="本日の状況" title="ダッシュボード" description="店舗の状況をひと目で確認できます。" />
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       {loading && <div className="customer-sync-status"><span>店舗データを集計しています。</span></div>}
       <section className="stats-grid" aria-label="概要">
@@ -426,19 +437,19 @@ function Dashboard() {
         <StatCard label="車検期限30日以内" value={String(summary?.inspectionsWithin30Days ?? 0)} suffix="台" note={`期限超過 ${summary?.overdueInspections ?? 0}台`} icon={CalendarDays} tone="orange" />
         <StatCard label="未入金の請求" value={String(summary?.unpaidInvoices ?? 0)} suffix="件" note={`合計 ${formatYen(summary?.unpaidAmount ?? 0)}`} icon={CircleDollarSign} tone="red" />
       </section>
-      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} />
+      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} defaultEnabledCategories={['inspection', 'vehicle-inspection', 'shared']} onCreateSharedSchedule={handleCreateSharedSchedule} onSelectEvent={(event) => { if (event.navigation) onNavigate(event.navigation) }} />
       <section className="dashboard-grid">
-        <Panel title="車検・点検期限が近い車両" action="一覧を見る">
-          <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row) => <div className="data-list-row" key={`${row.customer}-${row.date}-${row.plate}`}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
+        <Panel title="車検・点検期限が近い車両">
+          <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row, index) => <DashboardVehicleRow key={`${row.vehicleId}-${row.date}-${index}`} row={row} onSelect={() => onNavigate({ section: 'customers', customerId: row.customerId, vehicleId: row.vehicleId })} />) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
         </Panel>
-        <Panel title="未入金の請求" action="入金管理を見る">
-          <div className="data-list">{dashboard?.unpaidInvoices.length ? dashboard.unpaidInvoices.map((row) => <div className="data-list-row" key={row.document}><span className="row-icon row-icon-orange"><CircleDollarSign size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.document}</small></span><span className="row-trailing row-trailing-payment"><strong>{formatYen(row.amount)}</strong><StatusBadge tone={row.tone}>{row.due}</StatusBadge></span></div>) : <DashboardEmpty loading={loading}>未入金の請求はありません。</DashboardEmpty>}</div>
+        <Panel title="未入金の請求">
+          <div className="data-list">{dashboard?.unpaidInvoices.length ? dashboard.unpaidInvoices.map((row) => <button className="data-list-row data-list-row-action" key={row.documentId} type="button" onClick={() => onNavigate({ section: row.section, recordId: row.documentId })}><span className="row-icon row-icon-orange"><CircleDollarSign size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.document}</small></span><span className="row-trailing row-trailing-payment"><strong>{formatYen(row.amount)}</strong><StatusBadge tone={row.tone}>{row.due}</StatusBadge></span></button>) : <DashboardEmpty loading={loading}>未入金の請求はありません。</DashboardEmpty>}</div>
         </Panel>
-        <Panel title="最近の更新" action="履歴を見る">
-          <div className="activity-list">{dashboard?.recentActivities.length ? dashboard.recentActivities.map((activity, index) => <div className="activity-row" key={`${activity.kind}-${activity.label}-${activity.at}-${index}`}><span className="activity-icon"><RecentActivityIcon kind={activity.kind} /></span><span className="row-copy"><strong>{activity.label}</strong><small>{activity.detail}</small></span><small className="activity-time">{formatRelativeTime(activity.at)}</small></div>) : <DashboardEmpty loading={loading}>最近の更新はありません。</DashboardEmpty>}</div>
+        <Panel title="入庫日が近い車両">
+          <div className="data-list">{dashboard?.upcomingIntakeVehicles.length ? dashboard.upcomingIntakeVehicles.map((row, index) => <DashboardVehicleRow key={`${row.vehicleId}-${row.date}-${index}`} row={row} onSelect={() => onNavigate({ section: 'customers', customerId: row.customerId, vehicleId: row.vehicleId })} />) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
         </Panel>
-        <Panel title="クイック操作" className="quick-panel">
-          <div className="quick-actions"><QuickAction icon={Search} label="顧客・車両を検索" /><QuickAction icon={FileText} label="販売書類を作成" /><QuickAction icon={ClipboardCheck} label="整備書類を作成" /><QuickAction icon={CircleDollarSign} label="入金を登録" /></div>
+        <Panel title="出庫日が近い車両">
+          <div className="data-list">{dashboard?.upcomingReleaseVehicles.length ? dashboard.upcomingReleaseVehicles.map((row, index) => <DashboardVehicleRow key={`${row.vehicleId}-${row.date}-${index}`} row={row} onSelect={() => onNavigate({ section: 'customers', customerId: row.customerId, vehicleId: row.vehicleId })} />) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>
         </Panel>
       </section>
     </>
@@ -449,24 +460,8 @@ function DashboardEmpty({ loading, children }: { loading: boolean; children: Rea
   return <div className="dashboard-empty">{loading ? '読み込み中…' : children}</div>
 }
 
-function RecentActivityIcon({ kind }: { kind: DashboardData['recentActivities'][number]['kind'] }) {
-  const Icon = kind === 'sales' ? FileText : kind === 'vehicle' ? CarFront : CircleDollarSign
-  return <Icon size={17} />
-}
-
 function formatYen(amount: number) {
   return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}`
-}
-
-function formatRelativeTime(value: string) {
-  const date = new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z'))
-  if (Number.isNaN(date.getTime())) return '日時不明'
-  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
-  if (diffMinutes < 1) return 'たった今'
-  if (diffMinutes < 60) return `${diffMinutes}分前`
-  const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}時間前`
-  return `${Math.floor(diffHours / 24)}日前`
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
@@ -477,16 +472,16 @@ function StatCard({ label, value, suffix, note, icon: Icon, tone }: { label: str
   return <article className="stat-card"><div className={`stat-icon stat-icon-${tone}`}><Icon size={20} /></div><span className="stat-label">{label}</span><div className="stat-value"><strong>{value}</strong>{suffix && <span>{suffix}</span>}</div><span className={`stat-note stat-note-${tone}`}>{note}</span></article>
 }
 
-function Panel({ title, action, children, className = '' }: { title: string; action?: string; children: ReactNode; className?: string }) {
-  return <article className={`panel ${className}`}><div className="panel-header"><h2>{title}</h2>{action && <button className="text-button" type="button">{action}<ChevronRight size={16} /></button>}</div>{children}</article>
+function Panel({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
+  return <article className={`panel ${className}`}><div className="panel-header"><h2>{title}</h2></div>{children}</article>
 }
 
 function StatusBadge({ tone, children }: { tone: string; children: ReactNode }) {
   return <span className={`status-badge status-${tone}`}><span className="status-dot" />{children}</span>
 }
 
-function QuickAction({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
-  return <button className="quick-action" type="button"><span className="quick-action-icon"><Icon size={19} /></span><span>{label}</span><ChevronRight size={16} /></button>
+function DashboardVehicleRow({ row, onSelect }: { row: DashboardData['inspections'][number]; onSelect: () => void }) {
+  return <button className="data-list-row data-list-row-action" type="button" onClick={onSelect}><span className="row-icon row-icon-blue"><CarFront size={18} /></span><span className="row-copy"><strong>{row.customer}</strong><small>{row.vehicle} ・ {row.plate}</small></span><span className="row-trailing"><StatusBadge tone={row.tone}>{row.date}</StatusBadge></span></button>
 }
 
 export default App
