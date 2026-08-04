@@ -319,11 +319,40 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
       freeItem3: vehicle.freeItem3,
     },
     sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
-    maintenance: maintenance.map((document) => ({ id: document.id, number: document.number, type: document.type, category: document.category, status: document.status, issuedAt: document.issuedAt, intakeDate: document.intakeDate, completionDate: document.completionDate, total: document.total, recordedMileage: mileageByDocumentId.get(document.id) ?? null })),
+    maintenance: maintenance.map((document) => ({
+      id: document.id,
+      number: document.number,
+      type: document.type,
+      category: document.category,
+      status: document.status,
+      issuedAt: document.issuedAt,
+      intakeDate: document.intakeDate,
+      completionDate: document.completionDate,
+      total: document.total,
+      recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? vehicle.mileage,
+    })),
     inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
     payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
     attachments: files.map(serializeFile),
   }, 200, env)
+}
+
+function extractMileageFromDetailsJson(detailsJson: string | null): number | null {
+  if (!detailsJson) return null
+  try {
+    const parsed = JSON.parse(detailsJson)
+    if (!parsed || typeof parsed !== 'object') return null
+    const vehicleOverride = parsed.vehicleOverride
+    if (!vehicleOverride || typeof vehicleOverride !== 'object') return null
+    const mileage = vehicleOverride.mileage
+    if (typeof mileage !== 'string') return null
+    const digits = mileage.replace(/[^0-9]/g, '')
+    if (!digits) return null
+    const parsed2 = Number(digits)
+    return Number.isFinite(parsed2) ? parsed2 : null
+  } catch {
+    return null
+  }
 }
 
 function groupBy<T>(items: T[], getKey: (item: T) => string) {
