@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState } from 'react'
 import { CalendarClock, CalendarDays, CarFront, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, FileText } from 'lucide-react'
 import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 
@@ -128,10 +128,9 @@ export function DashboardCalendar({
               <div className="dashboard-calendar-weeks">
                 {calendarWeeks.map((week, weekIndex) => {
                   const rangeData = rangeDataByWeek[weekIndex]
-                  const weekStyle = { '--calendar-range-lanes': rangeData.laneCount } as CSSProperties
-                  return <div className={`dashboard-calendar-week${rangeData.laneCount ? ' has-ranges' : ''}`} key={toDateKey(week[0])} style={weekStyle}>
+                  return <div className="dashboard-calendar-week" key={toDateKey(week[0])}>
                     <div className="dashboard-calendar-week-days">
-                      {week.map((day) => {
+                      {week.map((day, dayIndex) => {
                         const date = toDateKey(day)
                         const dayEvents = eventsByDate.get(date) ?? []
                         const pointEvents = dayEvents.filter((event) => !isRangeEvent(event))
@@ -140,9 +139,11 @@ export function DashboardCalendar({
                         const isCurrentMonth = isSameMonth(day, viewDate)
                         const isSelected = date === selectedDate
                         const isToday = date === today
+                        const rangeLaneCount = getRangeLaneCountForDay(rangeData, dayIndex)
+                        const eventListStyle = rangeLaneCount > 0 ? { paddingTop: rangeLaneCount * 34 - 2 } : undefined
                         return <button className={`dashboard-calendar-day${isCurrentMonth ? '' : ' is-outside'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`} type="button" role="gridcell" aria-label={`${formatFullDate(day)}、予定${dayEvents.length}件`} aria-pressed={isSelected} key={date} onClick={() => selectDate(day)}>
                           <span className="calendar-day-number"><span>{day.getDate()}</span>{isToday && <em>今日</em>}</span>
-                          <span className="calendar-day-event-list">
+                          <span className="calendar-day-event-list" style={eventListStyle}>
                             {visibleEventsForDay.map((event) => <span className={`calendar-event-chip calendar-event-${event.category}`} key={event.id} title={`${event.categoryLabel}：${event.title}`}><span>{event.categoryLabel}</span><strong>{event.title}</strong></span>)}
                             {hiddenEventCount > 0 && <span className="calendar-more-events">+{hiddenEventCount}件</span>}
                           </span>
@@ -226,6 +227,17 @@ function buildRangeDataByWeek(events: DashboardCalendarEvent[], weeks: Date[][])
     }
     return { segments: candidates, laneCount: laneEnds.length }
   })
+}
+
+function getRangeLaneCountForDay(rangeData: CalendarWeekRangeData, dayIndex: number): number {
+  const dayColumn = dayIndex + 1
+  const lanes = new Set<number>()
+  for (const segment of rangeData.segments) {
+    if (segment.startColumn <= dayColumn && segment.endColumn >= dayColumn) {
+      lanes.add(segment.lane)
+    }
+  }
+  return lanes.size
 }
 
 function eventIntersectsMonth(event: DashboardCalendarEvent, viewDate: Date) {

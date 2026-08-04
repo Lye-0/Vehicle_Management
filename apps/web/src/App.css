@@ -155,12 +155,11 @@
 .dashboard-calendar-weekdays, .dashboard-calendar-week-days { display: grid; }
 .dashboard-calendar-weeks { display: grid; }
 .dashboard-calendar-week { position: relative; min-height: 130px; }
-.dashboard-calendar-week.has-ranges .calendar-day-event-list { padding-top: calc(var(--calendar-range-lanes) * 24px); }
-.dashboard-calendar-range-layer { position: absolute; top: 42px; right: 0; left: 0; z-index: 3; display: grid; grid-auto-rows: 22px; gap: 2px 0; pointer-events: none; }
-.calendar-range-event { min-width: 0; display: flex; align-items: center; gap: 4px; height: 22px; padding: 3px 8px; overflow: hidden; color: var(--calendar-event-text); border-top: 1px solid color-mix(in srgb, var(--calendar-event-color) 30%, #fff); border-bottom: 1px solid color-mix(in srgb, var(--calendar-event-color) 30%, #fff); background: var(--calendar-event-bg); font-size: 9px; line-height: 1.25; white-space: nowrap; }
+.dashboard-calendar-range-layer { position: absolute; top: 42px; right: 0; left: 0; z-index: 3; display: grid; grid-auto-rows: 32px; gap: 2px 0; pointer-events: none; }
+.calendar-range-event { min-width: 0; display: grid; gap: 2px; height: 32px; padding: 3px 8px; overflow: hidden; color: var(--calendar-event-text); border-top: 1px solid color-mix(in srgb, var(--calendar-event-color) 30%, #fff); border-bottom: 1px solid color-mix(in srgb, var(--calendar-event-color) 30%, #fff); background: var(--calendar-event-bg); font-size: 9px; line-height: 1.25; }
 .calendar-range-event.is-start { border-left: 3px solid var(--calendar-event-color); border-top-left-radius: 5px; border-bottom-left-radius: 5px; }
 .calendar-range-event.is-end { border-right: 1px solid color-mix(in srgb, var(--calendar-event-color) 30%, #fff); border-top-right-radius: 5px; border-bottom-right-radius: 5px; }
-.calendar-range-event > span { flex: 0 0 auto; overflow: hidden; color: var(--calendar-event-text); font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-range-event > span { overflow: hidden; color: var(--calendar-event-text); font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-range-event > strong { min-width: 0; overflow: hidden; color: var(--calendar-event-text); font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-calendar-weekday { padding: 9px 6px; color: var(--text-muted); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-subtle); font-size: 10px; font-weight: 800; text-align: center; }
 .dashboard-calendar-weekday.is-sunday { color: #d15e67; }
