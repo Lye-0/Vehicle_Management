@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
+import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, sharedSchedules, staffProfiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -23,13 +23,15 @@ export async function handleDashboardRoutes(request: Request, env: Env): Promise
 }
 
 async function loadDashboard(database: ReturnType<typeof createDatabase>, organizationId: string) {
-  const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows, scheduleRows] = await Promise.all([
+  const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows, scheduleRows, sharedScheduleRows, staffProfileRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.updatedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
     database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(desc(inspectionSchedules.dueDate)).all(),
+    database.select().from(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).orderBy(desc(sharedSchedules.startDate)).all(),
+    database.select().from(staffProfiles).all(),
   ])
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
   const vehiclesById = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]))
@@ -54,7 +56,7 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
     upcomingReleaseVehicles,
     unpaidInvoices,
     recentActivities: buildRecentActivities(salesRows, vehicleRows, paymentRows, customersById, vehiclesById),
-    calendarEvents: buildCalendarEvents(vehicleRows, scheduleRows, salesRows, maintenanceRows, paymentRows, customersById, vehiclesById),
+    calendarEvents: buildCalendarEvents(vehicleRows, scheduleRows, salesRows, maintenanceRows, paymentRows, sharedScheduleRows, staffProfileRows, customersById, vehiclesById),
   }
 }
 
@@ -92,12 +94,15 @@ function buildCalendarEvents(
   salesRows: Array<typeof salesDocuments.$inferSelect>,
   maintenanceRows: Array<typeof maintenanceDocuments.$inferSelect>,
   paymentRows: Array<typeof paymentRecords.$inferSelect>,
+  sharedScheduleRows: Array<typeof sharedSchedules.$inferSelect>,
+  staffProfileRows: Array<typeof staffProfiles.$inferSelect>,
   customersById: Map<string, typeof customers.$inferSelect>,
   vehiclesById: Map<string, typeof vehicles.$inferSelect>,
 ) {
   const events: CalendarEvent[] = []
   const salesById = new Map(salesRows.map((document) => [document.id, document]))
   const maintenanceById = new Map(maintenanceRows.map((document) => [document.id, document]))
+  const staffProfilesByUid = new Map(staffProfileRows.map((profile) => [profile.uid, profile.displayName]))
 
   for (const vehicle of vehicleRows) {
     const customer = customersById.get(vehicle.customerId)?.name ?? '顧客未登録'
@@ -137,6 +142,11 @@ function buildCalendarEvents(
     addCalendarEvent(events, payment.paymentDate, `payment-${payment.id}`, 'payment', `入金：${customer}`, `${payment.documentType} ・ ${vehicle}${method}`, '入金済み', payment.paidAmount, { section: 'payments', recordId: payment.id })
   }
 
+  for (const schedule of sharedScheduleRows) {
+    const authorName = staffProfilesByUid.get(schedule.createdByUid) ?? '未設定ユーザー'
+    addCalendarEvent(events, schedule.startDate, `shared-${schedule.id}`, 'shared', schedule.title, schedule.detail, null, null, undefined, schedule.endDate, authorName)
+  }
+
   return events.sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title, 'ja'))
 }
 
@@ -151,12 +161,13 @@ function addCalendarEvent(
   amount: number | null = null,
   navigation?: CalendarEventNavigation,
   endDate: string | null = null,
+  authorName: string | null = null,
 ) {
   const normalizedDate = date ? normalizeDate(date) : ''
   if (!isCalendarDate(normalizedDate)) return
   const normalizedEndDate = endDate ? normalizeDate(endDate) : normalizedDate
   const safeEndDate = isCalendarDate(normalizedEndDate) && normalizedEndDate >= normalizedDate ? normalizedEndDate : normalizedDate
-  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation })
+  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}) })
 }
 
 function isCalendarDate(value: string) {

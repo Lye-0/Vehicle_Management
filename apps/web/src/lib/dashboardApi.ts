@@ -14,6 +14,7 @@ export type DashboardCalendarEvent = {
   detail: string
   status: string | null
   amount: number | null
+  authorName?: string
   navigation?: DashboardNavigationTarget
 }
 

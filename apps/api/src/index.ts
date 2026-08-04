@@ -11,6 +11,7 @@ import { handleImportRoutes } from './routes/import-routes'
 import { handleBackupRoutes } from './routes/backup-routes'
 import { handleArchiveRoutes } from './routes/archive-routes'
 import { handleInspectionRoutes } from './routes/inspection-routes'
+import { handleSharedScheduleRoutes } from './routes/shared-schedule-routes'
 import { runScheduledBackupMaintenance } from './routes/backup-routes'
 import { corsHeaders, jsonResponse } from './http'
 import { getEnvironmentIssues } from './environment'
@@ -49,6 +50,9 @@ export default {
 
     const inspectionRouteResponse = await handleInspectionRoutes(request, env)
     if (inspectionRouteResponse) return inspectionRouteResponse
+
+    const sharedScheduleRouteResponse = await handleSharedScheduleRoutes(request, env)
+    if (sharedScheduleRouteResponse) return sharedScheduleRouteResponse
 
     const exportRouteResponse = await handleExportRoutes(request, env)
     if (exportRouteResponse) return exportRouteResponse

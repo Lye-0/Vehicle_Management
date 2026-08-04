@@ -127,6 +127,9 @@
 .dashboard-calendar-panel { margin-bottom: 20px; padding: 0; overflow: hidden; }
 .dashboard-calendar-top { padding: 24px 26px 0; }
 .dashboard-calendar-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.calendar-add-button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; flex: 0 0 auto; padding: 0 12px; color: #1554b8; border: 1px solid #b9cef1; border-radius: 8px; background: #f3f7ff; font-size: 11px; font-weight: 800; cursor: pointer; }
+.calendar-add-button:hover { color: #0d3f93; border-color: #8eafe8; background: #eaf2ff; }
+.calendar-add-button:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.22); outline-offset: 2px; }
 .calendar-heading-kicker { display: inline-flex; align-items: center; gap: 6px; color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: 0.07em; }
 .calendar-heading-kicker svg { flex: 0 0 auto; }
 .dashboard-calendar-heading h2 { margin: 8px 0 0; color: var(--text); font-size: 20px; letter-spacing: -0.03em; }
@@ -188,6 +191,8 @@
 .calendar-detail-status { max-width: 92px; overflow: hidden; padding: 3px 6px; color: var(--calendar-event-text); border-radius: 4px; background: rgba(255, 255, 255, 0.7); font-size: 9px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-detail-item h4 { margin: 10px 0 4px; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-detail-item p { margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-detail-author { color: var(--calendar-event-text) !important; font-weight: 800; }
+.calendar-detail-description { overflow: visible !important; text-overflow: clip !important; white-space: pre-wrap !important; overflow-wrap: anywhere; }
 .calendar-detail-amount { display: block; margin-top: 9px; color: var(--text); font-size: 12px; }
 .calendar-detail-item-action { width: 100%; font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, box-shadow 150ms ease; }
 .calendar-detail-item-action:hover { background: #fff9e9; box-shadow: 0 3px 10px rgba(23, 46, 84, 0.08); }
@@ -203,6 +208,10 @@
 .calendar-event-payment-due { --calendar-event-color: #d65b61; --calendar-event-bg: #fff0f1; --calendar-event-text: #a33c43; }
 .calendar-event-payment { --calendar-event-color: #31975c; --calendar-event-bg: #ebf9ef; --calendar-event-text: #237341; }
 .calendar-event-shared { --calendar-event-color: #64748b; --calendar-event-bg: #f1f5f9; --calendar-event-text: #475569; }
+.shared-schedule-modal { width: min(100%, 620px); }
+.shared-schedule-modal .modal-header { align-items: flex-start; }
+.shared-schedule-form-grid .shared-schedule-title-field, .shared-schedule-form-grid .shared-schedule-detail-field { grid-column: 1 / -1; }
+.shared-schedule-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
 .panel { min-width: 0; padding: 22px 24px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
 .panel h2 { font-size: 16px; letter-spacing: -0.02em; }
@@ -1585,6 +1594,7 @@
   .dashboard-calendar-panel { padding: 0; }
   .dashboard-calendar-top { padding: 18px 18px 0; }
   .dashboard-calendar-heading { align-items: stretch; flex-direction: column; gap: 16px; }
+  .calendar-add-button { align-self: flex-end; }
   .dashboard-calendar-heading p { line-height: 1.6; }
   .calendar-controls { justify-content: flex-end; }
   .calendar-legend { gap: 8px 11px; }
@@ -1597,6 +1607,8 @@
   .calendar-range-event.is-end { margin-right: 7px; }
   .dashboard-calendar-day { min-height: 112px; padding: 7px; }
   .dashboard-calendar-detail { padding: 18px; }
+  .shared-schedule-form-grid { grid-template-columns: 1fr; }
+  .shared-schedule-form-grid .shared-schedule-title-field, .shared-schedule-form-grid .shared-schedule-detail-field { grid-column: auto; }
   .data-list-row { grid-template-columns: auto minmax(0, 1fr); }
   .data-list-row-action { width: calc(100% + 36px); margin-inline: -18px; padding-inline: 18px; }
   .row-trailing { grid-column: 2; justify-content: flex-start; }
