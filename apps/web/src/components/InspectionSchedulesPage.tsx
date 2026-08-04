@@ -84,6 +84,7 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
     id: `vehicle-${vehicle.id}-inspection`,
     date: vehicle.inspectionDate,
+    endDate: vehicle.inspectionDate,
     category: 'vehicle-inspection',
     categoryLabel: '車検',
     title: `車検：${vehicle.customerName}`,

@@ -7,7 +7,8 @@ export type DashboardNavigationTarget =
 export type DashboardCalendarEvent = {
   id: string
   date: string
-  category: 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
+  endDate: string
+  category: 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment' | 'shared'
   categoryLabel: string
   title: string
   detail: string

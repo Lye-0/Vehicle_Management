@@ -58,7 +58,7 @@ async function loadDashboard(database: ReturnType<typeof createDatabase>, organi
   }
 }
 
-type CalendarEventCategory = 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment'
+type CalendarEventCategory = 'vehicle-inspection' | 'inspection' | 'maintenance' | 'sales' | 'payment-due' | 'payment' | 'shared'
 type CalendarEventNavigation =
   | { section: 'customers'; customerId: string; vehicleId: string }
   | { section: 'sales' | 'maintenance' | 'payments'; recordId: string }
@@ -72,16 +72,18 @@ type CalendarEvent = {
   detail: string
   status: string | null
   amount: number | null
+  endDate: string
   navigation?: CalendarEventNavigation
 }
 
 const calendarEventLabels: Record<CalendarEventCategory, string> = {
   'vehicle-inspection': '車検満了',
-  inspection: '点検予定',
-  maintenance: '整備',
-  sales: '販売書類',
+  inspection: '車検',
+  maintenance: '整備書類作成日',
+  sales: '販売書類作成日',
   'payment-due': '支払期限',
   payment: '入金',
+  shared: '組織内共有スケジュール',
 }
 
 function buildCalendarEvents(
@@ -99,12 +101,12 @@ function buildCalendarEvents(
 
   for (const vehicle of vehicleRows) {
     const customer = customersById.get(vehicle.customerId)?.name ?? '顧客未登録'
-    addCalendarEvent(events, vehicle.inspectionDate, `vehicle-${vehicle.id}-inspection`, 'vehicle-inspection', `車検満了：${customer}`, vehicleLabel(vehicle.id, vehiclesById), '車検満了', null, { section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })
+    addCalendarEvent(events, vehicle.inspectionDate, `vehicle-${vehicle.id}-inspection`, 'vehicle-inspection', customerVehicleLabel(customer, vehicleLabel(vehicle.id, vehiclesById)), '車検満了日', '車検満了', null, { section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })
   }
 
   for (const schedule of scheduleRows) {
     const customer = customersById.get(schedule.customerId)?.name ?? '顧客未登録'
-    addCalendarEvent(events, schedule.dueDate, `inspection-${schedule.id}`, 'inspection', `${schedule.inspectionType}：${customer}`, vehicleLabel(schedule.vehicleId, vehiclesById), schedule.status, null, { section: 'customers', customerId: schedule.customerId, vehicleId: schedule.vehicleId })
+    addCalendarEvent(events, schedule.dueDate, `inspection-schedule-${schedule.id}`, 'inspection', customerVehicleLabel(customer, vehicleLabel(schedule.vehicleId, vehiclesById)), schedule.inspectionType, schedule.status, null, { section: 'customers', customerId: schedule.customerId, vehicleId: schedule.vehicleId })
   }
 
   for (const document of salesRows) {
@@ -119,9 +121,9 @@ function buildCalendarEvents(
     const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
     const documentLabel = `${document.type} ・ #${document.number}`
     addCalendarEvent(events, document.issuedAt, `maintenance-${document.id}-issued`, 'maintenance', `整備書類：${customer}`, documentLabel, document.status, document.total, { section: 'maintenance', recordId: document.id })
-    addCalendarEvent(events, document.intakeDate, `maintenance-${document.id}-intake`, 'maintenance', `入庫：${customer}`, vehicle, document.status, null, { section: 'maintenance', recordId: document.id })
-    addCalendarEvent(events, document.plannedReleaseDate, `maintenance-${document.id}-release`, 'maintenance', `出庫予定：${customer}`, vehicle, document.status, null, { section: 'maintenance', recordId: document.id })
-    addCalendarEvent(events, document.completionDate, `maintenance-${document.id}-completion`, 'maintenance', `整備完了：${customer}`, vehicle, document.status, null, { section: 'maintenance', recordId: document.id })
+    if (document.category === '車検') {
+      addCalendarEvent(events, document.intakeDate, `inspection-document-${document.id}`, 'inspection', customerVehicleLabel(customer, vehicle), documentLabel, document.status, null, { section: 'maintenance', recordId: document.id }, document.plannedReleaseDate ?? document.completionDate ?? document.intakeDate)
+    }
     addCalendarEvent(events, document.dueDate, `maintenance-${document.id}-due`, 'payment-due', `支払期限：${customer}`, documentLabel, document.status, document.total, { section: 'maintenance', recordId: document.id })
   }
 
@@ -148,10 +150,13 @@ function addCalendarEvent(
   status: string | null,
   amount: number | null = null,
   navigation?: CalendarEventNavigation,
+  endDate: string | null = null,
 ) {
   const normalizedDate = date ? normalizeDate(date) : ''
   if (!isCalendarDate(normalizedDate)) return
-  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, navigation })
+  const normalizedEndDate = endDate ? normalizeDate(endDate) : normalizedDate
+  const safeEndDate = isCalendarDate(normalizedEndDate) && normalizedEndDate >= normalizedDate ? normalizedEndDate : normalizedDate
+  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation })
 }
 
 function isCalendarDate(value: string) {
@@ -303,6 +308,10 @@ function vehicleLabel(vehicleId: string | null, vehiclesById: Map<string, typeof
   if (!vehicleId) return '車両未指定'
   const vehicle = vehiclesById.get(vehicleId)
   return vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '車両未登録'
+}
+
+function customerVehicleLabel(customer: string, vehicle: string) {
+  return `${customer} - ${vehicle}`
 }
 
 function parseDate(value: string | null) {
