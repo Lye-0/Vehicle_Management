@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState } from 'react'
 import { CalendarClock, CalendarDays, CarFront, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, FileText } from 'lucide-react'
 import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 
@@ -32,7 +32,6 @@ type CalendarRangeSegment = {
   event: DashboardCalendarEvent
   startColumn: number
   endColumn: number
-  span: number
   lane: number
   startsAtEvent: boolean
   endsAtEvent: boolean
@@ -141,7 +140,7 @@ export function DashboardCalendar({
                         const isSelected = date === selectedDate
                         const isToday = date === today
                         const rangeLaneCount = getRangeLaneCountForDay(rangeData, dayIndex)
-                        const eventListStyle = rangeLaneCount > 0 ? { paddingTop: rangeLaneCount * 36 - 2 } : undefined
+                        const eventListStyle = rangeLaneCount > 0 ? { paddingTop: rangeLaneCount * 34 - 2 } : undefined
                         return <button className={`dashboard-calendar-day${isCurrentMonth ? '' : ' is-outside'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`} type="button" role="gridcell" aria-label={`${formatFullDate(day)}、予定${dayEvents.length}件`} aria-pressed={isSelected} key={date} onClick={() => selectDate(day)}>
                           <span className="calendar-day-number"><span>{day.getDate()}</span>{isToday && <em>今日</em>}</span>
                           <span className="calendar-day-event-list" style={eventListStyle}>
@@ -152,7 +151,7 @@ export function DashboardCalendar({
                       })}
                     </div>
                     {rangeData.segments.length > 0 && <div className="dashboard-calendar-range-layer" aria-hidden="true">
-                      {rangeData.segments.map((segment) => <span className={`calendar-range-event calendar-event-${segment.event.category}${segment.startsAtEvent ? ' is-start' : ''}${segment.endsAtEvent ? ' is-end' : ''}`} key={`${segment.event.id}-${segment.startColumn}`} style={{ gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`, gridRow: segment.lane + 1, '--range-span': segment.span } as CSSProperties} title={`${segment.event.categoryLabel}：${segment.event.title}`}>
+                      {rangeData.segments.map((segment) => <span className={`calendar-range-event calendar-event-${segment.event.category}${segment.startsAtEvent ? ' is-start' : ''}${segment.endsAtEvent ? ' is-end' : ''}`} key={`${segment.event.id}-${segment.startColumn}`} style={{ gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`, gridRow: segment.lane + 1 }} title={`${segment.event.categoryLabel}：${segment.event.title}`}>
                         {segment.startsAtEvent && <><span>{segment.event.categoryLabel}</span><strong>{segment.event.title}</strong></>}
                       </span>)}
                     </div>}
@@ -218,9 +217,7 @@ function buildRangeDataByWeek(events: DashboardCalendarEvent[], weeks: Date[][])
       if (!eventStart || !eventEnd || eventEnd.getTime() < weekStart.getTime() || eventStart.getTime() > weekEnd.getTime()) return []
       const segmentStart = eventStart.getTime() > weekStart.getTime() ? eventStart : weekStart
       const segmentEnd = eventEnd.getTime() < weekEnd.getTime() ? eventEnd : weekEnd
-      const startColumn = differenceInDays(weekStart, segmentStart) + 1
-      const endColumn = differenceInDays(weekStart, segmentEnd) + 1
-      return [{ event, startColumn, endColumn, span: endColumn - startColumn + 1, lane: 0, startsAtEvent: segmentStart.getTime() === eventStart.getTime(), endsAtEvent: segmentEnd.getTime() === eventEnd.getTime() }]
+      return [{ event, startColumn: differenceInDays(weekStart, segmentStart) + 1, endColumn: differenceInDays(weekStart, segmentEnd) + 1, lane: 0, startsAtEvent: segmentStart.getTime() === eventStart.getTime(), endsAtEvent: segmentEnd.getTime() === eventEnd.getTime() }]
     }).sort((left, right) => left.startColumn - right.startColumn || right.endColumn - left.endColumn)
     const laneEnds: number[] = []
     for (const segment of candidates) {
