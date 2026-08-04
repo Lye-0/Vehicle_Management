@@ -13,7 +13,6 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
-  Plus,
   Settings,
   UserRound,
 } from 'lucide-react'
@@ -429,7 +428,7 @@ function Dashboard({ onNavigate }: { onNavigate: (target: CustomerVehicleNavigat
   const summary = dashboard?.summary
   return (
     <>
-      <PageHeader eyebrow="本日の状況" title="ダッシュボード" description="店舗の状況をひと目で確認できます。" action={<button className="button button-primary" type="button"><Plus size={18} />クイック操作</button>} />
+      <PageHeader eyebrow="本日の状況" title="ダッシュボード" description="店舗の状況をひと目で確認できます。" />
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       {loading && <div className="customer-sync-status"><span>店舗データを集計しています。</span></div>}
       <section className="stats-grid" aria-label="概要">
