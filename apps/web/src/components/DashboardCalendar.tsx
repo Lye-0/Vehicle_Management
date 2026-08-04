@@ -140,7 +140,7 @@ export function DashboardCalendar({
                         const isSelected = date === selectedDate
                         const isToday = date === today
                         const rangeLaneCount = getRangeLaneCountForDay(rangeData, dayIndex)
-                        const eventListStyle = rangeLaneCount > 0 ? { paddingTop: rangeLaneCount * 34 - 2 } : undefined
+                        const eventListStyle = rangeLaneCount > 0 ? { paddingTop: rangeLaneCount * 36 - 2 } : undefined
                         return <button className={`dashboard-calendar-day${isCurrentMonth ? '' : ' is-outside'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`} type="button" role="gridcell" aria-label={`${formatFullDate(day)}、予定${dayEvents.length}件`} aria-pressed={isSelected} key={date} onClick={() => selectDate(day)}>
                           <span className="calendar-day-number"><span>{day.getDate()}</span>{isToday && <em>今日</em>}</span>
                           <span className="calendar-day-event-list" style={eventListStyle}>
