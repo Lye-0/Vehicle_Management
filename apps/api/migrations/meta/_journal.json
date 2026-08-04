@@ -99,6 +99,13 @@
       "when": 1785814417898,
       "tag": "0013_supreme_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1785858321717,
+      "tag": "0014_parallel_silver_sable",
+      "breakpoints": true
     }
   ]
 }

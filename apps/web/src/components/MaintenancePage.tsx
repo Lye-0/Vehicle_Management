@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
   Archive,
   CarFront,
@@ -91,6 +91,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [savedDocumentId, setSavedDocumentId] = useState('')
   const [error, setError] = useState('')
   const [documentView, setDocumentView] = useState<MaintenanceDocumentView>('edit')
+  const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
+  const [mileageDialogInfo, setMileageDialogInfo] = useState<{ openedMileage: number; inputMileage: number; currentVehicleMileage: number } | null>(null)
+  const documentOpenedMileageRef = useRef<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -125,6 +128,16 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? incompleteDocuments[0] ?? filteredDocuments[0] ?? null
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument) : null
+
+  // Reset documentOpenedMileage when selected document changes
+  useEffect(() => {
+    if (!selectedDocument) {
+      documentOpenedMileageRef.current = null
+      return
+    }
+    const overrideMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
+    documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedDocument.mileage)
+  }, [selectedDocument])
 
   function updateItem(itemId: string, field: 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary', value: string) {
     if (!selectedDocument) return
@@ -191,19 +204,35 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     }
   }
 
-  async function saveSelectedDocument() {
+  async function saveSelectedDocument(mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }) {
     if (!selectedDocument) return
     setSaving(true)
     setError('')
     try {
-      const saved = await updateMaintenanceDocument(selectedDocument.id, toMaintenanceInput(selectedDocument))
+      const saved = await updateMaintenanceDocument(selectedDocument.id, toMaintenanceInput(selectedDocument, mileageSync))
       setDocuments((current) => current.map((document) => document.id === saved.id ? saved : document))
       setSavedDocumentId(saved.id)
+      // Update documentOpenedMileage after successful save
+      documentOpenedMileageRef.current = mileageSync?.inputMileage ?? documentOpenedMileageRef.current
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '整備書類を保存できませんでした。')
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleSaveClick() {
+    if (!selectedDocument) return
+    const inputMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
+    const openedMileage = documentOpenedMileageRef.current
+    if (inputMileage === null || openedMileage === null || inputMileage === openedMileage) {
+      void saveSelectedDocument()
+      return
+    }
+    // Mileage changed - show confirmation dialog
+    const currentVehicleMileage = parseMileageString(selectedDocument.mileage) ?? 0
+    setMileageDialogInfo({ openedMileage, inputMileage, currentVehicleMileage })
+    setMileageDialogOpen(true)
   }
 
   async function createDocument(event: FormEvent<HTMLFormElement>) {
@@ -246,8 +275,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void saveSelectedDocument()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
+    {mileageDialogOpen && mileageDialogInfo && <MileageConfirmationDialog inputMileage={mileageDialogInfo.inputMileage} currentVehicleMileage={mileageDialogInfo.currentVehicleMileage} onConfirm={(sync) => { setMileageDialogOpen(false); setMileageDialogInfo(null); void saveSelectedDocument(sync) }} onCancel={() => { setMileageDialogOpen(false); setMileageDialogInfo(null) }} />}
   </>
 }
 
@@ -355,7 +385,7 @@ function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmi
 
 function FormField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) { return <label className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</label> }
 
-function toMaintenanceInput(document: MaintenanceDocument): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding: document.taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item) } }
+function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding: document.taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item), mileageSync } }
 function updateMaintenanceHeader(document: MaintenanceDocument, field: MaintenanceHeaderField, value: string, customers: Customer[]): MaintenanceDocument {
   if (field !== 'customerId' && field !== 'vehicleId') return { ...document, [field]: value }
 
@@ -412,3 +442,20 @@ function mapMaintenanceVehicleDetails(vehicle: Customer['vehicles'][number] | un
 function createFormForCustomers(customers: Customer[], defaultDueDays: number): MaintenanceCreateForm { const customer = customers[0]; return { ...emptyCreateForm, dueDate: addDaysDisplay(defaultDueDays), customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '' } }
 function todayDisplay() { return new Date().toISOString().slice(0, 10).replaceAll('-', '/') }
 function addDaysDisplay(days: number) { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10).replaceAll('-', '/') }
+function parseMileageString(value: string | undefined | null): number | null {
+  if (!value) return null
+  const digits = value.replace(/[^0-9]/g, '')
+  if (!digits) return null
+  const parsed = Number(digits)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function MileageConfirmationDialog({ inputMileage, currentVehicleMileage, onConfirm, onCancel }: { inputMileage: number; currentVehicleMileage: number; onConfirm: (sync: { confirmed: true; openedMileage: number; inputMileage: number }) => void; onCancel: () => void }) {
+  const inputFormatted = inputMileage.toLocaleString('ja-JP')
+  const currentFormatted = currentVehicleMileage.toLocaleString('ja-JP')
+  const willUpdateVehicle = inputMileage > currentVehicleMileage
+  const message = willUpdateVehicle
+    ? `車両の走行距離を ${inputFormatted} km に更新し、走行距離履歴に記録します。`
+    : `走行距離履歴に ${inputFormatted} km を記録します。車両の現在値（${currentFormatted} km）は更新されません。`
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="mileage-dialog-title"><div className="modal-header"><h2 id="mileage-dialog-title">走行距離の更新確認</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onCancel}><X size={19} /></button></div><div className="modal-form"><p>{message}</p><p className="text-muted" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>※キャンセルすると保存処理を中止します。</p><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onCancel}>キャンセル</button><button className="button button-primary" type="button" onClick={() => onConfirm({ confirmed: true, openedMileage: inputMileage, inputMileage })}>保存して反映</button></div></div></section></div>
+}

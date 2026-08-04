@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -282,18 +282,20 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
   const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
 
-  const [customer, sales, maintenance, schedules, files, payments] = await Promise.all([
+  const [customer, sales, maintenance, schedules, files, payments, mileageHistoryRows] = await Promise.all([
     database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId))).orderBy(desc(salesDocuments.issuedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
     database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
     database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).orderBy(desc(vehicleFiles.createdAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all(),
+    database.select().from(mileageHistories).where(and(eq(mileageHistories.vehicleId, vehicleId), eq(mileageHistories.organizationId, organizationId))).all(),
   ])
   const documentKeys = new Set([...sales.map((document) => `販売請求書:${document.id}`), ...maintenance.map((document) => `整備請求書:${document.id}`)])
   const relatedPayments = payments.filter((payment) => documentKeys.has(`${payment.documentType}:${payment.documentId}`))
   const salesById = new Map(sales.map((document) => [document.id, document]))
   const maintenanceById = new Map(maintenance.map((document) => [document.id, document]))
+  const mileageByDocumentId = new Map(mileageHistoryRows.map((row) => [row.maintenanceDocumentId, row.mileage]))
 
   return jsonResponse({
     vehicle: {
@@ -317,7 +319,7 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
       freeItem3: vehicle.freeItem3,
     },
     sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
-    maintenance: maintenance.map((document) => ({ id: document.id, number: document.number, type: document.type, category: document.category, status: document.status, issuedAt: document.issuedAt, intakeDate: document.intakeDate, completionDate: document.completionDate, total: document.total })),
+    maintenance: maintenance.map((document) => ({ id: document.id, number: document.number, type: document.type, category: document.category, status: document.status, issuedAt: document.issuedAt, intakeDate: document.intakeDate, completionDate: document.completionDate, total: document.total, recordedMileage: mileageByDocumentId.get(document.id) ?? null })),
     inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
     payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
     attachments: files.map(serializeFile),

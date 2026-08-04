@@ -174,7 +174,7 @@ export type VehicleHistory = {
     freeItem3: string | null
   }
   sales: Array<{ id: string; number: string; type: string; status: string; issuedAt: string; dueDate: string | null; total: number }>
-  maintenance: Array<{ id: string; number: string; type: string; category: string; status: string; issuedAt: string; intakeDate: string | null; completionDate: string | null; total: number }>
+  maintenance: Array<{ id: string; number: string; type: string; category: string; status: string; issuedAt: string; intakeDate: string | null; completionDate: string | null; total: number; recordedMileage: number | null }>
   inspections: Array<{ id: string; inspectionType: string; dueDate: string; status: string; note: string; notifiedAt: string | null }>
   payments: Array<{ id: string; documentType: string; documentId: string; documentNumber: string; paidAmount: number; paymentDate: string | null; method: string | null; note: string | null }>
   attachments: ApiAttachment[]

@@ -102,6 +102,11 @@ export type MaintenanceDocumentInput = {
   note: string
   details: MaintenanceDocumentDetails
   items: Array<Omit<MaintenanceLineItem, 'id'>>
+  mileageSync?: {
+    confirmed: true
+    openedMileage: number
+    inputMileage: number
+  }
 }
 
 type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }

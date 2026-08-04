@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, maintenanceItems, maintenanceDocuments, vehicles } from '@vehicle-management/database'
+import { customers, maintenanceItems, maintenanceDocuments, mileageHistories, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -13,6 +13,31 @@ const maintenanceStatuses = new Set(['下書き', '入金待ち', '完了', 'ア
 const maintenanceCategories = new Set(['車検', '板金', '一般整備'])
 const feeNames = ['自賠責', '重量税', '印紙代', 'リサイクル料金'] as const
 type FeeName = typeof feeNames[number]
+
+type MileageSync = {
+  confirmed: true
+  openedMileage: number
+  inputMileage: number
+}
+
+function parseMileageSync(body: Record<string, unknown>): MileageSync | undefined {
+  const raw = body.mileageSync
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  if (record.confirmed !== true) return undefined
+  const openedMileage = integerNumber(record.openedMileage, -1)
+  const inputMileage = integerNumber(record.inputMileage, -1)
+  if (openedMileage < 0 || inputMileage < 0) return undefined
+  return { confirmed: true, openedMileage, inputMileage }
+}
+
+function parseMileageValue(value: string | undefined | null): number | null {
+  if (!value) return null
+  const digits = value.replace(/[^0-9]/g, '')
+  if (!digits) return null
+  const parsed = Number(digits)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 export async function handleMaintenanceRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -53,35 +78,87 @@ async function listMaintenanceDocuments(request: Request, env: Env, database: Re
 }
 
 async function createMaintenanceDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
-  const input = await parseMaintenanceInput(await readJson(request), database, organizationId)
+  const body = await readJson(request)
+  const mileageSync = parseMileageSync(body)
+  const input = await parseMaintenanceInput(body, database, organizationId)
+
+  // Validate mileageSync for new documents
+  if (mileageSync) {
+    if (mileageSync.openedMileage === mileageSync.inputMileage) {
+      throw new HttpError(400, '走行距離が変更されていないため記録できません。')
+    }
+    const overrideMileage = parseMileageValue(input.details.vehicleOverride?.mileage)
+    if (mileageSync.inputMileage !== overrideMileage) {
+      throw new HttpError(400, '走行距離が書類内容と一致しません。')
+    }
+    // For new documents, openedMileage should match the current vehicle mileage
+    const currentVehicleMileage = await getCurrentVehicleMileage(database, input.vehicleId, organizationId)
+    if (mileageSync.openedMileage !== currentVehicleMileage) {
+      throw new HttpError(409, '車両の走行距離が開いた時点から変更されています。再読み込みしてください。')
+    }
+  } else {
+    // No mileageSync: verify the mileage on the document matches the vehicle (no change intended)
+    const inputMileage = parseMileageValue(input.details.vehicleOverride?.mileage)
+    const currentVehicleMileage = await getCurrentVehicleMileage(database, input.vehicleId, organizationId)
+    if (inputMileage !== null && inputMileage !== currentVehicleMileage) {
+      throw new HttpError(400, '走行距離が変更されていますが確認が送信されていません。')
+    }
+  }
+
   const id = crypto.randomUUID()
   const number = await nextDocumentNumber(env.DB, organizationId, 'M')
   await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateMaintenanceTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
+  const now = new Date().toISOString()
 
-  await database.insert(maintenanceDocuments).values({
-    id,
-    organizationId,
-    number,
-    type: input.type,
-    category: input.category,
-    status: input.status,
-    customerId: input.customerId,
-    vehicleId: input.vehicleId,
-    intakeDate: input.intakeDate,
-    plannedReleaseDate: input.plannedReleaseDate,
-    completionDate: input.completionDate,
-    issuedAt: input.issuedAt,
-    dueDate: input.dueDate,
-    taxRate: input.taxRate,
-    taxRounding: input.rounding,
-    subtotal: totals.subtotal,
-    tax: totals.tax,
-    total: totals.total,
-    note: input.note,
-    detailsJson: JSON.stringify(input.details),
-  }).run()
-  await insertMaintenanceItems(database, id, input.items, input.fees, input.adjustment, organizationId)
+  const itemRows = buildMaintenanceItemRows(input.items, input.fees, input.adjustment, id, organizationId)
+
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(
+      `INSERT INTO maintenance_documents
+        (id, organization_id, number, type, category, status, customer_id, vehicle_id,
+         intake_date, planned_release_date, completion_date, issued_at, due_date,
+         tax_rate, tax_rounding, subtotal, tax, total, note, details_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id, organizationId, number, input.type, input.category, input.status,
+      input.customerId, input.vehicleId, input.intakeDate, input.plannedReleaseDate,
+      input.completionDate, input.issuedAt, input.dueDate,
+      input.taxRate, input.rounding, totals.subtotal, totals.tax, totals.total,
+      input.note, JSON.stringify(input.details)
+    ),
+    ...itemRows.map((item, index) =>
+      env.DB.prepare(
+        `INSERT INTO maintenance_items
+          (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, technical_fee, summary, amount, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        item.id, organizationId, id, item.itemType, item.description,
+        item.quantity, item.unit, item.unitPrice, item.technicalFee,
+        item.summary, item.amount, index
+      )
+    ),
+  ]
+
+  if (mileageSync) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO mileage_histories
+          (id, organization_id, vehicle_id, maintenance_document_id, mileage, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (organization_id, maintenance_document_id)
+         DO UPDATE SET mileage = excluded.mileage, vehicle_id = excluded.vehicle_id, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), organizationId, input.vehicleId, id, mileageSync.inputMileage, now, now)
+    )
+    statements.push(
+      env.DB.prepare(
+        `UPDATE vehicles SET mileage = ?, updated_at = ?
+         WHERE id = ? AND organization_id = ? AND (mileage IS NULL OR mileage < ?)`
+      ).bind(mileageSync.inputMileage, now, input.vehicleId, organizationId, mileageSync.inputMileage)
+    )
+  }
+
+  await env.DB.batch(statements)
 
   return jsonResponse({ document: await findMaintenanceDocument(database, id, organizationId) }, 201, env)
 }
@@ -92,6 +169,14 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
 
   const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
+  const mileageSync = parseMileageSync(body)
+
+  // Compute persistedDocumentMileage using the same logic as the editor:
+  //   vehicleOverride.mileage if present, otherwise the vehicle's current mileage
+  const currentDetails = parseMaintenanceDetails(parseDetailsJson(current.detailsJson))
+  const vehicleOverrideMileage = parseMileageValue(currentDetails.vehicleOverride?.mileage)
+  const persistedDocumentMileage = vehicleOverrideMileage ?? await getCurrentVehicleMileage(database, current.vehicleId, organizationId)
+
   const input = await parseMaintenanceInput({
     ...body,
     type: body.type ?? current.type,
@@ -113,33 +198,82 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
+
+  // Validate mileageSync for existing documents
+  if (mileageSync) {
+    if (mileageSync.openedMileage === mileageSync.inputMileage) {
+      throw new HttpError(400, '走行距離が変更されていないため記録できません。')
+    }
+    const overrideMileage = parseMileageValue(input.details.vehicleOverride?.mileage)
+    if (mileageSync.inputMileage !== overrideMileage) {
+      throw new HttpError(400, '走行距離が書類内容と一致しません。')
+    }
+    if (mileageSync.openedMileage !== persistedDocumentMileage) {
+      throw new HttpError(409, '走行距離が開いた時点から変更されています。再読み込みしてください。')
+    }
+  } else {
+    const inputMileage = parseMileageValue(input.details.vehicleOverride?.mileage)
+    if (inputMileage !== null && inputMileage !== persistedDocumentMileage) {
+      throw new HttpError(400, '走行距離が変更されていますが確認が送信されていません。')
+    }
+  }
+
   const totals = calculateMaintenanceTotals(input.items, input.fees, input.adjustment, input.taxRate, input.rounding)
   const number = input.number || current.number
   await ensureMaintenanceDocumentNumberAvailable(database, number, organizationId, documentId)
+  const now = new Date().toISOString()
 
-  await database.update(maintenanceDocuments).set({
-    number,
-    type: input.type,
-    category: input.category,
-    status: input.status,
-    customerId: input.customerId,
-    vehicleId: input.vehicleId,
-    intakeDate: input.intakeDate,
-    plannedReleaseDate: input.plannedReleaseDate,
-    completionDate: input.completionDate,
-    issuedAt: input.issuedAt,
-    dueDate: input.dueDate,
-    taxRate: input.taxRate,
-    taxRounding: input.rounding,
-    subtotal: totals.subtotal,
-    tax: totals.tax,
-    total: totals.total,
-    note: input.note,
-    detailsJson: JSON.stringify(input.details),
-    updatedAt: new Date().toISOString(),
-  }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
-  await database.delete(maintenanceItems).where(and(eq(maintenanceItems.documentId, documentId), eq(maintenanceItems.organizationId, organizationId))).run()
-  await insertMaintenanceItems(database, documentId, input.items, input.fees, input.adjustment, organizationId)
+  const itemRows = buildMaintenanceItemRows(input.items, input.fees, input.adjustment, documentId, organizationId)
+
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(
+      `UPDATE maintenance_documents SET
+         number = ?, type = ?, category = ?, status = ?, customer_id = ?, vehicle_id = ?,
+         intake_date = ?, planned_release_date = ?, completion_date = ?, issued_at = ?, due_date = ?,
+         tax_rate = ?, tax_rounding = ?, subtotal = ?, tax = ?, total = ?,
+         note = ?, details_json = ?, updated_at = ?
+       WHERE id = ? AND organization_id = ?`
+    ).bind(
+      number, input.type, input.category, input.status, input.customerId, input.vehicleId,
+      input.intakeDate, input.plannedReleaseDate, input.completionDate, input.issuedAt, input.dueDate,
+      input.taxRate, input.rounding, totals.subtotal, totals.tax, totals.total,
+      input.note, JSON.stringify(input.details), now, documentId, organizationId
+    ),
+    env.DB.prepare(
+      `DELETE FROM maintenance_items WHERE document_id = ? AND organization_id = ?`
+    ).bind(documentId, organizationId),
+    ...itemRows.map((item, index) =>
+      env.DB.prepare(
+        `INSERT INTO maintenance_items
+          (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, technical_fee, summary, amount, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        item.id, organizationId, documentId, item.itemType, item.description,
+        item.quantity, item.unit, item.unitPrice, item.technicalFee,
+        item.summary, item.amount, index
+      )
+    ),
+  ]
+
+  if (mileageSync) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO mileage_histories
+          (id, organization_id, vehicle_id, maintenance_document_id, mileage, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (organization_id, maintenance_document_id)
+         DO UPDATE SET mileage = excluded.mileage, vehicle_id = excluded.vehicle_id, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), organizationId, input.vehicleId, documentId, mileageSync.inputMileage, now, now)
+    )
+    statements.push(
+      env.DB.prepare(
+        `UPDATE vehicles SET mileage = ?, updated_at = ?
+         WHERE id = ? AND organization_id = ? AND (mileage IS NULL OR mileage < ?)`
+      ).bind(mileageSync.inputMileage, now, input.vehicleId, organizationId, mileageSync.inputMileage)
+    )
+  }
+
+  await env.DB.batch(statements)
 
   return jsonResponse({ document: await findMaintenanceDocument(database, documentId, organizationId) }, 200, env)
 }
@@ -172,14 +306,71 @@ async function loadMaintenanceItems(database: ReturnType<typeof createDatabase>,
   return database.select().from(maintenanceItems).where(and(eq(maintenanceItems.documentId, documentId), eq(maintenanceItems.organizationId, organizationId))).orderBy(asc(maintenanceItems.sortOrder)).all()
 }
 
-async function insertMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, organizationId: string) {
-  const rows = [
-    ...items.map((item) => ({ itemType: item.kind, description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary, amount: item.amount })),
-    ...feeNames.map((name) => ({ itemType: '法定費用', description: name, quantity: 1, unit: '式', unitPrice: fees[name], technicalFee: 0, summary: '', amount: fees[name] })),
-    ...(adjustment === 0 ? [] : [{ itemType: '調整', description: '調整額', quantity: 1, unit: '式', unitPrice: adjustment, technicalFee: 0, summary: '', amount: adjustment }]),
+async function getCurrentVehicleMileage(database: ReturnType<typeof createDatabase>, vehicleId: string | null, organizationId: string): Promise<number | null> {
+  if (!vehicleId) return null
+  const result = await database.select({ mileage: vehicles.mileage })
+    .from(vehicles)
+    .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId)))
+    .get()
+  return result?.mileage ?? null
+}
+
+type MaintenanceItemRow = {
+  id: string
+  organizationId: string
+  documentId: string
+  itemType: string
+  description: string
+  quantity: number
+  unit: string
+  unitPrice: number
+  technicalFee: number
+  summary: string
+  amount: number
+}
+
+function buildMaintenanceItemRows(items: MaintenanceItemInput[], fees: Record<FeeName, number>, adjustment: number, documentId: string, organizationId: string): MaintenanceItemRow[] {
+  return [
+    ...items.map((item) => ({
+      id: crypto.randomUUID(),
+      organizationId,
+      documentId,
+      itemType: item.kind,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      technicalFee: item.technicalFee,
+      summary: item.summary,
+      amount: item.amount,
+    })),
+    ...feeNames.map((name) => ({
+      id: crypto.randomUUID(),
+      organizationId,
+      documentId,
+      itemType: '法定費用',
+      description: name,
+      quantity: 1,
+      unit: '式',
+      unitPrice: fees[name],
+      technicalFee: 0,
+      summary: '',
+      amount: fees[name],
+    })),
+    ...(adjustment === 0 ? [] : [{
+      id: crypto.randomUUID(),
+      organizationId,
+      documentId,
+      itemType: '調整',
+      description: '調整額',
+      quantity: 1,
+      unit: '式',
+      unitPrice: adjustment,
+      technicalFee: 0,
+      summary: '',
+      amount: adjustment,
+    }]),
   ]
-  if (!rows.length) return
-  await database.insert(maintenanceItems).values(rows.map((item, index) => ({ id: crypto.randomUUID(), organizationId, documentId, ...item, sortOrder: index }))).run()
 }
 
 function parseMaintenanceInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string): Promise<MaintenanceInput> {

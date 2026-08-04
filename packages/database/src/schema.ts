@@ -310,6 +310,22 @@ export const backupRecords = sqliteTable('backup_records', {
   index('backup_records_organization_id_idx').on(table.organizationId),
 ])
 
+export const mileageHistories = sqliteTable('mileage_histories', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  vehicleId: text('vehicle_id').notNull()
+    .references(() => vehicles.id, { onDelete: 'cascade' }),
+  maintenanceDocumentId: text('maintenance_document_id').notNull()
+    .references(() => maintenanceDocuments.id, { onDelete: 'cascade' }),
+  mileage: integer('mileage').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('mileage_histories_organization_id_idx').on(table.organizationId),
+  index('mileage_histories_vehicle_id_idx').on(table.vehicleId),
+  uniqueIndex('mileage_histories_organization_document_uq')
+    .on(table.organizationId, table.maintenanceDocumentId),
+])
+
 export const databaseSchema = {
   staffProfiles,
   organizations,
@@ -329,4 +345,5 @@ export const databaseSchema = {
   sharedSchedules,
   appSettings,
   backupRecords,
+  mileageHistories,
 }

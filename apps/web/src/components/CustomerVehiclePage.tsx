@@ -355,11 +355,74 @@ function VehicleHistoryPanel({ vehicleId, onNavigate }: { vehicleId: string; onN
     return () => { active = false }
   }, [vehicleId])
 
-  return <section className="panel vehicle-history-panel"><div className="vehicle-history-header"><div><span className="page-eyebrow">VEHICLE HISTORY</span><h3>車両履歴</h3><p>販売・整備・点検・入金・添付ファイルを車両単位で確認できます。</p></div><FileText size={20} /></div>{loading && <div className="vehicle-history-empty">履歴を読み込んでいます…</div>}{error && <div className="vehicle-history-empty is-error" role="alert">{error}</div>}{!loading && !error && history && <div className="vehicle-history-grid"><HistoryGroup title="販売履歴" count={history.sales.length}>{history.sales.map((row) => <HistoryRow key={row.id} primary={`${row.type} ${row.number}`} secondary={`${formatHistoryDate(row.issuedAt)} ・ ${row.status}`} amount={row.total} onClick={onNavigate ? () => onNavigate({ section: 'sales', recordId: row.id }) : undefined} />)}</HistoryGroup><HistoryGroup title="整備履歴" count={history.maintenance.length}>{history.maintenance.map((row) => <HistoryRow key={row.id} primary={`${row.category} ${row.number}`} secondary={`${formatHistoryDate(row.issuedAt)} ・ ${row.status}`} amount={row.total} onClick={onNavigate ? () => onNavigate({ section: 'maintenance', recordId: row.id }) : undefined} />)}</HistoryGroup><HistoryGroup title="車検・点検履歴" count={history.inspections.length}>{history.inspections.map((row) => <HistoryRow key={row.id} primary={row.inspectionType} secondary={`${formatHistoryDate(row.dueDate)} ・ ${row.status}`} onClick={onNavigate ? () => onNavigate({ section: 'inspections', recordId: row.id }) : undefined} />)}</HistoryGroup><HistoryGroup title="入金履歴" count={history.payments.length}>{history.payments.map((row) => <HistoryRow key={row.id} primary={`${row.documentType} ${row.documentNumber}`} secondary={`${formatHistoryDate(row.paymentDate)} ・ ${row.method || '方法未登録'}`} amount={row.paidAmount} onClick={onNavigate ? () => onNavigate({ section: 'payments', recordId: row.id }) : undefined} />)}</HistoryGroup><HistoryGroup title="添付ファイル履歴" count={history.attachments.length}>{history.attachments.map((row) => <HistoryRow key={row.id} primary={row.name} secondary={`${row.contentType} ・ ${formatFileSize(row.size)}`} />)}</HistoryGroup></div>}</section>
+  const timelineRows = useMemo(() => {
+    if (!history) return []
+    const salesRows: TimelineRow[] = history.sales.map(s => ({
+      documentType: 'sale' as const,
+      category: null,
+      date: s.issuedAt,
+      mileage: null,
+      documentId: s.id,
+      documentNumber: s.number,
+      documentTypeLabel: s.type,
+      status: s.status,
+      total: s.total,
+      section: 'sales' as const,
+    }))
+    const maintenanceRows: TimelineRow[] = history.maintenance.map(m => ({
+      documentType: 'maintenance' as const,
+      category: m.category,
+      date: m.issuedAt,
+      mileage: m.recordedMileage,
+      documentId: m.id,
+      documentNumber: m.number,
+      documentTypeLabel: m.type,
+      status: m.status,
+      total: m.total,
+      section: 'maintenance' as const,
+    }))
+    return [...salesRows, ...maintenanceRows]
+      .sort((a, b) => {
+        const dateCompare = a.date.localeCompare(b.date)
+        if (dateCompare !== 0) return dateCompare
+        // 同日付の場合、販売（sale）を優先して上に表示
+        const typePriority = (docType: 'sale' | 'maintenance') => docType === 'sale' ? 0 : 1
+        const typeCompare = typePriority(a.documentType) - typePriority(b.documentType)
+        if (typeCompare !== 0) return typeCompare
+        const numberCompare = a.documentNumber.localeCompare(b.documentNumber, 'ja-JP', { numeric: true })
+        if (numberCompare !== 0) return numberCompare
+        return a.documentId.localeCompare(b.documentId)
+      })
+  }, [history])
+
+  const panelContent = loading
+    ? <div className="vehicle-history-empty">履歴を読み込んでいます…</div>
+    : error
+      ? <div className="vehicle-history-empty is-error" role="alert">{error}</div>
+      : timelineRows.length === 0
+        ? <div className="vehicle-history-empty">履歴はありません</div>
+        : <div className="vehicle-timeline-table"><div className="vehicle-timeline-header"><div className="vehicle-timeline-cell vehicle-timeline-date">日付</div><div className="vehicle-timeline-cell vehicle-timeline-category">種別</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">走行距離</div><div className="vehicle-timeline-cell vehicle-timeline-document">書類</div></div>{timelineRows.map((row) => <TimelineRowComponent key={`${row.documentType}-${row.documentId}`} row={row} onNavigate={onNavigate} />)}</div>
+
+  return <section className="panel vehicle-history-panel"><div className="vehicle-history-header"><div><span className="page-eyebrow">VEHICLE HISTORY</span><h3>車両履歴</h3><p>販売・整備の書類を時系列で確認できます。</p></div><FileText size={20} /></div>{panelContent}</section>
 }
 
-function HistoryGroup({ title, count, children }: { title: string; count: number; children: ReactNode }) {
-  return <div className="vehicle-history-group"><div className="vehicle-history-group-header"><strong>{title}</strong><span>{count}件</span></div>{count ? children : <small className="vehicle-history-none">履歴はありません。</small>}</div>
+type TimelineRow = {
+  documentType: 'sale' | 'maintenance'
+  category: string | null
+  date: string
+  mileage: number | null
+  documentId: string
+  documentNumber: string
+  documentTypeLabel: string
+  status: string
+  total: number
+  section: 'sales' | 'maintenance'
+}
+
+function TimelineRowComponent({ row, onNavigate }: { row: TimelineRow; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
+  const categoryLabel = row.documentType === 'sale' ? '販売' : (row.category ?? '—')
+  const mileageLabel = row.mileage !== null ? `${row.mileage.toLocaleString('ja-JP')} km` : '—'
+  return <div className="vehicle-timeline-row"><div className="vehicle-timeline-cell vehicle-timeline-date">{formatHistoryDate(row.date)}</div><div className="vehicle-timeline-cell vehicle-timeline-category">{categoryLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">{mileageLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-document"><HistoryRow primary={`${row.documentTypeLabel} ${row.documentNumber}`} secondary={`${formatHistoryDate(row.date)} ・ ${row.status}`} amount={row.total} onClick={onNavigate ? () => onNavigate({ section: row.section, recordId: row.documentId }) : undefined} /></div></div>
 }
 
 function HistoryRow({ primary, secondary, amount, onClick }: { primary: string; secondary: string; amount?: number; onClick?: () => void }) {
