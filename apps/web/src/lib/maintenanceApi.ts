@@ -88,8 +88,8 @@ export type MaintenanceDocumentInput = {
   type: MaintenanceDocumentType
   status: MaintenanceStatus
   category: IntakeCategory
-  customerId: string
-  vehicleId: string
+  customerId?: string
+  vehicleId?: string
   issuedAt?: string
   intakeDate: string
   plannedReleaseDate: string

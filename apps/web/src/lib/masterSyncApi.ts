@@ -64,6 +64,8 @@ export type SyncPreviewInput = {
   documentId?: string
   customerId?: string
   vehicleId?: string
+  newCustomer?: { name: string; nameKana?: string; phone?: string; email?: string; postalCode?: string; address?: string }
+  newVehicle?: { maker: string; name: string; model?: string; registrationNumber?: string; chassisNumber?: string; modelYear?: number; inspectionDate?: string; bodyColor?: string; transmission?: string; mileage?: number; displacement?: number }
   customerOverride?: Record<string, unknown>
   vehicleOverride?: Record<string, unknown>
   issuedAt?: string
