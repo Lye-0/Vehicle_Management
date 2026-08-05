@@ -75,6 +75,7 @@ type CalendarEvent = {
   status: string | null
   amount: number | null
   endDate: string
+  sharedScheduleId?: string
   navigation?: CalendarEventNavigation
 }
 
@@ -144,7 +145,7 @@ function buildCalendarEvents(
 
   for (const schedule of sharedScheduleRows) {
     const authorName = staffProfilesByUid.get(schedule.createdByUid) ?? '未設定ユーザー'
-    addCalendarEvent(events, schedule.startDate, `shared-${schedule.id}`, 'shared', schedule.title, schedule.detail, null, null, undefined, schedule.endDate, authorName)
+    addCalendarEvent(events, schedule.startDate, `shared-${schedule.id}`, 'shared', schedule.title, schedule.detail, null, null, undefined, schedule.endDate, authorName, schedule.id)
   }
 
   return events.sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title, 'ja'))
@@ -162,12 +163,13 @@ function addCalendarEvent(
   navigation?: CalendarEventNavigation,
   endDate: string | null = null,
   authorName: string | null = null,
+  sharedScheduleId: string | null = null,
 ) {
   const normalizedDate = date ? normalizeDate(date) : ''
   if (!isCalendarDate(normalizedDate)) return
   const normalizedEndDate = endDate ? normalizeDate(endDate) : normalizedDate
   const safeEndDate = isCalendarDate(normalizedEndDate) && normalizedEndDate >= normalizedDate ? normalizedEndDate : normalizedDate
-  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}) })
+  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}), ...(sharedScheduleId?.trim() ? { sharedScheduleId: sharedScheduleId.trim() } : {}) })
 }
 
 function isCalendarDate(value: string) {

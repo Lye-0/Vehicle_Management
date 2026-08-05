@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { sharedSchedules, staffProfiles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -7,13 +7,22 @@ import { HttpError, jsonResponse, readJson } from '../http'
 
 export async function handleSharedScheduleRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
-  if (pathname !== '/api/shared-schedules') return null
+  const isCollection = pathname === '/api/shared-schedules'
+  const itemMatch = pathname.match(/^\/api\/shared-schedules\/([^/]+)$/)
+  if (!isCollection && !itemMatch) return null
 
   try {
     const database = createDatabase(env.DB)
     const context = await requireOrganizationContext(request, env, database)
-    if (request.method === 'GET') return await listSharedSchedules(database, env, context.organization.organizationId, context.user.uid, context.user.displayName, context.user.email)
-    if (request.method === 'POST') return await createSharedSchedule(request, database, env, context.organization.organizationId, context.user.uid, context.user.displayName, context.user.email)
+    const organizationId = context.organization.organizationId
+    if (isCollection) {
+      if (request.method === 'GET') return await listSharedSchedules(database, env, organizationId, context.user.uid, context.user.displayName, context.user.email)
+      if (request.method === 'POST') return await createSharedSchedule(request, database, env, organizationId, context.user.uid, context.user.displayName, context.user.email)
+      throw new HttpError(405, 'この操作には対応していません。')
+    }
+    const id = decodeURIComponent(itemMatch![1])
+    if (request.method === 'PATCH') return await updateSharedSchedule(request, database, env, id, organizationId, context.user.uid, context.user.displayName, context.user.email)
+    if (request.method === 'DELETE') return await deleteSharedSchedule(database, env, id, organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -41,6 +50,24 @@ async function createSharedSchedule(request: Request, database: ReturnType<typeo
   const profile = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName }).from(staffProfiles).where(eq(staffProfiles.uid, currentUid)).get()
   const authorName = profile?.displayName?.trim() || currentDisplayName?.trim() || currentEmail?.trim() || '未設定ユーザー'
   return jsonResponse({ schedule: serializeSharedSchedules([row], [{ uid: currentUid, displayName: authorName }], currentUid, currentDisplayName, currentEmail)[0] }, 201, env)
+}
+
+async function updateSharedSchedule(request: Request, database: ReturnType<typeof createDatabase>, env: Env, id: string, organizationId: string, currentUid: string, currentDisplayName: string | null, currentEmail: string | null) {
+  const current = await database.select().from(sharedSchedules).where(and(eq(sharedSchedules.id, id), eq(sharedSchedules.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '共有スケジュールが見つかりません。')
+  const input = parseSharedScheduleInput(await readJson(request))
+  const updatedAt = new Date().toISOString()
+  await database.update(sharedSchedules).set({ ...input, updatedAt }).where(and(eq(sharedSchedules.id, id), eq(sharedSchedules.organizationId, organizationId))).run()
+  const row = await database.select().from(sharedSchedules).where(and(eq(sharedSchedules.id, id), eq(sharedSchedules.organizationId, organizationId))).get()
+  if (!row) throw new HttpError(500, '共有スケジュールを更新できませんでした。')
+  const profiles = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName }).from(staffProfiles).all()
+  return jsonResponse({ schedule: serializeSharedSchedules([row], profiles, currentUid, currentDisplayName, currentEmail)[0] }, 200, env)
+}
+
+async function deleteSharedSchedule(database: ReturnType<typeof createDatabase>, env: Env, id: string, organizationId: string) {
+  const result = await database.delete(sharedSchedules).where(and(eq(sharedSchedules.id, id), eq(sharedSchedules.organizationId, organizationId))).run()
+  if (!result.success || result.meta.changes === 0) throw new HttpError(404, '共有スケジュールが見つかりません。')
+  return jsonResponse({ deleted: true }, 200, env)
 }
 
 function serializeSharedSchedules(rows: Array<typeof sharedSchedules.$inferSelect>, profiles: Array<{ uid: string; displayName: string }>, currentUid: string, currentDisplayName: string | null, currentEmail: string | null) {

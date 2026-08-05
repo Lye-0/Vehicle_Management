@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { CalendarClock, CalendarDays, CarFront, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, FileText, Plus, X } from 'lucide-react'
+import { CalendarClock, CalendarDays, CarFront, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, FileText, Plus, Trash2, X } from 'lucide-react'
 import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 import type { SharedScheduleInput } from '../lib/sharedSchedulesApi'
 
@@ -21,6 +21,8 @@ type DashboardCalendarProps = {
   loading: boolean
   onSelectEvent?: (event: DashboardCalendarEvent) => void
   onCreateSharedSchedule?: (input: SharedScheduleInput) => Promise<void>
+  onUpdateSharedSchedule?: (id: string, input: SharedScheduleInput) => Promise<void>
+  onDeleteSharedSchedule?: (id: string) => Promise<void>
   eyebrow?: string
   title?: string
   description?: string
@@ -49,6 +51,8 @@ export function DashboardCalendar({
   loading,
   onSelectEvent,
   onCreateSharedSchedule,
+  onUpdateSharedSchedule,
+  onDeleteSharedSchedule,
   eyebrow = '予定をまとめて確認',
   title = '業務カレンダー',
   description = '車検、車検満了、販売・整備書類作成日、支払期限、組織内共有スケジュールを表示しています。',
@@ -62,6 +66,8 @@ export function DashboardCalendar({
   const [selectedDate, setSelectedDate] = useState(today)
   const [enabledCategories, setEnabledCategories] = useState<Set<CalendarCategory>>(() => new Set(defaultEnabledCategories ?? legendCategories.map(({ category }) => category)))
   const [sharedScheduleModalOpen, setSharedScheduleModalOpen] = useState(false)
+  const [sharedScheduleModalMode, setSharedScheduleModalMode] = useState<'create' | 'edit'>('create')
+  const [sharedScheduleTargetId, setSharedScheduleTargetId] = useState<string | null>(null)
   const [sharedScheduleForm, setSharedScheduleForm] = useState<SharedScheduleInput>(() => emptySharedScheduleForm(today))
   const [sharedScheduleSaving, setSharedScheduleSaving] = useState(false)
   const [sharedScheduleError, setSharedScheduleError] = useState('')
@@ -100,21 +106,49 @@ export function DashboardCalendar({
   }
 
   function openSharedScheduleModal() {
+    setSharedScheduleModalMode('create')
+    setSharedScheduleTargetId(null)
     setSharedScheduleForm(emptySharedScheduleForm(selectedDate))
+    setSharedScheduleError('')
+    setSharedScheduleModalOpen(true)
+  }
+
+  function openSharedScheduleEdit(event: DashboardCalendarEvent) {
+    if (!event.sharedScheduleId || !onUpdateSharedSchedule) return
+    setSharedScheduleModalMode('edit')
+    setSharedScheduleTargetId(event.sharedScheduleId)
+    setSharedScheduleForm({ title: event.title, startDate: event.date, endDate: event.endDate, detail: event.detail })
     setSharedScheduleError('')
     setSharedScheduleModalOpen(true)
   }
 
   async function submitSharedSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!onCreateSharedSchedule) return
+    if (sharedScheduleModalMode === 'create' && !onCreateSharedSchedule) return
+    if (sharedScheduleModalMode === 'edit' && (!sharedScheduleTargetId || !onUpdateSharedSchedule)) return
     setSharedScheduleSaving(true)
     setSharedScheduleError('')
     try {
-      await onCreateSharedSchedule(sharedScheduleForm)
+      if (sharedScheduleModalMode === 'edit' && sharedScheduleTargetId && onUpdateSharedSchedule) await onUpdateSharedSchedule(sharedScheduleTargetId, sharedScheduleForm)
+      else if (onCreateSharedSchedule) await onCreateSharedSchedule(sharedScheduleForm)
       setSharedScheduleModalOpen(false)
     } catch (reason) {
-      setSharedScheduleError(reason instanceof Error ? reason.message : '共有スケジュールを登録できませんでした。')
+      setSharedScheduleError(reason instanceof Error ? reason.message : sharedScheduleModalMode === 'edit' ? '共有スケジュールを更新できませんでした。' : '共有スケジュールを登録できませんでした。')
+    } finally {
+      setSharedScheduleSaving(false)
+    }
+  }
+
+  async function deleteSharedSchedule() {
+    if (sharedScheduleModalMode !== 'edit' || !sharedScheduleTargetId || !onDeleteSharedSchedule) return
+    if (!window.confirm(`「${sharedScheduleForm.title || 'この共有スケジュール'}」を削除しますか？`)) return
+    setSharedScheduleSaving(true)
+    setSharedScheduleError('')
+    try {
+      await onDeleteSharedSchedule(sharedScheduleTargetId)
+      setSharedScheduleModalOpen(false)
+    } catch (reason) {
+      setSharedScheduleError(reason instanceof Error ? reason.message : '共有スケジュールを削除できませんでした。')
     } finally {
       setSharedScheduleSaving(false)
     }
@@ -197,25 +231,27 @@ export function DashboardCalendar({
             <h3 id={detailTitleId}>{formatFullDate(parseDateKey(selectedDate) ?? new Date())}</h3>
             <span className="calendar-detail-count">{selectedEvents.length}件の予定</span>
           </div>
-          {loading ? <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>予定を読み込んでいます</strong><span>店舗データを集計しています。</span></div> : selectedEvents.length ? <div className="calendar-detail-list">{selectedEvents.map((event) => <CalendarEventDetail event={event} key={event.id} onSelectEvent={onSelectEvent} />)}</div> : <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>この日の予定はありません</strong><span>表示する予定の種類をオンにするか、別の日付を選択してください。</span></div>}
+          {loading ? <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>予定を読み込んでいます</strong><span>店舗データを集計しています。</span></div> : selectedEvents.length ? <div className="calendar-detail-list">{selectedEvents.map((event) => <CalendarEventDetail event={event} key={event.id} onSelectEvent={onSelectEvent} onEditSharedSchedule={onUpdateSharedSchedule ? openSharedScheduleEdit : undefined} />)}</div> : <div className="calendar-detail-empty"><CalendarDays size={24} /><strong>この日の予定はありません</strong><span>表示する予定の種類をオンにするか、別の日付を選択してください。</span></div>}
         </aside>
       </div>
-      {sharedScheduleModalOpen && onCreateSharedSchedule && <SharedScheduleModal form={sharedScheduleForm} saving={sharedScheduleSaving} error={sharedScheduleError} onChange={setSharedScheduleForm} onClose={() => { if (!sharedScheduleSaving) setSharedScheduleModalOpen(false) }} onSubmit={(event) => void submitSharedSchedule(event)} />}
+      {sharedScheduleModalOpen && (onCreateSharedSchedule || onUpdateSharedSchedule) && <SharedScheduleModal mode={sharedScheduleModalMode} form={sharedScheduleForm} saving={sharedScheduleSaving} error={sharedScheduleError} onChange={setSharedScheduleForm} onClose={() => { if (!sharedScheduleSaving) setSharedScheduleModalOpen(false) }} onDelete={sharedScheduleModalMode === 'edit' && onDeleteSharedSchedule ? () => void deleteSharedSchedule() : undefined} onSubmit={(event) => void submitSharedSchedule(event)} />}
     </section>
   )
 }
 
-function CalendarEventDetail({ event, onSelectEvent }: { event: DashboardCalendarEvent; onSelectEvent?: (event: DashboardCalendarEvent) => void }) {
+function CalendarEventDetail({ event, onSelectEvent, onEditSharedSchedule }: { event: DashboardCalendarEvent; onSelectEvent?: (event: DashboardCalendarEvent) => void; onEditSharedSchedule?: (event: DashboardCalendarEvent) => void }) {
   const Icon = event.category === 'vehicle-inspection' ? CarFront : event.category === 'inspection' ? CalendarClock : event.category === 'maintenance' ? ClipboardCheck : event.category === 'sales' ? FileText : event.category === 'shared' ? CalendarDays : CircleDollarSign
   const content = <><div className="calendar-detail-item-header"><span className="calendar-detail-type"><Icon size={14} />{event.categoryLabel}</span>{event.status && <span className="calendar-detail-status">{event.status}</span>}</div><h4>{event.title}</h4>{event.authorName && <p className="calendar-detail-author">作成者：{event.authorName}</p>}<p className="calendar-detail-description">{event.detail || '詳細はありません。'}</p>{event.amount !== null && <strong className="calendar-detail-amount">{formatYen(event.amount)}</strong>}</>
+  const isSharedScheduleSelectable = Boolean(event.category === 'shared' && event.sharedScheduleId && onEditSharedSchedule)
   const isSelectable = Boolean(onSelectEvent && event.navigation)
+  if (isSharedScheduleSelectable) return <button className={`calendar-detail-item calendar-detail-item-action calendar-event-${event.category}`} type="button" onClick={() => onEditSharedSchedule?.(event)} aria-label={`${event.title}の編集・削除画面を開く`}>{content}</button>
   return isSelectable ? <button className={`calendar-detail-item calendar-detail-item-action calendar-event-${event.category}`} type="button" onClick={() => onSelectEvent?.(event)} aria-label={`${event.title}の詳細を開く`}>{content}</button> : <article className={`calendar-detail-item calendar-event-${event.category}`}>{content}</article>
 }
 
-function SharedScheduleModal({ form, saving, error, onChange, onClose, onSubmit }: { form: SharedScheduleInput; saving: boolean; error: string; onChange: (form: SharedScheduleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function SharedScheduleModal({ mode, form, saving, error, onChange, onClose, onDelete, onSubmit }: { mode: 'create' | 'edit'; form: SharedScheduleInput; saving: boolean; error: string; onChange: (form: SharedScheduleInput) => void; onClose: () => void; onDelete?: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const dateError = Boolean(form.startDate && form.endDate && form.endDate < form.startDate)
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}><section className="modal shared-schedule-modal" role="dialog" aria-modal="true" aria-labelledby="shared-schedule-modal-title" onMouseDown={(event) => event.stopPropagation()}>
-    <div className="modal-header"><div><span className="page-eyebrow">ORGANIZATION SCHEDULE</span><h2 id="shared-schedule-modal-title">共有スケジュールを追加</h2></div><button className="modal-close" type="button" aria-label="共有スケジュール入力を閉じる" disabled={saving} onClick={onClose}><X size={19} /></button></div>
+    <div className="modal-header"><div><span className="page-eyebrow">ORGANIZATION SCHEDULE</span><h2 id="shared-schedule-modal-title">{mode === 'edit' ? '共有スケジュールを編集' : '共有スケジュールを追加'}</h2></div><button className="modal-close" type="button" aria-label="共有スケジュール入力を閉じる" disabled={saving} onClick={onClose}><X size={19} /></button></div>
     <form className="modal-form" onSubmit={onSubmit}>
       <p className="modal-description"><CalendarDays size={16} />登録した予定は組織内の管理者・従業員に共有されます。</p>
       <div className="form-grid shared-schedule-form-grid">
@@ -226,7 +262,7 @@ function SharedScheduleModal({ form, saving, error, onChange, onClose, onSubmit 
       </div>
       {dateError && <p className="shared-schedule-error" role="alert">終了日は開始日以降の日付を選択してください。</p>}
       {error && <p className="shared-schedule-error" role="alert">{error}</p>}
-      <div className="modal-footer"><button className="button button-secondary" type="button" disabled={saving} onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={saving || dateError}>{saving ? '登録中…' : '共有予定を登録'}</button></div>
+      <div className="modal-footer">{mode === 'edit' && onDelete && <button className="button button-danger shared-schedule-delete-button" type="button" disabled={saving} onClick={onDelete}><Trash2 size={15} />削除</button>}<button className="button button-secondary" type="button" disabled={saving} onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={saving || dateError}>{saving ? mode === 'edit' ? '更新中…' : '登録中…' : mode === 'edit' ? '変更を保存' : '共有予定を登録'}</button></div>
     </form>
   </section></div>
 }

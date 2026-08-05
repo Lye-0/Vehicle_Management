@@ -212,6 +212,7 @@
 .shared-schedule-modal .modal-header { align-items: flex-start; }
 .shared-schedule-form-grid .shared-schedule-title-field, .shared-schedule-form-grid .shared-schedule-detail-field { grid-column: 1 / -1; }
 .shared-schedule-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
+.shared-schedule-delete-button { margin-right: auto; }
 .panel { min-width: 0; padding: 22px 24px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
 .panel h2 { font-size: 16px; letter-spacing: -0.02em; }
