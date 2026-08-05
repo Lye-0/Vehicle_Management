@@ -479,3 +479,140 @@ export function validateCombination(input: CombinationValidation): CombinationEr
 
   return null
 }
+
+// ----- 最終保存時の実差分集合計算 -----
+// sync-previewの結果を信用せず、保存API側で再計算するためのヘルパー
+
+export function computeActualCustomerDiffFields(
+  currentMaster: {
+    name: string
+    nameKana: string | null
+    phone: string | null
+    postalCode: string | null
+    address: string | null
+  } | null | undefined,
+  override: Record<string, unknown> | null | undefined,
+): Set<CustomerSyncField> {
+  const docValues = extractCustomerFieldsFromOverride(override)
+  const fields = new Set<CustomerSyncField>()
+  if (!currentMaster) return fields
+  for (const field of CUSTOMER_SYNC_ALLOWLIST) {
+    const current = currentMaster[CUSTOMER_FIELD_TO_DRIZZLE[field]] ?? null
+    const doc = docValues[field] ?? ''
+    if (!doc) continue
+    const currentStr = formatMasterValue(current, field)
+    if (currentStr === doc) continue
+    fields.add(field)
+  }
+  return fields
+}
+
+export function computeActualVehicleDiffFields(
+  currentMaster: {
+    maker: string | null
+    name: string
+    model: string | null
+    registrationNumber: string | null
+    chassisNumber: string | null
+    modelYear: number | null
+    inspectionDate: string | null
+    bodyColor: string | null
+    displacement: number | null
+    transmission: string | null
+  } | null | undefined,
+  override: Record<string, unknown> | null | undefined,
+): Set<VehicleSyncField> {
+  const docValues = extractVehicleFieldsFromOverride(override)
+  const fields = new Set<VehicleSyncField>()
+  if (!currentMaster) return fields
+  for (const field of VEHICLE_SYNC_ALLOWLIST) {
+    const current = currentMaster[VEHICLE_FIELD_TO_DRIZZLE[field]] ?? null
+    const doc = docValues[field]
+    const docStr = typeof doc === 'number' ? String(doc) : (doc ?? '')
+    if (!docStr) continue
+    const currentStr = formatMasterValue(current, field)
+    if (currentStr === docStr) continue
+    fields.add(field)
+  }
+  return fields
+}
+
+// ----- masterSync入力検証 -----
+
+export type MasterSyncInput = {
+  confirmed: boolean
+  customerFields?: unknown
+  vehicleFields?: unknown
+  expectedCustomerUpdatedAt?: unknown
+  expectedVehicleUpdatedAt?: unknown
+}
+
+export type MasterSyncValidationResult = {
+  customerFields: CustomerSyncField[]
+  vehicleFields: VehicleSyncField[]
+  expectedCustomerUpdatedAt: string | undefined
+  expectedVehicleUpdatedAt: string | undefined
+}
+
+export function validateMasterSyncInput(raw: unknown): MasterSyncValidationResult | { error: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'masterSyncはオブジェクトである必要があります。' }
+  }
+  const obj = raw as Record<string, unknown>
+  if (obj.confirmed !== true) {
+    return { error: 'masterSync.confirmedはtrueである必要があります。' }
+  }
+
+  const customerFieldsRaw = obj.customerFields
+  const vehicleFieldsRaw = obj.vehicleFields
+
+  if (customerFieldsRaw !== undefined && !Array.isArray(customerFieldsRaw)) {
+    return { error: 'customerFieldsは配列である必要があります。' }
+  }
+  if (vehicleFieldsRaw !== undefined && !Array.isArray(vehicleFieldsRaw)) {
+    return { error: 'vehicleFieldsは配列である必要があります。' }
+  }
+
+  const customerFields = (customerFieldsRaw as string[] | undefined) ?? []
+  const vehicleFields = (vehicleFieldsRaw as string[] | undefined) ?? []
+
+  // 重複チェック
+  if (new Set(customerFields).size !== customerFields.length) {
+    return { error: 'customerFieldsに重複があります。' }
+  }
+  if (new Set(vehicleFields).size !== vehicleFields.length) {
+    return { error: 'vehicleFieldsに重複があります。' }
+  }
+
+  // allowlist外チェック
+  const invalidCustomer = customerFields.filter((f) => !CUSTOMER_SYNC_ALLOWLIST.has(f as CustomerSyncField))
+  if (invalidCustomer.length > 0) {
+    return { error: `allowlist外の顧客フィールド: ${invalidCustomer.join(', ')}` }
+  }
+  const invalidVehicle = vehicleFields.filter((f) => !VEHICLE_SYNC_ALLOWLIST.has(f as VehicleSyncField))
+  if (invalidVehicle.length > 0) {
+    return { error: `allowlist外の車両フィールド: ${invalidVehicle.join(', ')}` }
+  }
+
+  // mileageチェック
+  if (vehicleFields.includes('mileage')) {
+    return { error: 'mileageはvehicleFieldsに含めません。mileageSyncを使用してください。' }
+  }
+
+  const expectedCustomerUpdatedAt = typeof obj.expectedCustomerUpdatedAt === 'string' ? obj.expectedCustomerUpdatedAt : undefined
+  const expectedVehicleUpdatedAt = typeof obj.expectedVehicleUpdatedAt === 'string' ? obj.expectedVehicleUpdatedAt : undefined
+
+  if (customerFields.length > 0 && !expectedCustomerUpdatedAt) {
+    return { error: 'customerFields指定時はexpectedCustomerUpdatedAtが必須です。' }
+  }
+  if (vehicleFields.length > 0 && !expectedVehicleUpdatedAt) {
+    return { error: 'vehicleFields指定時はexpectedVehicleUpdatedAtが必須です。' }
+  }
+
+  return {
+    customerFields: customerFields as CustomerSyncField[],
+    vehicleFields: vehicleFields as VehicleSyncField[],
+    expectedCustomerUpdatedAt,
+    expectedVehicleUpdatedAt,
+  }
+}
