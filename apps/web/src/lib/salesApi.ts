@@ -132,14 +132,39 @@ export type SalesDocument = {
 
 export type SalesCreateInput = {
   type: SalesDocumentType
-  customerId: string
-  vehicleId: string | null
+  customerId?: string
+  vehicleId?: string | null
   dueDate: string
   note: string
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
   initialItemDescription: string
   details?: SalesDocumentDetails
+  newCustomer?: {
+    name: string
+    nameKana?: string
+    phone?: string
+    email?: string
+    postalCode?: string
+    address?: string
+  }
+  newVehicle?: {
+    maker: string
+    name: string
+    model?: string
+    registrationNumber?: string
+    chassisNumber?: string
+    modelYear?: number
+    inspectionDate?: string
+    mileage?: number
+    bodyColor?: string
+    displacement?: number
+    transmission?: string
+  }
+  duplicateConfirmation?: {
+    registrationNumberConfirmed?: boolean
+    confirmedVehicleId?: string
+  }
 }
 
 type ApiSalesDocument = Omit<SalesDocument, 'taxRate' | 'issuedAt' | 'dueDate' | 'items'> & {
@@ -155,20 +180,32 @@ export async function fetchSalesDocuments() {
 }
 
 export async function createSalesDocument(input: SalesCreateInput) {
+  const payload: Record<string, unknown> = {
+    type: input.type,
+    issuedAt: today(),
+    dueDate: toApiDate(input.dueDate),
+    taxRate: input.taxRate,
+    rounding: input.taxRounding,
+    note: input.note,
+    details: input.details,
+    items: [{ description: input.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0 }],
+  }
+  if (input.newCustomer) {
+    payload.newCustomer = input.newCustomer
+  } else {
+    payload.customerId = input.customerId
+  }
+  if (input.newVehicle) {
+    payload.newVehicle = input.newVehicle
+  } else if (input.vehicleId) {
+    payload.vehicleId = input.vehicleId
+  }
+  if (input.duplicateConfirmation) {
+    payload.duplicateConfirmation = input.duplicateConfirmation
+  }
   const response = await apiFetch<{ document: ApiSalesDocument }>('/api/sales-documents', {
     method: 'POST',
-    body: JSON.stringify({
-      type: input.type,
-      customerId: input.customerId,
-      vehicleId: input.vehicleId,
-      issuedAt: today(),
-      dueDate: toApiDate(input.dueDate),
-      taxRate: input.taxRate,
-      rounding: input.taxRounding,
-      note: input.note,
-      details: input.details,
-      items: [{ description: input.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0 }],
-    }),
+    body: JSON.stringify(payload),
   })
   return mapSalesDocument(response.document)
 }

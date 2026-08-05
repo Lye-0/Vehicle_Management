@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import {
+  AlertTriangle,
   Archive,
   CarFront,
+  Check,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -16,8 +18,8 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { createCustomer, createVehicle, fetchCustomers, fetchVehicleFile, type Customer, type CustomerInput, type Vehicle, type VehicleInput } from '../lib/customerApi'
-import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
+import { fetchCustomers, fetchVehicleFile, type Customer, type CustomerInput, type Vehicle, type VehicleInput } from '../lib/customerApi'
+import { fetchSyncPreview, type DuplicateCustomerCandidate, type DuplicateVehicleCandidate, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
   createSalesDocument,
@@ -31,6 +33,7 @@ import {
   type SalesLineItem,
   type SalesTaxCategory,
   type SalesDocumentInput,
+  type SalesCreateInput,
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
@@ -122,6 +125,15 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [saved, setSaved] = useState(false)
   const [documentView, setDocumentView] = useState<SalesDocumentView>('edit')
   const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
+  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ ...emptySalesCustomerForm })
+  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ ...emptySalesVehicleForm })
+  const [dialogError, setDialogError] = useState('')
+  const [duplicateCustomerCandidates, setDuplicateCustomerCandidates] = useState<DuplicateCustomerCandidate[]>([])
+  const [duplicateVehicleCandidates, setDuplicateVehicleCandidates] = useState<DuplicateVehicleCandidate[]>([])
+  const [confirmedVehicleId, setConfirmedVehicleId] = useState<string | null>(null)
+  const [customerDuplicateConfirmed, setCustomerDuplicateConfirmed] = useState(false)
   const documentsRef = useRef<SalesDocument[]>([])
   const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
@@ -409,34 +421,125 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setCreateDialogOpen(true)
   }
 
-  async function registerCustomer(input: CustomerInput) {
-    const customer = await createCustomer(input)
-    setCustomers((current) => [...current, customer])
-    return customer
-  }
-
-  async function registerVehicle(customerId: string, input: VehicleInput) {
-    const result = await createVehicle(customerId, input)
-    setCustomers((current) => current.some((customer) => customer.id === result.customer.id)
-      ? current.map((customer) => customer.id === result.customer.id ? result.customer : customer)
-      : [...current, result.customer])
-    return result
-  }
-
   async function createDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (creating || !createForm.customerId) return
+    if (creating) return
+    const hasNewCustomer = newCustomerOpen && newCustomerForm.name.trim()
+    const hasExistingCustomer = !!createForm.customerId
+    if (!hasNewCustomer && !hasExistingCustomer) return
+
     setCreating(true)
+    setDialogError('')
     try {
-      const newDocument = await createSalesDocument({ ...createForm, vehicleId: createForm.vehicleId || null, note: '' })
+      // Build sync-preview input
+      const previewInput: SyncPreviewInput = { documentType: 'sales' }
+      if (hasNewCustomer) {
+        previewInput.newCustomer = { name: newCustomerForm.name.trim(), nameKana: newCustomerForm.kana || undefined, phone: newCustomerForm.phone || undefined, email: newCustomerForm.email || undefined, postalCode: newCustomerForm.postalCode || undefined, address: newCustomerForm.address || undefined }
+      } else if (createForm.customerId) {
+        previewInput.customerId = createForm.customerId
+      }
+      if (newVehicleOpen && newVehicleForm.maker.trim() && newVehicleForm.model.trim()) {
+        const mv: NonNullable<SyncPreviewInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
+        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
+        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
+        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
+        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
+        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
+        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
+        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
+        if (newVehicleForm.mileage) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (m > 0) mv.mileage = m }
+        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
+        previewInput.newVehicle = mv
+      } else if (createForm.vehicleId) {
+        previewInput.vehicleId = createForm.vehicleId
+      }
+      if (createForm.dueDate) previewInput.issuedAt = new Date().toISOString().slice(0, 10)
+
+      // Call sync-preview
+      const preview = await fetchSyncPreview(previewInput)
+
+      // Check for chassis number duplicates - block creation
+      const chassisDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'chassis_number') ?? []
+      if (chassisDuplicates.length > 0) {
+        const dup = chassisDuplicates[0]
+        setDialogError(`この車両は既に登録されています（${dup.maker ?? ''} ${dup.name}）。既存車両を選択してください。`)
+        setCreating(false)
+        return
+      }
+
+      // Check for registration number duplicates - require confirmation
+      const plateDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'registration_number') ?? []
+      if (plateDuplicates.length > 0 && !confirmedVehicleId) {
+        setDuplicateVehicleCandidates(plateDuplicates)
+        setCreating(false)
+        return
+      }
+
+      // Check for customer duplicates
+      const customerDuplicates = preview.duplicateCustomers ?? []
+      if (customerDuplicates.length > 0 && !customerDuplicateConfirmed) {
+        setDuplicateCustomerCandidates(customerDuplicates)
+        setCreating(false)
+        return
+      }
+
+      // Build final input
+      const input: SalesCreateInput = {
+        ...createForm,
+        vehicleId: createForm.vehicleId || null,
+        note: '',
+      }
+      if (hasNewCustomer) {
+        const trimmed = { ...newCustomerForm, name: newCustomerForm.name.trim() }
+        input.newCustomer = { name: trimmed.name, nameKana: trimmed.kana || undefined, phone: trimmed.phone || undefined, email: trimmed.email || undefined, postalCode: trimmed.postalCode || undefined, address: trimmed.address || undefined }
+        delete input.customerId
+      }
+      if (newVehicleOpen && newVehicleForm.maker.trim() && newVehicleForm.model.trim()) {
+        const mv: NonNullable<SalesCreateInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
+        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
+        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
+        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
+        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
+        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
+        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
+        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
+        if (newVehicleForm.mileage) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (m > 0) mv.mileage = m }
+        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
+        input.newVehicle = mv
+        delete input.vehicleId
+      }
+      // Add duplicate confirmation if needed
+      if (plateDuplicates.length > 0 && confirmedVehicleId) {
+        input.duplicateConfirmation = { registrationNumberConfirmed: true, confirmedVehicleId }
+      }
+
+      const newDocument = await createSalesDocument(input)
       replaceDocuments((current) => [newDocument, ...current])
       setSelectedDocumentId(newDocument.id)
       setCreateDialogOpen(false)
       setDirty(false)
       setSaved(false)
       setSyncError('')
+      setNewCustomerOpen(false)
+      setNewVehicleOpen(false)
+      setNewCustomerForm({ ...emptySalesCustomerForm })
+      setNewVehicleForm({ ...emptySalesVehicleForm })
+      setDuplicateCustomerCandidates([])
+      setDuplicateVehicleCandidates([])
+      setConfirmedVehicleId(null)
+      setCustomerDuplicateConfirmed(false)
+
+      // Re-fetch customers to update the list
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+      } catch {
+        // Save succeeded but re-fetch failed - show warning but don't block
+        setSyncError('書類は作成されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
     } catch (error: unknown) {
-      setSyncError(error instanceof Error ? error.message : '販売書類を作成できませんでした。')
+      setDialogError(error instanceof Error ? error.message : '販売書類を作成できませんでした。')
     } finally {
       setCreating(false)
     }
@@ -500,7 +603,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
       <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
-      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
+      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} newCustomerOpen={newCustomerOpen} setNewCustomerOpen={setNewCustomerOpen} newVehicleOpen={newVehicleOpen} setNewVehicleOpen={setNewVehicleOpen} newCustomerForm={newCustomerForm} setNewCustomerForm={setNewCustomerForm} newVehicleForm={newVehicleForm} setNewVehicleForm={setNewVehicleForm} dialogError={dialogError} duplicateCustomerCandidates={duplicateCustomerCandidates} duplicateVehicleCandidates={duplicateVehicleCandidates} onSelectExistingCustomer={(customerId) => setCreateForm({ ...createForm, customerId })} onContinueAsNewCustomer={() => { setCustomerDuplicateConfirmed(true); setDuplicateCustomerCandidates([]) }} onSelectExistingVehicle={(vehicleId) => setCreateForm({ ...createForm, vehicleId })} onConfirmRegistrationDuplicate={(vehicleId) => { setConfirmedVehicleId(vehicleId); setDuplicateVehicleCandidates([]) }} confirmedVehicleId={confirmedVehicleId} customerDuplicateConfirmed={customerDuplicateConfirmed} onResetDuplicateState={() => { setDuplicateCustomerCandidates([]); setDuplicateVehicleCandidates([]); setConfirmedVehicleId(null); setCustomerDuplicateConfirmed(false) }} />}
       {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
     </>
   )
@@ -1108,83 +1211,30 @@ function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicle
   return { maker: vehicle.maker, name: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, inspectionRecordAvailable: vehicle.inspectionRecordAvailable }
 }
 
-function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onSubmit, onCreateCustomer, onCreateVehicle }: { form: SalesCreateForm; customers: Customer[]; creating: boolean; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCreateCustomer: (input: CustomerInput) => Promise<Customer>; onCreateVehicle: (customerId: string, input: VehicleInput) => Promise<{ customer: Customer; vehicleId: string }> }) {
+function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onSubmit, newCustomerOpen, setNewCustomerOpen, newVehicleOpen, setNewVehicleOpen, newCustomerForm, setNewCustomerForm, newVehicleForm, setNewVehicleForm, dialogError, duplicateCustomerCandidates, duplicateVehicleCandidates, onSelectExistingCustomer, onContinueAsNewCustomer, onSelectExistingVehicle, onConfirmRegistrationDuplicate, confirmedVehicleId, customerDuplicateConfirmed, onResetDuplicateState }: { form: SalesCreateForm; customers: Customer[]; creating: boolean; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; newCustomerOpen: boolean; setNewCustomerOpen: (v: boolean) => void; newVehicleOpen: boolean; setNewVehicleOpen: (v: boolean) => void; newCustomerForm: CustomerInput; setNewCustomerForm: (v: CustomerInput) => void; newVehicleForm: VehicleInput; setNewVehicleForm: (v: VehicleInput) => void; dialogError: string; duplicateCustomerCandidates: DuplicateCustomerCandidate[]; duplicateVehicleCandidates: DuplicateVehicleCandidate[]; onSelectExistingCustomer: (customerId: string) => void; onContinueAsNewCustomer: () => void; onSelectExistingVehicle: (vehicleId: string) => void; onConfirmRegistrationDuplicate: (vehicleId: string) => void; confirmedVehicleId: string | null; customerDuplicateConfirmed: boolean; onResetDuplicateState: () => void }) {
   const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
   const vehicles = selectedCustomer?.vehicles ?? []
-  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
-  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
-  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ ...emptySalesCustomerForm })
-  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ ...emptySalesVehicleForm })
-  const [registeringCustomer, setRegisteringCustomer] = useState(false)
-  const [registeringVehicle, setRegisteringVehicle] = useState(false)
-  const [dialogError, setDialogError] = useState('')
 
   function selectCustomer(customerId: string) {
     const customer = customers.find((item) => item.id === customerId)
     onChange({ ...form, customerId, vehicleId: customer?.vehicles[0]?.id ?? '' })
-    setNewVehicleOpen(false)
-    setDialogError('')
   }
 
   function openNewCustomerForm() {
     setNewCustomerForm({ ...emptySalesCustomerForm })
     setNewCustomerOpen(true)
     setNewVehicleOpen(false)
-    setDialogError('')
   }
 
   function openNewVehicleForm() {
-    if (!selectedCustomer) return
     setNewVehicleForm({ ...emptySalesVehicleForm })
     setNewVehicleOpen(true)
     setNewCustomerOpen(false)
-    setDialogError('')
   }
 
-  async function saveNewCustomer() {
-    const name = newCustomerForm.name.trim()
-    if (!name) {
-      setDialogError('顧客名を入力してください。')
-      return
-    }
-    setRegisteringCustomer(true)
-    setDialogError('')
-    try {
-      const customer = await onCreateCustomer({ ...newCustomerForm, name, memo: '' })
-      onChange({ ...form, customerId: customer.id, vehicleId: customer.vehicles[0]?.id ?? '' })
-      setNewCustomerForm({ ...emptySalesCustomerForm })
-      setNewCustomerOpen(false)
-    } catch (error: unknown) {
-      setDialogError(error instanceof Error ? error.message : '顧客を登録できませんでした。')
-    } finally {
-      setRegisteringCustomer(false)
-    }
-  }
-
-  async function saveNewVehicle() {
-    if (!selectedCustomer) return
-    const maker = newVehicleForm.maker.trim()
-    const model = newVehicleForm.model.trim()
-    if (!maker || !model) {
-      setDialogError('メーカーと車名を入力してください。')
-      return
-    }
-    setRegisteringVehicle(true)
-    setDialogError('')
-    try {
-      const result = await onCreateVehicle(selectedCustomer.id, { ...newVehicleForm, maker, model })
-      onChange({ ...form, vehicleId: result.vehicleId })
-      setNewVehicleForm({ ...emptySalesVehicleForm })
-      setNewVehicleOpen(false)
-    } catch (error: unknown) {
-      setDialogError(error instanceof Error ? error.message : '車両を登録できませんでした。')
-    } finally {
-      setRegisteringVehicle(false)
-    }
-  }
-
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して、下書きの販売書類を作成します。未登録の場合はこの画面から追加できます。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>請求書</option></select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required aria-label="顧客" value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled>顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div><div className="form-field sales-create-related-field"><span>対象車両</span><div className="sales-create-select-row"><select aria-label="対象車両" disabled={!selectedCustomer} value={form.vehicleId} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を指定しない</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={!selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div>{newCustomerOpen && <div className="sales-create-inline-panel"><div><h3>新しい顧客を登録</h3><p>顧客名を登録すると、この販売書類の顧客として選択されます。</p></div><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringCustomer} onClick={() => setNewCustomerOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringCustomer} onClick={() => void saveNewCustomer()}><Plus size={15} />{registeringCustomer ? '登録中…' : '顧客を登録'}</button></div></div>}{newVehicleOpen && <div className="sales-create-inline-panel"><div><h3>新しい車両を登録</h3><p>{selectedCustomer?.name} の車両情報を登録します。メーカーと車名は必須です。</p></div><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, vin: event.target.value })} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：30000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringVehicle} onClick={() => setNewVehicleOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringVehicle} onClick={() => void saveNewVehicle()}><Plus size={15} />{registeringVehicle ? '登録中…' : '車両を登録'}</button></div></div>}{dialogError && <p className="sales-create-error" role="alert">{dialogError}</p>}<div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || registeringCustomer || registeringVehicle || !form.customerId}><Plus size={16} />{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={() => { onResetDuplicateState(); onClose() }}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して、下書きの販売書類を作成します。未登録の場合はこの画面から追加できます。</p>{dialogError && <p className="sales-create-error" role="alert">{dialogError}</p>}<div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>請求書</option></select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required aria-label="顧客" value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled>顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div>{newCustomerOpen && <div className="form-field sales-create-related-field"><span>新規顧客情報</span><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div></div>}{duplicateCustomerCandidates.length > 0 && !customerDuplicateConfirmed && <div className="form-field sales-create-related-field"><div className="sales-create-inline-panel"><h3>既存顧客が見つかりました</h3><p>以下の既存顧客が入力内容と一致しました。</p>{duplicateCustomerCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><strong>{candidate.name}</strong>{candidate.phone && <span>{candidate.phone}</span>}{candidate.email && <span>{candidate.email}</span>}<small>{candidate.matchReason === 'phone' ? '電話番号' : 'メールアドレス'}が一致</small></div><button className="button button-secondary" type="button" onClick={() => onSelectExistingCustomer(candidate.id)}>この既存顧客を使用</button></div>)}<div className="sales-create-inline-actions"><button className="button button-secondary" type="button" onClick={onContinueAsNewCustomer}>新規顧客として続ける</button></div></div></div>}{customerDuplicateConfirmed && <div className="form-field sales-create-related-field"><div className="sales-create-candidate-confirmed"><Check size={14} />既存顧客を使用中</div></div>}{duplicateVehicleCandidates.length > 0 && <div className="form-field sales-create-related-field"><div className="sales-create-inline-panel">{duplicateVehicleCandidates.some((d) => d.matchReason === 'chassis_number') ? <><h3><AlertTriangle size={15} /> この車両は既に登録されています</h3><p>車台番号が一致する既存車両が見つかりました。</p>{duplicateVehicleCandidates.filter((d) => d.matchReason === 'chassis_number').map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><strong>{candidate.maker} {candidate.name}</strong>{candidate.registrationNumber && <span>{candidate.registrationNumber}</span>}{candidate.chassisNumber && <span>{candidate.chassisNumber}</span>}<small>車台番号が一致</small></div><button className="button button-primary" type="button" onClick={() => onSelectExistingVehicle(candidate.id)}>この既存車両を使用</button></div>)}</> : <><h3>登録番号が既存車両と一致します</h3><p>登録番号が一致する既存車両が見つかりました。</p>{duplicateVehicleCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><strong>{candidate.maker} {candidate.name}</strong>{candidate.registrationNumber && <span>{candidate.registrationNumber}</span>}<small>登録番号が一致</small></div>{confirmedVehicleId === candidate.id ? <span className="sales-create-candidate-confirmed"><Check size={14} />確認済み</span> : <button className="button button-secondary" type="button" onClick={() => onSelectExistingVehicle(candidate.id)}>この既存車両を使用</button>}</div>)}{confirmedVehicleId && <div className="sales-create-inline-actions"><button className="button button-primary" type="button" onClick={() => onConfirmRegistrationDuplicate(confirmedVehicleId)}>新規車両として続ける</button></div>}</>}</div></div>}<div className="form-field sales-create-related-field"><span>対象車両</span><div className="sales-create-select-row"><select aria-label="対象車両" disabled={!selectedCustomer} value={form.vehicleId} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を指定しない</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={!selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div>{newVehicleOpen && <div className="form-field sales-create-related-field"><span>新規車両情報</span><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：ZAA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, plate: event.target.value })} placeholder="例：品川500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, vin: event.target.value })} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：10000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div></div>}<label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={() => { onResetDuplicateState(); onClose() }}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || (!form.customerId && !newCustomerOpen)}><Plus size={16} />{creating ? '作成…' : '作成する'}</button></div></form></section></div>
 }
+
 
 function emptyCreateForm(): SalesCreateForm {
   return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(defaultSettings.document.defaultDueDays), taxRate: defaultSettings.tax.consumptionTaxRate, taxRounding: defaultSettings.tax.rounding, initialItemDescription: '車両本体価格' }

@@ -28,6 +28,25 @@ export type SyncPreviewMileageDiff = {
   willUpdateVehicle: boolean
 }
 
+export type DuplicateCustomerCandidate = {
+  id: string
+  name: string
+  phone: string | null
+  email: string | null
+  matchReason: 'phone' | 'email'
+  strength: 'strong'
+}
+
+export type DuplicateVehicleCandidate = {
+  id: string
+  maker: string | null
+  name: string
+  registrationNumber: string | null
+  chassisNumber: string | null
+  matchReason: 'chassis_number' | 'registration_number'
+  strength: 'strong'
+}
+
 export type SyncPreviewResponse = {
   hasDifferences: boolean
   isOlderThanLatestDocument: boolean
@@ -36,6 +55,8 @@ export type SyncPreviewResponse = {
   mileageDiff?: SyncPreviewMileageDiff
   expectedCustomerUpdatedAt: string | null
   expectedVehicleUpdatedAt: string | null
+  duplicateCustomers?: DuplicateCustomerCandidate[]
+  duplicateVehicles?: DuplicateVehicleCandidate[]
 }
 
 export type SyncPreviewInput = {

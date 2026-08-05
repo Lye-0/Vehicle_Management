@@ -392,6 +392,12 @@
 .sales-create-inline-panel p { margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 .sales-create-inline-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .sales-create-inline-actions .button { min-height: 36px; padding: 0 12px; font-size: 11px; box-shadow: none; }
+.sales-create-candidate-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.sales-create-candidate-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sales-create-candidate-info strong { font-size: 12px; }
+.sales-create-candidate-info span { color: var(--text-secondary); font-size: 11px; }
+.sales-create-candidate-info small { color: var(--text-muted); font-size: 10px; }
+.sales-create-candidate-confirmed { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
 .sales-create-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .button-secondary { color: var(--text-secondary); border-color: var(--border); background: var(--surface); }
