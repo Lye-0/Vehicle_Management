@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { createCustomer, createVehicle, fetchCustomers, fetchVehicleFile, type Customer, type CustomerInput, type Vehicle, type VehicleInput } from '../lib/customerApi'
+import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
   createSalesDocument,
@@ -29,6 +30,7 @@ import {
   type SalesStatus,
   type SalesLineItem,
   type SalesTaxCategory,
+  type SalesDocumentInput,
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
@@ -37,6 +39,7 @@ import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilter
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
+import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesStatusFilter = 'すべて' | Exclude<SalesStatus, 'アーカイブ済み'>
@@ -45,6 +48,11 @@ type CompletedSalesGroup = { key: string; label: string; documents: SalesDocumen
 type SalesHeaderField = 'number' | 'type' | 'status' | 'customerId' | 'vehicleId' | 'issuedAt' | 'dueDate' | 'note'
 type SalesItemField = 'itemType' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'taxCategory' | 'otherAmount' | 'summary'
 type SalesTaxCategoryField = keyof SalesDocumentDetails['requiredDocuments']
+
+type SalesMasterSnapshot =
+  | { state: 'loading' }
+  | { state: 'ready'; customerId: string; customerUpdatedAt: string; vehicleId: string | null; vehicleUpdatedAt: string | null }
+  | { state: 'invalid' }
 
 const salesDocumentTypeFilterOptions: DocumentFilterOption<DocumentFilter>[] = [
   { value: 'すべて', label: 'すべて', tone: 'all' },
@@ -113,7 +121,10 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
   const [documentView, setDocumentView] = useState<SalesDocumentView>('edit')
+  const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
   const documentsRef = useRef<SalesDocument[]>([])
+  const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
+  const lastOpenedDocumentIdRef = useRef<string | null>(null)
 
   function replaceDocuments(updater: (current: SalesDocument[]) => SalesDocument[]) {
     const nextDocuments = updater(documentsRef.current)
@@ -158,6 +169,30 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
+
+  // Initialize openedMasterSnapshot when document changes
+  useEffect(() => {
+    const currentDocumentId = selectedDocument?.id ?? null
+    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
+    lastOpenedDocumentIdRef.current = currentDocumentId
+    if (!selectedDocument) {
+      openedMasterSnapshotRef.current = null
+      return
+    }
+    const foundCustomer = customers.find((c) => c.id === selectedDocument.customerId)
+    const foundVehicle = selectedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId) : null
+    if (foundCustomer) {
+      openedMasterSnapshotRef.current = {
+        state: 'ready',
+        customerId: foundCustomer.id,
+        customerUpdatedAt: foundCustomer.updatedAt,
+        vehicleId: selectedDocument.vehicleId,
+        vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+      }
+    } else {
+      openedMasterSnapshotRef.current = { state: 'loading' }
+    }
+  }, [selectedDocument, customers])
 
   function updateLineItem(itemId: string, field: SalesItemField, value: string) {
     if (!selectedDocument) return
@@ -304,20 +339,65 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     markDirty()
   }
 
-  async function saveSelectedDocument() {
+  async function saveSelectedDocument(masterSync?: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string }) {
     if (!selectedDocument || saving) return
+    if (openedMasterSnapshotRef.current?.state === 'invalid') {
+      setSyncError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
+      return
+    }
     const documentToSave = documentsRef.current.find((document) => document.id === selectedDocument.id)
     if (!documentToSave) return
     setSaving(true)
     setSaved(false)
     try {
-      const nextDocument = await updateSalesDocument(documentToSave)
+      const input: SalesDocumentInput = {
+        type: documentToSave.type,
+        number: documentToSave.number,
+        status: documentToSave.status,
+        customerId: documentToSave.customerId,
+        vehicleId: documentToSave.vehicleId,
+        issuedAt: documentToSave.issuedAt,
+        dueDate: documentToSave.dueDate,
+        taxRate: documentToSave.taxRate,
+        taxRounding: documentToSave.taxRounding,
+        note: documentToSave.note,
+        details: documentToSave.details,
+        items: documentToSave.items.map(({ id: _id, ...item }) => item),
+        masterSync,
+      }
+      const nextDocument = await updateSalesDocument(documentToSave.id, input)
       replaceDocuments((current) => current.map((document) => document.id === nextDocument.id ? nextDocument : document))
       setDirty(false)
       setSaved(true)
       setSyncError('')
+
+      // Re-fetch customers to get latest updatedAt
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        const foundCustomer = nextCustomers.find((c) => c.id === selectedDocument.customerId)
+        const foundVehicle = selectedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId) : null
+        if (foundCustomer) {
+          openedMasterSnapshotRef.current = {
+            state: 'ready',
+            customerId: foundCustomer.id,
+            customerUpdatedAt: foundCustomer.updatedAt,
+            vehicleId: selectedDocument.vehicleId,
+            vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+          }
+        } else {
+          openedMasterSnapshotRef.current = { state: 'loading' }
+        }
+      } catch {
+        setSyncError('書類は保存されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
     } catch (error: unknown) {
-      setSyncError(error instanceof Error ? error.message : '販売書類を保存できませんでした。')
+      if (error instanceof Error && error.message.includes('顧客または車両情報が更新されました')) {
+        setSyncError('顧客または車両情報が更新されました。再読み込み後にもう一度保存してください。')
+      } else {
+        setSyncError(error instanceof Error ? error.message : '販売書類を保存できませんでした。')
+      }
     } finally {
       setSaving(false)
     }
@@ -362,6 +442,56 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     }
   }
 
+  async function handleSaveClick() {
+    if (!selectedDocument || saving) return
+    if (openedMasterSnapshotRef.current?.state === 'invalid') {
+      setSyncError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
+      return
+    }
+
+    const snapshot = openedMasterSnapshotRef.current
+    try {
+      const preview = await fetchSyncPreview({
+        documentType: 'sales',
+        documentId: selectedDocument.id,
+        customerId: selectedDocument.customerId || undefined,
+        vehicleId: selectedDocument.vehicleId || undefined,
+        customerOverride: selectedDocument.details.customerOverride ?? undefined,
+        vehicleOverride: selectedDocument.details.vehicleOverride ?? undefined,
+        issuedAt: selectedDocument.issuedAt.replaceAll('/', '-'),
+        openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
+        openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt ?? undefined : undefined,
+      })
+
+      const hasDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0
+      if (hasDiffs) {
+        setMasterSyncDialogResult(preview)
+        return
+      }
+
+      // No differences - save directly
+      void saveSelectedDocument()
+    } catch (reason) {
+      setSyncError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
+    }
+  }
+
+  function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
+    setMasterSyncDialogResult(null)
+    const preview = masterSyncDialogResult
+    let masterSync: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string } | undefined
+    if (result.customerFields.length > 0 || result.vehicleFields.length > 0) {
+      masterSync = {
+        confirmed: true,
+        customerFields: result.customerFields,
+        vehicleFields: result.vehicleFields,
+        expectedCustomerUpdatedAt: result.customerFields.length > 0 ? (preview?.expectedCustomerUpdatedAt ?? undefined) : undefined,
+        expectedVehicleUpdatedAt: result.vehicleFields.length > 0 ? (preview?.expectedVehicleUpdatedAt ?? undefined) : undefined,
+      }
+    }
+    void saveSelectedDocument(masterSync)
+  }
+
   return (
     <>
       <div className="page-header sales-page-header"><div><span className="page-eyebrow">販売書類</span><h1>販売</h1><p>見積書・請求書を車両情報と連動して管理します。</p></div><button className="button button-primary" type="button" onClick={openCreateDialog}><Plus size={18} />販売書類を作成</button></div>
@@ -369,8 +499,9 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
+      {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
     </>
   )
 }

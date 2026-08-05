@@ -173,34 +173,64 @@ export async function createSalesDocument(input: SalesCreateInput) {
   return mapSalesDocument(response.document)
 }
 
-export async function updateSalesDocument(document: SalesDocument) {
-  const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${document.id}`, {
+export type SalesDocumentInput = {
+  number?: string
+  type: SalesDocumentType
+  status: SalesStatus
+  customerId: string
+  vehicleId: string | null
+  issuedAt?: string
+  dueDate: string
+  taxRate: number
+  taxRounding: '切り捨て' | '四捨五入'
+  note: string
+  details: SalesDocumentDetails
+  items: Array<Omit<SalesLineItem, 'id'>>
+  masterSync?: {
+    confirmed: true
+    customerFields: string[]
+    vehicleFields: string[]
+    expectedCustomerUpdatedAt?: string
+    expectedVehicleUpdatedAt?: string
+  }
+}
+
+export async function updateSalesDocument(id: string, input: SalesDocumentInput) {
+  const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({
-      type: document.type,
-      number: document.number,
-      status: document.status,
-      customerId: document.customerId,
-      vehicleId: document.vehicleId,
-      issuedAt: toApiDate(document.issuedAt),
-      dueDate: toApiDate(document.dueDate),
-      taxRate: Math.round(document.taxRate * 100),
-      rounding: document.taxRounding,
-      note: document.note,
-      details: document.details,
-      items: document.items.map((item) => ({
-        itemType: item.itemType,
-        description: item.description,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitPrice,
-        taxCategory: item.taxCategory,
-        otherAmount: item.otherAmount,
-        summary: item.summary,
-      })),
-    }),
+    body: JSON.stringify(toPayload(input)),
   })
   return mapSalesDocument(response.document)
+}
+
+function toPayload(input: SalesDocumentInput) {
+  const payload: Record<string, unknown> = {
+    type: input.type,
+    number: input.number || undefined,
+    status: input.status,
+    customerId: input.customerId,
+    vehicleId: input.vehicleId,
+    issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined,
+    dueDate: toApiDate(input.dueDate),
+    taxRate: Math.round(input.taxRate * 100),
+    rounding: input.taxRounding,
+    note: input.note,
+    details: input.details,
+    items: input.items.map((item) => ({
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+    })),
+  }
+  if (input.masterSync) {
+    payload.masterSync = input.masterSync
+  }
+  return payload
 }
 
 export async function archiveSalesDocument(id: string) {
