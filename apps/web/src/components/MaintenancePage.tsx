@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { fetchCustomers, type Customer } from '../lib/customerApi'
+import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadMaintenanceDocumentPdf, previewMaintenanceDocumentPdf } from '../lib/pdf'
 import {
   createMaintenanceDocument,
@@ -42,6 +43,7 @@ import { compareSortableDocuments, type DocumentSortDirection, type DocumentSort
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
 import { MaintenanceStatementEditor, type MaintenanceStatementItemField } from './MaintenanceStatementEditor'
+import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
 
 type CategoryFilter = 'すべて' | IntakeCategory
 type MaintenanceTypeFilter = 'すべて' | MaintenanceDocumentType
@@ -49,6 +51,11 @@ type MaintenanceStatusFilter = 'すべて' | Exclude<MaintenanceStatus, 'アー�
 type MaintenanceDocumentView = 'edit' | 'preview'
 type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCategory; customerId: string; vehicleId: string; intakeDate: string; plannedReleaseDate: string; dueDate: string }
 type CompletedMaintenanceGroup = { key: string; label: string; documents: MaintenanceDocument[] }
+
+type MasterSnapshot =
+  | { state: 'loading' }
+  | { state: 'ready'; customerId: string; vehicleId: string; customerUpdatedAt: string; vehicleUpdatedAt: string; mileage: number | null }
+  | { state: 'invalid' }
 
 const maintenanceDocumentTypeOptions: MaintenanceDocumentType[] = ['整備見積書', '整備請求書']
 const maintenanceCategoryOptions: IntakeCategory[] = ['車検', '板金', '一般整備']
@@ -91,10 +98,10 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [savedDocumentId, setSavedDocumentId] = useState('')
   const [error, setError] = useState('')
   const [documentView, setDocumentView] = useState<MaintenanceDocumentView>('edit')
-  const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
-  const [mileageDialogInfo, setMileageDialogInfo] = useState<{ openedMileage: number; inputMileage: number; currentVehicleMileage: number } | null>(null)
+  const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
   const documentOpenedMileageRef = useRef<number | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
+  const openedMasterSnapshotRef = useRef<MasterSnapshot | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -130,18 +137,35 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? incompleteDocuments[0] ?? filteredDocuments[0] ?? null
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument) : null
 
-  // Reset documentOpenedMileage only when selected document ID changes
+  // Reset documentOpenedMileage and openedMasterSnapshot only when selected document ID changes
   useEffect(() => {
     const currentDocumentId = selectedDocument?.id ?? null
     if (currentDocumentId === lastOpenedDocumentIdRef.current) return
     lastOpenedDocumentIdRef.current = currentDocumentId
     if (!selectedDocument) {
       documentOpenedMileageRef.current = null
+      openedMasterSnapshotRef.current = null
       return
     }
     const overrideMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
     documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedDocument.mileage)
-  }, [selectedDocument])
+
+    // Initialize openedMasterSnapshot when document, customer, and vehicle are all available
+    const foundCustomer = customers.find((c) => c.id === selectedDocument.customerId)
+    const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId)
+    if (foundCustomer && foundVehicle) {
+      openedMasterSnapshotRef.current = {
+        state: 'ready',
+        customerId: foundCustomer.id,
+        vehicleId: foundVehicle.id,
+        customerUpdatedAt: foundCustomer.updatedAt,
+        vehicleUpdatedAt: foundVehicle.updatedAt,
+        mileage: parseMileageString(foundVehicle.mileage),
+      }
+    } else {
+      openedMasterSnapshotRef.current = { state: 'loading' }
+    }
+  }, [selectedDocument, customers])
 
   function updateItem(itemId: string, field: 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary', value: string) {
     if (!selectedDocument) return
@@ -208,44 +232,120 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     }
   }
 
-  async function saveSelectedDocument(mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }) {
+  async function saveSelectedDocument(mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }, masterSync?: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string }) {
     if (!selectedDocument) return
     setSaving(true)
     setError('')
     try {
-      const saved = await updateMaintenanceDocument(selectedDocument.id, toMaintenanceInput(selectedDocument, mileageSync))
+      const input = toMaintenanceInput(selectedDocument, mileageSync)
+      const inputWithMasterSync = masterSync ? { ...input, masterSync } : input
+      const saved = await updateMaintenanceDocument(selectedDocument.id, inputWithMasterSync)
       setDocuments((current) => current.map((document) => document.id === saved.id ? saved : document))
       setSavedDocumentId(saved.id)
       // Update documentOpenedMileage after successful save
       documentOpenedMileageRef.current = mileageSync?.inputMileage ?? documentOpenedMileageRef.current
+
+      // Re-fetch customers to get latest updatedAt and mileage
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        // Update openedMasterSnapshot with latest values
+        const foundCustomer = nextCustomers.find((c) => c.id === selectedDocument.customerId)
+        const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId)
+        if (foundCustomer && foundVehicle) {
+          openedMasterSnapshotRef.current = {
+            state: 'ready',
+            customerId: foundCustomer.id,
+            vehicleId: foundVehicle.id,
+            customerUpdatedAt: foundCustomer.updatedAt,
+            vehicleUpdatedAt: foundVehicle.updatedAt,
+            mileage: parseMileageString(foundVehicle.mileage),
+          }
+        } else {
+          openedMasterSnapshotRef.current = { state: 'loading' }
+        }
+      } catch {
+        // Re-fetch failed but document was saved successfully
+        setError('書類は保存されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '整備書類を保存できませんでした。')
+      if (reason instanceof Error && reason.message.includes('顧客または車両情報が更新されました')) {
+        setError('顧客または車両情報が更新されました。再読み込み後にもう一度保存してください。')
+      } else {
+        setError(reason instanceof Error ? reason.message : '整備書類を保存できませんでした。')
+      }
     } finally {
       setSaving(false)
     }
   }
 
-  function handleSaveClick() {
+  async function handleSaveClick() {
     if (!selectedDocument) return
+    if (openedMasterSnapshotRef.current?.state === 'invalid') {
+      setError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
+      return
+    }
+
+    const openedMileage = documentOpenedMileageRef.current
+
+    // Call sync-preview to check for differences
+    const snapshot = openedMasterSnapshotRef.current
+    try {
+      const preview = await fetchSyncPreview({
+        documentType: 'maintenance',
+        documentId: selectedDocument.id,
+        customerId: selectedDocument.customerId || undefined,
+        vehicleId: selectedDocument.vehicleId || undefined,
+        customerOverride: selectedDocument.details.customerOverride ?? undefined,
+        vehicleOverride: selectedDocument.details.vehicleOverride ?? undefined,
+        issuedAt: selectedDocument.issuedAt.replaceAll('/', '-'),
+        openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
+        openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt : undefined,
+        mileageContext: { openedMileage: openedMileage },
+      })
+
+      const hasDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0 || Boolean(preview.mileageDiff?.isChanged)
+      if (hasDiffs) {
+        setMasterSyncDialogResult(preview)
+        return
+      }
+
+      // No differences - save directly
+      void saveSelectedDocument()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
+    }
+  }
+
+  function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
+    setMasterSyncDialogResult(null)
+    if (!selectedDocument) return
+
     const inputMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
     const openedMileage = documentOpenedMileageRef.current
     const mileageChanged = inputMileage !== null && inputMileage !== openedMileage
-    if (!mileageChanged) {
-      void saveSelectedDocument()
-      return
-    }
-    // Mileage changed - show confirmation dialog
-    const currentVehicleMileage = parseMileageString(selectedDocument.mileage) ?? 0
-    setMileageDialogInfo({ openedMileage: openedMileage ?? 0, inputMileage, currentVehicleMileage })
-    setMileageDialogOpen(true)
-  }
 
-  function handleMileageDialogConfirm(sync: { confirmed: true; openedMileage: number; inputMileage: number }) {
-    setMileageDialogOpen(false)
-    setMileageDialogInfo(null)
-    // Use the actual openedMileage from the ref, not the dialog value
-    const actualOpenedMileage = documentOpenedMileageRef.current ?? 0
-    void saveSelectedDocument({ ...sync, openedMileage: actualOpenedMileage })
+    // Build mileageSync if needed
+    let mileageSync: { confirmed: true; openedMileage: number; inputMileage: number } | undefined
+    if (mileageChanged) {
+      mileageSync = { confirmed: true, openedMileage: openedMileage ?? 0, inputMileage }
+    }
+
+    // Build masterSync if any fields selected
+    const preview = masterSyncDialogResult
+    let masterSync: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string } | undefined
+    if (result.customerFields.length > 0 || result.vehicleFields.length > 0) {
+      masterSync = {
+        confirmed: true,
+        customerFields: result.customerFields,
+        vehicleFields: result.vehicleFields,
+        expectedCustomerUpdatedAt: result.customerFields.length > 0 ? (preview?.expectedCustomerUpdatedAt ?? undefined) : undefined,
+        expectedVehicleUpdatedAt: result.vehicleFields.length > 0 ? (preview?.expectedVehicleUpdatedAt ?? undefined) : undefined,
+      }
+    }
+
+    void saveSelectedDocument(mileageSync, masterSync)
   }
 
   async function createDocument(event: FormEvent<HTMLFormElement>) {
@@ -290,7 +390,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
     <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
-    {mileageDialogOpen && mileageDialogInfo && <MileageConfirmationDialog openedMileage={mileageDialogInfo.openedMileage} inputMileage={mileageDialogInfo.inputMileage} currentVehicleMileage={mileageDialogInfo.currentVehicleMileage} onConfirm={handleMileageDialogConfirm} onCancel={() => { setMileageDialogOpen(false); setMileageDialogInfo(null) }} />}
+    {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
   </>
 }
 
@@ -461,14 +561,4 @@ function parseMileageString(value: string | undefined | null): number | null {
   if (!digits) return null
   const parsed = Number(digits)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-function MileageConfirmationDialog({ openedMileage, inputMileage, currentVehicleMileage, onConfirm, onCancel }: { openedMileage: number; inputMileage: number; currentVehicleMileage: number; onConfirm: (sync: { confirmed: true; openedMileage: number; inputMileage: number }) => void; onCancel: () => void }) {
-  const inputFormatted = inputMileage.toLocaleString('ja-JP')
-  const currentFormatted = currentVehicleMileage.toLocaleString('ja-JP')
-  const willUpdateVehicle = inputMileage > currentVehicleMileage
-  const message = willUpdateVehicle
-    ? `車両の走行距離を ${inputFormatted} km に更新し、走行距離履歴に記録します。`
-    : `走行距離履歴に ${inputFormatted} km を記録します。車両の現在値（${currentFormatted} km）は更新されません。`
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="mileage-dialog-title"><div className="modal-header"><h2 id="mileage-dialog-title">走行距離の更新確認</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onCancel}><X size={19} /></button></div><div className="modal-form"><p>{message}</p><p className="text-muted" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>※キャンセルすると保存処理を中止します。</p><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onCancel}>キャンセル</button><button className="button button-primary" type="button" onClick={() => onConfirm({ confirmed: true, openedMileage, inputMileage })}>保存して反映</button></div></div></section></div>
 }

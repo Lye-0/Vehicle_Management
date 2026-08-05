@@ -1979,3 +1979,22 @@
   .sales-estimate-accessory-breakdown { grid-column: auto; }
   .sales-estimate-edit-actions { align-items: flex-start; flex-direction: column; }
 }
+
+/* MasterSyncConfirmationDialog */
+.master-sync-modal { max-width: 560px; }
+.master-sync-warning { padding: 12px 14px; color: #8a6d00; border: 1px solid #e6d17a; border-radius: 8px; background: #fdf8e8; font-size: 12px; }
+.master-sync-warning-header { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.master-sync-conflict { padding: 10px 14px; color: var(--danger); border: 1px solid #f3c8c8; border-radius: 8px; background: var(--danger-soft); font-size: 12px; }
+.master-sync-section-title { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+.master-sync-diff-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; }
+.master-sync-diff-row:not(.is-disabled):hover { background: var(--surface-subtle); }
+.master-sync-diff-row.is-disabled { opacity: 0.6; }
+.master-sync-diff-info { min-width: 0; flex: 1; }
+.master-sync-diff-label { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text); }
+.master-sync-attention-badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: #f59e0b; color: #fff; font-size: 9px; font-weight: 800; }
+.master-sync-diff-values { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; }
+.master-sync-diff-current { color: var(--text-muted); }
+.master-sync-diff-arrow { color: var(--text-muted); }
+.master-sync-diff-document { color: var(--primary); font-weight: 600; }
+.master-sync-diff-note { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+.master-sync-toggle { flex: 0 0 auto; }
