@@ -451,6 +451,60 @@ describe("重複検出", () => {
   });
 });
 
+describe("新規車両の走行距離", () => {
+  it("走行距離未入力で車両作成、mileageはnull、履歴なし", async () => {
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "走行距離テスト顧客A" },
+      newVehicle: { maker: "トヨタ", name: "プレミオ" },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { vehicleId: string } };
+    const vehicle = await env.DB.prepare("SELECT mileage FROM vehicles WHERE id = ?").bind(body.document.vehicleId).first<{ mileage: number | null }>();
+    expect(vehicle?.mileage).toBeNull();
+    const historyCount = await env.DB.prepare("SELECT COUNT(*) as cnt FROM mileage_histories WHERE vehicle_id = ?").bind(body.document.vehicleId).first<{ cnt: number }>();
+    expect(historyCount?.cnt).toBe(0);
+  });
+
+  it("走行距離0で車両作成、mileageは0、履歴なし", async () => {
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "走行距離テスト顧客B" },
+      newVehicle: { maker: "ホンダ", name: "フィット", mileage: 0 },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { vehicleId: string } };
+    const vehicle = await env.DB.prepare("SELECT mileage FROM vehicles WHERE id = ?").bind(body.document.vehicleId).first<{ mileage: number | null }>();
+    // 0は有効な走行距離値として保存されるべき
+    expect(vehicle?.mileage).toBe(0);
+    const historyCount = await env.DB.prepare("SELECT COUNT(*) as cnt FROM mileage_histories WHERE vehicle_id = ?").bind(body.document.vehicleId).first<{ cnt: number }>();
+    expect(historyCount?.cnt).toBe(0);
+  });
+
+  it("走行距離15000で車両作成、mileageが一致、履歴なし", async () => {
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "走行距離テスト顧客C" },
+      newVehicle: { maker: "日産", name: "ノート", mileage: 15000 },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { vehicleId: string } };
+    const vehicle = await env.DB.prepare("SELECT mileage FROM vehicles WHERE id = ?").bind(body.document.vehicleId).first<{ mileage: number | null }>();
+    expect(vehicle?.mileage).toBe(15000);
+    const historyCount = await env.DB.prepare("SELECT COUNT(*) as cnt FROM mileage_histories WHERE vehicle_id = ?").bind(body.document.vehicleId).first<{ cnt: number }>();
+    expect(historyCount?.cnt).toBe(0);
+  });
+});
+
 describe("D1 batchロールバック", () => {
   it("updatedAt不一致でbatchが実行されずマスタが変更されない", async () => {
     const cid = "ms-cust-030";

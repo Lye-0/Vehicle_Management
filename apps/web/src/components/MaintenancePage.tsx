@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  AlertTriangle,
   Archive,
   CarFront,
+  Check,
   ChevronRight,
   ChevronDown,
   ClipboardCheck,
@@ -14,8 +16,8 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomers, type Customer } from '../lib/customerApi'
-import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
+import { fetchCustomers, type Customer, type CustomerInput, type VehicleInput } from '../lib/customerApi'
+import { fetchSyncPreview, type DuplicateCustomerCandidate, type DuplicateVehicleCandidate, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadMaintenanceDocumentPdf, previewMaintenanceDocumentPdf } from '../lib/pdf'
 import {
   createMaintenanceDocument,
@@ -99,6 +101,15 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [error, setError] = useState('')
   const [documentView, setDocumentView] = useState<MaintenanceDocumentView>('edit')
   const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
+  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
+  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
+  const [dialogError, setDialogError] = useState('')
+  const [duplicateCustomerCandidates, setDuplicateCustomerCandidates] = useState<DuplicateCustomerCandidate[]>([])
+  const [duplicateVehicleCandidates, setDuplicateVehicleCandidates] = useState<DuplicateVehicleCandidate[]>([])
+  const [confirmedVehicleId, setConfirmedVehicleId] = useState<string | null>(null)
+  const [customerDuplicateConfirmed, setCustomerDuplicateConfirmed] = useState(false)
   const documentOpenedMileageRef = useRef<number | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
   const openedMasterSnapshotRef = useRef<MasterSnapshot | null>(null)
@@ -351,9 +362,66 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   async function createDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSaving(true)
-    setError('')
+    setDialogError('')
     try {
-      const created = await createMaintenanceDocument({
+      // Validate combination
+      const hasNewCustomer = newCustomerOpen && newCustomerForm.name.trim()
+      const hasNewVehicle = newVehicleOpen && newVehicleForm.maker.trim() && newVehicleForm.model.trim()
+
+      // Build sync-preview input
+      const previewInput: SyncPreviewInput = { documentType: 'maintenance' }
+      if (hasNewCustomer) {
+        previewInput.newCustomer = { name: newCustomerForm.name.trim(), nameKana: newCustomerForm.kana || undefined, phone: newCustomerForm.phone || undefined, email: newCustomerForm.email || undefined, postalCode: newCustomerForm.postalCode || undefined, address: newCustomerForm.address || undefined }
+      } else if (createForm.customerId) {
+        previewInput.customerId = createForm.customerId
+      }
+      if (hasNewVehicle) {
+        const mv: NonNullable<SyncPreviewInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
+        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
+        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
+        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
+        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
+        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
+        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
+        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
+        if (newVehicleForm.mileage !== '' && newVehicleForm.mileage !== undefined) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (Number.isFinite(m) && m >= 0) mv.mileage = m }
+        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
+        previewInput.newVehicle = mv
+      } else if (createForm.vehicleId) {
+        previewInput.vehicleId = createForm.vehicleId
+      }
+      if (createForm.intakeDate) previewInput.issuedAt = createForm.intakeDate.replaceAll('/', '-')
+
+      // Call sync-preview
+      const preview = await fetchSyncPreview(previewInput)
+
+      // Check for chassis number duplicates - block creation
+      const chassisDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'chassis_number') ?? []
+      if (chassisDuplicates.length > 0) {
+        const dup = chassisDuplicates[0]
+        setDialogError(`この車両は既に登録されています（${dup.maker ?? ''} ${dup.name}）。既存車両を選択してください。`)
+        setSaving(false)
+        return
+      }
+
+      // Check for registration number duplicates - require confirmation
+      const plateDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'registration_number') ?? []
+      if (plateDuplicates.length > 0 && !confirmedVehicleId) {
+        setDuplicateVehicleCandidates(plateDuplicates)
+        setSaving(false)
+        return
+      }
+
+      // Check for customer duplicates
+      const customerDuplicates = preview.duplicateCustomers ?? []
+      if (customerDuplicates.length > 0 && !customerDuplicateConfirmed) {
+        setDuplicateCustomerCandidates(customerDuplicates)
+        setSaving(false)
+        return
+      }
+
+      // Build final input
+      const input: MaintenanceDocumentInput = {
         type: createForm.type,
         status: '下書き',
         category: createForm.category,
@@ -370,13 +438,56 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         note: '',
         details: structuredClone(defaultMaintenanceDocumentDetails),
         items: [{ kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }],
-      })
+      }
+
+      if (hasNewCustomer) {
+        const trimmed = { ...newCustomerForm, name: newCustomerForm.name.trim() }
+        input.newCustomer = { name: trimmed.name, nameKana: trimmed.kana || undefined, phone: trimmed.phone || undefined, email: trimmed.email || undefined, postalCode: trimmed.postalCode || undefined, address: trimmed.address || undefined }
+        delete input.customerId
+      }
+      if (hasNewVehicle) {
+        const mv: NonNullable<MaintenanceDocumentInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
+        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
+        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
+        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
+        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
+        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
+        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
+        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
+        if (newVehicleForm.mileage !== '' && newVehicleForm.mileage !== undefined) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (Number.isFinite(m) && m >= 0) mv.mileage = m }
+        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
+        input.newVehicle = mv
+        delete input.vehicleId
+      }
+      // Add duplicate confirmation if needed
+      if (plateDuplicates.length > 0 && confirmedVehicleId) {
+        input.duplicateConfirmation = { registrationNumberConfirmed: true, confirmedVehicleId }
+      }
+
+      const created = await createMaintenanceDocument(input)
       setDocuments((current) => [created, ...current])
       setSelectedDocumentId(created.id)
       setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays))
       setCreateDialogOpen(false)
+      setNewCustomerOpen(false)
+      setNewVehicleOpen(false)
+      setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
+      setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
+      setDuplicateCustomerCandidates([])
+      setDuplicateVehicleCandidates([])
+      setConfirmedVehicleId(null)
+      setCustomerDuplicateConfirmed(false)
+
+      // Re-fetch customers to update the list
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+      } catch {
+        setError('書類は作成されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '整備書類を作成できませんでした。')
+      setDialogError(reason instanceof Error ? reason.message : '整備書類を作成できませんでした。')
     } finally {
       setSaving(false)
     }
@@ -389,7 +500,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
     <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
-    {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)) }} onSubmit={createDocument} />}
+    {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)); setNewCustomerOpen(false); setNewVehicleOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }); setDuplicateCustomerCandidates([]); setDuplicateVehicleCandidates([]); setConfirmedVehicleId(null); setCustomerDuplicateConfirmed(false); setDialogError('') }} onSubmit={createDocument} creating={saving} dialogError={dialogError} newCustomerOpen={newCustomerOpen} setNewCustomerOpen={setNewCustomerOpen} newVehicleOpen={newVehicleOpen} setNewVehicleOpen={setNewVehicleOpen} newCustomerForm={newCustomerForm} setNewCustomerForm={setNewCustomerForm} newVehicleForm={newVehicleForm} setNewVehicleForm={setNewVehicleForm} duplicateCustomerCandidates={duplicateCustomerCandidates} duplicateVehicleCandidates={duplicateVehicleCandidates} confirmedVehicleId={confirmedVehicleId} customerDuplicateConfirmed={customerDuplicateConfirmed} onSelectExistingCustomer={(customerId) => { setCreateForm({ ...createForm, customerId }); setDuplicateCustomerCandidates([]) }} onContinueAsNewCustomer={() => { setCustomerDuplicateConfirmed(true); setDuplicateCustomerCandidates([]) }} onSelectExistingVehicle={(vehicleId) => setCreateForm({ ...createForm, vehicleId })} onConfirmRegistrationDuplicate={(vehicleId) => { setConfirmedVehicleId(vehicleId); setDuplicateVehicleCandidates([]) }} onResetDuplicateState={() => { setDuplicateCustomerCandidates([]); setDuplicateVehicleCandidates([]); setConfirmedVehicleId(null); setCustomerDuplicateConfirmed(false) }} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
   </>
 }
@@ -490,13 +601,34 @@ function MaintenanceStatusTag({ status }: { status: MaintenanceStatus }) { const
 
 function MaintenanceDocumentTypeTag({ type }: { type: MaintenanceDocumentType }) { const tone = type === '整備請求書' ? 'invoice' : 'estimate'; return <span className={`maintenance-document-type-badge maintenance-document-type-${tone}`}>{type === '整備請求書' ? '請求書' : '見積書'}</span> }
 
-function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmit }: { form: MaintenanceCreateForm; customers: Customer[]; onChange: (form: MaintenanceCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmit, creating, dialogError, newCustomerOpen, setNewCustomerOpen, newVehicleOpen, setNewVehicleOpen, newCustomerForm, setNewCustomerForm, newVehicleForm, setNewVehicleForm, duplicateCustomerCandidates, duplicateVehicleCandidates, customerDuplicateConfirmed, onSelectExistingCustomer, onContinueAsNewCustomer, onSelectExistingVehicle, onConfirmRegistrationDuplicate, onResetDuplicateState }: {
+  form: MaintenanceCreateForm; customers: Customer[]; onChange: (form: MaintenanceCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; creating: boolean; dialogError: string
+  newCustomerOpen: boolean; setNewCustomerOpen: (v: boolean) => void; newVehicleOpen: boolean; setNewVehicleOpen: (v: boolean) => void
+  newCustomerForm: CustomerInput; setNewCustomerForm: (v: CustomerInput) => void; newVehicleForm: VehicleInput; setNewVehicleForm: (v: VehicleInput) => void
+  duplicateCustomerCandidates: DuplicateCustomerCandidate[]; duplicateVehicleCandidates: DuplicateVehicleCandidate[]
+  customerDuplicateConfirmed: boolean
+  onSelectExistingCustomer: (customerId: string) => void; onContinueAsNewCustomer: () => void
+  onSelectExistingVehicle: (vehicleId: string) => void; onConfirmRegistrationDuplicate: (vehicleId: string) => void
+  onResetDuplicateState: () => void
+}) {
   const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
   const vehicles = selectedCustomer?.vehicles ?? []
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="maintenance-modal-title"><div className="modal-header"><h2 id="maintenance-modal-title">整備書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><ClipboardCheck size={16} />入庫する顧客・車両と整備内容を登録します。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as MaintenanceDocumentType })}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>入庫区分<em>必須</em></span><select required value={form.category} onChange={(event) => onChange({ ...form, category: event.target.value as IntakeCategory })}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客<em>必須</em></span><select required autoFocus value={form.customerId} onChange={(event) => { const nextCustomer = customers.find((customer) => customer.id === event.target.value); onChange({ ...form, customerId: event.target.value, vehicleId: nextCustomer?.vehicles[0]?.id ?? '' }) }}><option value="">顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号なし'}）</option>)}</select></label><label className="form-field"><span>対象車両<em>必須</em></span><select required value={form.vehicleId} disabled={!vehicles.length} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を選択してください</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><FormField label="入庫日"><input type="date" value={form.intakeDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, intakeDate: event.target.value.replaceAll('-', '/') })} /></FormField><FormField label="出庫予定日"><input type="date" value={form.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, plannedReleaseDate: event.target.value.replaceAll('-', '/') })} /></FormField><FormField label="支払期限"><input type="date" value={form.dueDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, dueDate: event.target.value.replaceAll('-', '/') })} /></FormField></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit"><Plus size={16} />作成する</button></div></form></section></div>
-}
 
-function FormField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) { return <label className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</label> }
+  function openNewCustomerForm() {
+    setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
+    setNewCustomerOpen(true)
+    setNewVehicleOpen(true)
+    setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
+    onChange({ ...form, customerId: '', vehicleId: '' })
+  }
+
+  function openNewVehicleForm() {
+    setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
+    setNewVehicleOpen(true)
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="maintenance-modal-title"><div className="modal-header"><h2 id="maintenance-modal-title">整備書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={() => { onResetDuplicateState(); onClose() }}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><ClipboardCheck size={16} />入庫する顧客・車両と整備内容を登録します。</p>{dialogError && <p className="customer-sync-status is-error" role="alert">{dialogError}</p>}<div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as MaintenanceDocumentType })}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>入庫区分<em>必須</em></span><select required value={form.category} onChange={(event) => onChange({ ...form, category: event.target.value as IntakeCategory })}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required autoFocus value={form.customerId} onChange={(event) => { const hasUnsavedNewCustomer = newCustomerOpen && (newCustomerForm.name || newCustomerForm.kana || newCustomerForm.phone || newCustomerForm.email || newCustomerForm.postalCode || newCustomerForm.address); if (hasUnsavedNewCustomer && !window.confirm('入力中の新規顧客情報は破棄されます。切り替えますか？')) return; const nextCustomer = customers.find((customer) => customer.id === event.target.value); setNewCustomerOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); setDuplicateCustomerCandidates([]); setCustomerDuplicateConfirmed(false); onChange({ ...form, customerId: event.target.value, vehicleId: nextCustomer?.vehicles[0]?.id ?? '' }) }}><option value="">顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号なし'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div>{newCustomerOpen && <div className="form-field sales-create-related-field"><span>新規顧客情報</span><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div></div>}{duplicateCustomerCandidates.length > 0 && !customerDuplicateConfirmed && <div className="sales-create-inline-panel"><div><h3>既存顧客が見つかりました</h3><p>以下の顧客と一致する候補があります。</p></div>{duplicateCustomerCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><span>{candidate.name}</span>{candidate.phone && <small>{candidate.phone}</small>}{candidate.email && <small>{candidate.email}</small>}<small>一致理由: {candidate.matchReason === 'phone' ? '電話番号' : 'メールアドレス'}</small></div><button className="button button-secondary" type="button" onClick={() => onSelectExistingCustomer(candidate.id)}>この既存顧客を使用</button></div>)}<button className="button button-secondary" type="button" onClick={onContinueAsNewCustomer}>新規顧客として続ける</button></div>}{customerDuplicateConfirmed && <div className="sales-create-candidate-confirmed"><Check size={14} />新規顧客として続行します</div>}<div className="form-field sales-create-related-field"><span>対象車両<em>必須</em></span><div className="sales-create-select-row"><select required value={newVehicleOpen ? '__new__' : form.vehicleId} disabled={!newCustomerOpen && !vehicles.length} onChange={(event) => { if (event.target.value === '__new__') return; if (newCustomerOpen && !window.confirm('入力中の新規顧客情報は破棄されます。切り替えますか？')) return; if (newVehicleOpen && hasNewVehicleInput(newVehicleForm) && !window.confirm('入力中の新規車両情報は破棄されます。切り替えますか？')) return; setNewCustomerOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); setNewVehicleOpen(false); setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }); setDuplicateCustomerCandidates([]); setCustomerDuplicateConfirmed(false); onChange({ ...form, vehicleId: event.target.value }) }}><option value="">{newVehicleOpen ? '新規車両を入力中' : '車両を選択してください'}</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={newCustomerOpen || !selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div>{newVehicleOpen && <div className="form-field sales-create-related-field"><span>新規車両情報</span><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：ZAA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => { setNewVehicleForm({ ...newVehicleForm, plate: event.target.value }); onResetDuplicateState() }} placeholder="例：品川500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => { setNewVehicleForm({ ...newVehicleForm, vin: event.target.value }); onResetDuplicateState() }} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：10000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div></div>}{duplicateVehicleCandidates.length > 0 && <div className="sales-create-inline-panel"><div>{duplicateVehicleCandidates.some((d) => d.matchReason === 'chassis_number') ? <><AlertTriangle size={16} /><h3>この車両は既に登録されています</h3><p>車台番号が既存車両と一致します。新規車両として続けることはできません。</p></> : <><h3>登録番号が既存車両と一致します</h3><p>以下の候補から選択するか、新規車両として続けてください。</p></>}</div>{duplicateVehicleCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><span>{candidate.maker ? `${candidate.maker} ` : ''}{candidate.name}</span>{candidate.registrationNumber && <small>登録番号: {candidate.registrationNumber}</small>}{candidate.chassisNumber && <small>車台番号: {candidate.chassisNumber}</small>}<small>一致理由: {candidate.matchReason === 'chassis_number' ? '車台番号' : '登録番号'}</small></div>{candidate.matchReason === 'registration_number' && <button className="button button-secondary" type="button" onClick={() => onSelectExistingVehicle(candidate.id)}>この既存車両を使用</button>}</div>)}{duplicateVehicleCandidates.every((d) => d.matchReason === 'registration_number') && <button className="button button-secondary" type="button" onClick={() => onConfirmRegistrationDuplicate(duplicateVehicleCandidates[0].id)}>新規車両として続ける</button>}</div>}<label className="form-field"><span>入庫日</span><input type="date" value={form.intakeDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, intakeDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={form.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, plannedReleaseDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={() => { onResetDuplicateState(); onClose() }}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || !form.customerId || !form.vehicleId}>{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
+}
 
 function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding: document.taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item), mileageSync } }
 function updateMaintenanceHeader(document: MaintenanceDocument, field: MaintenanceHeaderField, value: string, customers: Customer[]): MaintenanceDocument {
@@ -561,4 +693,20 @@ function parseMileageString(value: string | undefined | null): number | null {
   if (!digits) return null
   const parsed = Number(digits)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function hasNewVehicleInput(form: VehicleInput): boolean {
+  return Boolean(
+    form.maker.trim() ||
+    form.model.trim() ||
+    form.modelType.trim() ||
+    form.plate.trim() ||
+    form.vin.trim() ||
+    form.year.trim() ||
+    form.inspectionDate ||
+    (form.mileage !== '' && form.mileage !== undefined) ||
+    form.color.trim() ||
+    (form.displacement !== '' && form.displacement !== undefined) ||
+    form.transmission.trim()
+  )
 }

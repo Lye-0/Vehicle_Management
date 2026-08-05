@@ -114,6 +114,31 @@ export type MaintenanceDocumentInput = {
     expectedCustomerUpdatedAt?: string
     expectedVehicleUpdatedAt?: string
   }
+  newCustomer?: {
+    name: string
+    nameKana?: string
+    phone?: string
+    email?: string
+    postalCode?: string
+    address?: string
+  }
+  newVehicle?: {
+    maker: string
+    name: string
+    model?: string
+    registrationNumber?: string
+    chassisNumber?: string
+    modelYear?: number
+    inspectionDate?: string
+    mileage?: number
+    bodyColor?: string
+    displacement?: number
+    transmission?: string
+  }
+  duplicateConfirmation?: {
+    registrationNumberConfirmed?: boolean
+    confirmedVehicleId?: string
+  }
 }
 
 type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
@@ -170,6 +195,15 @@ function toPayload(input: MaintenanceDocumentInput) {
   const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
   if (input.masterSync) {
     payload.masterSync = input.masterSync
+  }
+  if (input.newCustomer) {
+    payload.newCustomer = input.newCustomer
+  }
+  if (input.newVehicle) {
+    payload.newVehicle = input.newVehicle
+  }
+  if (input.duplicateConfirmation) {
+    payload.duplicateConfirmation = input.duplicateConfirmation
   }
   return payload
 }

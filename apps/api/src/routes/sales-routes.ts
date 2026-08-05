@@ -217,7 +217,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(newVehId, organizationId, resolvedCustomerId, newVehicle.maker, newVehicle.name,
       newVehicle.model || null, newVehicle.registrationNumber || null, newVehicle.chassisNumber || null,
-      newVehicle.modelYear || null, newVehicle.inspectionDate || null, newVehicle.mileage || null,
+      newVehicle.modelYear || null, newVehicle.inspectionDate || null, newVehicle.mileage != null ? newVehicle.mileage : null,
       newVehicle.bodyColor || null, newVehicle.displacement || null, newVehicle.transmission || null))
   }
 
