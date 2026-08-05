@@ -469,12 +469,15 @@ export function validateCombination(input: CombinationValidation): CombinationEr
   if (hasNewVehicle && hasExistingVehicle) {
     return { status: 400, message: 'vehicleIdとnewVehicleは同時に指定できません。' }
   }
-  if (input.documentType === 'maintenance' && !hasNewVehicle && !hasExistingVehicle) {
-    return { status: 400, message: '整備書類ではvehicleIdまたはnewVehicleのどちらかを指定してください。' }
-  }
 
   if (hasNewCustomer && hasExistingVehicle) {
     return { status: 400, message: '新規顧客には新しい車両を登録してください。既存車両は選択できません。' }
+  }
+
+  if (input.documentType === 'maintenance') {
+    if (hasExistingCustomer && !hasNewVehicle && !hasExistingVehicle) {
+      return { status: 400, message: '整備書類ではvehicleIdまたはnewVehicleのどちらかを指定してください。' }
+    }
   }
 
   return null
