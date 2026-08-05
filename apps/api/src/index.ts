@@ -12,6 +12,7 @@ import { handleBackupRoutes } from './routes/backup-routes'
 import { handleArchiveRoutes } from './routes/archive-routes'
 import { handleInspectionRoutes } from './routes/inspection-routes'
 import { handleSharedScheduleRoutes } from './routes/shared-schedule-routes'
+import { handleSyncPreviewRoutes } from './routes/sync-preview-routes'
 import { runScheduledBackupMaintenance } from './routes/backup-routes'
 import { corsHeaders, jsonResponse } from './http'
 import { getEnvironmentIssues } from './environment'
@@ -47,6 +48,9 @@ export default {
 
     const customerRouteResponse = await handleCustomerRoutes(request, env)
     if (customerRouteResponse) return customerRouteResponse
+
+    const syncPreviewRouteResponse = await handleSyncPreviewRoutes(request, env)
+    if (syncPreviewRouteResponse) return syncPreviewRouteResponse
 
     const inspectionRouteResponse = await handleInspectionRoutes(request, env)
     if (inspectionRouteResponse) return inspectionRouteResponse

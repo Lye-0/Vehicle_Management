@@ -27,6 +27,7 @@ export type Vehicle = {
   freeItem1: string
   freeItem2: string
   freeItem3: string
+  updatedAt: string
   attachments: Attachment[]
 }
 
@@ -39,6 +40,7 @@ export type Customer = {
   postalCode: string
   address: string
   memo: string
+  updatedAt: string
   vehicles: Vehicle[]
 }
 
@@ -79,6 +81,7 @@ type ApiCustomer = {
   postalCode: string | null
   address: string | null
   memo: string | null
+  updatedAt: string
   vehicles: ApiVehicle[]
 }
 
@@ -101,6 +104,7 @@ type ApiVehicle = {
   freeItem1: string | null
   freeItem2: string | null
   freeItem3: string | null
+  updatedAt: string
   files: ApiAttachment[]
 }
 
@@ -194,6 +198,7 @@ function mapCustomer(customer: ApiCustomer): Customer {
     postalCode: customer.postalCode ?? '',
     address: customer.address ?? '',
     memo: customer.memo ?? '',
+    updatedAt: customer.updatedAt,
     vehicles: customer.vehicles.map(mapVehicle),
   }
 }
@@ -217,6 +222,7 @@ function mapVehicle(vehicle: ApiVehicle): Vehicle {
     freeItem1: vehicle.freeItem1 ?? '',
     freeItem2: vehicle.freeItem2 ?? '',
     freeItem3: vehicle.freeItem3 ?? '',
+    updatedAt: vehicle.updatedAt,
     attachments: vehicle.files.map(mapAttachment),
   }
 }
