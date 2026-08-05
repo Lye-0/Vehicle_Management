@@ -401,7 +401,7 @@ function VehicleHistoryPanel({ vehicleId, onNavigate }: { vehicleId: string; onN
       ? <div className="vehicle-history-empty is-error" role="alert">{error}</div>
       : timelineRows.length === 0
         ? <div className="vehicle-history-empty">履歴はありません</div>
-        : <div className="vehicle-timeline-table"><div className="vehicle-timeline-header"><div className="vehicle-timeline-cell vehicle-timeline-date">日付</div><div className="vehicle-timeline-cell vehicle-timeline-category">種別</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">走行距離</div><div className="vehicle-timeline-cell vehicle-timeline-document">書類</div></div>{timelineRows.map((row) => <TimelineRowComponent key={`${row.documentType}-${row.documentId}`} row={row} onNavigate={onNavigate} />)}</div>
+        : <div className="vehicle-timeline-table"><div className="vehicle-timeline-header"><div className="vehicle-timeline-cell vehicle-timeline-date">日付</div><div className="vehicle-timeline-cell vehicle-timeline-category">種別</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">走行距離</div><div className="vehicle-timeline-cell vehicle-timeline-amount">金額</div><div className="vehicle-timeline-cell vehicle-timeline-document">書類</div></div>{timelineRows.map((row) => <TimelineRowComponent key={`${row.documentType}-${row.documentId}`} row={row} onNavigate={onNavigate} />)}</div>
 
   return <section className="panel vehicle-history-panel"><div className="vehicle-history-header"><div><span className="page-eyebrow">VEHICLE HISTORY</span><h3>車両履歴</h3><p>販売・整備の書類を時系列で確認できます。</p></div><FileText size={20} /></div>{panelContent}</section>
 }
@@ -422,12 +422,12 @@ type TimelineRow = {
 function TimelineRowComponent({ row, onNavigate }: { row: TimelineRow; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
   const categoryLabel = row.documentType === 'sale' ? '販売' : (row.category ?? '—')
   const mileageLabel = row.mileage !== null ? `${row.mileage.toLocaleString('ja-JP')} km` : '—'
-  return <div className="vehicle-timeline-row"><div className="vehicle-timeline-cell vehicle-timeline-date">{formatHistoryDate(row.date)}</div><div className="vehicle-timeline-cell vehicle-timeline-category">{categoryLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">{mileageLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-document"><HistoryRow primary={`${row.documentTypeLabel} ${row.documentNumber}`} secondary={`${formatHistoryDate(row.date)} ・ ${row.status}`} amount={row.total} onClick={onNavigate ? () => onNavigate({ section: row.section, recordId: row.documentId }) : undefined} /></div></div>
+  return <div className="vehicle-timeline-row"><div className="vehicle-timeline-cell vehicle-timeline-date">{formatHistoryDate(row.date)}</div><div className="vehicle-timeline-cell vehicle-timeline-category">{categoryLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-mileage">{mileageLabel}</div><div className="vehicle-timeline-cell vehicle-timeline-amount">{formatYen(row.total)}</div><div className="vehicle-timeline-cell vehicle-timeline-document"><HistoryRow primary={`${row.documentTypeLabel} ${row.documentNumber}`} secondary={`${formatHistoryDate(row.date)} ・ ${row.status}`} onClick={onNavigate ? () => onNavigate({ section: row.section, recordId: row.documentId }) : undefined} /></div></div>
 }
 
-function HistoryRow({ primary, secondary, amount, onClick }: { primary: string; secondary: string; amount?: number; onClick?: () => void }) {
-  const content = <><span><strong>{primary}</strong><small>{secondary}</small></span>{amount === undefined ? null : <b>{formatYen(amount)}</b>}</>
-  return onClick ? <button className="vehicle-history-row is-action" type="button" onClick={onClick} aria-label={`${primary}を開く`}>{content}</button> : <div className="vehicle-history-row">{content}</div>
+function HistoryRow({ primary, secondary, onClick }: { primary: string; secondary: string; onClick?: () => void }) {
+  const label = <span className="vehicle-history-row-label"><strong>{primary}</strong><small>{secondary}</small></span>
+  return onClick ? <button className="vehicle-history-row-action" type="button" onClick={onClick} aria-label={`${primary}を開く`}>{label}</button> : label
 }
 
 function formatYen(amount: number) { return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}` }
