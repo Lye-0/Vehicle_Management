@@ -1,10 +1,10 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
-import { normalizeDate } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
@@ -398,8 +398,7 @@ function nullableCustomerEmployer(body: Record<string, unknown>, key = 'employer
 }
 
 function normalizeStoredBirthDate(value: string | null | undefined) {
-  const normalized = typeof value === 'string' ? value.trim() : ''
-  return /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(normalized) ? normalizeDate(normalized) : null
+  return normalizeCustomerBirthDateForStorage(value) || null
 }
 
 function normalizeStoredEmployer(value: string | null | undefined) {

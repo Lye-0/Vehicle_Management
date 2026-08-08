@@ -17,6 +17,7 @@ import {
   computeActualVehicleDiffFields,
   findDuplicateCustomers,
   findDuplicateVehicles,
+  normalizeCustomerBirthDateForStorage,
   validateCombination,
   validateMasterSyncInput,
   type CustomerSyncField,
@@ -497,7 +498,7 @@ function serializeSalesDocument(
   items: Array<typeof salesDocumentItems.$inferSelect>,
 ) {
   const details = parseSalesDetails(document.detailsJson)
-  const customerBirthDate = details.customerBirthDate || dateValue(customer?.birthDate)
+  const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
   const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
     id: document.id,
@@ -649,7 +650,7 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
     salesCategory: limitedString(record.salesCategory, '中古車', 100),
     staffName: limitedString(record.staffName, '', 100),
     customerHonorific: limitedString(record.customerHonorific, '様', 20),
-    customerBirthDate: dateValue(record.customerBirthDate),
+    customerBirthDate: customerBirthDateValue(record.customerBirthDate),
     customerEmployer: customerEmployerValue(record.customerEmployer),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
     selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
@@ -659,7 +660,7 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
       phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
       postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
       address: limitedString(customerOverride.address, '', 500),
-      birthDate: dateValue(customerOverride.birthDate),
+      birthDate: customerBirthDateValue(customerOverride.birthDate),
       employer: customerEmployerValue(customerOverride.employer),
     } : null,
     vehicleOverride: vehicleOverride ? {
@@ -773,7 +774,7 @@ function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
     email: typeof obj.email === 'string' ? obj.email.trim() || undefined : undefined,
     postalCode: typeof obj.postalCode === 'string' ? normalizePostalCode(obj.postalCode) || undefined : undefined,
     address: typeof obj.address === 'string' ? obj.address.trim() || undefined : undefined,
-    birthDate: typeof obj.birthDate === 'string' ? dateValue(obj.birthDate) || undefined : undefined,
+    birthDate: typeof obj.birthDate === 'string' ? customerBirthDateValue(obj.birthDate) || undefined : undefined,
     employer: typeof obj.employer === 'string' ? customerEmployerValue(obj.employer) || undefined : undefined,
   }
 }
@@ -810,6 +811,10 @@ function nullableString(body: Record<string, unknown>, key: string) {
 
 function dateValue(value: unknown) {
   return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : ''
+}
+
+function customerBirthDateValue(value: unknown) {
+  return normalizeCustomerBirthDateForStorage(value)
 }
 
 function customerEmployerValue(value: unknown) {

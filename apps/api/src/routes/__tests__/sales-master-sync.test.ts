@@ -222,6 +222,37 @@ describe("POST sales documents masterSync", () => {
     expect(patched.document.details.customerEmployer).toBe("販売先株式会社");
   });
 
+  it("販売書類の生年月日に省略形式を入力してもPATCH後に消さない", async () => {
+    const cid = "sms-cust-birth-partial-patch-001";
+    const vid = "sms-veh-birth-partial-patch-001";
+    await seedCustomer(cid, "販売書類の省略生年月日確認");
+    await seedVehicle(vid, cid, "スズキ", "アルト");
+
+    const createRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "請求書",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json() as { document: { id: string } };
+
+    const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${created.document.id}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "11/2",
+        customerOverride: { name: "販売書類の省略生年月日確認", kana: "", phone: "", postalCode: "", address: "", birthDate: "11/2", employer: "" },
+        vehicleOverride: null,
+      },
+    }));
+    expect(patchRes.status).toBe(200);
+    const patched = await patchRes.json() as { document: { customerDetails: { birthDate: string }; details: { customerBirthDate: string } } };
+    expect(patched.document.customerDetails.birthDate).toBe("11-2");
+    expect(patched.document.details.customerBirthDate).toBe("11-2");
+  });
+
   it("既存顧客＋既存車両＋販売書類を一体作成", async () => {
     const cid = "sms-cust-combo-001";
     const vid = "sms-veh-combo-001";

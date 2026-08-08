@@ -3,7 +3,6 @@
 
 import {
   normalizeDisplacement,
-  normalizeDate,
   normalizeMileage,
   normalizeModelYear,
   normalizePhone,
@@ -212,14 +211,14 @@ export function extractVehicleFieldsFromOverride(
 function normalizeCustomerSyncValue(field: CustomerSyncField, value: string): string {
   if (field === 'phone') return normalizePhone(value)
   if (field === 'postalCode') return normalizePostalCode(value)
-  if (field === 'birthDate') return normalizeCustomerBirthDateValue(value)
+  if (field === 'birthDate') return normalizeCustomerBirthDateForStorage(value)
   if (field === 'employer') return normalizeCustomerEmployerValue(value)
   return value.normalize('NFKC').trim()
 }
 
-function normalizeCustomerBirthDateValue(value: string | number): string {
-  const normalized = normalizeDate(value)
-  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : ''
+export function normalizeCustomerBirthDateForStorage(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim().replaceAll('/', '-').slice(0, 50) : ''
+  return normalized === 'birth_date' ? '' : normalized
 }
 
 function normalizeCustomerEmployerValue(value: string): string {
@@ -261,7 +260,7 @@ function formatMasterValue(value: string | number | null | undefined, field: str
   if (field === 'mileage') return normalizeMileage(value)
   if (field === 'phone') return normalizePhone(value)
   if (field === 'postalCode') return normalizePostalCode(value)
-  if (field === 'birthDate') return normalizeCustomerBirthDateValue(value ?? '')
+  if (field === 'birthDate') return normalizeCustomerBirthDateForStorage(value)
   if (field === 'employer') return normalizeCustomerEmployerValue(String(value))
   return String(value).normalize('NFKC').trim()
 }

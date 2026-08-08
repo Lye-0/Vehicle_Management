@@ -430,6 +430,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setSaving(true)
     setSaved(false)
     try {
+      const customerValues = salesCustomerValuesForSave(documentToSave)
       const input: SalesDocumentInput = {
         type: documentToSave.type,
         number: documentToSave.number,
@@ -441,7 +442,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         taxRate: documentToSave.taxRate,
         taxRounding: documentToSave.taxRounding,
         note: documentToSave.note,
-        details: { ...documentToSave.details, customerOverride: currentSalesCustomerValues(documentToSave) },
+        details: { ...documentToSave.details, customerBirthDate: customerValues.birthDate, customerEmployer: customerValues.employer, customerOverride: customerValues },
         items: documentToSave.items.map(({ id: _id, ...item }) => item),
         masterSync,
       }
@@ -568,7 +569,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         documentId: selectedPersistedDocument.id,
         customerId: selectedPersistedDocument.customerId || undefined,
         vehicleId: selectedPersistedDocument.vehicleId || undefined,
-        customerOverride: currentSalesCustomerValues(selectedPersistedDocument),
+        customerOverride: salesCustomerValuesForSave(selectedPersistedDocument),
         vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
         issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
         openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
@@ -1461,6 +1462,7 @@ function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicle
 
 function buildSalesDraftSyncPreviewInput(document: SalesDocumentLike, context: SalesDraftContext): SyncPreviewInput {
   validateSalesDraftContext(document, context)
+  const customerValues = salesCustomerValuesForSave(document)
   const input: SyncPreviewInput = {
     documentType: 'sales',
     issuedAt: normalizeSalesDocumentDate(document.issuedAt),
@@ -1469,11 +1471,11 @@ function buildSalesDraftSyncPreviewInput(document: SalesDocumentLike, context: S
   }
 
   if (context.customerMode === 'new') {
-    input.newCustomer = buildNewSalesCustomer(currentSalesCustomerValues(document))
+    input.newCustomer = buildNewSalesCustomer(customerValues)
   } else {
     if (!document.customerId) throw new Error('既存顧客が選択されていません。')
     input.customerId = document.customerId
-    input.customerOverride = currentSalesCustomerValues(document)
+    input.customerOverride = customerValues
   }
 
   if (context.vehicleMode === 'new') {
@@ -1489,6 +1491,7 @@ function buildSalesDraftSyncPreviewInput(document: SalesDocumentLike, context: S
 
 function buildSalesCreateInput(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation, masterSync?: SalesMasterSync): SalesCreateInput {
   validateSalesDraftContext(document, context)
+  const customerValues = salesCustomerValuesForSave(document)
   const input: SalesCreateInput = {
     type: document.type,
     status: document.status,
@@ -1497,12 +1500,12 @@ function buildSalesCreateInput(document: SalesDocumentLike, context: SalesDraftC
     note: document.note,
     taxRate: document.taxRate,
     taxRounding: document.taxRounding,
-    details: context.customerMode === 'existing' ? { ...document.details, customerOverride: currentSalesCustomerValues(document) } : document.details,
+    details: { ...document.details, customerBirthDate: customerValues.birthDate, customerEmployer: customerValues.employer, ...(context.customerMode === 'existing' ? { customerOverride: customerValues } : {}) },
     items: document.items.map(({ id: _id, ...item }) => item),
   }
 
   if (context.customerMode === 'new') {
-    input.newCustomer = buildNewSalesCustomer(currentSalesCustomerValues(document))
+    input.newCustomer = buildNewSalesCustomer(customerValues)
   } else {
     if (!document.customerId) throw new Error('顧客を選択してください。')
     input.customerId = document.customerId
@@ -1572,23 +1575,22 @@ function buildNewSalesCustomer(values: NonNullable<SalesDocumentDetails['custome
 }
 
 function normalizeSalesCustomerBirthDate(value: string | null | undefined) {
-  const normalized = typeof value === 'string' ? value.trim().replaceAll('/', '-') : ''
+  const normalized = typeof value === 'string' ? value.trim() : ''
   return normalized === 'birth_date' ? '' : normalized
 }
 
 function normalizeSalesCustomerBirthDateOnBlur(value: string) {
-  const normalized = normalizeSalesCustomerBirthDate(value)
-  const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
-  if (!match) return normalized
-  const [, year, month, day] = match
-  const padded = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  const date = new Date(`${padded}T00:00:00Z`)
-  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() + 1 === Number(month) && date.getUTCDate() === Number(day) ? padded : normalized
+  return normalizeSalesCustomerBirthDate(value).replaceAll('/', '-')
 }
 
 function normalizeSalesCustomerEmployer(value: string | null | undefined) {
   const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
   return normalized === 'employer' ? '' : normalized
+}
+
+function salesCustomerValuesForSave(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['customerOverride']> {
+  const values = currentSalesCustomerValues(document)
+  return { ...values, birthDate: normalizeSalesCustomerBirthDateOnBlur(values.birthDate) }
 }
 
 function buildNewSalesVehicle(values: NonNullable<SalesDocumentDetails['vehicleOverride']>): NonNullable<SalesCreateInput['newVehicle']> {
