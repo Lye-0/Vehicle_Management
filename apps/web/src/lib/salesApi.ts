@@ -140,14 +140,17 @@ export type SalesDocumentLike = Omit<SalesDocument, 'id' | 'customerId' | 'vehic
 
 export type SalesCreateInput = {
   type: SalesDocumentType
+  status?: SalesStatus
   customerId?: string
   vehicleId?: string | null
+  issuedAt?: string
   dueDate: string
   note: string
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
-  initialItemDescription: string
+  initialItemDescription?: string
   details?: SalesDocumentDetails
+  items?: Array<Omit<SalesLineItem, 'id'>>
   newCustomer?: {
     name: string
     nameKana?: string
@@ -170,8 +173,15 @@ export type SalesCreateInput = {
     transmission?: string
   }
   duplicateConfirmation?: {
-    registrationNumberConfirmed?: boolean
-    confirmedVehicleId?: string
+    registrationNumberConfirmed: true
+    confirmedVehicleId: string
+  }
+  masterSync?: {
+    confirmed: true
+    customerFields: string[]
+    vehicleFields: string[]
+    expectedCustomerUpdatedAt?: string
+    expectedVehicleUpdatedAt?: string
   }
 }
 
@@ -190,17 +200,27 @@ export async function fetchSalesDocuments() {
 export async function createSalesDocument(input: SalesCreateInput) {
   const payload: Record<string, unknown> = {
     type: input.type,
-    issuedAt: today(),
+    status: input.status ?? '下書き',
+    issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : today(),
     dueDate: toApiDate(input.dueDate),
     taxRate: input.taxRate,
     rounding: input.taxRounding,
     note: input.note,
     details: input.details,
-    items: [{ description: input.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0 }],
+    items: input.items?.map((item) => ({
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+    })) ?? [{ description: input.initialItemDescription ?? '', quantity: 1, unit: '式', unitPrice: 0 }],
   }
   if (input.newCustomer) {
     payload.newCustomer = input.newCustomer
-  } else {
+  } else if (input.customerId) {
     payload.customerId = input.customerId
   }
   if (input.newVehicle) {
@@ -210,6 +230,9 @@ export async function createSalesDocument(input: SalesCreateInput) {
   }
   if (input.duplicateConfirmation) {
     payload.duplicateConfirmation = input.duplicateConfirmation
+  }
+  if (input.masterSync) {
+    payload.masterSync = input.masterSync
   }
   const response = await apiFetch<{ document: ApiSalesDocument }>('/api/sales-documents', {
     method: 'POST',

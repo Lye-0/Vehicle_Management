@@ -118,8 +118,8 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
       throw new HttpError(409, `車台番号が既存車両（${vinDuplicate.maker ?? ''} ${vinDuplicate.name}）と一致します。既存車両を選択してください。`)
     }
 
-    const plateDuplicate = duplicateVehicles.find((d) => d.matchReason === 'registration_number')
-    if (plateDuplicate) {
+    const plateDuplicates = duplicateVehicles.filter((d) => d.matchReason === 'registration_number')
+    if (plateDuplicates.length > 0) {
       const dupConfirm = body.duplicateConfirmation
       if (!dupConfirm || typeof dupConfirm !== 'object' || Array.isArray(dupConfirm)) {
         throw new HttpError(409, '登録番号が既存車両と一致します。重複確認が必要です。')
@@ -129,7 +129,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
         throw new HttpError(409, '登録番号の重複確認が完了していません。')
       }
       const confirmedId = typeof confirmObj.confirmedVehicleId === 'string' ? confirmObj.confirmedVehicleId : undefined
-      if (confirmedId && confirmedId !== plateDuplicate.id) {
+      if (!confirmedId || !plateDuplicates.some((candidate) => candidate.id === confirmedId)) {
         throw new HttpError(400, '確認された車両IDが現在の重複候補と一致しません。')
       }
     }

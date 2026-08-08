@@ -17,9 +17,10 @@ import {
   X,
 } from 'lucide-react'
 import { fetchCustomers, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
-import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
+import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
+  createSalesDocument,
   archiveSalesDocument,
   fetchSalesDocuments,
   updateSalesDocument,
@@ -30,6 +31,7 @@ import {
   type SalesStatus,
   type SalesLineItem,
   type SalesTaxCategory,
+  type SalesCreateInput,
   type SalesDocumentInput,
   defaultSalesDocumentDetails,
 } from '../lib/salesApi'
@@ -41,6 +43,7 @@ import { compareSortableDocuments, type DocumentSortDirection, type DocumentSort
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
 import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
+import { SalesDuplicateConfirmationDialog, type SalesDuplicateDialogState } from './SalesDuplicateConfirmationDialog'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesStatusFilter = 'すべて' | Exclude<SalesStatus, 'アーカイブ済み'>
@@ -54,6 +57,18 @@ type SalesMasterSnapshot =
   | { state: 'loading' }
   | { state: 'ready'; customerId: string; customerUpdatedAt: string; vehicleId: string | null; vehicleUpdatedAt: string | null }
   | { state: 'invalid' }
+
+type SalesDraftContext = {
+  customerMode: 'existing' | 'new'
+  vehicleMode: 'existing' | 'new'
+  customerId: string | null
+  customerUpdatedAt: string | null
+  vehicleId: string | null
+  vehicleUpdatedAt: string | null
+}
+
+type SalesDuplicateConfirmation = NonNullable<SalesCreateInput['duplicateConfirmation']>
+type SalesMasterSync = NonNullable<SalesCreateInput['masterSync']>
 
 const salesDocumentTypeFilterOptions: DocumentFilterOption<DocumentFilter>[] = [
   { value: 'すべて', label: 'すべて', tone: 'all' },
@@ -126,7 +141,13 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [saved, setSaved] = useState(false)
   const [documentView, setDocumentView] = useState<SalesDocumentView>('edit')
   const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
+  const [salesDuplicateDialog, setSalesDuplicateDialog] = useState<SalesDuplicateDialogState | null>(null)
+  const [pendingDraftPreview, setPendingDraftPreview] = useState<SyncPreviewResponse | null>(null)
+  const [pendingDraftDuplicateConfirmation, setPendingDraftDuplicateConfirmation] = useState<SalesDuplicateConfirmation | undefined>(undefined)
   const documentsRef = useRef<SalesDocument[]>([])
+  const draftDocumentRef = useRef<SalesDocumentLike | null>(null)
+  const draftContextRef = useRef<SalesDraftContext | null>(null)
+  const draftCustomerDuplicateConfirmedRef = useRef(false)
   const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
 
@@ -175,9 +196,18 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
 
+  function setActiveDraft(nextDraft: SalesDocumentLike | null) {
+    draftDocumentRef.current = nextDraft
+    setDraftDocument(nextDraft)
+  }
+
   function replaceActiveDocument(updater: (document: SalesDocumentLike) => SalesDocumentLike) {
     if (draftDocument) {
-      setDraftDocument((current) => current ? updater(current) : current)
+      setDraftDocument((current) => {
+        const nextDraft = current ? updater(current) : current
+        draftDocumentRef.current = nextDraft
+        return nextDraft
+      })
       return
     }
     if (!selectedPersistedDocument) return
@@ -187,10 +217,15 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function discardDraftIfConfirmed(action: string) {
     if (!draftDocument) return true
     if (dirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
-    setDraftDocument(null)
+    setActiveDraft(null)
+    draftContextRef.current = null
+    draftCustomerDuplicateConfirmedRef.current = false
     setDirty(false)
     setSaved(false)
     setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
     return true
   }
 
@@ -346,6 +381,13 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   }
 
   function markDirty() {
+    if (draftDocumentRef.current) {
+      draftCustomerDuplicateConfirmedRef.current = false
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+    }
     setDirty(true)
     setSaved(false)
   }
@@ -474,17 +516,43 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       keepForever: false,
       items: [{ id: 'draft-item-1', itemType: 'その他', description: createForm.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }],
     }
-    setDraftDocument(draft)
+    draftContextRef.current = {
+      customerMode: createForm.customerMode!,
+      vehicleMode: createForm.vehicleMode!,
+      customerId: customer?.id ?? null,
+      customerUpdatedAt: customer?.updatedAt ?? null,
+      vehicleId: vehicle?.id ?? null,
+      vehicleUpdatedAt: vehicle?.updatedAt ?? null,
+    }
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(draft)
     setSelectedDocumentId('')
     setDirty(false)
     setSaved(false)
     setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSyncError('')
     setDocumentView('edit')
     setCreateDialogOpen(false)
   }
 
   async function handleSaveClick() {
-    if (draftDocument || !selectedPersistedDocument || saving) return
+    if (saving || !selectedDocument) return
+    if (draftDocument) {
+      const currentDraft = draftDocumentRef.current ?? draftDocument
+      const context = draftContextRef.current
+      if (!context) {
+        setSyncError('未保存書類の顧客・車両情報を確認できません。書類を開き直してください。')
+        return
+      }
+      setSyncError('')
+      setSaving(true)
+      await runDraftSyncPreview(currentDraft, context)
+      return
+    }
+    if (!selectedPersistedDocument) return
     if (openedMasterSnapshotRef.current?.state === 'invalid') {
       setSyncError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
       return
@@ -517,9 +585,264 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     }
   }
 
-  function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
+  async function runDraftSyncPreview(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation) {
+    try {
+      const preview = await fetchSyncPreview(buildSalesDraftSyncPreviewInput(document, context))
+      await processDraftSyncPreview(preview, duplicateConfirmation)
+    } catch (reason) {
+      setSaving(false)
+      setSyncError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
+    }
+  }
+
+  async function processDraftSyncPreview(preview: SyncPreviewResponse, duplicateConfirmation?: SalesDuplicateConfirmation) {
+    const context = draftContextRef.current
+    if (!context) {
+      setSaving(false)
+      setSyncError('未保存書類の顧客・車両情報を確認できません。書類を開き直してください。')
+      return
+    }
+
+    setPendingDraftPreview(preview)
+    setPendingDraftDuplicateConfirmation(duplicateConfirmation)
+
+    const duplicateCustomers = preview.duplicateCustomers ?? []
+    if (context.customerMode === 'new' && !draftCustomerDuplicateConfirmedRef.current && duplicateCustomers.length > 0) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'customer', candidates: duplicateCustomers })
+      return
+    }
+
+    const chassisCandidates = (preview.duplicateVehicles ?? []).filter((candidate) => candidate.matchReason === 'chassis_number')
+    if (chassisCandidates.length > 0) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'vehicle', matchReason: 'chassis_number', candidates: chassisCandidates })
+      return
+    }
+
+    const registrationCandidates = (preview.duplicateVehicles ?? []).filter((candidate) => candidate.matchReason === 'registration_number')
+    const hasValidRegistrationConfirmation = Boolean(
+      duplicateConfirmation?.registrationNumberConfirmed
+      && duplicateConfirmation.confirmedVehicleId
+      && registrationCandidates.some((candidate) => candidate.id === duplicateConfirmation.confirmedVehicleId),
+    )
+    if (registrationCandidates.length > 0 && !hasValidRegistrationConfirmation) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'vehicle', matchReason: 'registration_number', candidates: registrationCandidates })
+      return
+    }
+
+    const hasMasterDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0
+    if (hasMasterDiffs) {
+      setMasterSyncDialogResult(preview)
+      setSaving(false)
+      return
+    }
+
+    const currentDraft = draftDocumentRef.current
+    if (!currentDraft) {
+      setSaving(false)
+      setSyncError('未保存書類が見つかりません。')
+      return
+    }
+    setPendingDraftPreview(null)
+    await createDraftDocument(currentDraft, context, duplicateConfirmation)
+  }
+
+  async function createDraftDocument(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation, masterSync?: SalesMasterSync) {
+    setSaving(true)
+    setSyncError('')
+    try {
+      const currentDraft = draftDocumentRef.current ?? document
+      const currentContext = draftContextRef.current ?? context
+      const input = buildSalesCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync)
+      const nextDocument = await createSalesDocument(input)
+      replaceDocuments((current) => [nextDocument, ...current])
+      setSelectedDocumentId(nextDocument.id)
+      setActiveDraft(null)
+      draftContextRef.current = null
+      draftCustomerDuplicateConfirmedRef.current = false
+      setDirty(false)
+      setSaved(true)
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      setDocumentView('edit')
+
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        lastOpenedDocumentIdRef.current = nextDocument.id
+        const foundCustomer = nextCustomers.find((customer) => customer.id === nextDocument.customerId)
+        const foundVehicle = nextDocument.vehicleId ? foundCustomer?.vehicles.find((vehicle) => vehicle.id === nextDocument.vehicleId) : null
+        if (foundCustomer && (!nextDocument.vehicleId || foundVehicle)) {
+          openedMasterSnapshotRef.current = {
+            state: 'ready',
+            customerId: foundCustomer.id,
+            customerUpdatedAt: foundCustomer.updatedAt,
+            vehicleId: nextDocument.vehicleId,
+            vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+          }
+        } else {
+          openedMasterSnapshotRef.current = { state: 'invalid' }
+        }
+      } catch {
+        setSyncError('書類は作成されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        lastOpenedDocumentIdRef.current = nextDocument.id
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
+    } catch (reason) {
+      setPendingDraftDuplicateConfirmation(undefined)
+      setSyncError(reason instanceof Error ? reason.message : '販売書類を保存できませんでした。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleUseExistingCustomer(customerId: string) {
+    const currentDraft = draftDocumentRef.current
+    const context = draftContextRef.current
+    if (!currentDraft || !context || context.customerMode !== 'new') return
+
+    setSaving(true)
+    setSyncError('')
+    try {
+      let nextCustomers = customers
+      let customer = nextCustomers.find((item) => item.id === customerId)
+      if (!customer) {
+        nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        customer = nextCustomers.find((item) => item.id === customerId)
+      }
+      if (!customer) throw new Error('選択した既存顧客を確認できません。顧客一覧を再読み込みしてください。')
+
+      const nextDraft: SalesDocumentLike = {
+        ...currentDraft,
+        customerId: customer.id,
+        customerName: customer.name,
+        phone: customer.phone,
+        customerDetails: mapCustomerDetails(customer),
+      }
+      const nextContext: SalesDraftContext = {
+        ...context,
+        customerMode: 'existing',
+        customerId: customer.id,
+        customerUpdatedAt: customer.updatedAt,
+      }
+      draftContextRef.current = nextContext
+      draftCustomerDuplicateConfirmedRef.current = false
+      setActiveDraft(nextDraft)
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      await runDraftSyncPreview(nextDraft, nextContext)
+    } catch (reason) {
+      setSaving(false)
+      setSyncError(reason instanceof Error ? reason.message : '既存顧客への切り替えに失敗しました。')
+    }
+  }
+
+  async function handleContinueAsNewCustomer() {
+    const preview = pendingDraftPreview
+    if (!preview || !draftContextRef.current) return
+    draftCustomerDuplicateConfirmedRef.current = true
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setSaving(true)
+    setPendingDraftDuplicateConfirmation(undefined)
+    await processDraftSyncPreview(preview)
+  }
+
+  function canUseExistingVehicleForDraft(vehicleId: string) {
+    const context = draftContextRef.current
+    if (!context || context.customerMode !== 'existing' || !context.customerId) return false
+    return customers.some((customer) => customer.id === context.customerId && customer.vehicles.some((vehicle) => vehicle.id === vehicleId))
+  }
+
+  async function handleUseExistingVehicle(vehicleId: string) {
+    const currentDraft = draftDocumentRef.current
+    const context = draftContextRef.current
+    if (!currentDraft || !context || !canUseExistingVehicleForDraft(vehicleId)) return
+    const customer = customers.find((item) => item.id === context.customerId)
+    const vehicle = customer?.vehicles.find((item) => item.id === vehicleId)
+    if (!customer || !vehicle) {
+      setSyncError('選択した既存車両を確認できません。顧客一覧を再読み込みしてください。')
+      return
+    }
+
+    const nextDraft: SalesDocumentLike = {
+      ...currentDraft,
+      vehicleId: vehicle.id,
+      vehicle: `${vehicle.maker} ${vehicle.model}`.trim(),
+      plate: vehicle.plate,
+      vehicleDetails: mapVehicleDetails(vehicle),
+    }
+    const nextContext: SalesDraftContext = {
+      ...context,
+      vehicleMode: 'existing',
+      vehicleId: vehicle.id,
+      vehicleUpdatedAt: vehicle.updatedAt,
+    }
+    draftContextRef.current = nextContext
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(nextDraft)
     setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(true)
+    setSyncError('')
+    await runDraftSyncPreview(nextDraft, nextContext)
+  }
+
+  async function handleContinueAsNewVehicle(vehicleId: string) {
+    const preview = pendingDraftPreview
+    const isCurrentRegistrationCandidate = preview?.duplicateVehicles?.some((candidate) => candidate.id === vehicleId && candidate.matchReason === 'registration_number')
+    if (!preview || !isCurrentRegistrationCandidate) {
+      setSyncError('登録番号の重複候補が更新されています。もう一度保存してください。')
+      setSaving(false)
+      return
+    }
+    const duplicateConfirmation: SalesDuplicateConfirmation = { registrationNumberConfirmed: true, confirmedVehicleId: vehicleId }
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setSaving(true)
+    await processDraftSyncPreview(preview, duplicateConfirmation)
+  }
+
+  function handleSalesDuplicateCancel() {
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(false)
+  }
+
+  function handleMasterSyncCancel() {
+    setMasterSyncDialogResult(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(false)
+  }
+
+  function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
     const preview = masterSyncDialogResult
+    setMasterSyncDialogResult(null)
+    if (draftDocumentRef.current) {
+      const context = draftContextRef.current
+      if (!context || !preview) {
+        setSaving(false)
+        setSyncError('未保存書類の保存状態を確認できません。')
+        return
+      }
+      const masterSync = buildSalesMasterSync(result, preview)
+      const duplicateConfirmation = pendingDraftDuplicateConfirmation
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      void createDraftDocument(draftDocumentRef.current, context, duplicateConfirmation, masterSync)
+      return
+    }
     let masterSync: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string } | undefined
     if (result.customerFields.length > 0 || result.vehicleFields.length > 0) {
       masterSync = {
@@ -542,7 +865,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
       <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
-      {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
+      {salesDuplicateDialog && <SalesDuplicateConfirmationDialog state={salesDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleSalesDuplicateCancel} />}
+      {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={undefined} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMasterSyncCancel} />}
     </>
   )
 }
@@ -587,7 +911,7 @@ function salesDocumentMonth(issuedAt: string) {
 }
 
 function SalesDocumentDetail({ document, isDraft, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
-  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} />{isDraft && <span className="document-draft-badge">新規・未保存</span>}</div><h2>{document.id ? document.number : '未採番'}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={isDraft || !dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={isDraft || saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} isDraft={isDraft} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} isDraft={isDraft} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
+  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} />{isDraft && <span className="document-draft-badge">新規・未保存</span>}</div><h2>{document.id ? document.number : '未採番'}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={isDraft || saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} isDraft={isDraft} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} isDraft={isDraft} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
 }
 
 function SalesDocumentEditor(props: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
@@ -1126,6 +1450,154 @@ function emptyVehicleDetails(): NonNullable<SalesDocumentDetails['vehicleOverrid
 
 function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicleDetails']> {
   return { maker: vehicle.maker, name: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, inspectionRecordAvailable: vehicle.inspectionRecordAvailable }
+}
+
+function buildSalesDraftSyncPreviewInput(document: SalesDocumentLike, context: SalesDraftContext): SyncPreviewInput {
+  validateSalesDraftContext(document, context)
+  const input: SyncPreviewInput = {
+    documentType: 'sales',
+    issuedAt: normalizeSalesDocumentDate(document.issuedAt),
+    openedCustomerUpdatedAt: context.customerMode === 'existing' ? context.customerUpdatedAt ?? undefined : undefined,
+    openedVehicleUpdatedAt: context.vehicleMode === 'existing' ? context.vehicleUpdatedAt ?? undefined : undefined,
+  }
+
+  if (context.customerMode === 'new') {
+    input.newCustomer = buildNewSalesCustomer(currentSalesCustomerValues(document))
+  } else {
+    if (!document.customerId) throw new Error('既存顧客が選択されていません。')
+    input.customerId = document.customerId
+    if (document.details.customerOverride) input.customerOverride = { ...document.details.customerOverride }
+  }
+
+  if (context.vehicleMode === 'new') {
+    input.newVehicle = buildNewSalesVehicle(currentSalesVehicleValues(document))
+  } else {
+    if (!document.vehicleId) throw new Error('既存車両が選択されていません。')
+    input.vehicleId = document.vehicleId
+    if (document.details.vehicleOverride) input.vehicleOverride = { ...document.details.vehicleOverride }
+  }
+
+  return input
+}
+
+function buildSalesCreateInput(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation, masterSync?: SalesMasterSync): SalesCreateInput {
+  validateSalesDraftContext(document, context)
+  const input: SalesCreateInput = {
+    type: document.type,
+    status: document.status,
+    issuedAt: document.issuedAt,
+    dueDate: document.dueDate,
+    note: document.note,
+    taxRate: document.taxRate,
+    taxRounding: document.taxRounding,
+    details: document.details,
+    items: document.items.map(({ id: _id, ...item }) => item),
+  }
+
+  if (context.customerMode === 'new') {
+    input.newCustomer = buildNewSalesCustomer(currentSalesCustomerValues(document))
+  } else {
+    if (!document.customerId) throw new Error('顧客を選択してください。')
+    input.customerId = document.customerId
+  }
+
+  if (context.vehicleMode === 'new') {
+    input.newVehicle = buildNewSalesVehicle(currentSalesVehicleValues(document))
+  } else {
+    if (!document.vehicleId) throw new Error('車両を選択してください。')
+    input.vehicleId = document.vehicleId
+  }
+
+  if (duplicateConfirmation) input.duplicateConfirmation = duplicateConfirmation
+  if (masterSync) input.masterSync = masterSync
+  return input
+}
+
+function validateSalesDraftContext(document: SalesDocumentLike, context: SalesDraftContext) {
+  if (context.customerMode === 'new' && context.vehicleMode === 'existing') throw new Error('新規顧客には既存車両を指定できません。')
+  if (context.customerMode === 'existing' && (!document.customerId || document.customerId !== context.customerId)) throw new Error('顧客の選択状態を確認してください。')
+  if (context.customerMode === 'new' && document.customerId) throw new Error('新規顧客の選択状態を確認してください。')
+  if (context.vehicleMode === 'existing' && (!document.vehicleId || document.vehicleId !== context.vehicleId)) throw new Error('車両の選択状態を確認してください。')
+  if (context.vehicleMode === 'new' && document.vehicleId) throw new Error('新規車両の選択状態を確認してください。')
+}
+
+function buildSalesMasterSync(result: MasterSyncConfirmationResult, preview: SyncPreviewResponse): SalesMasterSync | undefined {
+  if (result.customerFields.length === 0 && result.vehicleFields.length === 0) return undefined
+  return {
+    confirmed: true,
+    customerFields: result.customerFields,
+    vehicleFields: result.vehicleFields,
+    expectedCustomerUpdatedAt: result.customerFields.length > 0 ? preview.expectedCustomerUpdatedAt ?? undefined : undefined,
+    expectedVehicleUpdatedAt: result.vehicleFields.length > 0 ? preview.expectedVehicleUpdatedAt ?? undefined : undefined,
+  }
+}
+
+function currentSalesCustomerValues(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['customerOverride']> {
+  return { ...pickCustomerOverride(document.customerDetails), ...(document.details.customerOverride ?? {}) }
+}
+
+function currentSalesVehicleValues(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['vehicleOverride']> {
+  return { ...emptyVehicleDetails(), ...(document.vehicleDetails ?? {}), ...(document.details.vehicleOverride ?? {}) }
+}
+
+function buildNewSalesCustomer(values: NonNullable<SalesDocumentDetails['customerOverride']>): NonNullable<SalesCreateInput['newCustomer']> {
+  const name = values.name.trim()
+  if (!name) throw new Error('顧客名を入力してください。')
+  return {
+    name,
+    nameKana: trimSalesOptional(values.kana),
+    phone: trimSalesOptional(values.phone),
+    email: trimSalesOptional(values.email),
+    postalCode: trimSalesOptional(values.postalCode),
+    address: trimSalesOptional(values.address),
+  }
+}
+
+function buildNewSalesVehicle(values: NonNullable<SalesDocumentDetails['vehicleOverride']>): NonNullable<SalesCreateInput['newVehicle']> {
+  const maker = values.maker.trim()
+  const name = values.name.trim()
+  if (!maker) throw new Error('メーカーを入力してください。')
+  if (!name) throw new Error('車名を入力してください。')
+
+  const vehicle: NonNullable<SalesCreateInput['newVehicle']> = { maker, name }
+  const model = trimSalesOptional(values.modelType)
+  const registrationNumber = trimSalesOptional(values.plate)
+  const chassisNumber = trimSalesOptional(values.vin)
+  const inspectionDate = normalizeSalesDocumentDate(values.inspectionDate)
+  const bodyColor = trimSalesOptional(values.color)
+  const transmission = trimSalesOptional(values.transmission)
+  const modelYear = parseSalesNumber(values.year)
+  const mileage = parseSalesNumber(values.mileage)
+  const displacement = parseSalesNumber(values.displacement)
+  if (model) vehicle.model = model
+  if (registrationNumber) vehicle.registrationNumber = registrationNumber
+  if (chassisNumber) vehicle.chassisNumber = chassisNumber
+  if (modelYear !== undefined) vehicle.modelYear = modelYear
+  if (inspectionDate) vehicle.inspectionDate = inspectionDate
+  if (mileage !== undefined) vehicle.mileage = mileage
+  if (bodyColor) vehicle.bodyColor = bodyColor
+  if (displacement !== undefined) vehicle.displacement = displacement
+  if (transmission) vehicle.transmission = transmission
+  return vehicle
+}
+
+function trimSalesOptional(value: string | undefined | null) {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || undefined
+}
+
+function normalizeSalesDocumentDate(value: string) {
+  const trimmed = value.trim()
+  return trimmed ? trimmed.replaceAll('/', '-') : undefined
+}
+
+function parseSalesNumber(value: string | undefined | null) {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return undefined
+  const digits = trimmed.replace(/[^0-9]/g, '')
+  if (!digits) return undefined
+  const parsed = Number(digits)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 

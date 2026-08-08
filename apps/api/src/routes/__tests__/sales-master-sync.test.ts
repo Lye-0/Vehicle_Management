@@ -176,6 +176,7 @@ describe("POST sales documents masterSync", () => {
       type: "見積書",
       newCustomer: { name: "新規売客F" },
       newVehicle: { maker: "トヨタ", name: "プリウス", chassisNumber: "ZVW50-00001" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: vid },
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -213,6 +214,78 @@ describe("POST sales documents masterSync", () => {
       items: [],
     }));
     expect(res.status).toBe(201);
+  });
+
+  it("登録番号一致候補が複数でも1件目を確認すれば許可", async () => {
+    const cid = "sms-cust-013";
+    const firstVid = "sms-veh-013-a";
+    const secondVid = "sms-veh-013-b";
+    await seedCustomer(cid, "重複候補複数顧客1");
+    await seedVehicle(firstVid, cid, "トヨタ", "プリウス", undefined, undefined, "名古屋300あ1234");
+    await seedVehicle(secondVid, cid, "ホンダ", "フィット", undefined, undefined, "名古屋 300 あ 1234");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      newCustomer: { name: "新規売客I" },
+      newVehicle: { maker: "日産", name: "ノート", registrationNumber: "名古屋300あ1234" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: firstVid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+  });
+
+  it("登録番号一致候補が複数でも2件目を確認すれば許可", async () => {
+    const cid = "sms-cust-014";
+    const firstVid = "sms-veh-014-a";
+    const secondVid = "sms-veh-014-b";
+    await seedCustomer(cid, "重複候補複数顧客2");
+    await seedVehicle(firstVid, cid, "トヨタ", "プリウス", undefined, undefined, "京都500い5678");
+    await seedVehicle(secondVid, cid, "ホンダ", "フィット", undefined, undefined, "京都 500 い 5678");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      newCustomer: { name: "新規売客J" },
+      newVehicle: { maker: "日産", name: "ノート", registrationNumber: "京都500い5678" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: secondVid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+  });
+
+  it("登録番号一致候補に存在しない車両IDは拒否", async () => {
+    const cid = "sms-cust-015";
+    const vid = "sms-veh-015";
+    await seedCustomer(cid, "重複候補外ID顧客");
+    await seedVehicle(vid, cid, "スバル", "インプレッサ", undefined, undefined, "神戸300う1111");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      newCustomer: { name: "新規売客K" },
+      newVehicle: { maker: "スバル", name: "インプレッサ", registrationNumber: "神戸300う1111" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: "sms-veh-015-not-candidate" },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("登録番号一致で確認がfalseなら拒否", async () => {
+    const cid = "sms-cust-016";
+    const vid = "sms-veh-016";
+    await seedCustomer(cid, "重複確認false顧客");
+    await seedVehicle(vid, cid, "マツダ", "デミオ", undefined, undefined, "福岡500え2222");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      newCustomer: { name: "新規売客L" },
+      newVehicle: { maker: "マツダ", name: "デミオ", registrationNumber: "福岡500え2222" },
+      duplicateConfirmation: { registrationNumberConfirmed: false, confirmedVehicleId: vid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(409);
   });
 });
 
