@@ -94,6 +94,65 @@ describe("POST sales documents masterSync", () => {
     expect(body.document.vehicleId).toBeTruthy();
   });
 
+  it("販売書類の生年月日・勤務先等を新規顧客マスタへ保存し、再表示する", async () => {
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      newCustomer: { name: "顧客情報付き新規顧客", birthDate: "1990/01/23", employer: "株式会社サンプル" },
+      newVehicle: { maker: "トヨタ", name: "プリウス" },
+      details: { customerBirthDate: "1990-01-23", customerEmployer: "株式会社サンプル", customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(body.document.customerDetails.birthDate).toBe("1990-01-23");
+    expect(body.document.customerDetails.employer).toBe("株式会社サンプル");
+    expect(body.document.details.customerBirthDate).toBe("1990-01-23");
+    expect(body.document.details.customerEmployer).toBe("株式会社サンプル");
+
+    const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
+      .bind(body.document.customerId)
+      .first<{ birth_date: string | null; employer: string | null }>();
+    expect(customer?.birth_date).toBe("1990-01-23");
+    expect(customer?.employer).toBe("株式会社サンプル");
+  });
+
+  it("既存顧客の生年月日・勤務先等をmasterSyncで顧客マスタへ反映する", async () => {
+    const cid = "sms-cust-birth-employer-001";
+    const vid = "sms-veh-birth-employer-001";
+    await seedCustomer(cid, "既存顧客の勤務先確認");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "1985/06/07",
+        customerEmployer: "既存顧客株式会社",
+        customerOverride: { name: "既存顧客の勤務先確認", kana: "", phone: "", postalCode: "", address: "", birthDate: "1985/06/07", employer: "既存顧客株式会社" },
+        vehicleOverride: null,
+      },
+      masterSync: {
+        confirmed: true,
+        customerFields: ["birthDate", "employer"],
+        expectedCustomerUpdatedAt: await getCustomerUpdatedAt(cid),
+      },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(body.document.customerDetails.birthDate).toBe("1985-06-07");
+    expect(body.document.customerDetails.employer).toBe("既存顧客株式会社");
+    expect(body.document.details.customerBirthDate).toBe("1985-06-07");
+    expect(body.document.details.customerEmployer).toBe("既存顧客株式会社");
+
+    const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
+      .bind(cid)
+      .first<{ birth_date: string | null; employer: string | null }>();
+    expect(customer?.birth_date).toBe("1985-06-07");
+    expect(customer?.employer).toBe("既存顧客株式会社");
+  });
+
   it("既存顧客＋既存車両＋販売書類を一体作成", async () => {
     const cid = "sms-cust-combo-001";
     const vid = "sms-veh-combo-001";

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { appSettings, customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { normalizeDate, normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -201,11 +202,12 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     const newCustId = crypto.randomUUID()
     resolvedCustomerId = newCustId
     statements.push(env.DB.prepare(
-      `INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email, birth_date, employer)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(newCustId, organizationId, `C-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
       newCustomer.name, newCustomer.nameKana || null, newCustomer.postalCode || null,
-      newCustomer.address || null, newCustomer.phone || null, newCustomer.email || null))
+      newCustomer.address || null, newCustomer.phone || null, newCustomer.email || null,
+      newCustomer.birthDate || null, newCustomer.employer || null))
   }
 
   let resolvedVehicleId = input.vehicleId
@@ -494,6 +496,9 @@ function serializeSalesDocument(
   vehicle: typeof vehicles.$inferSelect | undefined,
   items: Array<typeof salesDocumentItems.$inferSelect>,
 ) {
+  const details = parseSalesDetails(document.detailsJson)
+  const customerBirthDate = details.customerBirthDate || normalizeDate(customer?.birthDate) || ''
+  const customerEmployer = details.customerEmployer || customer?.employer || ''
   return {
     id: document.id,
     number: document.number,
@@ -508,8 +513,8 @@ function serializeSalesDocument(
       phone: customer?.phone ?? '',
       postalCode: customer?.postalCode ?? '',
       address: customer?.address ?? '',
-      birthDate: '',
-      employer: '',
+      birthDate: customerBirthDate,
+      employer: customerEmployer,
       contactPhone: '',
     },
     vehicleId: document.vehicleId,
@@ -521,15 +526,15 @@ function serializeSalesDocument(
       modelType: vehicle.model ?? '',
       plate: vehicle.registrationNumber ?? '',
       vin: vehicle.chassisNumber ?? '',
-      year: vehicle.modelYear ? `${vehicle.modelYear}年` : '',
+      year: normalizeModelYear(vehicle.modelYear),
       inspectionDate: vehicle.inspectionDate ?? '',
-      mileage: vehicle.mileage === null ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+      mileage: normalizeMileage(vehicle.mileage),
       color: vehicle.bodyColor ?? '',
-      displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
+      displacement: normalizeDisplacement(vehicle.displacement),
       transmission: vehicle.transmission ?? '',
       inspectionRecordAvailable: Boolean(vehicle.inspectionRecordAvailable),
     } : null,
-    details: parseSalesDetails(document.detailsJson),
+    details: { ...details, customerBirthDate, customerEmployer },
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
@@ -651,9 +656,11 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
     customerOverride: customerOverride ? {
       name: limitedString(customerOverride.name, '', 200),
       kana: limitedString(customerOverride.kana, '', 200),
-      phone: limitedString(customerOverride.phone, '', 50),
-      postalCode: limitedString(customerOverride.postalCode, '', 20),
+      phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
+      postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
       address: limitedString(customerOverride.address, '', 500),
+      birthDate: normalizeDate(limitedString(customerOverride.birthDate, '', 50)),
+      employer: limitedString(customerOverride.employer, '', 200),
     } : null,
     vehicleOverride: vehicleOverride ? {
       maker: limitedString(vehicleOverride.maker, '', 100),
@@ -661,11 +668,11 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
       modelType: limitedString(vehicleOverride.modelType, '', 100),
       plate: limitedString(vehicleOverride.plate, '', 100),
       vin: limitedString(vehicleOverride.vin, '', 100),
-      year: limitedString(vehicleOverride.year, '', 50),
+      year: normalizeModelYear(limitedString(vehicleOverride.year, '', 50)),
       inspectionDate: dateValue(vehicleOverride.inspectionDate),
-      mileage: limitedString(vehicleOverride.mileage, '', 50),
+      mileage: normalizeMileage(limitedString(vehicleOverride.mileage, '', 50)),
       color: limitedString(vehicleOverride.color, '', 100),
-      displacement: limitedString(vehicleOverride.displacement, '', 50),
+      displacement: normalizeDisplacement(limitedString(vehicleOverride.displacement, '', 50)),
       transmission: limitedString(vehicleOverride.transmission, '', 100),
       inspectionRecordAvailable: booleanValue(vehicleOverride.inspectionRecordAvailable),
     } : null,
@@ -762,10 +769,12 @@ function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
   return {
     name,
     nameKana: typeof obj.nameKana === 'string' ? obj.nameKana.trim() || undefined : undefined,
-    phone: typeof obj.phone === 'string' ? obj.phone.trim() || undefined : undefined,
+    phone: typeof obj.phone === 'string' ? normalizePhone(obj.phone) || undefined : undefined,
     email: typeof obj.email === 'string' ? obj.email.trim() || undefined : undefined,
-    postalCode: typeof obj.postalCode === 'string' ? obj.postalCode.trim() || undefined : undefined,
+    postalCode: typeof obj.postalCode === 'string' ? normalizePostalCode(obj.postalCode) || undefined : undefined,
     address: typeof obj.address === 'string' ? obj.address.trim() || undefined : undefined,
+    birthDate: typeof obj.birthDate === 'string' ? normalizeDate(obj.birthDate) || undefined : undefined,
+    employer: typeof obj.employer === 'string' ? obj.employer.trim() || undefined : undefined,
   }
 }
 
@@ -903,7 +912,7 @@ type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
-  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string } | null
+  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string; birthDate: string; employer: string } | null
   vehicleOverride: { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean } | null
   tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
   recycleFee: number

@@ -154,7 +154,7 @@ export function MasterSyncConfirmationDialog({
             </p>
           )}
         </div>
-        <div className="modal-footer">
+        <div className="modal-footer master-sync-modal-footer">
           <button className="button button-secondary" type="button" onClick={onCancel}>保存せず閉じる</button>
           <button className="button button-primary" type="button" disabled={!hasAnyDiff} onClick={handleConfirm}>
             {hasMileageOnly ? '走行距離を記録して保存' : '保存して選択項目を反映'}

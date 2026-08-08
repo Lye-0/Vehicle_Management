@@ -39,6 +39,8 @@ export type Customer = {
   email: string
   postalCode: string
   address: string
+  birthDate: string
+  employer: string
   memo: string
   updatedAt: string
   vehicles: Vehicle[]
@@ -51,6 +53,8 @@ export type CustomerInput = {
   email: string
   postalCode?: string
   address: string
+  birthDate: string
+  employer: string
   memo: string
 }
 
@@ -80,6 +84,8 @@ type ApiCustomer = {
   email: string | null
   postalCode: string | null
   address: string | null
+  birthDate: string | null
+  employer: string | null
   memo: string | null
   updatedAt: string
   vehicles: ApiVehicle[]
@@ -197,6 +203,8 @@ function mapCustomer(customer: ApiCustomer): Customer {
     email: customer.email ?? '',
     postalCode: customer.postalCode ?? '',
     address: customer.address ?? '',
+    birthDate: customer.birthDate ?? '',
+    employer: customer.employer ?? '',
     memo: customer.memo ?? '',
     updatedAt: customer.updatedAt,
     vehicles: customer.vehicles.map(mapVehicle),
@@ -236,7 +244,7 @@ function formatDate(date: string) {
 }
 
 function toCustomerPayload(input: CustomerInput) {
-  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, memo: input.memo }
+  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, birthDate: input.birthDate, employer: input.employer, memo: input.memo }
 }
 
 function toVehiclePayload(input: VehicleInput) {

@@ -1623,6 +1623,8 @@
   .csv-export-grid { grid-template-columns: 1fr; }
   .csv-import-controls { grid-template-columns: 1fr; align-items: stretch; }
   .modal-form, .modal-header { padding-left: 18px; padding-right: 18px; }
+  .modal.master-sync-modal .master-sync-modal-footer { padding: 18px; flex-wrap: wrap; }
+  .modal.master-sync-modal .master-sync-modal-footer .button { flex: 1 1 auto; }
   .attachment-preview-modal { width: 100%; max-height: calc(100vh - 24px); }
   .attachment-preview-modal .modal-header { padding-top: 16px; padding-bottom: 16px; }
   .attachment-preview-content { padding: 10px; }
@@ -1972,6 +1974,7 @@
 
 /* MasterSyncConfirmationDialog */
 .master-sync-modal { max-width: 560px; }
+.master-sync-modal-footer { margin-top: 0; padding: 18px 24px 24px; }
 .master-sync-warning { padding: 12px 14px; color: #8a6d00; border: 1px solid #e6d17a; border-radius: 8px; background: #fdf8e8; font-size: 12px; }
 .master-sync-warning-header { display: flex; align-items: center; gap: 7px; font-size: 13px; }
 .master-sync-conflict { padding: 10px 14px; color: var(--danger); border: 1px solid #f3c8c8; border-radius: 8px; background: var(--danger-soft); font-size: 12px; }

@@ -1,9 +1,20 @@
 // 顧客・車両マスタ同期の共有ヘルパー
 // sync-preview API と 販売・整備PATCH API の両方で使用
 
+import {
+  normalizeDisplacement,
+  normalizeDate,
+  normalizeMileage,
+  normalizeModelYear,
+  normalizePhone,
+  normalizePostalCode,
+  normalizeValueForComparison,
+  parseNormalizedInteger,
+} from '@vehicle-management/shared'
+
 // ----- 型定義 -----
 
-export type CustomerSyncField = 'name' | 'nameKana' | 'phone' | 'postalCode' | 'address'
+export type CustomerSyncField = 'name' | 'nameKana' | 'phone' | 'postalCode' | 'address' | 'birthDate' | 'employer'
 
 export type VehicleSyncField = 'maker' | 'name' | 'model' | 'registrationNumber'
   | 'chassisNumber' | 'modelYear' | 'inspectionDate' | 'bodyColor'
@@ -12,7 +23,7 @@ export type VehicleSyncField = 'maker' | 'name' | 'model' | 'registrationNumber'
 // ----- Allowlist -----
 
 export const CUSTOMER_SYNC_ALLOWLIST = new Set<CustomerSyncField>([
-  'name', 'nameKana', 'phone', 'postalCode', 'address',
+  'name', 'nameKana', 'phone', 'postalCode', 'address', 'birthDate', 'employer',
 ])
 
 export const VEHICLE_SYNC_ALLOWLIST = new Set<VehicleSyncField>([
@@ -29,6 +40,8 @@ export const CUSTOMER_FIELD_LABELS: Record<CustomerSyncField, string> = {
   phone: '電話番号',
   postalCode: '郵便番号',
   address: '住所',
+  birthDate: '生年月日',
+  employer: '勤務先等',
 }
 
 export const VEHICLE_FIELD_LABELS: Record<VehicleSyncField, string> = {
@@ -58,6 +71,8 @@ export const CUSTOMER_OVERRIDE_TO_SYNC: Record<string, CustomerSyncField> = {
   phone: 'phone',
   postalCode: 'postalCode',
   address: 'address',
+  birthDate: 'birthDate',
+  employer: 'employer',
 }
 
 export const VEHICLE_OVERRIDE_TO_SYNC: Record<string, VehicleSyncField> = {
@@ -81,6 +96,8 @@ export const CUSTOMER_FIELD_TO_DB_COLUMN: Record<CustomerSyncField, string> = {
   phone: 'phone',
   postalCode: 'postal_code',
   address: 'address',
+  birthDate: 'birth_date',
+  employer: 'employer',
 }
 
 export const VEHICLE_FIELD_TO_DB_COLUMN: Record<VehicleSyncField, string> = {
@@ -99,13 +116,16 @@ export const VEHICLE_FIELD_TO_DB_COLUMN: Record<VehicleSyncField, string> = {
 // ----- syncフィールド名 → Drizzleプロパティ名 -----
 
 export const CUSTOMER_FIELD_TO_DRIZZLE: Record<CustomerSyncField, keyof {
-  name: string; nameKana: string | null; phone: string | null; postalCode: string | null; address: string | null
+  name: string; nameKana: string | null; phone: string | null; postalCode: string | null; address: string | null;
+  birthDate: string | null; employer: string | null
 }> = {
   name: 'name',
   nameKana: 'nameKana',
   phone: 'phone',
   postalCode: 'postalCode',
   address: 'address',
+  birthDate: 'birthDate',
+  employer: 'employer',
 }
 
 export const VEHICLE_FIELD_TO_DRIZZLE: Record<VehicleSyncField, keyof {
@@ -166,7 +186,7 @@ export function extractCustomerFieldsFromOverride(
   for (const [overrideKey, syncField] of Object.entries(CUSTOMER_OVERRIDE_TO_SYNC)) {
     const value = override[overrideKey]
     if (typeof value === 'string' && value.trim()) {
-      result[syncField] = value.trim()
+      result[syncField] = normalizeCustomerSyncValue(syncField, value)
     }
   }
   return result
@@ -180,12 +200,25 @@ export function extractVehicleFieldsFromOverride(
   for (const [overrideKey, syncField] of Object.entries(VEHICLE_OVERRIDE_TO_SYNC)) {
     const value = override[overrideKey]
     if (typeof value === 'string' && value.trim()) {
-      result[syncField] = value.trim()
+      result[syncField] = normalizeVehicleSyncValue(syncField, value)
     } else if (typeof value === 'number' && Number.isFinite(value)) {
-      result[syncField] = value
+      result[syncField] = normalizeVehicleSyncValue(syncField, value)
     }
   }
   return result
+}
+
+function normalizeCustomerSyncValue(field: CustomerSyncField, value: string): string {
+  if (field === 'phone') return normalizePhone(value)
+  if (field === 'postalCode') return normalizePostalCode(value)
+  if (field === 'birthDate') return normalizeDate(value)
+  return value.normalize('NFKC').trim()
+}
+
+function normalizeVehicleSyncValue(field: VehicleSyncField, value: string | number): string {
+  if (field === 'modelYear') return normalizeModelYear(value)
+  if (field === 'displacement') return normalizeDisplacement(value)
+  return String(value).normalize('NFKC').trim()
 }
 
 // ----- allowlist検証 -----
@@ -211,10 +244,13 @@ export type DiffItem<T extends string> = {
 
 function formatMasterValue(value: string | number | null | undefined, field: string): string {
   if (value === null || value === undefined) return ''
-  if (field === 'modelYear' && typeof value === 'number') return `${value}年`
-  if (field === 'displacement' && typeof value === 'number') return `${value.toLocaleString('ja-JP')} cc`
-  if (field === 'mileage' && typeof value === 'number') return `${value.toLocaleString('ja-JP')} km`
-  return String(value)
+  if (field === 'modelYear') return normalizeModelYear(value)
+  if (field === 'displacement') return normalizeDisplacement(value)
+  if (field === 'mileage') return normalizeMileage(value)
+  if (field === 'phone') return normalizePhone(value)
+  if (field === 'postalCode') return normalizePostalCode(value)
+  if (field === 'birthDate') return normalizeDate(value)
+  return String(value).normalize('NFKC').trim()
 }
 
 export function computeCustomerDiffs(
@@ -224,6 +260,8 @@ export function computeCustomerDiffs(
     phone: string | null
     postalCode: string | null
     address: string | null
+    birthDate?: string | null
+    employer?: string | null
   } | null | undefined,
   documentValues: CustomerOverrideValues,
 ): DiffItem<CustomerSyncField>[] {
@@ -234,12 +272,13 @@ export function computeCustomerDiffs(
     const doc = documentValues[field] ?? ''
     if (!doc) continue
     const currentStr = formatMasterValue(current, field)
-    if (currentStr === doc) continue
+    const documentStr = formatMasterValue(doc, field)
+    if (normalizeValueForComparison(field, currentStr) === normalizeValueForComparison(field, documentStr)) continue
     diffs.push({
       field,
       label: CUSTOMER_FIELD_LABELS[field],
       currentValue: currentStr,
-      documentValue: doc,
+      documentValue: documentStr,
       isAttention: CUSTOMER_ATTENTION_FIELDS.has(field),
     })
   }
@@ -266,10 +305,10 @@ export function computeVehicleDiffs(
   for (const field of VEHICLE_SYNC_ALLOWLIST) {
     const current = currentMaster[VEHICLE_FIELD_TO_DRIZZLE[field]] ?? null
     const doc = documentValues[field]
-    const docStr = typeof doc === 'number' ? String(doc) : (doc ?? '')
+    const docStr = doc === undefined ? '' : formatMasterValue(doc, field)
     if (!docStr) continue
     const currentStr = formatMasterValue(current, field)
-    if (currentStr === docStr) continue
+    if (normalizeValueForComparison(field, currentStr) === normalizeValueForComparison(field, docStr)) continue
     diffs.push({
       field,
       label: VEHICLE_FIELD_LABELS[field],
@@ -307,10 +346,14 @@ export function buildVehicleUpdateValues(
   const values: Record<string, string | number> = {}
   for (const field of selectedFields) {
     if (!VEHICLE_SYNC_ALLOWLIST.has(field)) continue
-    if (field === 'mileage') continue
     const value = extracted[field]
     if (value !== undefined && !isBlankValue(value)) {
-      values[VEHICLE_FIELD_TO_DB_COLUMN[field]] = value as string | number
+      if (field === 'modelYear' || field === 'displacement') {
+        const numericValue = parseNormalizedInteger(value)
+        if (numericValue !== null) values[VEHICLE_FIELD_TO_DB_COLUMN[field]] = numericValue
+      } else {
+        values[VEHICLE_FIELD_TO_DB_COLUMN[field]] = String(value)
+      }
     }
   }
   return values
@@ -353,6 +396,8 @@ export type NewCustomerInput = {
   email?: string
   postalCode?: string
   address?: string
+  birthDate?: string
+  employer?: string
 }
 
 export type NewVehicleInput = {
@@ -498,6 +543,8 @@ export function computeActualCustomerDiffFields(
     phone: string | null
     postalCode: string | null
     address: string | null
+    birthDate?: string | null
+    employer?: string | null
   } | null | undefined,
   override: Record<string, unknown> | null | undefined,
 ): Set<CustomerSyncField> {
@@ -509,7 +556,8 @@ export function computeActualCustomerDiffFields(
     const doc = docValues[field] ?? ''
     if (!doc) continue
     const currentStr = formatMasterValue(current, field)
-    if (currentStr === doc) continue
+    const documentStr = formatMasterValue(doc, field)
+    if (normalizeValueForComparison(field, currentStr) === normalizeValueForComparison(field, documentStr)) continue
     fields.add(field)
   }
   return fields
@@ -536,10 +584,10 @@ export function computeActualVehicleDiffFields(
   for (const field of VEHICLE_SYNC_ALLOWLIST) {
     const current = currentMaster[VEHICLE_FIELD_TO_DRIZZLE[field]] ?? null
     const doc = docValues[field]
-    const docStr = typeof doc === 'number' ? String(doc) : (doc ?? '')
+    const docStr = doc === undefined ? '' : formatMasterValue(doc, field)
     if (!docStr) continue
     const currentStr = formatMasterValue(current, field)
-    if (currentStr === docStr) continue
+    if (normalizeValueForComparison(field, currentStr) === normalizeValueForComparison(field, docStr)) continue
     fields.add(field)
   }
   return fields

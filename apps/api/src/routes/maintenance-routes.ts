@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, mileageHistories, vehicles } from '@vehicle-management/database'
+import { normalizeDate, normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -252,11 +253,12 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     const newCustId = crypto.randomUUID()
     resolvedCustomerId = newCustId
     statements.push(env.DB.prepare(
-      `INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email, birth_date, employer)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(newCustId, organizationId, `C-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
       newCustomer.name, newCustomer.nameKana || null, newCustomer.postalCode || null,
-      newCustomer.address || null, newCustomer.phone || null, newCustomer.email || null))
+      newCustomer.address || null, newCustomer.phone || null, newCustomer.email || null,
+      newCustomer.birthDate || null, newCustomer.employer || null))
   }
 
   // 新規車両INSERT
@@ -541,10 +543,12 @@ function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
   return {
     name,
     nameKana: typeof obj.nameKana === 'string' ? obj.nameKana.trim() || undefined : undefined,
-    phone: typeof obj.phone === 'string' ? obj.phone.trim() || undefined : undefined,
+    phone: typeof obj.phone === 'string' ? normalizePhone(obj.phone) || undefined : undefined,
     email: typeof obj.email === 'string' ? obj.email.trim() || undefined : undefined,
-    postalCode: typeof obj.postalCode === 'string' ? obj.postalCode.trim() || undefined : undefined,
+    postalCode: typeof obj.postalCode === 'string' ? normalizePostalCode(obj.postalCode) || undefined : undefined,
     address: typeof obj.address === 'string' ? obj.address.trim() || undefined : undefined,
+    birthDate: typeof obj.birthDate === 'string' ? normalizeDate(obj.birthDate) || undefined : undefined,
+    employer: typeof obj.employer === 'string' ? obj.employer.trim() || undefined : undefined,
   }
 }
 
@@ -741,18 +745,18 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
     plate: vehicle?.registrationNumber ?? '',
-    mileage: vehicle?.mileage === null || vehicle?.mileage === undefined ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+    mileage: normalizeMileage(vehicle?.mileage),
     vehicleDetails: {
       maker: vehicle?.maker ?? '',
       name: vehicle?.name ?? '',
       modelType: vehicle?.model ?? '',
       plate: vehicle?.registrationNumber ?? '',
       vin: vehicle?.chassisNumber ?? '',
-      year: vehicle?.modelYear === null || vehicle?.modelYear === undefined ? '' : String(vehicle.modelYear),
+      year: normalizeModelYear(vehicle?.modelYear),
       inspectionDate: vehicle?.inspectionDate ?? '',
-      mileage: vehicle?.mileage === null || vehicle?.mileage === undefined ? '' : `${vehicle.mileage.toLocaleString('ja-JP')}km`,
+      mileage: normalizeMileage(vehicle?.mileage),
       color: vehicle?.bodyColor ?? '',
-      displacement: vehicle?.displacement === null || vehicle?.displacement === undefined ? '' : String(vehicle.displacement),
+      displacement: normalizeDisplacement(vehicle?.displacement),
       transmission: vehicle?.transmission ?? '',
       inspectionRecordAvailable: vehicle?.inspectionRecordAvailable ?? false,
     },
@@ -876,8 +880,8 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
   const normalizedCustomerOverride = {
     name: stringValue(customerOverride, 'name'),
     kana: stringValue(customerOverride, 'kana'),
-    phone: stringValue(customerOverride, 'phone'),
-    postalCode: stringValue(customerOverride, 'postalCode'),
+    phone: normalizePhone(stringValue(customerOverride, 'phone')),
+    postalCode: normalizePostalCode(stringValue(customerOverride, 'postalCode')),
     address: stringValue(customerOverride, 'address'),
   }
   const normalizedVehicleOverride = {
@@ -886,11 +890,11 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     modelType: stringValue(vehicleOverride, 'modelType'),
     plate: stringValue(vehicleOverride, 'plate'),
     vin: stringValue(vehicleOverride, 'vin'),
-    year: stringValue(vehicleOverride, 'year'),
+    year: normalizeModelYear(stringValue(vehicleOverride, 'year')),
     inspectionDate: stringValue(vehicleOverride, 'inspectionDate'),
-    mileage: stringValue(vehicleOverride, 'mileage'),
+    mileage: normalizeMileage(stringValue(vehicleOverride, 'mileage')),
     color: stringValue(vehicleOverride, 'color'),
-    displacement: stringValue(vehicleOverride, 'displacement'),
+    displacement: normalizeDisplacement(stringValue(vehicleOverride, 'displacement')),
     transmission: stringValue(vehicleOverride, 'transmission'),
     inspectionRecordAvailable: typeof vehicleOverride.inspectionRecordAvailable === 'boolean' ? vehicleOverride.inspectionRecordAvailable : false,
   }

@@ -106,6 +106,13 @@
       "when": 1785858321717,
       "tag": "0014_parallel_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1786179595198,
+      "tag": "0015_legal_boomerang",
+      "breakpoints": true
     }
   ]
 }

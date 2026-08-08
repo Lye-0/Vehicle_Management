@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { normalizeDate } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -96,6 +97,8 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, 
     email: customer.email,
     postalCode: customer.postalCode,
     address: customer.address,
+    birthDate: customer.birthDate,
+    employer: customer.employer,
     memo: customer.memo,
     updatedAt: customer.updatedAt,
     vehicles: (vehiclesByCustomer.get(customer.id) ?? []).map((vehicle) => ({
@@ -139,6 +142,8 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
     email: nullableString(body, 'email'),
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
+    birthDate: nullableDateString(body, 'birthDate'),
+    employer: nullableString(body, 'employer'),
     memo: nullableString(body, 'memo'),
   }).run()
   return jsonResponse({ customer: await findCustomer(database, id, organizationId) }, 201, env)
@@ -156,6 +161,8 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     email: nullableString(body, 'email'),
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
+    birthDate: nullableDateString(body, 'birthDate'),
+    employer: nullableString(body, 'employer'),
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
@@ -379,6 +386,11 @@ function stringValue(body: Record<string, unknown>, key: string) {
 function nullableString(body: Record<string, unknown>, key: string) {
   const value = stringValue(body, key)
   return value || null
+}
+
+function nullableDateString(body: Record<string, unknown>, key: string) {
+  const value = stringValue(body, key)
+  return value ? normalizeDate(value) : null
 }
 
 function nullableInteger(body: Record<string, unknown>, key: string) {

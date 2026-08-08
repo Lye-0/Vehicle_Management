@@ -64,6 +64,8 @@ export const customers = sqliteTable('customers', {
   address: text('address'),
   phone: text('phone'),
   email: text('email'),
+  birthDate: text('birth_date'),
+  employer: text('employer'),
   memo: text('memo'),
   ...timestamps,
 }, (table) => [

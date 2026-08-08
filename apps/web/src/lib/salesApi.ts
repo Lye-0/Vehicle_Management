@@ -39,7 +39,7 @@ export type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
-  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'email' | 'postalCode' | 'address'> | null
+  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'email' | 'postalCode' | 'address' | 'birthDate' | 'employer'> | null
   vehicleOverride: SalesVehicleDetails | null
   tradeIn: {
     name: string
@@ -158,6 +158,8 @@ export type SalesCreateInput = {
     email?: string
     postalCode?: string
     address?: string
+    birthDate?: string
+    employer?: string
   }
   newVehicle?: {
     maker: string
