@@ -592,8 +592,18 @@
 .sales-estimate-sheet-field-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
 .sales-estimate-sheet-field-control.is-centered { text-align: center; }
 .sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
+.date-calendar-picker { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
+.date-calendar-picker-button { display: grid; place-items: center; width: 100%; height: 100%; padding: 0; color: #101820; border: 0; background: transparent; cursor: pointer; }
+.date-calendar-picker-button:hover { background: transparent; }
+.date-calendar-picker-button:focus-visible { position: relative; z-index: 2; outline: 2px solid #2563eb; outline-offset: -2px; }
+.date-calendar-picker-button svg { width: 14px; height: 14px; flex: 0 0 14px; }
+.date-calendar-picker-native { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; }
 .sales-estimate-sheet-field-control.is-customer-value { font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(8px, 1.232cqw, 13px); }
+.sales-estimate-sheet-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
+.sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control { padding-right: 1.6em; }
+.sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control:hover { background: #fff; }
+.sales-estimate-sheet-calendar-control > .date-calendar-picker { width: clamp(12px, 1.8cqw, 20px); }
 .sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
@@ -861,6 +871,8 @@
 .maintenance-statement { position: relative; width: 100%; aspect-ratio: 1122 / 1407; }
 .maintenance-statement > div:first-child { position: absolute; inset: 0; z-index: 1; }
 .maintenance-statement svg { display: block; width: 100%; height: auto; }
+.sales-estimate-sheet .date-calendar-picker-button svg,
+.maintenance-statement .date-calendar-picker-button svg { width: 14px; height: 14px; flex: 0 0 14px; }
 .maintenance-statement-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: #101820; caret-color: auto; border: 1px solid transparent; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
 .maintenance-statement-control:hover { border-color: #86a5d0; background: transparent; }
@@ -877,6 +889,9 @@
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
 .maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }
+.maintenance-statement-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
+.maintenance-statement-calendar-control > .maintenance-statement-control { padding-right: 1.7em; }
+.maintenance-statement-calendar-control > .date-calendar-picker { width: clamp(10px, 1.7vw, 18px); }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
