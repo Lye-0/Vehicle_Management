@@ -307,7 +307,7 @@ function expandedCustomerBlock(document: SalesDocumentLike) {
   const customer = { ...document.customerDetails, ...document.details.customerOverride }
   const details = document.details
   const rows: Array<[string, string]> = [
-    ['生年月日', details.customerBirthDate || customer.birthDate || '未設定'],
+    ['生年月日', formatSlashDate(details.customerBirthDate || customer.birthDate)],
     ['電話番号', customer.phone || document.phone || '未登録'],
     ['勤務先等', details.customerEmployer || customer.employer || '未設定'],
     ['連絡先TEL', details.customerContactPhone || customer.contactPhone || '未設定'],
@@ -630,13 +630,18 @@ function formatPercent(rate: number) {
 }
 
 function formatJapaneseDate(value: string) {
-  const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return match ? `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日` : value || '未設定'
+  const match = dateParts(value)
+  return match ? `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日` : formatSlashDate(value)
 }
 
 function formatSlashDate(value: string) {
-  const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return match ? `${match[1]}/${match[2]}/${match[3]}` : value || '未設定'
+  const normalized = value?.trim().slice(0, 10).replaceAll('.', '/').replaceAll('-', '/') ?? ''
+  return normalized || '未設定'
+}
+
+function dateParts(value: string) {
+  const normalized = value?.trim().slice(0, 10).replaceAll('.', '/').replaceAll('-', '/') ?? ''
+  return normalized.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/)
 }
 
 function brandMark(x: number, y: number, reversed = false) {
