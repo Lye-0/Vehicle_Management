@@ -376,6 +376,7 @@ describe("重複検出", () => {
       category: "一般整備",
       newCustomer: { name: "新規顧客F" },
       newVehicle: { maker: "トヨタ", name: "プリウス", chassisNumber: "ZVW50-00001" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: vid },
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -399,6 +400,24 @@ describe("重複検出", () => {
     expect(res.status).toBe(409);
   });
 
+  it("登録番号一致で確認フラグfalseを拒否", async () => {
+    const cid = "ms-cust-021-false";
+    const vid = "ms-veh-021-false";
+    await seedCustomer(cid, "重複テスト顧客2false");
+    await seedVehicle(vid, cid, "ホンダ", "フィット", undefined, undefined, "横浜300い9876");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "新規顧客Gfalse" },
+      newVehicle: { maker: "ホンダ", name: "フィット", registrationNumber: "横浜 300 い 9876" },
+      duplicateConfirmation: { registrationNumberConfirmed: false, confirmedVehicleId: vid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(409);
+  });
+
   it("登録番号一致で正しい候補確認ありなら許可", async () => {
     const cid = "ms-cust-022";
     const vid = "ms-veh-022";
@@ -411,6 +430,46 @@ describe("重複検出", () => {
       newCustomer: { name: "新規顧客H" },
       newVehicle: { maker: "ホンダ", name: "フィット", registrationNumber: "品川 500 あ 1234" },
       duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: vid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+  });
+
+  it("登録番号一致候補が複数でも1件目を確認すれば許可", async () => {
+    const cid = "ms-cust-025";
+    const firstVid = "ms-veh-025-a";
+    const secondVid = "ms-veh-025-b";
+    await seedCustomer(cid, "整備重複候補複数顧客1");
+    await seedVehicle(firstVid, cid, "トヨタ", "プリウス", undefined, undefined, "名古屋300あ1234");
+    await seedVehicle(secondVid, cid, "ホンダ", "フィット", undefined, undefined, "名古屋 300 あ 1234");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "新規整備顧客K" },
+      newVehicle: { maker: "日産", name: "ノート", registrationNumber: "名古屋300あ1234" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: firstVid },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+  });
+
+  it("登録番号一致候補が複数でも2件目を確認すれば許可", async () => {
+    const cid = "ms-cust-026";
+    const firstVid = "ms-veh-026-a";
+    const secondVid = "ms-veh-026-b";
+    await seedCustomer(cid, "整備重複候補複数顧客2");
+    await seedVehicle(firstVid, cid, "トヨタ", "プリウス", undefined, undefined, "京都500い5678");
+    await seedVehicle(secondVid, cid, "ホンダ", "フィット", undefined, undefined, "京都 500 い 5678");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "新規整備顧客L" },
+      newVehicle: { maker: "日産", name: "ノート", registrationNumber: "京都500い5678" },
+      duplicateConfirmation: { registrationNumberConfirmed: true, confirmedVehicleId: secondVid },
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -475,7 +534,7 @@ describe("新規車両の走行距離", () => {
       category: "一般整備",
       newCustomer: { name: "走行距離テスト顧客B" },
       newVehicle: { maker: "ホンダ", name: "フィット", mileage: 0 },
-      details: { customerOverride: null, vehicleOverride: null },
+      details: { customerOverride: null, vehicleOverride: { mileage: "0" } },
       items: [],
     }));
     expect(res.status).toBe(201);
@@ -493,7 +552,7 @@ describe("新規車両の走行距離", () => {
       category: "一般整備",
       newCustomer: { name: "走行距離テスト顧客C" },
       newVehicle: { maker: "日産", name: "ノート", mileage: 15000 },
-      details: { customerOverride: null, vehicleOverride: null },
+      details: { customerOverride: null, vehicleOverride: { mileage: "15000" } },
       items: [],
     }));
     expect(res.status).toBe(201);
@@ -502,6 +561,88 @@ describe("新規車両の走行距離", () => {
     expect(vehicle?.mileage).toBe(15000);
     const historyCount = await env.DB.prepare("SELECT COUNT(*) as cnt FROM mileage_histories WHERE vehicle_id = ?").bind(body.document.vehicleId).first<{ cnt: number }>();
     expect(historyCount?.cnt).toBe(0);
+  });
+});
+
+describe("既存車両の走行距離同期", () => {
+  it("初回POSTでmileageSyncを保存し、車両走行距離と履歴を更新", async () => {
+    const cid = "ms-cust-040";
+    const vid = "ms-veh-040";
+    await seedCustomer(cid, "既存走行距離顧客A");
+    await env.DB.prepare(
+      "INSERT INTO vehicles (id, organization_id, customer_id, maker, name, mileage) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(vid, TEST_ORG, cid, "トヨタ", "プリウス", 10000).run();
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: { mileage: "12000" } },
+      mileageSync: { confirmed: true, openedMileage: 10000, inputMileage: 12000 },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const vehicle = await env.DB.prepare("SELECT mileage FROM vehicles WHERE id = ?").bind(vid).first<{ mileage: number | null }>();
+    expect(vehicle?.mileage).toBe(12000);
+    const history = await env.DB.prepare("SELECT mileage FROM mileage_histories WHERE vehicle_id = ?").bind(vid).first<{ mileage: number }>();
+    expect(history?.mileage).toBe(12000);
+  });
+
+  it("入力走行距離が現在値以下でも車両値を下げず履歴を保存", async () => {
+    const cid = "ms-cust-041";
+    const vid = "ms-veh-041";
+    await seedCustomer(cid, "既存走行距離顧客B");
+    await env.DB.prepare(
+      "INSERT INTO vehicles (id, organization_id, customer_id, maker, name, mileage) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(vid, TEST_ORG, cid, "ホンダ", "フィット", 15000).run();
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: { mileage: "12000" } },
+      mileageSync: { confirmed: true, openedMileage: 15000, inputMileage: 12000 },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const vehicle = await env.DB.prepare("SELECT mileage FROM vehicles WHERE id = ?").bind(vid).first<{ mileage: number | null }>();
+    expect(vehicle?.mileage).toBe(15000);
+    const history = await env.DB.prepare("SELECT mileage FROM mileage_histories WHERE vehicle_id = ?").bind(vid).first<{ mileage: number }>();
+    expect(history?.mileage).toBe(12000);
+  });
+
+  it("PATCHの走行距離履歴を同一書類でUPSERT", async () => {
+    const cid = "ms-cust-042";
+    const vid = "ms-veh-042";
+    const did = "ms-doc-042";
+    await seedCustomer(cid, "既存走行距離顧客C");
+    await env.DB.prepare(
+      "INSERT INTO vehicles (id, organization_id, customer_id, maker, name, mileage) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(vid, TEST_ORG, cid, "日産", "ノート", 10000).run();
+    await seedDoc(did, "M-MS-042", cid, vid, "2026-08-01");
+
+    const first = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${did}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: { mileage: "12000" } },
+      mileageSync: { confirmed: true, openedMileage: 10000, inputMileage: 12000 },
+      items: [],
+    }));
+    expect(first.status).toBe(200);
+
+    const second = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${did}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: { mileage: "13000" } },
+      mileageSync: { confirmed: true, openedMileage: 12000, inputMileage: 13000 },
+      items: [],
+    }));
+    expect(second.status).toBe(200);
+    const history = await env.DB.prepare("SELECT mileage FROM mileage_histories WHERE maintenance_document_id = ?").bind(did).all<{ mileage: number }>();
+    expect(history.results).toHaveLength(1);
+    expect(history.results[0]?.mileage).toBe(13000);
   });
 });
 

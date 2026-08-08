@@ -111,7 +111,7 @@ export type MaintenanceDocumentInput = {
   items: Array<Omit<MaintenanceLineItem, 'id'>>
   mileageSync?: {
     confirmed: true
-    openedMileage: number
+    openedMileage: number | null
     inputMileage: number
   }
   masterSync?: {
