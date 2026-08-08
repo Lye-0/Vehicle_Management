@@ -8,7 +8,7 @@ type CalendarCategory = DashboardCalendarEvent['category']
 type CalendarLegendCategory = { category: CalendarCategory; label: string }
 
 const defaultLegendCategories: CalendarLegendCategory[] = [
-  { category: 'inspection', label: '車検' },
+  { category: 'inspection', label: '整備' },
   { category: 'vehicle-inspection', label: '車検満了' },
   { category: 'payment-due', label: '支払期限' },
   { category: 'sales', label: '販売書類作成日' },
@@ -306,7 +306,7 @@ function buildRangeDataByWeek(events: DashboardCalendarEvent[], weeks: Date[][])
     }).sort((left, right) => left.startColumn - right.startColumn || right.endColumn - left.endColumn)
     const laneEnds: number[] = []
     for (const segment of candidates) {
-      const availableLane = laneEnds.findIndex((endColumn) => endColumn <= segment.startColumn)
+      const availableLane = laneEnds.findIndex((endColumn) => endColumn < segment.startColumn)
       segment.lane = availableLane >= 0 ? availableLane : laneEnds.length
       laneEnds[segment.lane] = segment.endColumn
     }
