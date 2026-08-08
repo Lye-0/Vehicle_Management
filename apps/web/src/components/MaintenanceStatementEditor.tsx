@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import type {
-  MaintenanceDocument,
+  MaintenanceDocumentLike,
   MaintenanceDocumentDetails,
   MaintenanceFeeKey,
   MaintenanceLineItem,
@@ -12,7 +12,7 @@ export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' 
 export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
 
 type Props = {
-  document: MaintenanceDocument
+  document: MaintenanceDocumentLike
   itemPresets: string[]
   onUpdateHeader: (field: MaintenanceStatementHeaderField, value: string) => void
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
@@ -44,7 +44,7 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
 
     <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} className="is-document-number" x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
     <StatementTextControl ariaLabel="担当" value={details.staffName} className="is-document-number" x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
-    <StatementTextControl ariaLabel="請求番号" value={document.number} className="is-document-number" x={847} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('number', value)} />
+    <StatementTextControl ariaLabel="請求番号" value={document.number} className="is-document-number" x={847} y={44} width={118} height={32} centered readOnly={!document.id} onChange={(value) => onUpdateHeader('number', value)} />
 
     <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
     <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
@@ -135,8 +135,8 @@ function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, heig
   </div>
 }
 
-function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '' }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string }) {
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={value} style={controlStyle(x, y, width, height)} onChange={(event) => onChange(event.target.value)} />
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', readOnly = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; readOnly?: boolean }) {
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={value} readOnly={readOnly} style={controlStyle(x, y, width, height)} onChange={(event) => onChange(event.target.value)} />
 }
 
 function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {

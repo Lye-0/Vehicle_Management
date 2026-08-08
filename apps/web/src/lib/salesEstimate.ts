@@ -1,4 +1,4 @@
-import type { SalesDocument, SalesDocumentDetails, SalesLineItem, SalesTaxCategory } from './salesApi'
+import type { SalesDocument, SalesDocumentDetails, SalesDocumentLike, SalesLineItem, SalesTaxCategory } from './salesApi'
 
 export function salesDocumentTitle(type: SalesDocument['type']) {
   return type === '請求書' ? '請求書' : 'お見積書'
@@ -76,7 +76,7 @@ export function calculateSalesLineAmount(item: Pick<SalesLineItem, 'quantity' | 
   return Math.round(quantity * unitPrice) + Math.round(otherAmount)
 }
 
-export function calculateSalesEstimateTotals(document: SalesDocument): SalesTotals {
+export function calculateSalesEstimateTotals(document: SalesDocumentLike): SalesTotals {
   const sections = buildSalesEstimateSections(document)
   const sum = (lines: SalesEstimateLine[]) => lines.reduce((total, line) => total + line.amount, 0)
   const lineItemsSubtotal = document.items.reduce((total, item) => total + calculateSalesLineAmount(item), 0)
@@ -125,7 +125,7 @@ export function calculateSalesEstimateTotals(document: SalesDocument): SalesTota
   }
 }
 
-export function buildSalesEstimateSections(document: SalesDocument): SalesEstimateSections {
+export function buildSalesEstimateSections(document: SalesDocumentLike): SalesEstimateSections {
   const sections: SalesEstimateSections = {
     vehicleBase: [],
     discounts: [],

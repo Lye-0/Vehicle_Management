@@ -1,4 +1,4 @@
-import type { MaintenanceDocument, MaintenanceLineItem } from './maintenanceApi'
+import type { MaintenanceDocumentLike, MaintenanceLineItem } from './maintenanceApi'
 import type { AppSettings } from './settingsApi'
 
 export const maintenanceStatementWidth = 1122
@@ -19,7 +19,7 @@ export type MaintenanceStatementSvgOptions = {
 }
 
 export function calculateMaintenanceStatementTotals(
-  document: MaintenanceDocument,
+  document: MaintenanceDocumentLike,
 ): MaintenanceStatementTotals {
   const partsSubtotal = document.items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice), 0)
   const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0)
@@ -31,7 +31,7 @@ export function calculateMaintenanceStatementTotals(
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
 }
 
-export function buildMaintenanceStatementSvg(document: MaintenanceDocument, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
+export function buildMaintenanceStatementSvg(document: MaintenanceDocumentLike, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
   const hideEditableValues = options.hideEditableValues ?? false
   const totals = calculateMaintenanceStatementTotals(document)
   const customer = document.details.customerOverride ?? document.customerDetails
@@ -142,7 +142,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   </svg>`
 }
 
-function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>, hideEditableValues: boolean) {
+function vehicleGrid(vehicle: NonNullable<MaintenanceDocumentLike['vehicleDetails']>, hideEditableValues: boolean) {
   const topX = [16, 115, 351, 455, 568, 683, 810]
   const bottomX = [16, 140, 350, 530, 670, 810]
   return `${rect(17, 327, 792, 38, '#dcecff')}${rect(17, 407, 792, 38, '#dcecff')}${gridLines(topX, [326, 366, 406])}${gridLines(bottomX, [406, 446, 495])}
@@ -171,7 +171,7 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
   ${valueText(966, baseline, statementValue(item.summary, hideEditableValues), 'start', 12)}`
 }
 
-function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
+function summaryBoxes(document: MaintenanceDocumentLike, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
   return `${roundedBox(16, 1144, 300, 75)}
   ${rect(17, 1145, 298, 36, '#dcecff')}
@@ -224,16 +224,16 @@ function shopBox(settings: AppSettings) {
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
 
-function statementRows(document: MaintenanceDocument): StatementRow[] {
+function statementRows(document: MaintenanceDocumentLike): StatementRow[] {
   const rows = document.items.map((item) => ({ ...item, partAmount: Math.round(item.quantity * item.unitPrice) }))
   return rows.slice(0, 18)
 }
 
-const emptyVehicle: NonNullable<MaintenanceDocument['vehicleDetails']> = {
+const emptyVehicle: NonNullable<MaintenanceDocumentLike['vehicleDetails']> = {
   maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false,
 }
 
-function defaultDocumentTitle(type: MaintenanceDocument['type']) {
+function defaultDocumentTitle(type: MaintenanceDocumentLike['type']) {
   if (type === '整備見積書') return '見積書'
   return '請求書'
 }

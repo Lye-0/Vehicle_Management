@@ -8,6 +8,7 @@ export type SalesCustomerDetails = {
   name: string
   kana: string
   phone: string
+  email?: string
   postalCode: string
   address: string
   birthDate: string
@@ -38,7 +39,7 @@ export type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
-  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'postalCode' | 'address'> | null
+  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'email' | 'postalCode' | 'address'> | null
   vehicleOverride: SalesVehicleDetails | null
   tradeIn: {
     name: string
@@ -128,6 +129,13 @@ export type SalesDocument = {
   purgeAt: string | null
   keepForever: boolean
   items: SalesLineItem[]
+}
+
+/** Persisted fields plus the optional identifiers used by an unsaved document draft. */
+export type SalesDocumentLike = Omit<SalesDocument, 'id' | 'customerId' | 'vehicleId'> & {
+  id?: string
+  customerId: string | null
+  vehicleId: string | null
 }
 
 export type SalesCreateInput = {
@@ -281,7 +289,7 @@ export async function restoreSalesDocument(id: string) {
 function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
   return {
     ...document,
-    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeDetails(document.details),
     issuedAt: formatDate(document.issuedAt),

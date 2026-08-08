@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
-  AlertTriangle,
   Archive,
   CarFront,
-  Check,
   ChevronRight,
   ChevronDown,
   ClipboardCheck,
@@ -16,11 +14,10 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomers, type Customer, type CustomerInput, type VehicleInput } from '../lib/customerApi'
-import { fetchSyncPreview, type DuplicateCustomerCandidate, type DuplicateVehicleCandidate, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
+import { fetchCustomers, type Customer } from '../lib/customerApi'
+import { fetchSyncPreview, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadMaintenanceDocumentPdf, previewMaintenanceDocumentPdf } from '../lib/pdf'
 import {
-  createMaintenanceDocument,
   archiveMaintenanceDocument,
   fetchMaintenanceDocuments,
   updateMaintenanceDocument,
@@ -30,6 +27,7 @@ import {
   type MaintenanceFeeKey,
   type MaintenanceCustomerDetails,
   type MaintenanceDocument,
+  type MaintenanceDocumentLike,
   type MaintenanceDocumentDetails,
   type MaintenanceDocumentInput,
   type MaintenanceDocumentType,
@@ -51,7 +49,7 @@ type CategoryFilter = 'すべて' | IntakeCategory
 type MaintenanceTypeFilter = 'すべて' | MaintenanceDocumentType
 type MaintenanceStatusFilter = 'すべて' | Exclude<MaintenanceStatus, 'アーカイブ済み'>
 type MaintenanceDocumentView = 'edit' | 'preview'
-type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCategory; customerId: string; vehicleId: string; intakeDate: string; plannedReleaseDate: string; dueDate: string }
+type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCategory; customerMode: 'existing' | 'new' | null; customerId: string; vehicleMode: 'existing' | 'new' | null; vehicleId: string; intakeDate: string; plannedReleaseDate: string; dueDate: string }
 type CompletedMaintenanceGroup = { key: string; label: string; documents: MaintenanceDocument[] }
 
 type MasterSnapshot =
@@ -80,7 +78,9 @@ const maintenanceCategoryFilterOptions: DocumentFilterOption<CategoryFilter>[] =
   { value: '一般整備', label: '一般整備', tone: 'general' },
 ]
 const emptyFees: MandatoryFees = { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }
-const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerId: '', vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(defaultSettings.document.defaultDueDays) }
+const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(defaultSettings.document.defaultDueDays) }
+const NEW_CUSTOMER_VALUE = '__new_customer__'
+const NEW_VEHICLE_VALUE = '__new_vehicle__'
 
 export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<MaintenanceDocument[]>([])
@@ -95,22 +95,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<MaintenanceCreateForm>(emptyCreateForm)
+  const [draftDocument, setDraftDocument] = useState<MaintenanceDocumentLike | null>(null)
+  const [draftDirty, setDraftDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savedDocumentId, setSavedDocumentId] = useState('')
   const [error, setError] = useState('')
   const [documentView, setDocumentView] = useState<MaintenanceDocumentView>('edit')
   const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
-  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
-  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
-  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
-  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
-  const [dialogError, setDialogError] = useState('')
-  const [duplicateCustomerCandidates, setDuplicateCustomerCandidates] = useState<DuplicateCustomerCandidate[]>([])
-  const [duplicateVehicleCandidates, setDuplicateVehicleCandidates] = useState<DuplicateVehicleCandidate[]>([])
-  const [selectedDuplicateVehicleId, setSelectedDuplicateVehicleId] = useState<string | null>(null)
-  const [confirmedVehicleId, setConfirmedVehicleId] = useState<string | null>(null)
-  const [customerDuplicateConfirmed, setCustomerDuplicateConfirmed] = useState(false)
   const documentOpenedMileageRef = useRef<number | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
   const openedMasterSnapshotRef = useRef<MasterSnapshot | null>(null)
@@ -146,25 +138,56 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? incompleteDocuments[0] ?? filteredDocuments[0] ?? null
+  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? incompleteDocuments[0] ?? filteredDocuments[0] ?? null
+  const selectedDocument: MaintenanceDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument) : null
+
+  function replaceActiveDocument(updater: (document: MaintenanceDocumentLike) => MaintenanceDocumentLike) {
+    if (draftDocument) {
+      setDraftDocument((current) => current ? updater(current) : current)
+      return
+    }
+    if (!selectedPersistedDocument) return
+    setDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as MaintenanceDocument : document))
+  }
+
+  function discardDraftIfConfirmed(action: string) {
+    if (!draftDocument) return true
+    if (draftDirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
+    setDraftDocument(null)
+    setDraftDirty(false)
+    setMasterSyncDialogResult(null)
+    return true
+  }
+
+  function selectPersistedDocument(documentId: string) {
+    if (!discardDraftIfConfirmed('別の書類を表示')) return
+    setSelectedDocumentId(documentId)
+    setDocumentView('edit')
+  }
 
   // Reset documentOpenedMileage and openedMasterSnapshot only when selected document ID changes
   useEffect(() => {
-    const currentDocumentId = selectedDocument?.id ?? null
-    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
-    lastOpenedDocumentIdRef.current = currentDocumentId
-    if (!selectedDocument) {
+    if (draftDocument) {
+      lastOpenedDocumentIdRef.current = null
       documentOpenedMileageRef.current = null
       openedMasterSnapshotRef.current = null
       return
     }
-    const overrideMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
-    documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedDocument.mileage)
+    const currentDocumentId = selectedPersistedDocument?.id ?? null
+    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
+    lastOpenedDocumentIdRef.current = currentDocumentId
+    if (!selectedPersistedDocument) {
+      documentOpenedMileageRef.current = null
+      openedMasterSnapshotRef.current = null
+      return
+    }
+    const overrideMileage = parseMileageString(selectedPersistedDocument.details.vehicleOverride?.mileage)
+    documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedPersistedDocument.mileage)
 
     // Initialize openedMasterSnapshot when document, customer, and vehicle are all available
-    const foundCustomer = customers.find((c) => c.id === selectedDocument.customerId)
-    const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId)
+    const foundCustomer = customers.find((c) => c.id === selectedPersistedDocument.customerId)
+    const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
     if (foundCustomer && foundVehicle) {
       openedMasterSnapshotRef.current = {
         state: 'ready',
@@ -177,64 +200,71 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     } else {
       openedMasterSnapshotRef.current = { state: 'loading' }
     }
-  }, [selectedDocument, customers])
+  }, [draftDocument, selectedPersistedDocument, customers])
 
   function updateItem(itemId: string, field: 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary', value: string) {
     if (!selectedDocument) return
     const nextValue = field === 'kind' ? value as MaintenanceItemKind : field === 'description' || field === 'unit' || field === 'summary' ? value : Number(value) || 0
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item) }))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => ({ ...document, items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item) }))
+    markChanged()
   }
 
   function addItem() {
     if (!selectedDocument || selectedDocument.items.length >= 18) return
     const newItem: MaintenanceLineItem = { id: `maintenance-item-${Date.now()}`, kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => ({ ...document, items: [...document.items, newItem] }))
+    markChanged()
   }
 
   function removeItem(itemId: string) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: document.items.filter((item) => item.id !== itemId) } : document))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => ({ ...document, items: document.items.filter((item) => item.id !== itemId) }))
+    markChanged()
   }
 
   function updateFee(key: MaintenanceFeeKey, value: string) {
     if (!selectedDocument) return
     const nextValue = Number(value) || 0
-    setDocuments((current) => current.map((document) => {
-      if (document.id !== selectedDocument.id) return document
-      return key === '調整額' ? { ...document, adjustment: nextValue } : { ...document, fees: { ...document.fees, [key]: nextValue } }
-    }))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => key === '調整額' ? { ...document, adjustment: nextValue } : { ...document, fees: { ...document.fees, [key]: nextValue } })
+    markChanged()
   }
 
   function updateDetails(details: MaintenanceDocumentDetails) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, details } : document))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => ({ ...document, details }))
+    markChanged()
   }
 
   function updateTaxRate(value: number) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, taxRate: value / 100 } : document))
-    setSavedDocumentId('')
+    replaceActiveDocument((document) => ({ ...document, taxRate: value / 100 }))
+    markChanged()
   }
 
   function updateHeader(field: 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note', value: string) {
     if (!selectedDocument) return
-    setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
+    if (draftDocument && (field === 'customerId' || field === 'vehicleId')) return
+    if (draftDocument) {
+      replaceActiveDocument((document) => ({ ...document, [field]: value }))
+    } else {
+      setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
+    }
+    markChanged()
+  }
+
+  function markChanged() {
+    if (draftDocument) setDraftDirty(true)
     setSavedDocumentId('')
   }
 
   async function archiveSelectedDocument() {
-    if (!selectedDocument || saving) return
-    if (!window.confirm(`${selectedDocument.number}をアーカイブしますか？`)) return
+    if (draftDocument || !selectedPersistedDocument || saving) return
+    if (!window.confirm(`${selectedPersistedDocument.number}をアーカイブしますか？`)) return
     setSaving(true)
     setError('')
     try {
-      await archiveMaintenanceDocument(selectedDocument.id)
-      setDocuments((current) => current.filter((document) => document.id !== selectedDocument.id))
+      await archiveMaintenanceDocument(selectedPersistedDocument.id)
+      setDocuments((current) => current.filter((document) => document.id !== selectedPersistedDocument.id))
       setSelectedDocumentId('')
       setSavedDocumentId('')
     } catch (reason: unknown) {
@@ -245,13 +275,13 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   }
 
   async function saveSelectedDocument(mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }, masterSync?: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string }) {
-    if (!selectedDocument) return
+    if (draftDocument || !selectedPersistedDocument) return
     setSaving(true)
     setError('')
     try {
-      const input = toMaintenanceInput(selectedDocument, mileageSync)
+      const input = toMaintenanceInput(selectedPersistedDocument, mileageSync)
       const inputWithMasterSync = masterSync ? { ...input, masterSync } : input
-      const saved = await updateMaintenanceDocument(selectedDocument.id, inputWithMasterSync)
+      const saved = await updateMaintenanceDocument(selectedPersistedDocument.id, inputWithMasterSync)
       setDocuments((current) => current.map((document) => document.id === saved.id ? saved : document))
       setSavedDocumentId(saved.id)
       // Update documentOpenedMileage after successful save
@@ -262,8 +292,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         const nextCustomers = await fetchCustomers()
         setCustomers(nextCustomers)
         // Update openedMasterSnapshot with latest values
-        const foundCustomer = nextCustomers.find((c) => c.id === selectedDocument.customerId)
-        const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedDocument.vehicleId)
+        const foundCustomer = nextCustomers.find((c) => c.id === selectedPersistedDocument.customerId)
+        const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
         if (foundCustomer && foundVehicle) {
           openedMasterSnapshotRef.current = {
             state: 'ready',
@@ -293,7 +323,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   }
 
   async function handleSaveClick() {
-    if (!selectedDocument) return
+    if (draftDocument || !selectedPersistedDocument) return
     if (openedMasterSnapshotRef.current?.state === 'invalid') {
       setError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
       return
@@ -306,12 +336,12 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     try {
       const preview = await fetchSyncPreview({
         documentType: 'maintenance',
-        documentId: selectedDocument.id,
-        customerId: selectedDocument.customerId || undefined,
-        vehicleId: selectedDocument.vehicleId || undefined,
-        customerOverride: selectedDocument.details.customerOverride ?? undefined,
-        vehicleOverride: selectedDocument.details.vehicleOverride ?? undefined,
-        issuedAt: selectedDocument.issuedAt.replaceAll('/', '-'),
+        documentId: selectedPersistedDocument.id,
+        customerId: selectedPersistedDocument.customerId || undefined,
+        vehicleId: selectedPersistedDocument.vehicleId || undefined,
+        customerOverride: selectedPersistedDocument.details.customerOverride ?? undefined,
+        vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
+        issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
         openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
         openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt : undefined,
         mileageContext: { openedMileage: openedMileage },
@@ -332,9 +362,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
     setMasterSyncDialogResult(null)
-    if (!selectedDocument) return
+    if (draftDocument || !selectedPersistedDocument) return
 
-    const inputMileage = parseMileageString(selectedDocument.details.vehicleOverride?.mileage)
+    const inputMileage = parseMileageString(selectedPersistedDocument.details.vehicleOverride?.mileage)
     const openedMileage = documentOpenedMileageRef.current
     const mileageChanged = inputMileage !== null && inputMileage !== openedMileage
 
@@ -360,151 +390,67 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     void saveSelectedDocument(mileageSync, masterSync)
   }
 
-  async function createDocument(event: FormEvent<HTMLFormElement>) {
+
+  function openCreateDialog() {
+    if (!discardDraftIfConfirmed('新しい書類を作成')) return
+    setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays))
+    setCreateDialogOpen(true)
+  }
+
+  function startDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSaving(true)
-    setDialogError('')
-    try {
-      // Validate combination
-      const hasNewCustomer = newCustomerOpen && hasNewCustomerInput(newCustomerForm)
-      const hasNewVehicle = newVehicleOpen && hasNewVehicleInput(newVehicleForm)
-
-      // Build sync-preview input
-      const previewInput: SyncPreviewInput = { documentType: 'maintenance' }
-      if (hasNewCustomer) {
-        previewInput.newCustomer = { name: newCustomerForm.name.trim(), nameKana: newCustomerForm.kana || undefined, phone: newCustomerForm.phone || undefined, email: newCustomerForm.email || undefined, postalCode: newCustomerForm.postalCode || undefined, address: newCustomerForm.address || undefined }
-      } else if (createForm.customerId) {
-        previewInput.customerId = createForm.customerId
-      }
-      if (hasNewVehicle) {
-        const mv: NonNullable<SyncPreviewInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
-        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
-        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
-        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
-        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
-        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
-        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
-        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
-        if (newVehicleForm.mileage !== '' && newVehicleForm.mileage !== undefined) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (Number.isFinite(m) && m >= 0) mv.mileage = m }
-        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
-        previewInput.newVehicle = mv
-      } else if (createForm.vehicleId) {
-        previewInput.vehicleId = createForm.vehicleId
-      }
-      if (createForm.intakeDate) previewInput.issuedAt = createForm.intakeDate.replaceAll('/', '-')
-
-      // Call sync-preview
-      const preview = await fetchSyncPreview(previewInput)
-
-      // Check for chassis number duplicates - block creation
-      const chassisDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'chassis_number') ?? []
-      if (chassisDuplicates.length > 0) {
-        const dup = chassisDuplicates[0]
-        setDialogError(`この車両は既に登録されています（${dup.maker ?? ''} ${dup.name}）。既存車両を選択してください。`)
-        setSaving(false)
-        return
-      }
-
-      // Check for registration number duplicates - require confirmation
-      const plateDuplicates = preview.duplicateVehicles?.filter((d) => d.matchReason === 'registration_number') ?? []
-      if (plateDuplicates.length > 0 && !confirmedVehicleId) {
-        setDuplicateVehicleCandidates(plateDuplicates)
-        setSaving(false)
-        return
-      }
-
-      // Check for customer duplicates
-      const customerDuplicates = preview.duplicateCustomers ?? []
-      if (customerDuplicates.length > 0 && !customerDuplicateConfirmed) {
-        setDuplicateCustomerCandidates(customerDuplicates)
-        setSaving(false)
-        return
-      }
-
-      // Build final input
-      const input: MaintenanceDocumentInput = {
-        type: createForm.type,
-        status: '下書き',
-        category: createForm.category,
-        intakeDate: createForm.intakeDate,
-        plannedReleaseDate: createForm.plannedReleaseDate,
-        completionDate: '',
-        dueDate: createForm.dueDate,
-        taxRate: settings.tax.consumptionTaxRate / 100,
-        taxRounding: settings.tax.rounding,
-        fees: { ...emptyFees },
-        adjustment: 0,
-        note: '',
-        details: structuredClone(defaultMaintenanceDocumentDetails),
-        items: [{ kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }],
-      }
-      if (!hasNewCustomer && createForm.customerId) {
-        input.customerId = createForm.customerId
-      }
-      if (!hasNewVehicle && createForm.vehicleId) {
-        input.vehicleId = createForm.vehicleId
-      }
-
-      if (hasNewCustomer) {
-        const trimmed = { ...newCustomerForm, name: newCustomerForm.name.trim() }
-        input.newCustomer = { name: trimmed.name, nameKana: trimmed.kana || undefined, phone: trimmed.phone || undefined, email: trimmed.email || undefined, postalCode: trimmed.postalCode || undefined, address: trimmed.address || undefined }
-      }
-      if (hasNewVehicle) {
-        const mv: NonNullable<MaintenanceDocumentInput['newVehicle']> = { maker: newVehicleForm.maker.trim(), name: newVehicleForm.model.trim() }
-        if (newVehicleForm.modelType) mv.model = newVehicleForm.modelType
-        if (newVehicleForm.plate) mv.registrationNumber = newVehicleForm.plate
-        if (newVehicleForm.vin) mv.chassisNumber = newVehicleForm.vin
-        if (newVehicleForm.year) { const y = Number(newVehicleForm.year.replace(/[^0-9]/g, '')); if (y > 0) mv.modelYear = y }
-        if (newVehicleForm.inspectionDate) mv.inspectionDate = newVehicleForm.inspectionDate
-        if (newVehicleForm.color) mv.bodyColor = newVehicleForm.color
-        if (newVehicleForm.transmission) mv.transmission = newVehicleForm.transmission
-        if (newVehicleForm.mileage !== '' && newVehicleForm.mileage !== undefined) { const m = Number(String(newVehicleForm.mileage).replace(/[^0-9]/g, '')); if (Number.isFinite(m) && m >= 0) mv.mileage = m }
-        if (newVehicleForm.displacement) { const d = Number(String(newVehicleForm.displacement).replace(/[^0-9]/g, '')); if (d > 0) mv.displacement = d }
-        input.newVehicle = mv
-      }
-      // Add duplicate confirmation if needed
-      if (plateDuplicates.length > 0 && confirmedVehicleId) {
-        input.duplicateConfirmation = { registrationNumberConfirmed: true, confirmedVehicleId }
-      }
-
-      const created = await createMaintenanceDocument(input)
-      setDocuments((current) => [created, ...current])
-      setSelectedDocumentId(created.id)
-      setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays))
-      setCreateDialogOpen(false)
-      setNewCustomerOpen(false)
-      setNewVehicleOpen(false)
-      setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
-      setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
-      setDuplicateCustomerCandidates([])
-      setDuplicateVehicleCandidates([])
-      setSelectedDuplicateVehicleId(null)
-      setConfirmedVehicleId(null)
-      setCustomerDuplicateConfirmed(false)
-
-      // Re-fetch customers to update the list
-      try {
-        const nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
-      } catch {
-        setError('書類は作成されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
-        openedMasterSnapshotRef.current = { state: 'invalid' }
-      }
-    } catch (reason) {
-      setDialogError(reason instanceof Error ? reason.message : '整備書類を作成できませんでした。')
-    } finally {
-      setSaving(false)
+    if (!isValidCreateSelection(createForm)) return
+    const customer = createForm.customerMode === 'existing' ? customers.find((item) => item.id === createForm.customerId) : undefined
+    const vehicle = createForm.vehicleMode === 'existing' ? customer?.vehicles.find((item) => item.id === createForm.vehicleId) : undefined
+    const draft: MaintenanceDocumentLike = {
+      number: '未採番',
+      type: createForm.type,
+      status: '下書き',
+      category: createForm.category,
+      customerId: customer?.id ?? null,
+      customerName: customer?.name ?? '',
+      phone: customer?.phone ?? '',
+      customerDetails: customer ? mapMaintenanceCustomerDetails(customer) : mapMaintenanceCustomerDetails(undefined),
+      vehicleId: vehicle?.id ?? null,
+      vehicle: vehicle ? [vehicle.maker, vehicle.model].filter(Boolean).join(' ') : '',
+      plate: vehicle?.plate ?? '',
+      mileage: vehicle?.mileage ?? '',
+      vehicleDetails: vehicle ? mapMaintenanceVehicleDetails(vehicle) : null,
+      details: structuredClone(defaultMaintenanceDocumentDetails),
+      intakeDate: createForm.intakeDate,
+      plannedReleaseDate: createForm.plannedReleaseDate,
+      completionDate: '',
+      issuedAt: todayDisplay(),
+      dueDate: createForm.dueDate,
+      taxRate: settings.tax.consumptionTaxRate / 100,
+      taxRounding: settings.tax.rounding,
+      fees: { ...emptyFees },
+      adjustment: 0,
+      note: '',
+      archivedAt: null,
+      archivedPreviousStatus: null,
+      archivedBy: null,
+      purgeAt: null,
+      keepForever: false,
+      items: [{ id: 'draft-maintenance-item-1', kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }],
     }
+    setDraftDocument(draft)
+    setDraftDirty(false)
+    setSelectedDocumentId('')
+    setSavedDocumentId('')
+    setMasterSyncDialogResult(null)
+    setDocumentView('edit')
+    setCreateDialogOpen(false)
   }
 
   return <>
-    <div className="page-header maintenance-page-header"><div><span className="page-eyebrow">整備書類</span><h1>車検・点検・一般</h1><p>整備の受付から作業明細、見積書・請求書まで管理します。</p></div><button className="button button-primary" type="button" disabled={!customers.length} onClick={() => setCreateDialogOpen(true)}><Plus size={18} />整備書類を作成</button></div>
+    <div className="page-header maintenance-page-header"><div><span className="page-eyebrow">整備書類</span><h1>車検・点検・一般</h1><p>整備の受付から作業明細、見積書・請求書まで管理します。</p></div><button className="button button-primary" type="button" onClick={openCreateDialog}><Plus size={18} />整備書類を作成</button></div>
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadMaintenanceDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewMaintenanceDocumentPdf(selectedDocument, settings)} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
-    {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => { setCreateDialogOpen(false); setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays)); setNewCustomerOpen(false); setNewVehicleOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }); setDuplicateCustomerCandidates([]); setDuplicateVehicleCandidates([]); setSelectedDuplicateVehicleId(null); setConfirmedVehicleId(null); setCustomerDuplicateConfirmed(false); setDialogError('') }} onSubmit={createDocument} creating={saving} dialogError={dialogError} newCustomerOpen={newCustomerOpen} setNewCustomerOpen={setNewCustomerOpen} newVehicleOpen={newVehicleOpen} setNewVehicleOpen={setNewVehicleOpen} newCustomerForm={newCustomerForm} setNewCustomerForm={setNewCustomerForm} newVehicleForm={newVehicleForm} setNewVehicleForm={setNewVehicleForm} duplicateCustomerCandidates={duplicateCustomerCandidates} duplicateVehicleCandidates={duplicateVehicleCandidates} selectedDuplicateVehicleId={selectedDuplicateVehicleId} customerDuplicateConfirmed={customerDuplicateConfirmed} onSelectExistingCustomer={(customerId) => { setCreateForm({ ...createForm, customerId }); setDuplicateCustomerCandidates([]) }} onContinueAsNewCustomer={() => { setCustomerDuplicateConfirmed(true); setDuplicateCustomerCandidates([]) }} onSelectExistingVehicle={(vehicleId) => { setCreateForm({ ...createForm, vehicleId }); setNewVehicleOpen(false); setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }); setDuplicateVehicleCandidates([]); setSelectedDuplicateVehicleId(null); setConfirmedVehicleId(null) }} onConfirmRegistrationDuplicate={(vehicleId) => { setSelectedDuplicateVehicleId(vehicleId); }} onConfirmDuplicateRegistration={() => { if (selectedDuplicateVehicleId && duplicateVehicleCandidates.some((c) => c.id === selectedDuplicateVehicleId && c.matchReason === 'registration_number')) { setConfirmedVehicleId(selectedDuplicateVehicleId); setDuplicateVehicleCandidates([]); setSelectedDuplicateVehicleId(null); } }} onResetDuplicateState={() => { setDuplicateCustomerCandidates([]); setDuplicateVehicleCandidates([]); setSelectedDuplicateVehicleId(null); setConfirmedVehicleId(null); setCustomerDuplicateConfirmed(false) }} />}
+    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+    {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={() => setMasterSyncDialogResult(null)} />}
   </>
 }
@@ -550,22 +496,23 @@ function maintenanceDocumentMonth(issuedAt: string) {
 
 type MaintenanceHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
 
-function MaintenanceDocumentDetail({ document, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
+function MaintenanceDocumentDetail({ document, isDraft, customers, settings, itemPresets, view, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
   return <section className="panel maintenance-detail-panel">
     <div className="maintenance-detail-header">
-      <div className="maintenance-detail-title"><div><div className="maintenance-detail-badges"><MaintenanceDocumentTypeTag type={document.type} /><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><MaintenanceStatusTag status={document.status} /></div><h2>{document.number}</h2><small>{document.type} ・ 発行元 {settings.shop.name}</small></div></div>
-      <div className="maintenance-detail-actions"><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />出力</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div>
+      <div className="maintenance-detail-title"><div><div className="maintenance-detail-badges"><MaintenanceDocumentTypeTag type={document.type} /><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><MaintenanceStatusTag status={document.status} />{isDraft && <span className="document-draft-badge">新規・未保存</span>}</div><h2>{document.id ? document.number : '未採番'}</h2><small>{document.type} ・ 発行元 {settings.shop.name}</small></div></div>
+      <div className="maintenance-detail-actions"><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={isDraft || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />出力</button><button className="button button-danger" type="button" disabled={isDraft || saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div>
     </div>
     <div className="maintenance-document-tabs" role="tablist" aria-label="整備書類の表示"><button id="maintenance-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="maintenance-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="maintenance-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="maintenance-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>
     {view === 'edit'
-      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateTaxRate={onUpdateTaxRate} /></div>
+      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} isDraft={isDraft} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} /></div>
       : <div id="maintenance-document-preview-panel" className="maintenance-detail-content maintenance-preview-content" role="tabpanel" aria-labelledby="maintenance-document-preview-tab"><MaintenancePreview document={document} settings={settings} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div>}
   </section>
 }
 
 type MaintenanceItemField = MaintenanceStatementItemField
 type MaintenanceDocumentDetailProps = {
-  document: MaintenanceDocument
+  document: MaintenanceDocumentLike
+  isDraft: boolean
   customers: Customer[]
   settings: AppSettings
   itemPresets: string[]
@@ -586,15 +533,15 @@ type MaintenanceDocumentDetailProps = {
   onUpdateFee: (key: MaintenanceFeeKey, value: string) => void
 }
 
-function MaintenanceDocumentEditor({ document, customers, onUpdateHeader, onUpdateTaxRate }: { document: MaintenanceDocument; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateTaxRate: (value: number) => void }) {
+function MaintenanceDocumentEditor({ document, isDraft, customers, onUpdateHeader, onUpdateDetails, onUpdateTaxRate }: { document: MaintenanceDocumentLike; isDraft: boolean; customers: Customer[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateTaxRate: (value: number) => void }) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   return <>
-    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}><option value="">車両を指定しない</option>{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>支払期限</span><input type="date" value={document.dueDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('dueDate', event.target.value.replaceAll('-', '/'))} /></label></div></section>
+    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>顧客メールアドレス</span><input type="email" value={document.details.customerOverride?.email ?? document.customerDetails.email ?? ''} onChange={(event) => onUpdateDetails({ ...document.details, customerOverride: { ...(document.details.customerOverride ?? document.customerDetails), email: event.target.value } })} /></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && <option value="">車両を指定しない</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>支払期限</span><input type="date" value={document.dueDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('dueDate', event.target.value.replaceAll('-', '/'))} /></label></div></section>
     <details className="maintenance-details-accordion"><summary><span>詳細設定</span><ChevronDown size={16} aria-hidden="true" /></summary><div className="maintenance-details-accordion-content"><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={onUpdateTaxRate} /></div></details>
   </>
 }
 
-function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: { document: MaintenanceDocument; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: MaintenanceFeeKey, value: string) => void; onAddItem: () => void }) {
+function MaintenancePreview({ document, settings, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: { document: MaintenanceDocumentLike; settings: AppSettings; itemPresets: string[]; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void; onRemoveItem: (itemId: string) => void; onUpdateFee: (key: MaintenanceFeeKey, value: string) => void; onAddItem: () => void }) {
   const svg = useMemo(() => buildMaintenanceStatementSvg(document, settings, { hideEditableValues: true }), [document, settings])
   return <div className="maintenance-preview-shell">
     <div className="maintenance-statement-frame"><div className="maintenance-statement"><div dangerouslySetInnerHTML={{ __html: svg }} /><MaintenanceStatementEditor document={document} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div></div>
@@ -605,34 +552,31 @@ function MaintenanceStatusTag({ status }: { status: MaintenanceStatus }) { const
 
 function MaintenanceDocumentTypeTag({ type }: { type: MaintenanceDocumentType }) { const tone = type === '整備請求書' ? 'invoice' : 'estimate'; return <span className={`maintenance-document-type-badge maintenance-document-type-${tone}`}>{type === '整備請求書' ? '請求書' : '見積書'}</span> }
 
-function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmit, creating, dialogError, newCustomerOpen, setNewCustomerOpen, newVehicleOpen, setNewVehicleOpen, newCustomerForm, setNewCustomerForm, newVehicleForm, setNewVehicleForm, duplicateCustomerCandidates, duplicateVehicleCandidates, selectedDuplicateVehicleId, customerDuplicateConfirmed, onSelectExistingCustomer, onContinueAsNewCustomer, onSelectExistingVehicle, onConfirmRegistrationDuplicate, onConfirmDuplicateRegistration, onResetDuplicateState }: {
-  form: MaintenanceCreateForm; customers: Customer[]; onChange: (form: MaintenanceCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; creating: boolean; dialogError: string
-  newCustomerOpen: boolean; setNewCustomerOpen: (v: boolean) => void; newVehicleOpen: boolean; setNewVehicleOpen: (v: boolean) => void
-  newCustomerForm: CustomerInput; setNewCustomerForm: (v: CustomerInput) => void; newVehicleForm: VehicleInput; setNewVehicleForm: (v: VehicleInput) => void
-  duplicateCustomerCandidates: DuplicateCustomerCandidate[]; duplicateVehicleCandidates: DuplicateVehicleCandidate[]
-  selectedDuplicateVehicleId: string | null
-  customerDuplicateConfirmed: boolean
-  onSelectExistingCustomer: (customerId: string) => void; onContinueAsNewCustomer: () => void
-  onSelectExistingVehicle: (vehicleId: string) => void; onConfirmRegistrationDuplicate: (vehicleId: string) => void; onConfirmDuplicateRegistration: () => void
-  onResetDuplicateState: () => void
-}) {
-  const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
+
+function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmit }: { form: MaintenanceCreateForm; customers: Customer[]; onChange: (form: MaintenanceCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const selectedCustomer = form.customerMode === 'existing' ? customers.find((customer) => customer.id === form.customerId) : undefined
   const vehicles = selectedCustomer?.vehicles ?? []
+  const canStart = isValidCreateSelection(form)
 
-  function openNewCustomerForm() {
-    setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' })
-    setNewCustomerOpen(true)
-    setNewVehicleOpen(true)
-    setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
-    onChange({ ...form, customerId: '', vehicleId: '' })
+  function selectCustomer(value: string) {
+    if (value === NEW_CUSTOMER_VALUE) {
+      onChange({ ...form, customerMode: 'new', customerId: '', vehicleMode: 'new', vehicleId: '' })
+      return
+    }
+    if (!value || value === '__separator__') return
+    onChange({ ...form, customerMode: 'existing', customerId: value, vehicleMode: null, vehicleId: '' })
   }
 
-  function openNewVehicleForm() {
-    setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' })
-    setNewVehicleOpen(true)
+  function selectVehicle(value: string) {
+    if (value === NEW_VEHICLE_VALUE) {
+      onChange({ ...form, vehicleMode: 'new', vehicleId: '' })
+      return
+    }
+    if (!value || value === '__separator__') return
+    onChange({ ...form, vehicleMode: 'existing', vehicleId: value })
   }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="maintenance-modal-title"><div className="modal-header"><h2 id="maintenance-modal-title">整備書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={() => { onResetDuplicateState(); onClose() }}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><ClipboardCheck size={16} />入庫する顧客・車両と整備内容を登録します。</p>{dialogError && <p className="customer-sync-status is-error" role="alert">{dialogError}</p>}<div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as MaintenanceDocumentType })}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>入庫区分<em>必須</em></span><select required value={form.category} onChange={(event) => onChange({ ...form, category: event.target.value as IntakeCategory })}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required autoFocus value={form.customerId} onChange={(event) => { const hasUnsavedNewCustomer = newCustomerOpen && (newCustomerForm.name || newCustomerForm.kana || newCustomerForm.phone || newCustomerForm.email || newCustomerForm.postalCode || newCustomerForm.address); if (hasUnsavedNewCustomer && !window.confirm('入力中の新規顧客情報は破棄されます。切り替えますか？')) return; const nextCustomer = customers.find((customer) => customer.id === event.target.value); setNewCustomerOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); onResetDuplicateState(); onChange({ ...form, customerId: event.target.value, vehicleId: nextCustomer?.vehicles[0]?.id ?? '' }) }}><option value="">顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号なし'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div>{newCustomerOpen && <div className="form-field sales-create-related-field"><span>新規顧客情報</span><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div></div>}{duplicateCustomerCandidates.length > 0 && !customerDuplicateConfirmed && <div className="sales-create-inline-panel"><div><h3>既存顧客が見つかりました</h3><p>以下の顧客と一致する候補があります。</p></div>{duplicateCustomerCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><span>{candidate.name}</span>{candidate.phone && <small>{candidate.phone}</small>}{candidate.email && <small>{candidate.email}</small>}<small>一致理由: {candidate.matchReason === 'phone' ? '電話番号' : 'メールアドレス'}</small></div><button className="button button-secondary" type="button" onClick={() => onSelectExistingCustomer(candidate.id)}>この既存顧客を使用</button></div>)}<button className="button button-secondary" type="button" onClick={onContinueAsNewCustomer}>新規顧客として続ける</button></div>}{customerDuplicateConfirmed && <div className="sales-create-candidate-confirmed"><Check size={14} />新規顧客として続行します</div>}<div className="form-field sales-create-related-field"><span>対象車両<em>必須</em></span><div className="sales-create-select-row"><select required value={newVehicleOpen ? '__new__' : form.vehicleId} disabled={!newCustomerOpen && !vehicles.length} onChange={(event) => { if (event.target.value === '__new__') return; if (newCustomerOpen && !window.confirm('入力中の新規顧客情報は破棄されます。切り替えますか？')) return; if (newVehicleOpen && hasNewVehicleInput(newVehicleForm) && !window.confirm('入力中の新規車両情報は破棄されます。切り替えますか？')) return; setNewCustomerOpen(false); setNewCustomerForm({ name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }); setNewVehicleOpen(false); setNewVehicleForm({ maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }); onResetDuplicateState(); onChange({ ...form, vehicleId: event.target.value }) }}><option value="">{newVehicleOpen ? '新規車両を入力中' : '車両を選択してください'}</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={newCustomerOpen || !selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div>{newVehicleOpen && <div className="form-field sales-create-related-field"><span>新規車両情報</span><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：ZAA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => { setNewVehicleForm({ ...newVehicleForm, plate: event.target.value }); onResetDuplicateState() }} placeholder="例：品川500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => { setNewVehicleForm({ ...newVehicleForm, vin: event.target.value }); onResetDuplicateState() }} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：10000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div></div>}{duplicateVehicleCandidates.length > 0 && <div className="sales-create-inline-panel"><div>{duplicateVehicleCandidates.some((d) => d.matchReason === 'chassis_number') ? <><AlertTriangle size={16} /><h3>この車両は既に登録されています</h3><p>車台番号が既存車両と一致します。新規車両として続けることはできません。</p></> : <><h3>登録番号が既存車両と一致します</h3><p>以下の候補から選択するか、新規車両として続けてください。</p></>}</div>{duplicateVehicleCandidates.map((candidate) => <div key={candidate.id} className="sales-create-candidate-row"><div className="sales-create-candidate-info"><span>{candidate.maker ? `${candidate.maker} ` : ''}{candidate.name}</span>{candidate.registrationNumber && <small>登録番号: {candidate.registrationNumber}</small>}{candidate.chassisNumber && <small>車台番号: {candidate.chassisNumber}</small>}<small>一致理由: {candidate.matchReason === 'chassis_number' ? '車台番号' : '登録番号'}</small></div><div className="sales-create-candidate-actions">{candidate.matchReason === 'registration_number' && <><button className="button button-secondary" type="button" onClick={() => { const vehicle = customers.find((c) => c.id === form.customerId)?.vehicles.find((v) => v.id === candidate.id); if (vehicle && selectedCustomer && vehicle.id === candidate.id) { onSelectExistingVehicle(candidate.id); } }} disabled={!selectedCustomer || !customers.find((c) => c.id === form.customerId)?.vehicles.find((v) => v.id === candidate.id)}>この既存車両を使用</button><label className="sales-create-confirm-label"><input type="radio" name="confirm-registration-duplicate" value={candidate.id} checked={selectedDuplicateVehicleId === candidate.id} onChange={(e) => e.target.checked && onConfirmRegistrationDuplicate(e.target.value)} /> <span>この候補との重複を確認して新規車両として続ける</span></label></>}{candidate.matchReason === 'chassis_number' && <span className="sales-create-chassis-warning">車台番号が一致するため、新規車両として登録できません。既存車両を選択してください。</span>}</div></div>)}{duplicateVehicleCandidates.some((d) => d.matchReason === 'registration_number') && <div className="sales-create-confirm-actions"><button className="button button-primary" type="button" onClick={onConfirmDuplicateRegistration} disabled={!selectedDuplicateVehicleId || !duplicateVehicleCandidates.some((c) => c.id === selectedDuplicateVehicleId && c.matchReason === 'registration_number')}>確認して新規車両として続ける</button></div>}</div>}<label className="form-field"><span>入庫日</span><input type="date" value={form.intakeDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, intakeDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={form.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onChange({ ...form, plannedReleaseDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={() => { onResetDuplicateState(); onClose() }}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || !form.customerId || !form.vehicleId}>{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="maintenance-modal-title"><div className="modal-header"><h2 id="maintenance-modal-title">整備書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><ClipboardCheck size={16} />入庫区分と顧客・車両を選択して入力を開始します。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as MaintenanceDocumentType })}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>入庫区分<em>必須</em></span><select required value={form.category} onChange={(event) => onChange({ ...form, category: event.target.value as IntakeCategory })}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客<em>必須</em></span><select required autoFocus aria-label="顧客" value={form.customerMode === 'new' ? NEW_CUSTOMER_VALUE : form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled hidden>顧客を選択してください</option><option value={NEW_CUSTOMER_VALUE}>＋ 新規顧客</option><option value="__separator__" disabled>────────────</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select></label><label className="form-field"><span>車両<em>必須</em></span><select required aria-label="車両" value={form.vehicleMode === 'new' ? NEW_VEHICLE_VALUE : form.vehicleId} disabled={form.customerMode === null} onChange={(event) => selectVehicle(event.target.value)}><option value="" disabled hidden>車両を選択してください</option><option value={NEW_VEHICLE_VALUE}>＋ 新規車両</option>{form.customerMode === 'existing' && <><option value="__separator__" disabled>────────────</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</>}</select></label></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={!canStart}><Plus size={16} />入力を開始</button></div></form></section></div>
 }
 
 function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: { confirmed: true; openedMileage: number; inputMileage: number }): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding: document.taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item), mileageSync } }
@@ -667,6 +611,7 @@ function mapMaintenanceCustomerDetails(customer: Customer | undefined): Maintena
     name: customer?.name ?? '',
     kana: customer?.kana ?? '',
     phone: customer?.phone ?? '',
+    email: customer?.email ?? '',
     postalCode: customer?.postalCode ?? '',
     address: customer?.address ?? '',
   }
@@ -689,7 +634,7 @@ function mapMaintenanceVehicleDetails(vehicle: Customer['vehicles'][number] | un
     inspectionRecordAvailable: vehicle.inspectionRecordAvailable,
   }
 }
-function createFormForCustomers(customers: Customer[], defaultDueDays: number): MaintenanceCreateForm { const customer = customers[0]; return { ...emptyCreateForm, dueDate: addDaysDisplay(defaultDueDays), customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '' } }
+function createFormForCustomers(_customers: Customer[], defaultDueDays: number): MaintenanceCreateForm { return { ...emptyCreateForm, dueDate: addDaysDisplay(defaultDueDays) } }
 function todayDisplay() { return new Date().toISOString().slice(0, 10).replaceAll('-', '/') }
 function addDaysDisplay(days: number) { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10).replaceAll('-', '/') }
 function parseMileageString(value: string | undefined | null): number | null {
@@ -700,29 +645,9 @@ function parseMileageString(value: string | undefined | null): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function hasNewVehicleInput(form: VehicleInput): boolean {
-  return Boolean(
-    form.maker.trim() ||
-    form.model.trim() ||
-    form.modelType.trim() ||
-    form.plate.trim() ||
-    form.vin.trim() ||
-    form.year.trim() ||
-    form.inspectionDate ||
-    (form.mileage !== '' && form.mileage !== undefined) ||
-    form.color.trim() ||
-    (form.displacement !== '' && form.displacement !== undefined) ||
-    form.transmission.trim()
-  )
-}
-
-function hasNewCustomerInput(form: CustomerInput): boolean {
-  return Boolean(
-    form.name.trim() ||
-    form.kana.trim() ||
-    form.phone.trim() ||
-    form.email.trim() ||
-    form.postalCode?.trim() ||
-    form.address.trim()
-  )
+function isValidCreateSelection(form: MaintenanceCreateForm) {
+  if (form.customerMode === 'new') return form.vehicleMode === 'new'
+  if (form.customerMode !== 'existing') return false
+  if (!form.customerId) return false
+  return form.vehicleMode === 'new' || (form.vehicleMode === 'existing' && Boolean(form.vehicleId))
 }
