@@ -17,7 +17,9 @@ export function NormalizedInput({ field, value, onChange, ...inputProps }: Omit<
 
   function handleChange(nextValue: string) {
     const sanitized = sanitizeNormalizedDraft(field, nextValue)
-    if (sanitized !== null) setDraft(sanitized)
+    if (sanitized === null) return
+    setDraft(sanitized)
+    onChange(sanitized)
   }
 
   function finish() {
