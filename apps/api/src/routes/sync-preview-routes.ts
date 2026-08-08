@@ -129,6 +129,7 @@ async function computeSyncPreview(
   const mileageContext = body.mileageContext && typeof body.mileageContext === 'object' && !Array.isArray(body.mileageContext)
     ? body.mileageContext as { openedMileage?: number | null }
     : undefined
+  let allowVehicleless = false
 
   // 1. documentId/documentTypeの整合性検証
   if (documentId && !documentType) {
@@ -142,6 +143,15 @@ async function computeSyncPreview(
       .where(and(eq(docTable.id, documentId), eq(docTable.organizationId, organizationId)))
       .get()
     if (!doc) throw new HttpError(404, '書類が見つかりません。')
+
+    // 過去の販売書類には車両なしのレコードが残っている可能性があるため、
+    // 既存レコードの通常編集に限ってsync-previewの車両必須検証を緩和する。
+    // 新規POST（documentIdなし）では必ず車両を要求する。
+    allowVehicleless = documentType === 'sales'
+      && doc.vehicleId === null
+      && !vehicleId
+      && !newVehicle
+      && !newCustomer
 
     // customerId/vehicleIdの整合性
     const effectiveCustomerId = customerId ?? doc.customerId
@@ -162,6 +172,7 @@ async function computeSyncPreview(
     vehicleId,
     newVehicle,
     documentType,
+    allowVehicleless,
   })
   if (combinationError) throw new HttpError(combinationError.status, combinationError.message)
 

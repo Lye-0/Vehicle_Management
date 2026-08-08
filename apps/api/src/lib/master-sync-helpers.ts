@@ -446,6 +446,8 @@ export type CombinationValidation = {
   vehicleId?: string
   newVehicle?: NewVehicleInput
   documentType: 'sales' | 'maintenance'
+  /** 既存の車両なし販売書類を編集するための後方互換用。新規保存では指定しない。 */
+  allowVehicleless?: boolean
 }
 
 export type CombinationError = {
@@ -474,9 +476,12 @@ export function validateCombination(input: CombinationValidation): CombinationEr
     return { status: 400, message: '新規顧客には新しい車両を登録してください。既存車両は選択できません。' }
   }
 
-  if (input.documentType === 'maintenance') {
-    if (hasExistingCustomer && !hasNewVehicle && !hasExistingVehicle) {
-      return { status: 400, message: '整備書類ではvehicleIdまたはnewVehicleのどちらかを指定してください。' }
+  if (!input.allowVehicleless && !hasNewVehicle && !hasExistingVehicle) {
+    return {
+      status: 400,
+      message: input.documentType === 'maintenance'
+        ? '整備書類ではvehicleIdまたはnewVehicleのどちらかを指定してください。'
+        : '販売書類ではvehicleIdまたはnewVehicleのどちらかを指定してください。',
     }
   }
 

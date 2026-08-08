@@ -316,12 +316,13 @@ describe("master-sync-helpers", () => {
       expect(result).toBeNull();
     });
 
-    it("販売書類で車両なしは許可", () => {
+    it("販売書類で車両未指定を拒否", () => {
       const result = validateCombination({
         customerId: "c1",
         documentType: "sales",
       });
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(400);
     });
   });
 });

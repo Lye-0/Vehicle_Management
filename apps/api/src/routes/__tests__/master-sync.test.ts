@@ -265,6 +265,44 @@ describe("POST masterSync", () => {
     expect(body.document.vehicleId).toBeTruthy();
   });
 
+  it("既存顧客＋既存車両＋整備書類を一体作成", async () => {
+    const cid = "ms-cust-combo-001";
+    const vid = "ms-veh-combo-001";
+    await seedCustomer(cid, "既存組み合わせ顧客A");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; vehicleId: string } };
+    expect(body.document.customerId).toBe(cid);
+    expect(body.document.vehicleId).toBe(vid);
+  });
+
+  it("既存顧客＋新規車両＋整備書類を一体作成", async () => {
+    const cid = "ms-cust-combo-002";
+    await seedCustomer(cid, "既存組み合わせ顧客B");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備請求書",
+      category: "車検",
+      customerId: cid,
+      newVehicle: { maker: "ホンダ", name: "N-BOX" },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; vehicleId: string } };
+    expect(body.document.customerId).toBe(cid);
+    expect(body.document.vehicleId).toBeTruthy();
+  });
+
   it("新規顧客＋既存車両を400拒否", async () => {
     const cid = "ms-cust-010";
     const vid = "ms-veh-010";

@@ -94,7 +94,43 @@ describe("POST sales documents masterSync", () => {
     expect(body.document.vehicleId).toBeTruthy();
   });
 
-  it("既存顧客＋車両なしで新規作成", async () => {
+  it("既存顧客＋既存車両＋販売書類を一体作成", async () => {
+    const cid = "sms-cust-combo-001";
+    const vid = "sms-veh-combo-001";
+    await seedCustomer(cid, "既存組み合わせ顧客A");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "見積書",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; vehicleId: string } };
+    expect(body.document.customerId).toBe(cid);
+    expect(body.document.vehicleId).toBe(vid);
+  });
+
+  it("既存顧客＋新規車両＋販売書類を一体作成", async () => {
+    const cid = "sms-cust-combo-002";
+    await seedCustomer(cid, "既存組み合わせ顧客B");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "請求書",
+      customerId: cid,
+      newVehicle: { maker: "ホンダ", name: "N-BOX" },
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; vehicleId: string } };
+    expect(body.document.customerId).toBe(cid);
+    expect(body.document.vehicleId).toBeTruthy();
+  });
+
+  it("既存顧客＋車両なしを400拒否", async () => {
     const cid = "sms-cust-001";
     await seedCustomer(cid, "既存顧客A", "090-1111-2222");
 
@@ -105,10 +141,7 @@ describe("POST sales documents masterSync", () => {
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
-    expect(res.status).toBe(201);
-    const body = await res.json() as { document: { customerId: string; vehicleId: string | null } };
-    expect(body.document.customerId).toBe(cid);
-    expect(body.document.vehicleId).toBeNull();
+    expect(res.status).toBe(400);
   });
 
   it("customerIdとnewCustomerの同時指定を400拒否", async () => {
@@ -292,12 +325,14 @@ describe("POST sales documents masterSync", () => {
 describe("PATCH sales documents masterSync", () => {
   it("顧客の複数差分から1項目だけ更新", async () => {
     const cid = "sms-cust-020";
+    const vid = "sms-veh-020";
     await seedCustomer(cid, "山田太郎", "090-1111-1111");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -305,7 +340,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: {
         customerOverride: { name: "山田太郎", kana: "", phone: "080-2222-2222", postalCode: "", address: "" },
         vehicleOverride: null,
@@ -324,12 +359,14 @@ describe("PATCH sales documents masterSync", () => {
 
   it("選択していない項目が変更されない", async () => {
     const cid = "sms-cust-021";
+    const vid = "sms-veh-021";
     await seedCustomer(cid, "佐藤花子", "090-3333-3333", "sato@test.com", "東京都");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -337,7 +374,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: {
         customerOverride: { name: "佐藤花子", kana: "", phone: "080-4444-4444", postalCode: "", address: "神奈川県" },
         vehicleOverride: null,
@@ -356,12 +393,14 @@ describe("PATCH sales documents masterSync", () => {
 
   it("空欄フィールド指定を400拒否", async () => {
     const cid = "sms-cust-022";
+    const vid = "sms-veh-022";
     await seedCustomer(cid, "鈴木一郎", "090-5555-5555");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -369,7 +408,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: {
         customerOverride: { name: "鈴木一郎", kana: "", phone: "", postalCode: "", address: "" },
         vehicleOverride: null,
@@ -385,12 +424,14 @@ describe("PATCH sales documents masterSync", () => {
 
   it("allowlist外を400拒否", async () => {
     const cid = "sms-cust-023";
+    const vid = "sms-veh-023";
     await seedCustomer(cid, "高橋二郎");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -398,7 +439,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       masterSync: { confirmed: true, customerFields: ["email"] },
     }));
@@ -407,12 +448,14 @@ describe("PATCH sales documents masterSync", () => {
 
   it("confirmedがtrueでない場合を400拒否", async () => {
     const cid = "sms-cust-024";
+    const vid = "sms-veh-024";
     await seedCustomer(cid, "渡辺四郎");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -420,7 +463,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       masterSync: { confirmed: false, customerFields: ["phone"] },
     }));
@@ -429,12 +472,14 @@ describe("PATCH sales documents masterSync", () => {
 
   it("updatedAt不一致で409", async () => {
     const cid = "sms-cust-025";
+    const vid = "sms-veh-025";
     await seedCustomer(cid, "加藤六郎", "090-9999-9999");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
 
     const postRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
@@ -442,7 +487,7 @@ describe("PATCH sales documents masterSync", () => {
 
     const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${doc.id}`, {
       customerId: cid,
-      vehicleId: null,
+      vehicleId: vid,
       details: { customerOverride: { name: "加藤六郎", phone: "070-0000-0000" } },
       masterSync: { confirmed: true, customerFields: ["phone"], expectedCustomerUpdatedAt: "1970-01-01T00:00:00.000Z" },
     }));
@@ -487,8 +532,8 @@ describe("PATCH sales documents masterSync", () => {
   });
 });
 
-describe("車両なし販売書類", () => {
-  it("車両なしで作成してマスタ同期なし", async () => {
+describe("販売書類の車両必須", () => {
+  it("既存顧客＋車両なしを400拒否", async () => {
     const cid = "sms-cust-040";
     await seedCustomer(cid, "車両なし顧客");
 
@@ -499,21 +544,16 @@ describe("車両なし販売書類", () => {
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
-    expect(res.status).toBe(201);
-    const body = await res.json() as { document: { vehicleId: string | null } };
-    expect(body.document.vehicleId).toBeNull();
+    expect(res.status).toBe(400);
   });
 
-  it("車両なしで新規顧客を作成", async () => {
+  it("新規顧客＋車両なしを400拒否", async () => {
     const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",
       newCustomer: { name: "車両なし新規" },
       details: { customerOverride: null, vehicleOverride: null },
       items: [],
     }));
-    expect(res.status).toBe(201);
-    const body = await res.json() as { document: { customerId: string; vehicleId: string | null } };
-    expect(body.document.customerId).toBeTruthy();
-    expect(body.document.vehicleId).toBeNull();
+    expect(res.status).toBe(400);
   });
 });
