@@ -43,8 +43,9 @@ describe('入力値の正規化', () => {
   })
 
   it('生年月日の保存値は区切り文字を正規化する', () => {
-    expect(normalizeCustomerBirthDateForStorage('１９９０／１／２')).toBe('1990-1-2')
-    expect(normalizeCustomerBirthDateForStorage('11/2')).toBe('11-2')
+    expect(normalizeCustomerBirthDateForStorage('１９９０／１／２')).toBe('1990/1/2')
+    expect(normalizeCustomerBirthDateForStorage('1990-01-02')).toBe('1990/01/02')
+    expect(normalizeCustomerBirthDateForStorage('11-2')).toBe('11/2')
   })
 
   it('空欄と不正な値を勝手に0へ変換しない', () => {
@@ -69,8 +70,8 @@ describe('マスタ同期の正規化比較', () => {
 
   it('省略形式の生年月日を正規化して同期する', () => {
     const current = { name: '山田 太郎', nameKana: null, phone: null, postalCode: null, address: null, birthDate: null, employer: null }
-    expect(computeCustomerDiffs(current, { birthDate: '11/2' }).map((diff) => diff.field)).toEqual(['birthDate'])
-    expect(buildCustomerUpdateValues(['birthDate'], { birthDate: '11/2' })).toEqual({ birth_date: '11-2' })
+    expect(computeCustomerDiffs(current, { birthDate: '11-2' }).map((diff) => diff.field)).toEqual(['birthDate'])
+    expect(buildCustomerUpdateValues(['birthDate'], { birthDate: '11-2' })).toEqual({ birth_date: '11/2' })
   })
 
   it('顧客情報の列名プレースホルダーを空値として扱う', () => {

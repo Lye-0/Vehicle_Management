@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, mileageHistories, vehicles } from '@vehicle-management/database'
-import { normalizeDate, normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -19,6 +19,7 @@ import {
   computeActualVehicleDiffFields,
   findDuplicateCustomers,
   findDuplicateVehicles,
+  normalizeCustomerBirthDateForStorage,
   validateCombination,
   validateMasterSyncInput,
   type CustomerSyncField,
@@ -547,8 +548,8 @@ function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
     email: typeof obj.email === 'string' ? obj.email.trim() || undefined : undefined,
     postalCode: typeof obj.postalCode === 'string' ? normalizePostalCode(obj.postalCode) || undefined : undefined,
     address: typeof obj.address === 'string' ? obj.address.trim() || undefined : undefined,
-    birthDate: typeof obj.birthDate === 'string' ? normalizeDate(obj.birthDate) || undefined : undefined,
-    employer: typeof obj.employer === 'string' ? obj.employer.trim() || undefined : undefined,
+    birthDate: typeof obj.birthDate === 'string' ? normalizeCustomerBirthDateForStorage(obj.birthDate) || undefined : undefined,
+    employer: typeof obj.employer === 'string' ? normalizeCustomerEmployerValue(obj.employer) || undefined : undefined,
   }
 }
 
@@ -726,6 +727,9 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const fees = extractFees(rows)
   const adjustment = extractAdjustment(rows)
   const items = rows.filter((item) => item.itemType === '作業' || item.itemType === '部品')
+  const details = parseMaintenanceDetails(parseDetailsJson(document.detailsJson))
+  const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
+  const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
     id: document.id,
     number: document.number,
@@ -739,8 +743,11 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
       name: customer?.name ?? '',
       kana: customer?.nameKana ?? '',
       phone: customer?.phone ?? '',
+      email: customer?.email ?? '',
       postalCode: customer?.postalCode ?? '',
       address: customer?.address ?? '',
+      birthDate: customerBirthDate,
+      employer: customerEmployer,
     },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
@@ -773,7 +780,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     fees,
     adjustment,
     note: document.note ?? '',
-    details: parseMaintenanceDetails(parseDetailsJson(document.detailsJson)),
+    details: { ...details, customerBirthDate, customerEmployer },
     archivedAt: document.archivedAt,
     archivedPreviousStatus: document.archivedPreviousStatus,
     archivedBy: document.archivedBy,
@@ -853,6 +860,10 @@ function groupBy<T>(items: T[], getKey: (item: T) => string) {
 }
 
 function stringValue(body: Record<string, unknown>, key: string) { return typeof body[key] === 'string' ? body[key].trim() : '' }
+function normalizeCustomerEmployerValue(value: unknown) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim().slice(0, 200) : ''
+  return normalized === 'employer' ? '' : normalized
+}
 function nullableString(body: Record<string, unknown>, key: string) { const value = stringValue(body, key); return value || null }
 function dateValue(value: unknown) { return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : '' }
 function nullableDate(value: unknown) { return dateValue(value) || null }
@@ -883,6 +894,8 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     phone: normalizePhone(stringValue(customerOverride, 'phone')),
     postalCode: normalizePostalCode(stringValue(customerOverride, 'postalCode')),
     address: stringValue(customerOverride, 'address'),
+    birthDate: normalizeCustomerBirthDateForStorage(stringValue(customerOverride, 'birthDate')),
+    employer: normalizeCustomerEmployerValue(stringValue(customerOverride, 'employer')),
   }
   const normalizedVehicleOverride = {
     maker: stringValue(vehicleOverride, 'maker'),
@@ -901,8 +914,8 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
   return {
     staffName: stringValue(source, 'staffName'),
     customerHonorific: stringValue(source, 'customerHonorific') || '様',
-    customerBirthDate: stringValue(source, 'customerBirthDate'),
-    customerEmployer: stringValue(source, 'customerEmployer'),
+    customerBirthDate: normalizeCustomerBirthDateForStorage(stringValue(source, 'customerBirthDate')),
+    customerEmployer: normalizeCustomerEmployerValue(stringValue(source, 'customerEmployer')),
     customerContactPhone: stringValue(source, 'customerContactPhone'),
     bankName: stringValue(source, 'bankName'),
     bankAccount: stringValue(source, 'bankAccount'),

@@ -935,7 +935,7 @@ function SalesDocumentEditor(props: { document: SalesDocumentLike; isDraft: bool
     </section>
     <details className="sales-details-accordion">
       <summary><span>詳細</span><ChevronDown size={16} aria-hidden="true" /></summary>
-      <div className="sales-details-accordion-content"><div className="form-grid"><label className="form-field"><span>顧客ふりがな</span><input value={document.details.customerOverride?.kana ?? document.customerDetails.kana ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...currentSalesCustomerValues(document), kana: event.target.value } })} /></label><label className="form-field"><span>顧客メールアドレス</span><input type="email" value={document.details.customerOverride?.email ?? document.customerDetails.email ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...currentSalesCustomerValues(document), email: event.target.value } })} /></label></div><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
+      <div className="sales-details-accordion-content"><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
     </details>
   </>
 }
@@ -1580,7 +1580,7 @@ function normalizeSalesCustomerBirthDate(value: string | null | undefined) {
 }
 
 function normalizeSalesCustomerBirthDateOnBlur(value: string) {
-  return normalizeSalesCustomerBirthDate(value).replaceAll('/', '-')
+  return normalizeSalesCustomerBirthDate(value).replaceAll('-', '/')
 }
 
 function normalizeSalesCustomerEmployer(value: string | null | undefined) {

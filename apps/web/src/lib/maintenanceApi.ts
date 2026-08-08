@@ -6,7 +6,7 @@ export type IntakeCategory = '車検' | '板金' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
 export type MaintenanceFeeKey = keyof MandatoryFees | '調整額'
-export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; email?: string; postalCode: string; address: string }
+export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; email?: string; postalCode: string; address: string; birthDate: string; employer: string }
 export type MaintenanceVehicleDetails = { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean }
 export type MaintenanceDocumentDetails = {
   staffName: string
@@ -128,6 +128,8 @@ export type MaintenanceDocumentInput = {
     email?: string
     postalCode?: string
     address?: string
+    birthDate?: string
+    employer?: string
   }
   newVehicle?: {
     maker: string
@@ -179,7 +181,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     type: document.type === '納品書' ? '整備請求書' : document.type,
     status: normalizeMaintenanceStatus(document.status),
     category: document.category === '法定点検' ? '板金' : document.category,
-    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '' },
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeMaintenanceDetails(document.details),
     intakeDate: formatDate(document.intakeDate),
@@ -230,6 +232,8 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
       email: details.customerOverride.email ?? '',
       postalCode: details.customerOverride.postalCode,
       address: details.customerOverride.address,
+      birthDate: details.customerOverride.birthDate ?? '',
+      employer: details.customerOverride.employer ?? '',
     } : null,
     vehicleOverride: details.vehicleOverride && hasMaintenanceOverrideValue(details.vehicleOverride) ? {
       maker: details.vehicleOverride.maker,

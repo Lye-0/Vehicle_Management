@@ -217,7 +217,7 @@ function normalizeCustomerSyncValue(field: CustomerSyncField, value: string): st
 }
 
 export function normalizeCustomerBirthDateForStorage(value: unknown): string {
-  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim().replaceAll('/', '-').slice(0, 50) : ''
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim().replaceAll('-', '/').slice(0, 50) : ''
   return normalized === 'birth_date' ? '' : normalized
 }
 

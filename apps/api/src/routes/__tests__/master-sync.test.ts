@@ -250,6 +250,67 @@ describe("PATCH masterSync", () => {
 });
 
 describe("POST masterSync", () => {
+  it("整備書類の新規顧客で生年月日・勤務先を保存", async () => {
+    const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備見積書",
+      category: "一般整備",
+      newCustomer: { name: "整備顧客の追加情報", birthDate: "1990-01-23", employer: "整備株式会社" },
+      newVehicle: { maker: "トヨタ", name: "プリウス" },
+      details: { customerBirthDate: "1990-01-23", customerEmployer: "整備株式会社", customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { document: { customerId: string; customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(body.document.customerDetails.birthDate).toBe("1990/01/23");
+    expect(body.document.customerDetails.employer).toBe("整備株式会社");
+    expect(body.document.details.customerBirthDate).toBe("1990/01/23");
+    expect(body.document.details.customerEmployer).toBe("整備株式会社");
+
+    const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
+      .bind(body.document.customerId)
+      .first<{ birth_date: string | null; employer: string | null }>();
+    expect(customer?.birth_date).toBe("1990/01/23");
+    expect(customer?.employer).toBe("整備株式会社");
+  });
+
+  it("整備書類の既存顧客で生年月日・勤務先を同期", async () => {
+    const cid = "ms-cust-maint-birth-001";
+    const vid = "ms-veh-maint-birth-001";
+    const did = "ms-doc-maint-birth-001";
+    await seedCustomer(cid, "整備既存顧客の追加情報");
+    await seedVehicle(vid, cid, "ホンダ", "フィット");
+    await seedDoc(did, "M-MS-MAINT-BIRTH-001", cid, vid, "2026-08-01");
+
+    const res = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${did}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "1985-06-07",
+        customerEmployer: "整備先株式会社",
+        customerOverride: { name: "整備既存顧客の追加情報", kana: "", phone: "", postalCode: "", address: "", birthDate: "1985-06-07", employer: "整備先株式会社" },
+        vehicleOverride: null,
+      },
+      masterSync: {
+        confirmed: true,
+        customerFields: ["birthDate", "employer"],
+        expectedCustomerUpdatedAt: await getCustomerUpdatedAt(cid),
+      },
+      items: [],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(body.document.customerDetails.birthDate).toBe("1985/06/07");
+    expect(body.document.customerDetails.employer).toBe("整備先株式会社");
+    expect(body.document.details.customerBirthDate).toBe("1985/06/07");
+    expect(body.document.details.customerEmployer).toBe("整備先株式会社");
+
+    const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
+      .bind(cid)
+      .first<{ birth_date: string | null; employer: string | null }>();
+    expect(customer?.birth_date).toBe("1985/06/07");
+    expect(customer?.employer).toBe("整備先株式会社");
+  });
+
   it("新規顧客＋新規車両＋整備書類を一体作成", async () => {
     const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
       type: "整備見積書",

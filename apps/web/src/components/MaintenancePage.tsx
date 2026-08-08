@@ -401,7 +401,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         documentId: selectedPersistedDocument.id,
         customerId: selectedPersistedDocument.customerId || undefined,
         vehicleId: selectedPersistedDocument.vehicleId || undefined,
-        customerOverride: selectedPersistedDocument.details.customerOverride ?? undefined,
+        customerOverride: maintenanceCustomerValuesForSave(selectedPersistedDocument),
         vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
         issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
         openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
@@ -846,7 +846,7 @@ function MaintenanceDocumentDetail({ document, isDraft, draftDirty, customers, s
     </div>
     <div className="maintenance-document-tabs" role="tablist" aria-label="整備書類の表示"><button id="maintenance-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="maintenance-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="maintenance-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="maintenance-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>
     {view === 'edit'
-      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} isDraft={isDraft} customers={customers} defaultDueDate={addDaysDisplay(settings.document.defaultDueDays)} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} /></div>
+      ? <div id="maintenance-document-edit-panel" className="maintenance-detail-content" role="tabpanel" aria-labelledby="maintenance-document-edit-tab"><MaintenanceDocumentEditor document={document} isDraft={isDraft} customers={customers} defaultDueDate={addDaysDisplay(settings.document.defaultDueDays)} onUpdateHeader={onUpdateHeader} onUpdateTaxRate={onUpdateTaxRate} /></div>
       : <div id="maintenance-document-preview-panel" className="maintenance-detail-content maintenance-preview-content" role="tabpanel" aria-labelledby="maintenance-document-preview-tab"><MaintenancePreview document={document} settings={settings} itemPresets={itemPresets} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} onUpdateFee={onUpdateFee} onAddItem={onAddItem} /></div>}
   </section>
 }
@@ -876,10 +876,10 @@ type MaintenanceDocumentDetailProps = {
   onUpdateFee: (key: MaintenanceFeeKey, value: string) => void
 }
 
-function MaintenanceDocumentEditor({ document, isDraft, customers, defaultDueDate, onUpdateHeader, onUpdateDetails, onUpdateTaxRate }: { document: MaintenanceDocumentLike; isDraft: boolean; customers: Customer[]; defaultDueDate: string; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateDetails: (details: MaintenanceDocumentDetails) => void; onUpdateTaxRate: (value: number) => void }) {
+function MaintenanceDocumentEditor({ document, isDraft, customers, defaultDueDate, onUpdateHeader, onUpdateTaxRate }: { document: MaintenanceDocumentLike; isDraft: boolean; customers: Customer[]; defaultDueDate: string; onUpdateHeader: (field: MaintenanceHeaderField, value: string) => void; onUpdateTaxRate: (value: number) => void }) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   return <>
-    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>顧客メールアドレス</span><input type="email" value={document.details.customerOverride?.email ?? document.customerDetails.email ?? ''} onChange={(event) => onUpdateDetails({ ...document.details, customerOverride: { ...(document.details.customerOverride ?? document.customerDetails), email: event.target.value } })} /></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && <option value="">車両を指定しない</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><OptionalDateField id="maintenance-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} /></div></section>
+    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && <option value="">車両を指定しない</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><OptionalDateField id="maintenance-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} /></div></section>
     <details className="maintenance-details-accordion"><summary><span>詳細設定</span><ChevronDown size={16} aria-hidden="true" /></summary><div className="maintenance-details-accordion-content"><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={onUpdateTaxRate} /></div></details>
   </>
 }
@@ -924,6 +924,7 @@ function MaintenanceDocumentDialog({ form, customers, onChange, onClose, onSubmi
 
 function buildMaintenanceDraftSyncPreviewInput(document: MaintenanceDocumentLike, context: MaintenanceDraftContext): SyncPreviewInput {
   validateMaintenanceDraftContext(document, context)
+  const customerValues = maintenanceCustomerValuesForSave(document)
   const input: SyncPreviewInput = {
     documentType: 'maintenance',
     issuedAt: normalizeMaintenanceDocumentDate(document.issuedAt),
@@ -932,11 +933,11 @@ function buildMaintenanceDraftSyncPreviewInput(document: MaintenanceDocumentLike
   }
 
   if (context.customerMode === 'new') {
-    input.newCustomer = buildNewMaintenanceCustomer(currentMaintenanceCustomerValues(document))
+    input.newCustomer = buildNewMaintenanceCustomer(customerValues)
   } else {
     if (!document.customerId) throw new Error('既存顧客が選択されていません。')
     input.customerId = document.customerId
-    if (document.details.customerOverride) input.customerOverride = { ...document.details.customerOverride }
+    input.customerOverride = customerValues
   }
 
   if (context.vehicleMode === 'new') {
@@ -953,6 +954,7 @@ function buildMaintenanceDraftSyncPreviewInput(document: MaintenanceDocumentLike
 
 function buildMaintenanceCreateInput(document: MaintenanceDocumentLike, context: MaintenanceDraftContext, duplicateConfirmation?: MaintenanceDuplicateConfirmation, masterSync?: MaintenanceMasterSync, mileageSync?: MaintenanceMileageSync): MaintenanceDocumentInput {
   validateMaintenanceDraftContext(document, context)
+  const customerValues = maintenanceCustomerValuesForSave(document)
   const input: MaintenanceDocumentInput = {
     type: document.type,
     status: document.status,
@@ -967,12 +969,17 @@ function buildMaintenanceCreateInput(document: MaintenanceDocumentLike, context:
     fees: document.fees,
     adjustment: document.adjustment,
     note: document.note,
-    details: document.details,
+    details: {
+      ...document.details,
+      customerBirthDate: customerValues.birthDate,
+      customerEmployer: customerValues.employer,
+      ...(context.customerMode === 'existing' ? { customerOverride: customerValues } : {}),
+    },
     items: document.items.map(({ id: _id, ...item }) => item),
   }
 
   if (context.customerMode === 'new') {
-    input.newCustomer = buildNewMaintenanceCustomer(currentMaintenanceCustomerValues(document))
+    input.newCustomer = buildNewMaintenanceCustomer(customerValues)
   } else {
     if (!document.customerId) throw new Error('顧客を選択してください。')
     input.customerId = document.customerId
@@ -1018,7 +1025,18 @@ function buildMaintenanceMileageSync(document: MaintenanceDocumentLike, context:
 }
 
 function currentMaintenanceCustomerValues(document: MaintenanceDocumentLike): NonNullable<MaintenanceDocumentDetails['customerOverride']> {
-  return { ...document.customerDetails, ...(document.details.customerOverride ?? {}) }
+  const override = document.details.customerOverride
+  const base = { ...document.customerDetails, ...(override ?? {}) }
+  return {
+    ...base,
+    birthDate: normalizeMaintenanceCustomerBirthDate(document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate),
+    employer: normalizeMaintenanceCustomerEmployer(document.details.customerEmployer || override?.employer || document.customerDetails.employer),
+  }
+}
+
+function maintenanceCustomerValuesForSave(document: MaintenanceDocumentLike): NonNullable<MaintenanceDocumentDetails['customerOverride']> {
+  const values = currentMaintenanceCustomerValues(document)
+  return { ...values, birthDate: normalizeMaintenanceCustomerBirthDateOnBlur(values.birthDate) }
 }
 
 function currentMaintenanceVehicleValues(document: MaintenanceDocumentLike): NonNullable<MaintenanceDocumentDetails['vehicleOverride']> {
@@ -1035,6 +1053,8 @@ function buildNewMaintenanceCustomer(values: NonNullable<MaintenanceDocumentInpu
     email: trimMaintenanceOptional(values.email),
     postalCode: trimMaintenanceOptional(values.postalCode),
     address: trimMaintenanceOptional(values.address),
+    birthDate: trimMaintenanceOptional(values.birthDate),
+    employer: trimMaintenanceOptional(values.employer),
   }
 }
 
@@ -1075,6 +1095,20 @@ function trimMaintenanceOptional(value: string | undefined | null) {
   return trimmed || undefined
 }
 
+function normalizeMaintenanceCustomerBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized === 'birth_date' ? '' : normalized
+}
+
+function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
+  return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
+}
+
+function normalizeMaintenanceCustomerEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized === 'employer' ? '' : normalized
+}
+
 function normalizeMaintenanceDocumentDate(value: string) {
   const trimmed = value.trim()
   return trimmed ? trimmed.replaceAll('/', '-') : undefined
@@ -1089,7 +1123,30 @@ function parseMaintenanceNumber(value: string | undefined | null) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
-function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: MaintenanceMileageSync): MaintenanceDocumentInput { return { number: document.number, type: document.type, status: document.status, category: document.category, customerId: document.customerId, vehicleId: document.vehicleId, issuedAt: document.issuedAt, intakeDate: document.intakeDate, plannedReleaseDate: document.plannedReleaseDate, completionDate: document.completionDate, dueDate: document.dueDate, taxRate: document.taxRate, taxRounding: document.taxRounding, fees: document.fees, adjustment: document.adjustment, note: document.note, details: document.details, items: document.items.map(({ id: _id, ...item }) => item), mileageSync } }
+function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: MaintenanceMileageSync): MaintenanceDocumentInput {
+  const customerValues = maintenanceCustomerValuesForSave(document)
+  return {
+    number: document.number,
+    type: document.type,
+    status: document.status,
+    category: document.category,
+    customerId: document.customerId,
+    vehicleId: document.vehicleId,
+    issuedAt: document.issuedAt,
+    intakeDate: document.intakeDate,
+    plannedReleaseDate: document.plannedReleaseDate,
+    completionDate: document.completionDate,
+    dueDate: document.dueDate,
+    taxRate: document.taxRate,
+    taxRounding: document.taxRounding,
+    fees: document.fees,
+    adjustment: document.adjustment,
+    note: document.note,
+    details: { ...document.details, customerBirthDate: customerValues.birthDate, customerEmployer: customerValues.employer, customerOverride: customerValues },
+    items: document.items.map(({ id: _id, ...item }) => item),
+    mileageSync,
+  }
+}
 function updateMaintenanceHeader(document: MaintenanceDocument, field: MaintenanceHeaderField, value: string, customers: Customer[]): MaintenanceDocument {
   if (field !== 'customerId' && field !== 'vehicleId') return { ...document, [field]: value }
 
@@ -1097,7 +1154,7 @@ function updateMaintenanceHeader(document: MaintenanceDocument, field: Maintenan
   const nextVehicleId = field === 'customerId' ? nextCustomer?.vehicles[0]?.id ?? '' : value
   const nextVehicle = nextCustomer?.vehicles.find((vehicle) => vehicle.id === nextVehicleId)
   const nextDetails = field === 'customerId'
-    ? { ...document.details, customerOverride: null, vehicleOverride: null }
+    ? { ...document.details, customerBirthDate: normalizeMaintenanceCustomerBirthDate(nextCustomer?.birthDate), customerEmployer: normalizeMaintenanceCustomerEmployer(nextCustomer?.employer), customerOverride: null, vehicleOverride: null }
     : { ...document.details, vehicleOverride: null }
 
   return {
@@ -1124,6 +1181,8 @@ function mapMaintenanceCustomerDetails(customer: Customer | undefined): Maintena
     email: customer?.email ?? '',
     postalCode: customer?.postalCode ?? '',
     address: customer?.address ?? '',
+    birthDate: normalizeMaintenanceCustomerBirthDate(customer?.birthDate),
+    employer: normalizeMaintenanceCustomerEmployer(customer?.employer),
   }
 }
 

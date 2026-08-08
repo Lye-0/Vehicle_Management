@@ -108,15 +108,15 @@ describe("POST sales documents masterSync", () => {
     }));
     expect(res.status).toBe(201);
     const body = await res.json() as { document: { customerId: string; customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
-    expect(body.document.customerDetails.birthDate).toBe("1990-01-23");
+    expect(body.document.customerDetails.birthDate).toBe("1990/01/23");
     expect(body.document.customerDetails.employer).toBe("株式会社サンプル");
-    expect(body.document.details.customerBirthDate).toBe("1990-01-23");
+    expect(body.document.details.customerBirthDate).toBe("1990/01/23");
     expect(body.document.details.customerEmployer).toBe("株式会社サンプル");
 
     const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
       .bind(body.document.customerId)
       .first<{ birth_date: string | null; employer: string | null }>();
-    expect(customer?.birth_date).toBe("1990-01-23");
+    expect(customer?.birth_date).toBe("1990/01/23");
     expect(customer?.employer).toBe("株式会社サンプル");
   });
 
@@ -145,15 +145,15 @@ describe("POST sales documents masterSync", () => {
     }));
     expect(res.status).toBe(201);
     const body = await res.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
-    expect(body.document.customerDetails.birthDate).toBe("1985-06-07");
+    expect(body.document.customerDetails.birthDate).toBe("1985/06/07");
     expect(body.document.customerDetails.employer).toBe("既存顧客株式会社");
-    expect(body.document.details.customerBirthDate).toBe("1985-06-07");
+    expect(body.document.details.customerBirthDate).toBe("1985/06/07");
     expect(body.document.details.customerEmployer).toBe("既存顧客株式会社");
 
     const customer = await env.DB.prepare("SELECT birth_date, employer FROM customers WHERE id = ?")
       .bind(cid)
       .first<{ birth_date: string | null; employer: string | null }>();
-    expect(customer?.birth_date).toBe("1985-06-07");
+    expect(customer?.birth_date).toBe("1985/06/07");
     expect(customer?.employer).toBe("既存顧客株式会社");
   });
 
@@ -216,9 +216,9 @@ describe("POST sales documents masterSync", () => {
     }));
     expect(patchRes.status).toBe(200);
     const patched = await patchRes.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
-    expect(patched.document.customerDetails.birthDate).toBe("1988-02-03");
+    expect(patched.document.customerDetails.birthDate).toBe("1988/02/03");
     expect(patched.document.customerDetails.employer).toBe("販売先株式会社");
-    expect(patched.document.details.customerBirthDate).toBe("1988-02-03");
+    expect(patched.document.details.customerBirthDate).toBe("1988/02/03");
     expect(patched.document.details.customerEmployer).toBe("販売先株式会社");
   });
 
@@ -249,8 +249,8 @@ describe("POST sales documents masterSync", () => {
     }));
     expect(patchRes.status).toBe(200);
     const patched = await patchRes.json() as { document: { customerDetails: { birthDate: string }; details: { customerBirthDate: string } } };
-    expect(patched.document.customerDetails.birthDate).toBe("11-2");
-    expect(patched.document.details.customerBirthDate).toBe("11-2");
+    expect(patched.document.customerDetails.birthDate).toBe("11/2");
+    expect(patched.document.details.customerBirthDate).toBe("11/2");
   });
 
   it("既存顧客＋既存車両＋販売書類を一体作成", async () => {

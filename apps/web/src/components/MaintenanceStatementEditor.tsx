@@ -25,7 +25,12 @@ type Props = {
 
 export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
   const details = document.details
-  const customer = details.customerOverride ?? document.customerDetails
+  const customer = {
+    ...document.customerDetails,
+    ...(details.customerOverride ?? {}),
+    birthDate: details.customerBirthDate || details.customerOverride?.birthDate || document.customerDetails.birthDate || '',
+    employer: details.customerEmployer || details.customerOverride?.employer || document.customerDetails.employer || '',
+  }
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
 
   function updateDetails(patch: Partial<MaintenanceDocumentDetails>) {
@@ -33,7 +38,11 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   }
 
   function updateCustomer(field: keyof NonNullable<MaintenanceDocumentDetails['customerOverride']>, value: string) {
-    updateDetails({ customerOverride: { ...customer, [field]: value } })
+    updateDetails({
+      customerOverride: { ...customer, [field]: value },
+      ...(field === 'birthDate' ? { customerBirthDate: value } : {}),
+      ...(field === 'employer' ? { customerEmployer: value } : {}),
+    })
   }
 
   function updateVehicle(field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>, value: string | boolean) {
@@ -52,9 +61,9 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     <StatementTextControl ariaLabel="顧客敬称" value={details.customerHonorific} x={462} y={112} width={54} height={38} centered className="is-large" onChange={(value) => updateDetails({ customerHonorific: value })} />
     <StatementTextControl ariaLabel="郵便番号" displayPrefix="〒" value={customer.postalCode} x={140} y={181} width={200} height={28} normalizeOnBlur={normalizePostalCode} onChange={(value) => updateCustomer('postalCode', value)} />
     <StatementTextControl ariaLabel="顧客住所" value={customer.address} x={140} y={211} width={370} height={41} onChange={(value) => updateCustomer('address', value)} />
-    <StatementTextControl ariaLabel="生年月日" value={details.customerBirthDate} x={650} y={95} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerBirthDate: value })} />
+    <StatementTextControl ariaLabel="生年月日" value={customer.birthDate} x={650} y={95} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizeMaintenanceCustomerBirthDateOnBlur} onChange={(value) => updateCustomer('birthDate', value)} />
     <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={650} y={137} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizePhone} onChange={(value) => updateCustomer('phone', value)} />
-    <StatementTextControl ariaLabel="勤務先等" value={details.customerEmployer} x={650} y={179} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerEmployer: value })} />
+    <StatementTextControl ariaLabel="勤務先等" value={customer.employer} x={650} y={179} width={155} height={30} className="is-contact-value" onChange={(value) => updateCustomer('employer', value)} />
     <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={650} y={221} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerContactPhone: value })} />
 
     <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
@@ -143,6 +152,15 @@ function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange,
     onChange(withoutPrefix)
   }
   return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={displayValue} readOnly={readOnly} style={controlStyle(x, y, width, height)} onChange={(event) => handleChange(event.target.value)} onBlur={() => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) }} />
+}
+
+function normalizeMaintenanceCustomerBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized === 'birth_date' ? '' : normalized
+}
+
+function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
+  return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
 function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
