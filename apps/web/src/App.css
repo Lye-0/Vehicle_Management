@@ -603,7 +603,7 @@
 .sales-estimate-sheet-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
 .sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control { padding-right: 1.6em; }
 .sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control:hover { background: #fff; }
-.sales-estimate-sheet-calendar-control > .date-calendar-picker { width: clamp(12px, 1.8cqw, 20px); }
+.sales-estimate-sheet-calendar-control > .date-calendar-picker { right: 4px; z-index: 30; width: clamp(12px, 1.8cqw, 20px); }
 .sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
