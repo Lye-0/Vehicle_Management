@@ -1094,7 +1094,7 @@
 .payment-form-header { padding-bottom: 13px; border-bottom: 1px solid var(--border); }
 .payment-form-header > svg { color: var(--primary); }
 .payment-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.payment-amount-input { text-align: right; font-variant-numeric: tabular-nums; }
+.payment-amount-input { text-align: left; font-variant-numeric: tabular-nums; }
 .payment-note-field { margin-top: 14px; }
 .payment-save-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .payment-save-row > div { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
