@@ -603,7 +603,13 @@
 .sales-estimate-sheet-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
 .sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control { padding-right: 1.6em; }
 .sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control:hover { background: #fff; }
+.sales-estimate-sheet-calendar-control > input[type="date"]::-webkit-calendar-picker-indicator,
+.maintenance-statement-calendar-control > input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0; pointer-events: none; }
 .sales-estimate-sheet-calendar-control > .date-calendar-picker { right: 4px; z-index: 30; width: clamp(12px, 1.8cqw, 20px); }
+.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"] { padding-left: 1px; text-align: left; }
+.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-datetime-edit,
+.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
 .sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
@@ -891,7 +897,12 @@
 .maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }
 .maintenance-statement-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
 .maintenance-statement-calendar-control > .maintenance-statement-control { padding-right: 1.7em; }
+.maintenance-statement-calendar-control > input[type="date"].is-compact-date { padding-left: 1px; text-align: left; }
+.maintenance-statement-calendar-control > input[type="date"].is-compact-date::-webkit-calendar-picker-indicator { display: none; }
+.maintenance-statement-calendar-control > input[type="date"].is-compact-date::-webkit-datetime-edit,
+.maintenance-statement-calendar-control > input[type="date"].is-compact-date::-webkit-datetime-edit-fields-wrapper { padding: 0; }
 .maintenance-statement-calendar-control > .date-calendar-picker { width: clamp(10px, 1.7vw, 18px); }
+.maintenance-statement-calendar-control.is-vehicle-inspection-date > .date-calendar-picker { right: 4px; }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }

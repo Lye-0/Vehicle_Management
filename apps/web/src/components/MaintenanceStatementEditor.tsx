@@ -9,6 +9,7 @@ import type {
 } from '../lib/maintenanceApi'
 import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/maintenanceStatement'
 import { DateCalendarButton } from './DateCalendarButton'
+import { toNativeDateValue } from './dateInput'
 
 export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
 export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
@@ -97,7 +98,7 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
     { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <StatementTextControl key={field} calendar={field === 'inspectionDate'} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <StatementTextControl key={field} calendar={field === 'inspectionDate'} calendarControlClassName={field === 'inspectionDate' ? 'is-vehicle-inspection-date' : undefined} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
   </>
 }
 
@@ -146,7 +147,7 @@ function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, heig
   </div>
 }
 
-function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', calendarControlClassName = '', readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; calendarControlClassName?: string; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
   const displayValue = value ? `${displayPrefix}${value}` : value
   function handleChange(nextValue: string) {
     const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
@@ -155,8 +156,8 @@ function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange,
   const inputClassName = `maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`
   const inputProps = { 'aria-label': ariaLabel, className: inputClassName, value: displayValue, readOnly, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
   if (!calendar) return <input {...inputProps} style={controlStyle(x, y, width, height)} />
-  return <div className="maintenance-statement-calendar-control" style={controlStyle(x, y, width, height)}>
-    <input {...inputProps} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
+  return <div className={`maintenance-statement-calendar-control${calendarControlClassName ? ` ${calendarControlClassName}` : ''}`} style={controlStyle(x, y, width, height)}>
+    <input {...inputProps} type="date" value={toNativeDateValue(value)} onChange={(event) => onChange(event.target.value.replaceAll('-', '/'))} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
     <DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} />
   </div>
 }

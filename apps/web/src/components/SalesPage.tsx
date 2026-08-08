@@ -44,6 +44,7 @@ import { compareSortableDocuments, type DocumentSortDirection, type DocumentSort
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
 import { DateCalendarButton } from './DateCalendarButton'
+import { toNativeDateValue } from './dateInput'
 import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
 import { OptionalDateField } from './OptionalDateField'
 import { SalesDuplicateConfirmationDialog, type SalesDuplicateDialogState } from './SalesDuplicateConfirmationDialog'
@@ -1172,7 +1173,7 @@ function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: bo
     { field: 'mileage', x: 427, width: 137 },
     { field: 'color', x: 564, width: 121 },
   ]
-  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid calendar={field === 'inspectionDate'} key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered normalizeOnBlur={field === 'modelYear' ? normalizeModelYear : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}</>
+  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid calendar={field === 'inspectionDate'} calendarControlClassName={field === 'inspectionDate' ? 'is-trade-in-inspection-date' : undefined} key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered normalizeOnBlur={field === 'modelYear' ? normalizeModelYear : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}</>
 }
 
 function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { requiredDocuments: SalesDocumentDetails['requiredDocuments']; onUpdate: (field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) => void }) {
@@ -1222,7 +1223,7 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
   />
 }
 
-function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, calendar = false, variant, displayPrefix = '', normalizeOnBlur, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; calendar?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; onChange: (value: string) => void }) {
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, calendar = false, calendarControlClassName = '', variant, displayPrefix = '', normalizeOnBlur, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; calendar?: boolean; calendarControlClassName?: string; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; onChange: (value: string) => void }) {
   const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}${variant ? ` is-${variant}` : ''}`
   const displayValue = value ? `${displayPrefix}${value}` : value
   function handleChange(nextValue: string) {
@@ -1231,8 +1232,8 @@ function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = fa
   }
   const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
   if (!calendar || multiline) return multiline ? <textarea {...props} style={sheetPositionStyle(x, y, width, height)} /> : <input {...props} style={sheetPositionStyle(x, y, width, height)} />
-  return <div className="sales-estimate-sheet-calendar-control" style={sheetPositionStyle(x, y, width, height)}>
-    <input {...props} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
+  return <div className={`sales-estimate-sheet-calendar-control${calendarControlClassName ? ` ${calendarControlClassName}` : ''}`} style={sheetPositionStyle(x, y, width, height)}>
+    <input {...props} type="date" value={toNativeDateValue(value)} onChange={(event) => onChange(event.target.value.replaceAll('-', '/'))} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
     <DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} />
   </div>
 }
