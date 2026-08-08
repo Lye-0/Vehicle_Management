@@ -8,6 +8,7 @@ export type SalesCustomerDetails = {
   name: string
   kana: string
   phone: string
+  email?: string
   postalCode: string
   address: string
   birthDate: string
@@ -38,7 +39,7 @@ export type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
-  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'postalCode' | 'address'> | null
+  customerOverride: Pick<SalesCustomerDetails, 'name' | 'kana' | 'phone' | 'email' | 'postalCode' | 'address' | 'birthDate' | 'employer'> | null
   vehicleOverride: SalesVehicleDetails | null
   tradeIn: {
     name: string
@@ -130,16 +131,60 @@ export type SalesDocument = {
   items: SalesLineItem[]
 }
 
+/** Persisted fields plus the optional identifiers used by an unsaved document draft. */
+export type SalesDocumentLike = Omit<SalesDocument, 'id' | 'customerId' | 'vehicleId'> & {
+  id?: string
+  customerId: string | null
+  vehicleId: string | null
+}
+
 export type SalesCreateInput = {
   type: SalesDocumentType
-  customerId: string
-  vehicleId: string | null
+  status?: SalesStatus
+  customerId?: string
+  vehicleId?: string | null
+  issuedAt?: string
   dueDate: string
   note: string
   taxRate: number
   taxRounding: '切り捨て' | '四捨五入'
-  initialItemDescription: string
+  initialItemDescription?: string
   details?: SalesDocumentDetails
+  items?: Array<Omit<SalesLineItem, 'id'>>
+  newCustomer?: {
+    name: string
+    nameKana?: string
+    phone?: string
+    email?: string
+    postalCode?: string
+    address?: string
+    birthDate?: string
+    employer?: string
+  }
+  newVehicle?: {
+    maker: string
+    name: string
+    model?: string
+    registrationNumber?: string
+    chassisNumber?: string
+    modelYear?: number
+    inspectionDate?: string
+    mileage?: number
+    bodyColor?: string
+    displacement?: number
+    transmission?: string
+  }
+  duplicateConfirmation?: {
+    registrationNumberConfirmed: true
+    confirmedVehicleId: string
+  }
+  masterSync?: {
+    confirmed: true
+    customerFields: string[]
+    vehicleFields: string[]
+    expectedCustomerUpdatedAt?: string
+    expectedVehicleUpdatedAt?: string
+  }
 }
 
 type ApiSalesDocument = Omit<SalesDocument, 'taxRate' | 'issuedAt' | 'dueDate' | 'items'> & {
@@ -155,52 +200,107 @@ export async function fetchSalesDocuments() {
 }
 
 export async function createSalesDocument(input: SalesCreateInput) {
+  const payload: Record<string, unknown> = {
+    type: input.type,
+    status: input.status ?? '下書き',
+    issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : today(),
+    dueDate: toApiDate(input.dueDate),
+    taxRate: input.taxRate,
+    rounding: input.taxRounding,
+    note: input.note,
+    details: input.details,
+    items: input.items?.map((item) => ({
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+    })) ?? [{ description: input.initialItemDescription ?? '', quantity: 1, unit: '式', unitPrice: 0 }],
+  }
+  if (input.newCustomer) {
+    payload.newCustomer = input.newCustomer
+  } else if (input.customerId) {
+    payload.customerId = input.customerId
+  }
+  if (input.newVehicle) {
+    payload.newVehicle = input.newVehicle
+  } else if (input.vehicleId) {
+    payload.vehicleId = input.vehicleId
+  }
+  if (input.duplicateConfirmation) {
+    payload.duplicateConfirmation = input.duplicateConfirmation
+  }
+  if (input.masterSync) {
+    payload.masterSync = input.masterSync
+  }
   const response = await apiFetch<{ document: ApiSalesDocument }>('/api/sales-documents', {
     method: 'POST',
-    body: JSON.stringify({
-      type: input.type,
-      customerId: input.customerId,
-      vehicleId: input.vehicleId,
-      issuedAt: today(),
-      dueDate: toApiDate(input.dueDate),
-      taxRate: input.taxRate,
-      rounding: input.taxRounding,
-      note: input.note,
-      details: input.details,
-      items: [{ description: input.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0 }],
-    }),
+    body: JSON.stringify(payload),
   })
   return mapSalesDocument(response.document)
 }
 
-export async function updateSalesDocument(document: SalesDocument) {
-  const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${document.id}`, {
+export type SalesDocumentInput = {
+  number?: string
+  type: SalesDocumentType
+  status: SalesStatus
+  customerId: string
+  vehicleId: string | null
+  issuedAt?: string
+  dueDate: string
+  taxRate: number
+  taxRounding: '切り捨て' | '四捨五入'
+  note: string
+  details: SalesDocumentDetails
+  items: Array<Omit<SalesLineItem, 'id'>>
+  masterSync?: {
+    confirmed: true
+    customerFields: string[]
+    vehicleFields: string[]
+    expectedCustomerUpdatedAt?: string
+    expectedVehicleUpdatedAt?: string
+  }
+}
+
+export async function updateSalesDocument(id: string, input: SalesDocumentInput) {
+  const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({
-      type: document.type,
-      number: document.number,
-      status: document.status,
-      customerId: document.customerId,
-      vehicleId: document.vehicleId,
-      issuedAt: toApiDate(document.issuedAt),
-      dueDate: toApiDate(document.dueDate),
-      taxRate: Math.round(document.taxRate * 100),
-      rounding: document.taxRounding,
-      note: document.note,
-      details: document.details,
-      items: document.items.map((item) => ({
-        itemType: item.itemType,
-        description: item.description,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitPrice,
-        taxCategory: item.taxCategory,
-        otherAmount: item.otherAmount,
-        summary: item.summary,
-      })),
-    }),
+    body: JSON.stringify(toPayload(input)),
   })
   return mapSalesDocument(response.document)
+}
+
+function toPayload(input: SalesDocumentInput) {
+  const payload: Record<string, unknown> = {
+    type: input.type,
+    number: input.number || undefined,
+    status: input.status,
+    customerId: input.customerId,
+    vehicleId: input.vehicleId,
+    issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined,
+    dueDate: toApiDate(input.dueDate),
+    taxRate: Math.round(input.taxRate * 100),
+    rounding: input.taxRounding,
+    note: input.note,
+    details: input.details,
+    items: input.items.map((item) => ({
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+    })),
+  }
+  if (input.masterSync) {
+    payload.masterSync = input.masterSync
+  }
+  return payload
 }
 
 export async function archiveSalesDocument(id: string) {
@@ -214,7 +314,7 @@ export async function restoreSalesDocument(id: string) {
 function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
   return {
     ...document,
-    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeDetails(document.details),
     issuedAt: formatDate(document.issuedAt),

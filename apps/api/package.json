@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"@vehicle-management/database": "workspace:*",
+		"@vehicle-management/shared": "workspace:*",
 		"aws4fetch": "^1.0.20",
 		"drizzle-orm": "^0.45.2",
 		"jose": "^6.2.4"

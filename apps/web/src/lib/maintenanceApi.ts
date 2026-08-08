@@ -6,7 +6,7 @@ export type IntakeCategory = '車検' | '板金' | '一般整備'
 export type MaintenanceItemKind = '作業' | '部品'
 export type MandatoryFees = { 自賠責: number; 重量税: number; 印紙代: number; リサイクル料金: number }
 export type MaintenanceFeeKey = keyof MandatoryFees | '調整額'
-export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; postalCode: string; address: string }
+export type MaintenanceCustomerDetails = { name: string; kana: string; phone: string; email?: string; postalCode: string; address: string; birthDate: string; employer: string }
 export type MaintenanceVehicleDetails = { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean }
 export type MaintenanceDocumentDetails = {
   staffName: string
@@ -83,13 +83,20 @@ export type MaintenanceDocument = {
   items: MaintenanceLineItem[]
 }
 
+/** Persisted fields plus the optional identifiers used by an unsaved document draft. */
+export type MaintenanceDocumentLike = Omit<MaintenanceDocument, 'id' | 'customerId' | 'vehicleId'> & {
+  id?: string
+  customerId: string | null
+  vehicleId: string | null
+}
+
 export type MaintenanceDocumentInput = {
   number?: string
   type: MaintenanceDocumentType
   status: MaintenanceStatus
   category: IntakeCategory
-  customerId: string
-  vehicleId: string
+  customerId?: string
+  vehicleId?: string
   issuedAt?: string
   intakeDate: string
   plannedReleaseDate: string
@@ -102,6 +109,45 @@ export type MaintenanceDocumentInput = {
   note: string
   details: MaintenanceDocumentDetails
   items: Array<Omit<MaintenanceLineItem, 'id'>>
+  mileageSync?: {
+    confirmed: true
+    openedMileage: number | null
+    inputMileage: number
+  }
+  masterSync?: {
+    confirmed: true
+    customerFields: string[]
+    vehicleFields: string[]
+    expectedCustomerUpdatedAt?: string
+    expectedVehicleUpdatedAt?: string
+  }
+  newCustomer?: {
+    name: string
+    nameKana?: string
+    phone?: string
+    email?: string
+    postalCode?: string
+    address?: string
+    birthDate?: string
+    employer?: string
+  }
+  newVehicle?: {
+    maker: string
+    name: string
+    model?: string
+    registrationNumber?: string
+    chassisNumber?: string
+    modelYear?: number
+    inspectionDate?: string
+    mileage?: number
+    bodyColor?: string
+    displacement?: number
+    transmission?: string
+  }
+  duplicateConfirmation?: {
+    registrationNumberConfirmed?: boolean
+    confirmedVehicleId?: string
+  }
 }
 
 type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
@@ -135,7 +181,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     type: document.type === '納品書' ? '整備請求書' : document.type,
     status: normalizeMaintenanceStatus(document.status),
     category: document.category === '法定点検' ? '板金' : document.category,
-    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, postalCode: '', address: '' },
+    customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeMaintenanceDetails(document.details),
     intakeDate: formatDate(document.intakeDate),
@@ -155,7 +201,20 @@ function normalizeMaintenanceStatus(status: ApiMaintenanceDocument['status']): M
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  return { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: toApiDate(input.completionDate), taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+  const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+  if (input.masterSync) {
+    payload.masterSync = input.masterSync
+  }
+  if (input.newCustomer) {
+    payload.newCustomer = input.newCustomer
+  }
+  if (input.newVehicle) {
+    payload.newVehicle = input.newVehicle
+  }
+  if (input.duplicateConfirmation) {
+    payload.duplicateConfirmation = input.duplicateConfirmation
+  }
+  return payload
 }
 
 function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | undefined): MaintenanceDocumentDetails {
@@ -170,8 +229,11 @@ function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | 
       name: details.customerOverride.name,
       kana: details.customerOverride.kana,
       phone: details.customerOverride.phone,
+      email: details.customerOverride.email ?? '',
       postalCode: details.customerOverride.postalCode,
       address: details.customerOverride.address,
+      birthDate: details.customerOverride.birthDate ?? '',
+      employer: details.customerOverride.employer ?? '',
     } : null,
     vehicleOverride: details.vehicleOverride && hasMaintenanceOverrideValue(details.vehicleOverride) ? {
       maker: details.vehicleOverride.maker,

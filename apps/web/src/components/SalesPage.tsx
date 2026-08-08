@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import {
   Archive,
   CarFront,
@@ -16,7 +17,8 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { createCustomer, createVehicle, fetchCustomers, fetchVehicleFile, type Customer, type CustomerInput, type Vehicle, type VehicleInput } from '../lib/customerApi'
+import { fetchCustomers, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
+import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
   createSalesDocument,
@@ -24,11 +26,15 @@ import {
   fetchSalesDocuments,
   updateSalesDocument,
   type SalesDocument,
+  type SalesDocumentLike,
   type SalesDocumentDetails,
   type SalesDocumentType,
   type SalesStatus,
   type SalesLineItem,
   type SalesTaxCategory,
+  type SalesCreateInput,
+  type SalesDocumentInput,
+  defaultSalesDocumentDetails,
 } from '../lib/salesApi'
 import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
@@ -37,6 +43,10 @@ import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilter
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
+import { DateCalendarButton } from './DateCalendarButton'
+import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
+import { OptionalDateField } from './OptionalDateField'
+import { SalesDuplicateConfirmationDialog, type SalesDuplicateDialogState } from './SalesDuplicateConfirmationDialog'
 
 type DocumentFilter = 'すべて' | SalesDocumentType
 type SalesStatusFilter = 'すべて' | Exclude<SalesStatus, 'アーカイブ済み'>
@@ -45,6 +55,23 @@ type CompletedSalesGroup = { key: string; label: string; documents: SalesDocumen
 type SalesHeaderField = 'number' | 'type' | 'status' | 'customerId' | 'vehicleId' | 'issuedAt' | 'dueDate' | 'note'
 type SalesItemField = 'itemType' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'taxCategory' | 'otherAmount' | 'summary'
 type SalesTaxCategoryField = keyof SalesDocumentDetails['requiredDocuments']
+
+type SalesMasterSnapshot =
+  | { state: 'loading' }
+  | { state: 'ready'; customerId: string; customerUpdatedAt: string; vehicleId: string | null; vehicleUpdatedAt: string | null }
+  | { state: 'invalid' }
+
+type SalesDraftContext = {
+  customerMode: 'existing' | 'new'
+  vehicleMode: 'existing' | 'new'
+  customerId: string | null
+  customerUpdatedAt: string | null
+  vehicleId: string | null
+  vehicleUpdatedAt: string | null
+}
+
+type SalesDuplicateConfirmation = NonNullable<SalesCreateInput['duplicateConfirmation']>
+type SalesMasterSync = NonNullable<SalesCreateInput['masterSync']>
 
 const salesDocumentTypeFilterOptions: DocumentFilterOption<DocumentFilter>[] = [
   { value: 'すべて', label: 'すべて', tone: 'all' },
@@ -83,16 +110,15 @@ const estimateBucketDefaults: Record<SalesEstimateEditableBucket, { itemType: st
 
 type SalesCreateForm = {
   type: SalesDocumentType
+  customerMode: 'existing' | 'new' | null
   customerId: string
+  vehicleMode: 'existing' | 'new' | null
   vehicleId: string
-  dueDate: string
-  taxRate: number
-  taxRounding: '切り捨て' | '四捨五入'
-  initialItemDescription: string
 }
 
-const emptySalesCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', memo: '' }
-const emptySalesVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
+const NEW_CUSTOMER_VALUE = '__new_customer__'
+const NEW_VEHICLE_VALUE = '__new_vehicle__'
+type SalesDraftState = SalesDocumentLike | null
 
 export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } = {}) {
   const [documents, setDocuments] = useState<SalesDocument[]>([])
@@ -106,14 +132,23 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<SalesCreateForm>(emptyCreateForm())
+  const [draftDocument, setDraftDocument] = useState<SalesDraftState>(null)
   const [loading, setLoading] = useState(true)
   const [syncError, setSyncError] = useState('')
   const [saving, setSaving] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
   const [documentView, setDocumentView] = useState<SalesDocumentView>('edit')
+  const [masterSyncDialogResult, setMasterSyncDialogResult] = useState<SyncPreviewResponse | null>(null)
+  const [salesDuplicateDialog, setSalesDuplicateDialog] = useState<SalesDuplicateDialogState | null>(null)
+  const [pendingDraftPreview, setPendingDraftPreview] = useState<SyncPreviewResponse | null>(null)
+  const [pendingDraftDuplicateConfirmation, setPendingDraftDuplicateConfirmation] = useState<SalesDuplicateConfirmation | undefined>(undefined)
   const documentsRef = useRef<SalesDocument[]>([])
+  const draftDocumentRef = useRef<SalesDocumentLike | null>(null)
+  const draftContextRef = useRef<SalesDraftContext | null>(null)
+  const draftCustomerDuplicateConfirmedRef = useRef(false)
+  const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
+  const lastOpenedDocumentIdRef = useRef<string | null>(null)
 
   function replaceDocuments(updater: (current: SalesDocument[]) => SalesDocument[]) {
     const nextDocuments = updater(documentsRef.current)
@@ -156,13 +191,87 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedSalesDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
+  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
+  const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
+
+  function setActiveDraft(nextDraft: SalesDocumentLike | null) {
+    draftDocumentRef.current = nextDraft
+    setDraftDocument(nextDraft)
+  }
+
+  function replaceActiveDocument(updater: (document: SalesDocumentLike) => SalesDocumentLike) {
+    if (draftDocument) {
+      setDraftDocument((current) => {
+        const nextDraft = current ? updater(current) : current
+        draftDocumentRef.current = nextDraft
+        return nextDraft
+      })
+      return
+    }
+    if (!selectedPersistedDocument) return
+    if (selectedDocumentId !== selectedPersistedDocument.id) {
+      // 一覧の先頭をフォールバック表示している場合も、編集対象をIDで固定する。
+      // 支払期限の変更で一覧順が変わっても別書類へ切り替わらないようにする。
+      setSelectedDocumentId(selectedPersistedDocument.id)
+    }
+    replaceDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as SalesDocument : document))
+  }
+
+  function discardDraftIfConfirmed(action: string) {
+    if (!draftDocument) return true
+    if (dirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
+    setActiveDraft(null)
+    draftContextRef.current = null
+    draftCustomerDuplicateConfirmedRef.current = false
+    setDirty(false)
+    setSaved(false)
+    setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    return true
+  }
+
+  function selectPersistedDocument(documentId: string) {
+    if (!discardDraftIfConfirmed('別の書類を表示')) return
+    setSelectedDocumentId(documentId)
+    setDocumentView('edit')
+  }
+
+  // Initialize openedMasterSnapshot when document changes
+  useEffect(() => {
+    if (draftDocument) {
+      lastOpenedDocumentIdRef.current = null
+      openedMasterSnapshotRef.current = null
+      return
+    }
+    const currentDocumentId = selectedPersistedDocument?.id ?? null
+    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
+    lastOpenedDocumentIdRef.current = currentDocumentId
+    if (!selectedPersistedDocument) {
+      openedMasterSnapshotRef.current = null
+      return
+    }
+    const foundCustomer = customers.find((c) => c.id === selectedPersistedDocument.customerId)
+    const foundVehicle = selectedPersistedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId) : null
+    if (foundCustomer) {
+      openedMasterSnapshotRef.current = {
+        state: 'ready',
+        customerId: foundCustomer.id,
+        customerUpdatedAt: foundCustomer.updatedAt,
+        vehicleId: selectedPersistedDocument.vehicleId,
+        vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+      }
+    } else {
+      openedMasterSnapshotRef.current = { state: 'loading' }
+    }
+  }, [draftDocument, selectedPersistedDocument, customers])
 
   function updateLineItem(itemId: string, field: SalesItemField, value: string) {
     if (!selectedDocument) return
     const nextValue = field === 'description' || field === 'itemType' || field === 'unit' || field === 'taxCategory' || field === 'summary' ? value : Number(value)
-    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : {
+    replaceActiveDocument((document) => ({
       ...document,
       items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item),
     }))
@@ -172,8 +281,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function updateEstimateSheetLine(bucket: SalesEstimateEditableBucket, index: number, patch: { label?: string; amount?: number }) {
     if (!selectedDocument) return
     const defaults = estimateBucketDefaults[bucket]
-    replaceDocuments((current) => current.map((document) => {
-      if (document.id !== selectedDocument.id) return document
+    replaceActiveDocument((document) => {
       const line = buildSalesEstimateSections(document)[bucket][index]
       if (line) {
         const nextLabel = patch.label ?? line.label
@@ -216,19 +324,20 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         summary: '',
       }
       return { ...document, items: [...document.items, newItem] }
-    }))
+    })
     markDirty()
   }
 
   function addLineItem() {
     if (!selectedDocument) return
     const newItem: SalesLineItem = { id: `item-${Date.now()}`, itemType: 'その他', description: '', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }
-    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: [...document.items, newItem] } : document))
+    replaceActiveDocument((document) => ({ ...document, items: [...document.items, newItem] }))
     markDirty()
   }
 
   function updateHeader(field: SalesHeaderField, value: string) {
     if (!selectedDocument || field === 'number') return
+    if (draftDocument && (field === 'customerId' || field === 'vehicleId')) return
     const nextCustomer = customers.find((customer) => customer.id === (field === 'customerId' ? value : selectedDocument.customerId))
     const nextVehicleId = field === 'customerId' ? nextCustomer?.vehicles[0]?.id ?? null : field === 'vehicleId' ? value || null : selectedDocument.vehicleId
     const nextVehicle = nextCustomer?.vehicles.find((vehicle) => vehicle.id === nextVehicleId)
@@ -243,19 +352,19 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       vehicleDetails: nextVehicle ? mapVehicleDetails(nextVehicle) : null,
       details: { ...selectedDocument.details, selectedImageAttachmentId: '', customerOverride: null, vehicleOverride: null },
     } : {}
-    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, [field]: value, ...relationPatch }))
+    replaceActiveDocument((document) => ({ ...document, [field]: value, ...relationPatch }))
     markDirty()
   }
 
   function updateDetails(patch: Partial<SalesDocumentDetails>) {
     if (!selectedDocument) return
-    replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : { ...document, details: { ...document.details, ...patch } }))
+    replaceActiveDocument((document) => ({ ...document, details: { ...document.details, ...patch } }))
     markDirty()
   }
 
   function updateTaxRate(value: number) {
     if (!selectedDocument) return
-    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, taxRate: value / 100 } : document))
+    replaceActiveDocument((document) => ({ ...document, taxRate: value / 100 }))
     markDirty()
   }
 
@@ -276,18 +385,25 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   }
 
   function markDirty() {
+    if (draftDocumentRef.current) {
+      draftCustomerDuplicateConfirmedRef.current = false
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+    }
     setDirty(true)
     setSaved(false)
   }
 
   async function archiveSelectedDocument() {
-    if (!selectedDocument || saving) return
-    if (!window.confirm(`${selectedDocument.number}をアーカイブしますか？`)) return
+    if (draftDocument || !selectedPersistedDocument || saving) return
+    if (!window.confirm(`${selectedPersistedDocument.number}をアーカイブしますか？`)) return
     setSaving(true)
     setSyncError('')
     try {
-      await archiveSalesDocument(selectedDocument.id)
-      replaceDocuments((current) => current.filter((document) => document.id !== selectedDocument.id))
+      await archiveSalesDocument(selectedPersistedDocument.id)
+      replaceDocuments((current) => current.filter((document) => document.id !== selectedPersistedDocument.id))
       setSelectedDocumentId('')
       setDirty(false)
       setSaved(false)
@@ -300,66 +416,449 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function removeLineItem(itemId: string) {
     if (!selectedDocument) return
-    replaceDocuments((current) => current.map((document) => document.id === selectedDocument.id ? { ...document, items: document.items.filter((item) => item.id !== itemId) } : document))
+    replaceActiveDocument((document) => ({ ...document, items: document.items.filter((item) => item.id !== itemId) }))
     markDirty()
   }
 
-  async function saveSelectedDocument() {
-    if (!selectedDocument || saving) return
-    const documentToSave = documentsRef.current.find((document) => document.id === selectedDocument.id)
+  async function saveSelectedDocument(masterSync?: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string }) {
+    if (draftDocument || !selectedPersistedDocument || saving) return
+    if (openedMasterSnapshotRef.current?.state === 'invalid') {
+      setSyncError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
+      return
+    }
+    const documentToSave = documentsRef.current.find((document) => document.id === selectedPersistedDocument.id)
     if (!documentToSave) return
     setSaving(true)
     setSaved(false)
     try {
-      const nextDocument = await updateSalesDocument(documentToSave)
+      const customerValues = salesCustomerValuesForSave(documentToSave)
+      const input: SalesDocumentInput = {
+        type: documentToSave.type,
+        number: documentToSave.number,
+        status: documentToSave.status,
+        customerId: documentToSave.customerId,
+        vehicleId: documentToSave.vehicleId,
+        issuedAt: documentToSave.issuedAt,
+        dueDate: documentToSave.dueDate,
+        taxRate: documentToSave.taxRate,
+        taxRounding: documentToSave.taxRounding,
+        note: documentToSave.note,
+        details: { ...documentToSave.details, customerBirthDate: customerValues.birthDate, customerEmployer: customerValues.employer, customerOverride: customerValues },
+        items: documentToSave.items.map(({ id: _id, ...item }) => item),
+        masterSync,
+      }
+      const nextDocument = await updateSalesDocument(documentToSave.id, input)
       replaceDocuments((current) => current.map((document) => document.id === nextDocument.id ? nextDocument : document))
       setDirty(false)
       setSaved(true)
       setSyncError('')
+
+      // Re-fetch customers to get latest updatedAt
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        const foundCustomer = nextCustomers.find((c) => c.id === selectedPersistedDocument.customerId)
+        const foundVehicle = selectedPersistedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId) : null
+        if (foundCustomer) {
+          openedMasterSnapshotRef.current = {
+            state: 'ready',
+            customerId: foundCustomer.id,
+            customerUpdatedAt: foundCustomer.updatedAt,
+            vehicleId: selectedPersistedDocument.vehicleId,
+            vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+          }
+        } else {
+          openedMasterSnapshotRef.current = { state: 'loading' }
+        }
+      } catch {
+        setSyncError('書類は保存されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
     } catch (error: unknown) {
-      setSyncError(error instanceof Error ? error.message : '販売書類を保存できませんでした。')
+      if (error instanceof Error && error.message.includes('顧客または車両情報が更新されました')) {
+        setSyncError('顧客または車両情報が更新されました。再読み込み後にもう一度保存してください。')
+      } else {
+        setSyncError(error instanceof Error ? error.message : '販売書類を保存できませんでした。')
+      }
     } finally {
       setSaving(false)
     }
   }
 
   function openCreateDialog() {
-    const customer = customers[0]
-    setCreateForm({ type: '見積書', customerId: customer?.id ?? '', vehicleId: customer?.vehicles[0]?.id ?? '', dueDate: dateAfter(settings.document.defaultDueDays), taxRate: settings.tax.consumptionTaxRate, taxRounding: settings.tax.rounding, initialItemDescription: settings.salesItemPresets[0] ?? '車両本体価格' })
+    if (!discardDraftIfConfirmed('新しい書類を作成')) return
+    setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
     setCreateDialogOpen(true)
   }
 
-  async function registerCustomer(input: CustomerInput) {
-    const customer = await createCustomer(input)
-    setCustomers((current) => [...current, customer])
-    return customer
-  }
-
-  async function registerVehicle(customerId: string, input: VehicleInput) {
-    const result = await createVehicle(customerId, input)
-    setCustomers((current) => current.some((customer) => customer.id === result.customer.id)
-      ? current.map((customer) => customer.id === result.customer.id ? result.customer : customer)
-      : [...current, result.customer])
-    return result
-  }
-
-  async function createDocument(event: FormEvent<HTMLFormElement>) {
+  function startDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (creating || !createForm.customerId) return
-    setCreating(true)
-    try {
-      const newDocument = await createSalesDocument({ ...createForm, vehicleId: createForm.vehicleId || null, note: '' })
-      replaceDocuments((current) => [newDocument, ...current])
-      setSelectedDocumentId(newDocument.id)
-      setCreateDialogOpen(false)
-      setDirty(false)
-      setSaved(false)
-      setSyncError('')
-    } catch (error: unknown) {
-      setSyncError(error instanceof Error ? error.message : '販売書類を作成できませんでした。')
-    } finally {
-      setCreating(false)
+    if (!isValidCreateSelection(createForm)) return
+    const customer = createForm.customerMode === 'existing' ? customers.find((item) => item.id === createForm.customerId) : undefined
+    const vehicle = createForm.vehicleMode === 'existing' ? customer?.vehicles.find((item) => item.id === createForm.vehicleId) : undefined
+    const draft: SalesDocumentLike = {
+      number: '未採番',
+      type: createForm.type,
+      status: '下書き',
+      customerId: customer?.id ?? null,
+      customerName: customer?.name ?? '',
+      phone: customer?.phone ?? '',
+      vehicleId: vehicle?.id ?? null,
+      vehicle: vehicle ? `${vehicle.maker} ${vehicle.model}`.trim() : '',
+      plate: vehicle?.plate ?? '',
+      customerDetails: customer ? mapCustomerDetails(customer) : emptyCustomerDetails(),
+      vehicleDetails: vehicle ? mapVehicleDetails(vehicle) : null,
+      details: structuredClone(defaultSalesDocumentDetails),
+      issuedAt: todaySalesDisplay(),
+      dueDate: '',
+      taxRate: settings.tax.consumptionTaxRate / 100,
+      taxRounding: settings.tax.rounding,
+      note: '',
+      archivedAt: null,
+      archivedPreviousStatus: null,
+      archivedBy: null,
+      purgeAt: null,
+      keepForever: false,
+      items: [{ id: 'draft-item-1', itemType: 'その他', description: settings.salesItemPresets[0] ?? '車両本体価格', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }],
     }
+    draftContextRef.current = {
+      customerMode: createForm.customerMode!,
+      vehicleMode: createForm.vehicleMode!,
+      customerId: customer?.id ?? null,
+      customerUpdatedAt: customer?.updatedAt ?? null,
+      vehicleId: vehicle?.id ?? null,
+      vehicleUpdatedAt: vehicle?.updatedAt ?? null,
+    }
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(draft)
+    setSelectedDocumentId('')
+    setDirty(false)
+    setSaved(false)
+    setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSyncError('')
+    setDocumentView('edit')
+    setCreateDialogOpen(false)
+  }
+
+  async function handleSaveClick() {
+    if (saving || !selectedDocument) return
+    if (draftDocument) {
+      const currentDraft = draftDocumentRef.current ?? draftDocument
+      const context = draftContextRef.current
+      if (!context) {
+        setSyncError('未保存書類の顧客・車両情報を確認できません。書類を開き直してください。')
+        return
+      }
+      setSyncError('')
+      setSaving(true)
+      await runDraftSyncPreview(currentDraft, context)
+      return
+    }
+    if (!selectedPersistedDocument) return
+    if (openedMasterSnapshotRef.current?.state === 'invalid') {
+      setSyncError('最新の顧客・車両情報を確認できないため保存できません。画面を再読み込みしてください。')
+      return
+    }
+
+    const snapshot = openedMasterSnapshotRef.current
+    try {
+      const preview = await fetchSyncPreview({
+        documentType: 'sales',
+        documentId: selectedPersistedDocument.id,
+        customerId: selectedPersistedDocument.customerId || undefined,
+        vehicleId: selectedPersistedDocument.vehicleId || undefined,
+        customerOverride: salesCustomerValuesForSave(selectedPersistedDocument),
+        vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
+        issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
+        openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
+        openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt ?? undefined : undefined,
+      })
+
+      const hasDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0
+      if (hasDiffs) {
+        setMasterSyncDialogResult(preview)
+        return
+      }
+
+      // No differences - save directly
+      void saveSelectedDocument()
+    } catch (reason) {
+      setSyncError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
+    }
+  }
+
+  async function runDraftSyncPreview(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation) {
+    try {
+      const preview = await fetchSyncPreview(buildSalesDraftSyncPreviewInput(document, context))
+      await processDraftSyncPreview(preview, duplicateConfirmation)
+    } catch (reason) {
+      setSaving(false)
+      setSyncError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
+    }
+  }
+
+  async function processDraftSyncPreview(preview: SyncPreviewResponse, duplicateConfirmation?: SalesDuplicateConfirmation) {
+    const context = draftContextRef.current
+    if (!context) {
+      setSaving(false)
+      setSyncError('未保存書類の顧客・車両情報を確認できません。書類を開き直してください。')
+      return
+    }
+
+    setPendingDraftPreview(preview)
+    setPendingDraftDuplicateConfirmation(duplicateConfirmation)
+
+    const duplicateCustomers = preview.duplicateCustomers ?? []
+    if (context.customerMode === 'new' && !draftCustomerDuplicateConfirmedRef.current && duplicateCustomers.length > 0) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'customer', candidates: duplicateCustomers })
+      return
+    }
+
+    const chassisCandidates = (preview.duplicateVehicles ?? []).filter((candidate) => candidate.matchReason === 'chassis_number')
+    if (chassisCandidates.length > 0) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'vehicle', matchReason: 'chassis_number', candidates: chassisCandidates })
+      return
+    }
+
+    const registrationCandidates = (preview.duplicateVehicles ?? []).filter((candidate) => candidate.matchReason === 'registration_number')
+    const hasValidRegistrationConfirmation = Boolean(
+      duplicateConfirmation?.registrationNumberConfirmed
+      && duplicateConfirmation.confirmedVehicleId
+      && registrationCandidates.some((candidate) => candidate.id === duplicateConfirmation.confirmedVehicleId),
+    )
+    if (registrationCandidates.length > 0 && !hasValidRegistrationConfirmation) {
+      setSaving(false)
+      setSalesDuplicateDialog({ kind: 'vehicle', matchReason: 'registration_number', candidates: registrationCandidates })
+      return
+    }
+
+    const hasMasterDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0
+    if (hasMasterDiffs) {
+      setMasterSyncDialogResult(preview)
+      setSaving(false)
+      return
+    }
+
+    const currentDraft = draftDocumentRef.current
+    if (!currentDraft) {
+      setSaving(false)
+      setSyncError('未保存書類が見つかりません。')
+      return
+    }
+    setPendingDraftPreview(null)
+    await createDraftDocument(currentDraft, context, duplicateConfirmation)
+  }
+
+  async function createDraftDocument(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation, masterSync?: SalesMasterSync) {
+    setSaving(true)
+    setSyncError('')
+    try {
+      const currentDraft = draftDocumentRef.current ?? document
+      const currentContext = draftContextRef.current ?? context
+      const input = buildSalesCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync)
+      const nextDocument = await createSalesDocument(input)
+      replaceDocuments((current) => [nextDocument, ...current])
+      setSelectedDocumentId(nextDocument.id)
+      setActiveDraft(null)
+      draftContextRef.current = null
+      draftCustomerDuplicateConfirmedRef.current = false
+      setDirty(false)
+      setSaved(true)
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      setDocumentView('edit')
+
+      try {
+        const nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        lastOpenedDocumentIdRef.current = nextDocument.id
+        const foundCustomer = nextCustomers.find((customer) => customer.id === nextDocument.customerId)
+        const foundVehicle = nextDocument.vehicleId ? foundCustomer?.vehicles.find((vehicle) => vehicle.id === nextDocument.vehicleId) : null
+        if (foundCustomer && (!nextDocument.vehicleId || foundVehicle)) {
+          openedMasterSnapshotRef.current = {
+            state: 'ready',
+            customerId: foundCustomer.id,
+            customerUpdatedAt: foundCustomer.updatedAt,
+            vehicleId: nextDocument.vehicleId,
+            vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+          }
+        } else {
+          openedMasterSnapshotRef.current = { state: 'invalid' }
+        }
+      } catch {
+        setSyncError('書類は保存されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        lastOpenedDocumentIdRef.current = nextDocument.id
+        openedMasterSnapshotRef.current = { state: 'invalid' }
+      }
+    } catch (reason) {
+      setPendingDraftDuplicateConfirmation(undefined)
+      setSyncError(reason instanceof Error ? reason.message : '販売書類を保存できませんでした。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleUseExistingCustomer(customerId: string) {
+    const currentDraft = draftDocumentRef.current
+    const context = draftContextRef.current
+    if (!currentDraft || !context || context.customerMode !== 'new') return
+
+    setSaving(true)
+    setSyncError('')
+    try {
+      let nextCustomers = customers
+      let customer = nextCustomers.find((item) => item.id === customerId)
+      if (!customer) {
+        nextCustomers = await fetchCustomers()
+        setCustomers(nextCustomers)
+        customer = nextCustomers.find((item) => item.id === customerId)
+      }
+      if (!customer) throw new Error('選択した既存顧客を確認できません。顧客一覧を再読み込みしてください。')
+
+      const nextDraft: SalesDocumentLike = {
+        ...currentDraft,
+        customerId: customer.id,
+        customerName: customer.name,
+        phone: customer.phone,
+        customerDetails: mapCustomerDetails(customer),
+      }
+      const nextContext: SalesDraftContext = {
+        ...context,
+        customerMode: 'existing',
+        customerId: customer.id,
+        customerUpdatedAt: customer.updatedAt,
+      }
+      draftContextRef.current = nextContext
+      draftCustomerDuplicateConfirmedRef.current = false
+      setActiveDraft(nextDraft)
+      setMasterSyncDialogResult(null)
+      setSalesDuplicateDialog(null)
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      await runDraftSyncPreview(nextDraft, nextContext)
+    } catch (reason) {
+      setSaving(false)
+      setSyncError(reason instanceof Error ? reason.message : '既存顧客への切り替えに失敗しました。')
+    }
+  }
+
+  async function handleContinueAsNewCustomer() {
+    const preview = pendingDraftPreview
+    if (!preview || !draftContextRef.current) return
+    draftCustomerDuplicateConfirmedRef.current = true
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setSaving(true)
+    setPendingDraftDuplicateConfirmation(undefined)
+    await processDraftSyncPreview(preview)
+  }
+
+  function canUseExistingVehicleForDraft(vehicleId: string) {
+    const context = draftContextRef.current
+    if (!context || context.customerMode !== 'existing' || !context.customerId) return false
+    return customers.some((customer) => customer.id === context.customerId && customer.vehicles.some((vehicle) => vehicle.id === vehicleId))
+  }
+
+  async function handleUseExistingVehicle(vehicleId: string) {
+    const currentDraft = draftDocumentRef.current
+    const context = draftContextRef.current
+    if (!currentDraft || !context || !canUseExistingVehicleForDraft(vehicleId)) return
+    const customer = customers.find((item) => item.id === context.customerId)
+    const vehicle = customer?.vehicles.find((item) => item.id === vehicleId)
+    if (!customer || !vehicle) {
+      setSyncError('選択した既存車両を確認できません。顧客一覧を再読み込みしてください。')
+      return
+    }
+
+    const nextDraft: SalesDocumentLike = {
+      ...currentDraft,
+      vehicleId: vehicle.id,
+      vehicle: `${vehicle.maker} ${vehicle.model}`.trim(),
+      plate: vehicle.plate,
+      vehicleDetails: mapVehicleDetails(vehicle),
+    }
+    const nextContext: SalesDraftContext = {
+      ...context,
+      vehicleMode: 'existing',
+      vehicleId: vehicle.id,
+      vehicleUpdatedAt: vehicle.updatedAt,
+    }
+    draftContextRef.current = nextContext
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(nextDraft)
+    setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(true)
+    setSyncError('')
+    await runDraftSyncPreview(nextDraft, nextContext)
+  }
+
+  async function handleContinueAsNewVehicle(vehicleId: string) {
+    const preview = pendingDraftPreview
+    const isCurrentRegistrationCandidate = preview?.duplicateVehicles?.some((candidate) => candidate.id === vehicleId && candidate.matchReason === 'registration_number')
+    if (!preview || !isCurrentRegistrationCandidate) {
+      setSyncError('登録番号の重複候補が更新されています。もう一度保存してください。')
+      setSaving(false)
+      return
+    }
+    const duplicateConfirmation: SalesDuplicateConfirmation = { registrationNumberConfirmed: true, confirmedVehicleId: vehicleId }
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setSaving(true)
+    await processDraftSyncPreview(preview, duplicateConfirmation)
+  }
+
+  function handleSalesDuplicateCancel() {
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(false)
+  }
+
+  function handleMasterSyncCancel() {
+    setMasterSyncDialogResult(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSaving(false)
+  }
+
+  function handleMasterSyncConfirm(result: MasterSyncConfirmationResult) {
+    const preview = masterSyncDialogResult
+    setMasterSyncDialogResult(null)
+    if (draftDocumentRef.current) {
+      const context = draftContextRef.current
+      if (!context || !preview) {
+        setSaving(false)
+        setSyncError('未保存書類の保存状態を確認できません。')
+        return
+      }
+      const masterSync = buildSalesMasterSync(result, preview)
+      const duplicateConfirmation = pendingDraftDuplicateConfirmation
+      setPendingDraftPreview(null)
+      setPendingDraftDuplicateConfirmation(undefined)
+      void createDraftDocument(draftDocumentRef.current, context, duplicateConfirmation, masterSync)
+      return
+    }
+    let masterSync: { confirmed: true; customerFields: string[]; vehicleFields: string[]; expectedCustomerUpdatedAt?: string; expectedVehicleUpdatedAt?: string } | undefined
+    if (result.customerFields.length > 0 || result.vehicleFields.length > 0) {
+      masterSync = {
+        confirmed: true,
+        customerFields: result.customerFields,
+        vehicleFields: result.vehicleFields,
+        expectedCustomerUpdatedAt: result.customerFields.length > 0 ? (preview?.expectedCustomerUpdatedAt ?? undefined) : undefined,
+        expectedVehicleUpdatedAt: result.vehicleFields.length > 0 ? (preview?.expectedVehicleUpdatedAt ?? undefined) : undefined,
+      }
+    }
+    void saveSelectedDocument(masterSync)
   }
 
   return (
@@ -369,8 +868,10 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={selectedDocument?.id ?? ''} onSelect={setSelectedDocumentId} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={saveSelectedDocument} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => void downloadSalesDocumentPdf(selectedDocument, settings)} onPdfPreview={() => void previewSalesDocumentPdf(selectedDocument, settings)} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
-      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} creating={creating} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={createDocument} onCreateCustomer={registerCustomer} onCreateVehicle={registerVehicle} />}
+      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+      {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
+      {salesDuplicateDialog && <SalesDuplicateConfirmationDialog state={salesDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleSalesDuplicateCancel} />}
+      {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={undefined} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMasterSyncCancel} />}
     </>
   )
 }
@@ -414,12 +915,12 @@ function salesDocumentMonth(issuedAt: string) {
   return { key: `${year}-${month.padStart(2, '0')}`, label: `${year}年${Number(month)}月（完了）` }
 }
 
-function SalesDocumentDetail({ document, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocument; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
-  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} /></div><h2>{document.number}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} totals={totals} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
+function SalesDocumentDetail({ document, isDraft, totals, shopName, settings, itemPresets, customers, view, dirty, saving, saved, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onUpdateTradeIn, onUpdateCredit, onUpdateRequiredDocument, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem, onSave, onArchive, onPdfDownload, onPdfPreview }: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; shopName: string; settings: AppSettings; itemPresets: string[]; customers: Customer[]; view: SalesDocumentView; dirty: boolean; saving: boolean; saved: boolean; onViewChange: (view: SalesDocumentView) => void; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void; onSave: () => void; onArchive: () => void; onPdfDownload: () => void; onPdfPreview: () => void }) {
+  return <section className="panel sales-detail-panel"><div className="sales-detail-header"><div className="sales-detail-title"><div><div className="sales-detail-badges"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} />{isDraft && <span className="document-draft-badge">新規・未保存</span>}</div><h2>{document.id ? document.number : '未採番'}</h2><small>{document.issuedAt} 作成 ・ 発行元 {shopName}</small></div></div><div className="sales-detail-actions"><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={!dirty || saving} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />PDF保存</button><button className="button button-danger" type="button" disabled={isDraft || saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div></div><div className="sales-document-tabs" role="tablist" aria-label="販売書類の表示"><button id="sales-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="sales-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="sales-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="sales-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>{view === 'edit' ? <div id="sales-document-edit-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-edit-tab"><SalesDocumentEditor document={document} isDraft={isDraft} totals={totals} itemPresets={itemPresets} customers={customers} defaultDueDate={dateAfter(settings.document.defaultDueDays)} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateTaxRate={onUpdateTaxRate} onUpdateTradeIn={onUpdateTradeIn} onUpdateCredit={onUpdateCredit} onUpdateRequiredDocument={onUpdateRequiredDocument} onUpdateItem={onUpdateItem} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div> : <div id="sales-document-preview-panel" className="sales-detail-content" role="tabpanel" aria-labelledby="sales-document-preview-tab"><SalesDocumentPreview document={document} isDraft={isDraft} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} /></div>}</section>
 }
 
-function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
-  const { document, customers, onUpdateHeader } = props
+function SalesDocumentEditor(props: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; defaultDueDate: string; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
+  const { document, isDraft, customers, defaultDueDate, onUpdateHeader } = props
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   return <>
     <section className="document-header-editor">
@@ -427,10 +928,10 @@ function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTota
       <div className="form-grid">
         <label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select></label>
         <label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}><option>下書き</option><option>入金待ち</option><option>完了</option></select></label>
-        <label className="form-field"><span>顧客</span><select value={document.customerId} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
-        <label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}><option value="">車両を指定しない</option>{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label>
+         <label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+         <label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && <option value="">車両を指定しない</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select></label>
         <label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label>
-        <label className="form-field"><span>支払期限</span><input type="date" value={document.dueDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('dueDate', event.target.value.replaceAll('-', '/'))} /></label>
+        <OptionalDateField id="sales-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} />
       </div>
     </section>
     <details className="sales-details-accordion">
@@ -440,23 +941,13 @@ function SalesDocumentEditor(props: { document: SalesDocument; totals: SalesTota
   </>
 }
 
-function SalesDocumentPreview({ document, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem }: { document: SalesDocument; totals: SalesTotals; settings: AppSettings; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
-  return <SalesEstimatePreview document={document} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} />
-  /*
-  const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
-  const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
-  const customer = document.customerDetails ?? mapCustomerDetails(selectedCustomer)
-  const vehicle = document.vehicleDetails ?? (selectedVehicle ? mapVehicleDetails(selectedVehicle) : null)
-  const details = document.details
-  const shopLines = [settings.shop.postalCode ? `〒${settings.shop.postalCode}` : '', settings.shop.address, settings.shop.phone ? `TEL ${settings.shop.phone}` : '', settings.shop.representative ? `担当 ${settings.shop.representative}` : '', settings.shop.registrationNumber ? `登録番号 ${settings.shop.registrationNumber}` : ''].filter(Boolean)
-  const paymentNote = settings.document.paymentNote || '店頭または指定口座へお支払いください。'
-  const bankAccount = [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定'
-  return <div className="sales-preview-area"><div className="sales-preview-toolbar"><div><strong>見積書プレビュー</strong><span>実際のPDFと同じ情報配置で確認できます。基本項目と明細はこの画面から編集できます。</span></div><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button></div><article className="sales-document-paper sales-estimate-paper"><header className="sales-estimate-paper-header"><div className="sales-estimate-title-block"><select className="sales-estimate-title" aria-label="書類種別" value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select><span>{details.salesCategory || '販売書類'}</span></div><div className="sales-estimate-meta-table"><div><span>日付</span><input type="date" aria-label="発行日" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></div><div><span>販売区分</span><strong>{details.salesCategory || '未設定'}</strong></div><div><span>担当</span><strong>{details.staffName || '未設定'}</strong></div><div><span>見積番号</span><input aria-label="書類番号" value={document.number} onChange={(event) => onUpdateHeader('number', event.target.value)} /></div><div><span>ページ</span><strong>1</strong></div></div></header><section className="sales-estimate-customer-grid"><div className="sales-estimate-customer-box"><div className="sales-estimate-cell-label">お名前</div><div className="sales-estimate-cell-value"><strong>{customer.name || '未設定'} {details.customerHonorific}</strong><small>{customer.kana || 'ふりがな未登録'}</small></div><div className="sales-estimate-cell-label">ご住所</div><div className="sales-estimate-cell-value"><span>{customer.postalCode ? `〒${customer.postalCode}` : ''}</span><span>{customer.address || '住所未登録'}</span></div></div><div className="sales-estimate-contact-box"><div className="sales-estimate-cell-label">生年月日</div><div>{details.customerBirthDate || '未設定'}</div><div className="sales-estimate-cell-label">電話番号</div><div>{customer.phone || '未登録'}</div><div className="sales-estimate-cell-label">勤務先等</div><div>{details.customerEmployer || '未設定'}</div><div className="sales-estimate-cell-label">連絡先TEL</div><div>{details.customerContactPhone || '未設定'}</div></div></section><EstimateVehicleTable vehicle={vehicle} /><EstimateTradeInTable details={details} /><section className="sales-estimate-summary-top"><div className="sales-estimate-amount-card"><span>お見積金額</span><strong>{formatYen(totals.total)}</strong></div><div className="sales-estimate-tax-card"><div><span>課税対象額</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div><span>非課税・対象外</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div></div></section><div className="sales-estimate-section-title"><h3>明細</h3><span /><button className="text-button" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button></div><div className="sales-estimate-items-table"><div className="sales-estimate-items-head"><span>No.</span><span>作業内容／部品名等</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要</span></div>{document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}><span>{index + 1}</span><input list="sales-preview-item-presets" aria-label="プレビューの明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /><input aria-label="プレビューの数量" type="number" min="0" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} /><input aria-label="プレビューの単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} /><input aria-label="プレビューの単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} /><strong>{formatYen(Math.round(item.quantity * item.unitPrice))}</strong><strong>{formatYen(item.otherAmount)}</strong><input aria-label="プレビューの摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button></div>)}</div><datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist><div className="sales-estimate-items-total"><span>明細合計</span><strong>{formatYen(totals.subtotal)}</strong><span>消費税</span><strong>{formatYen(totals.tax)}</strong><span>合計</span><strong>{formatYen(totals.total)}</strong></div><section className="sales-estimate-bottom-grid"><div><div className="sales-estimate-recycle"><span>リサイクル料金（預託金）</span><strong>{formatYen(details.recycleFee)}</strong></div><div className="sales-estimate-credit"><h4>クレジットお支払いプラン</h4>{details.credit.enabled ? <div><span>{details.credit.paymentCount || '回数未設定'}</span><span>月々 {formatYen(details.credit.monthlyPayment)}</span><span>初回 {formatYen(details.credit.initialPayment)}</span><span>ボーナス {details.credit.bonusMonths || '月未設定'} / {formatYen(details.credit.bonusPayment)}</span></div> : <p>利用なし</p>}</div><div className="sales-estimate-required"><h4>必要書類</h4><p>{requiredDocumentLabels(details).join(' ／ ') || '未確認'}</p></div></div><div className="sales-estimate-company"><strong>{settings.shop.name || '店舗名未設定'}</strong>{shopLines.slice(0, 4).map((line) => <span key={line}>{line}</span>)}<div className="sales-estimate-company-payment"><span>お支払いについて</span><p>{paymentNote}</p><span>振込先</span><p>{bankAccount}</p></div></div></section><footer className="sales-paper-footer"><span>{document.note || settings.document.footerNote || '見積条件は担当者へご確認ください。'}</span><span>ページ 1</span></footer></article></div>
-  */
+function SalesDocumentPreview({ document, isDraft, totals, settings, itemPresets, customers, onUpdateHeader, onUpdateDetails, onUpdateItem, onUpdateSheetLine, onAddItem, onRemoveItem }: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; settings: AppSettings; itemPresets: string[]; customers: Customer[]; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onUpdateSheetLine: SalesPreviewProps['onUpdateSheetLine']; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
+  return <SalesEstimatePreview document={document} isDraft={isDraft} totals={totals} settings={settings} itemPresets={itemPresets} customers={customers} onUpdateHeader={onUpdateHeader} onUpdateDetails={onUpdateDetails} onUpdateItem={onUpdateItem} onUpdateSheetLine={onUpdateSheetLine} onAddItem={onAddItem} onRemoveItem={onRemoveItem} />
 }
 
 type SalesPreviewProps = {
-  document: SalesDocument
+  document: SalesDocumentLike
+  isDraft: boolean
   totals: SalesTotals
   settings: AppSettings
   itemPresets: string[]
@@ -472,20 +963,9 @@ type SalesPreviewProps = {
 
 function SalesEstimatePreview(props: SalesPreviewProps) {
   return <SalesEstimateExactPreview {...props} />
-  /*
-  const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
-  const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
-  const customer = document.customerDetails ?? mapCustomerDetails(selectedCustomer)
-  const vehicle = document.vehicleDetails ?? (selectedVehicle ? mapVehicleDetails(selectedVehicle) : null)
-  const details = document.details
-  const shopLines = [settings.shop.postalCode ? `〒${settings.shop.postalCode}` : '', settings.shop.address, settings.shop.phone ? `TEL ${settings.shop.phone}` : '', settings.shop.representative ? `担当 ${settings.shop.representative}` : '', settings.shop.registrationNumber ? `登録番号 ${settings.shop.registrationNumber}` : ''].filter(Boolean)
-  const paymentNote = settings.document.paymentNote || '店頭または指定口座へお支払いください。'
-  const bankAccount = [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定'
-  return <div className="sales-preview-area"><div className="sales-preview-toolbar"><div><strong>見積書プレビュー</strong><span>実際のPDFと同じ情報配置で確認できます。基本項目と明細はこの画面から編集できます。</span></div><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button></div><article className="sales-document-paper sales-estimate-paper"><header className="sales-estimate-paper-header"><div className="sales-estimate-title-block"><select className="sales-estimate-title" aria-label="書類種別" value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select><span>{details.salesCategory || '販売書類'}</span></div><div className="sales-estimate-meta-table"><div><span>日付</span><input type="date" aria-label="発行日" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></div><div><span>販売区分</span><strong>{details.salesCategory || '未設定'}</strong></div><div><span>担当</span><strong>{details.staffName || '未設定'}</strong></div><div><span>見積番号</span><input aria-label="書類番号" value={document.number} onChange={(event) => onUpdateHeader('number', event.target.value)} /></div><div><span>ページ</span><strong>1</strong></div></div></header><section className="sales-estimate-customer-grid"><div className="sales-estimate-customer-box"><div className="sales-estimate-cell-label">お名前</div><div className="sales-estimate-cell-value"><strong>{customer.name || '未設定'} {details.customerHonorific}</strong><small>{customer.kana || 'ふりがな未登録'}</small></div><div className="sales-estimate-cell-label">ご住所</div><div className="sales-estimate-cell-value"><span>{customer.postalCode ? `〒${customer.postalCode}` : ''}</span><span>{customer.address || '住所未登録'}</span></div></div><div className="sales-estimate-contact-box"><div className="sales-estimate-cell-label">生年月日</div><div>{details.customerBirthDate || '未設定'}</div><div className="sales-estimate-cell-label">電話番号</div><div>{customer.phone || '未登録'}</div><div className="sales-estimate-cell-label">勤務先等</div><div>{details.customerEmployer || '未設定'}</div><div className="sales-estimate-cell-label">連絡先TEL</div><div>{details.customerContactPhone || '未設定'}</div></div></section><EstimateVehicleTable vehicle={vehicle} /><EstimateTradeInTable details={details} /><section className="sales-estimate-summary-top"><div className="sales-estimate-amount-card"><span>お見積金額</span><strong>{formatYen(totals.total)}</strong></div><div className="sales-estimate-tax-card"><div><span>課税対象額</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div><span>非課税・対象外</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div></div></section><div className="sales-estimate-status-line"><span>支払期限：{document.dueDate || '未設定'}</span><span>状態：{document.status}</span></div><div className="sales-estimate-section-title"><h3>明細</h3><span /><button className="text-button" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button></div><div className="sales-estimate-items-table"><div className="sales-estimate-items-head"><span>No.</span><span>作業内容／部品名等</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要・課税</span></div>{document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}><span>{index + 1}</span><input list="sales-preview-item-presets" aria-label="プレビューの明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /><input aria-label="プレビューの数量" type="number" min="0" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} /><input aria-label="プレビューの単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} /><input aria-label="プレビューの単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} /><strong>{formatYen(Math.round(item.quantity * item.unitPrice))}</strong><strong>{formatYen(item.otherAmount)}</strong><div className="sales-estimate-summary-cell"><input aria-label="プレビューの摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="プレビューの課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div><button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button></div>)}</div><datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist><div className="sales-estimate-items-total"><span>明細合計</span><strong>{formatYen(totals.subtotal)}</strong><span>消費税</span><strong>{formatYen(totals.tax)}</strong><span>合計</span><strong>{formatYen(totals.total)}</strong></div><section className="sales-estimate-bottom-grid"><div><div className="sales-estimate-recycle"><span>リサイクル料金（預託金）</span><strong>{formatYen(details.recycleFee)}</strong></div><div className="sales-estimate-payment-summary"><span>頭金・現金・他</span><strong>{formatYen(details.downPayment)}</strong><span>残金・所要資金</span><strong>{formatYen(details.remainingPayment)}</strong></div><div className="sales-estimate-credit"><h4>クレジットお支払いプラン</h4>{details.credit.enabled ? <div><span>{details.credit.paymentCount || '回数未設定'}</span><span>手数料 {formatYen(details.credit.fee)}</span><span>月々 {formatYen(details.credit.monthlyPayment)}</span><span>初回 {formatYen(details.credit.initialPayment)}</span><span>ボーナス {details.credit.bonusMonths || '月未設定'} / {formatYen(details.credit.bonusPayment)}</span></div> : <p>利用なし</p>}</div><div className="sales-estimate-required"><h4>必要書類</h4><p>{requiredDocumentLabels(details).join(' ／ ') || '未確認'}</p></div></div><div className="sales-estimate-company"><strong>{settings.shop.name || '店舗名未設定'}</strong>{shopLines.slice(0, 4).map((line) => <span key={line}>{line}</span>)}<div className="sales-estimate-company-payment"><span>お支払いについて</span><p>{paymentNote}</p><span>振込先</span><p>{bankAccount}</p></div></div></section><footer className="sales-paper-footer"><span>{document.note || settings.document.footerNote || '見積条件は担当者へご確認ください。'}</span><span>ページ 1</span></footer></article></div>
-  */
 }
 
-function SalesEstimateExactPreview({ document, customers, onUpdateHeader, onUpdateDetails, onUpdateSheetLine, settings }: SalesPreviewProps) {
+function SalesEstimateExactPreview({ document, isDraft, customers, onUpdateHeader, onUpdateDetails, onUpdateSheetLine, settings }: SalesPreviewProps) {
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === document.vehicleId)
   const imageAttachments = selectedVehicle?.attachments.filter((attachment) => attachment.type === 'image') ?? []
@@ -500,13 +980,13 @@ function SalesEstimateExactPreview({ document, customers, onUpdateHeader, onUpda
     <div className="sales-estimate-image-control">
       <div><strong><ImageIcon size={16} />帳票に表示する車両画像</strong><span>{selectedVehicle ? `${selectedVehicle.maker} ${selectedVehicle.model}の添付画像から選択できます。` : '対象車両を選択すると添付画像を選択できます。'}</span></div>
       <div className="sales-estimate-image-select">
-        <select aria-label="帳票に表示する車両画像" value={document.details.selectedImageAttachmentId} disabled={!imageAttachments.length} onChange={(event) => onUpdateDetails({ selectedImageAttachmentId: event.target.value })}>
+        <select aria-label="帳票に表示する車両画像" value={document.details.selectedImageAttachmentId} disabled={isDraft || !imageAttachments.length} onChange={(event) => onUpdateDetails({ selectedImageAttachmentId: event.target.value })}>
           <option value="">画像なし（顧客情報を拡張）</option>
           {imageAttachments.map((attachment) => <option key={attachment.id} value={attachment.id}>{attachment.name}</option>)}
         </select>
         {imageState.loading && <small><RefreshCw size={13} className="is-spinning" />画像を読み込んでいます…</small>}
         {imageState.error && <small className="is-error">画像を表示できないため、顧客情報表示に切り替えています。</small>}
-        {!imageAttachments.length && <small>画像ファイルが登録されていません。</small>}
+        {isDraft ? <small>未保存書類では添付画像を選択できません。</small> : !imageAttachments.length && <small>画像ファイルが登録されていません。</small>}
       </div>
     </div>
     <div className="sales-estimate-sheet-frame">
@@ -565,13 +1045,17 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
   })),
 ]
 
-export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresetGroups, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocument; hasImage: boolean; sections: SalesEstimateSections; itemPresetGroups: SalesItemPresetGroups; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
-  const customer = document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)
+export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresetGroups, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocumentLike; hasImage: boolean; sections: SalesEstimateSections; itemPresetGroups: SalesItemPresetGroups; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
+  const customer = currentSalesCustomerValues(document)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicleDetails()
   const tradeInLine = sections.tradeIns[0]
 
   function updateCustomer(field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) {
-    onUpdateDetails({ customerOverride: { ...customer, [field]: value } })
+    onUpdateDetails({
+      customerOverride: { ...customer, [field]: value },
+      ...(field === 'birthDate' ? { customerBirthDate: value } : {}),
+      ...(field === 'employer' ? { customerEmployer: value } : {}),
+    })
   }
 
   function updateVehicle(field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) {
@@ -632,7 +1116,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
   </div>
 }
 
-function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocument; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
+function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustomer, onUpdateDetails }: { document: SalesDocumentLike; hasImage: boolean; customer: NonNullable<SalesDocumentDetails['customerOverride']>; onUpdateCustomer: (field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) => void; onUpdateDetails: SalesPreviewProps['onUpdateDetails'] }) {
   const customerLayout = salesEstimateSheetLayout.customer
   const left = hasImage
     ? { name: [84, customerLayout.y + 16, 230, 35], postalCode: [38, customerLayout.y + 61, 312, 27], address: [38, customerLayout.y + 93, 312, 27], phone: [38, customerLayout.y + 129, 312, 28] }
@@ -640,13 +1124,13 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
   return <>
     <SheetTextControl variant="customer-name" ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SalesSheetCustomerHonorific hasImage={hasImage} value={document.details.customerHonorific || '様'} y={left.name[1]} height={left.name[3]} />
-    <SheetTextControl variant="customer-value" displayPrefix="〒" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} onChange={(value) => onUpdateCustomer('postalCode', value)} />
+    <SheetTextControl variant="customer-value" displayPrefix="〒" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} normalizeOnBlur={normalizePostalCode} onChange={(value) => onUpdateCustomer('postalCode', value)} />
     <SheetTextControl variant="customer-value" ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
-    {hasImage && left.phone ? <SheetTextControl variant="customer-value" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
+    {hasImage && left.phone ? <SheetTextControl variant="customer-value" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
     {!hasImage ? <>
-      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate} x={478} y={customerLayout.y + 1} width={207} height={41} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
-      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} onChange={(value) => onUpdateCustomer('phone', value)} />
-      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl grid calendar ariaLabel="生年月日" value={customer.birthDate} x={478} y={customerLayout.y + 1} width={207} height={41} normalizeOnBlur={normalizeSalesCustomerBirthDateOnBlur} onChange={(value) => onUpdateCustomer('birthDate', value)} />
+      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl grid ariaLabel="勤務先等" value={customer.employer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(value) => onUpdateCustomer('employer', value)} />
       <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
@@ -674,7 +1158,7 @@ function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: bo
     { field: 'inspectionDate', x: 116, y: y + 150, width: 277, height: 37 },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <SheetTextControl grid key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <SheetTextControl grid calendar={field === 'inspectionDate'} key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
     <SheetRecordControl value={vehicle.inspectionRecordAvailable} x={483} y={y + 150} width={202} height={37} onChange={(value) => onUpdate('inspectionRecordAvailable', value)} />
   </>
 }
@@ -688,7 +1172,7 @@ function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: bo
     { field: 'mileage', x: 427, width: 137 },
     { field: 'color', x: 564, width: 121 },
   ]
-  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered onChange={(value) => onUpdate(field, value)} />)}</>
+  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid calendar={field === 'inspectionDate'} key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered normalizeOnBlur={field === 'modelYear' ? normalizeModelYear : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}</>
 }
 
 function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { requiredDocuments: SalesDocumentDetails['requiredDocuments']; onUpdate: (field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) => void }) {
@@ -738,15 +1222,19 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
   />
 }
 
-function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, variant, displayPrefix = '', onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; onChange: (value: string) => void }) {
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, calendar = false, variant, displayPrefix = '', normalizeOnBlur, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; calendar?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; onChange: (value: string) => void }) {
   const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}${variant ? ` is-${variant}` : ''}`
   const displayValue = value ? `${displayPrefix}${value}` : value
   function handleChange(nextValue: string) {
     const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
     onChange(withoutPrefix)
   }
-  const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, style: sheetPositionStyle(x, y, width, height), onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value) }
-  return multiline ? <textarea {...props} /> : <input {...props} />
+  const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
+  if (!calendar || multiline) return multiline ? <textarea {...props} style={sheetPositionStyle(x, y, width, height)} /> : <input {...props} style={sheetPositionStyle(x, y, width, height)} />
+  return <div className="sales-estimate-sheet-calendar-control" style={sheetPositionStyle(x, y, width, height)}>
+    <input {...props} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
+    <DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} />
+  </div>
 }
 
 function SheetRecordControl({ value, x, y, width, height, onChange }: { value: boolean; x: number; y: number; width: number; height: number; onChange: (value: boolean) => void }) {
@@ -871,7 +1359,7 @@ function SalesEstimatePreviewLayout({ document, totals, settings, itemPresets, c
   const paymentNote = settings.document.paymentNote || '店頭または指定口座へお支払いください。'
   const bankAccount = [settings.shop.bankName, settings.shop.bankAccount].filter(Boolean).join(' / ') || '未設定'
 
-  return <div className="sales-preview-area"><div className="sales-preview-toolbar"><div><strong>見積書プレビュー</strong><span>PDFと同じ帳票構成で確認できます。表示画像と明細はこの画面から変更できます。</span></div><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button></div><div className="sales-estimate-image-control"><div><strong><ImageIcon size={16} />帳票に表示する車両画像</strong><span>{selectedVehicle ? `${selectedVehicle.maker} ${selectedVehicle.model}の添付画像から選択できます。` : '対象車両を選択すると添付画像を選択できます。'}</span></div><div className="sales-estimate-image-select"><select aria-label="帳票に表示する車両画像" value={details.selectedImageAttachmentId} disabled={!imageAttachments.length} onChange={(event) => onUpdateDetails({ selectedImageAttachmentId: event.target.value })}><option value="">画像なし（顧客情報を拡張）</option>{imageAttachments.map((attachment) => <option key={attachment.id} value={attachment.id}>{attachment.name}</option>)}</select>{imageState.loading && <small><RefreshCw size={13} className="is-spinning" />画像を読み込んでいます…</small>}{imageState.error && <small className="is-error">画像を表示できないため、顧客情報表示に切り替えています。</small>}{!imageAttachments.length && <small>画像ファイルが登録されていません。</small>}</div></div><article className={`sales-document-paper sales-estimate-paper${hasImage ? ' has-selected-image' : ' has-expanded-customer'}`}><header className="sales-estimate-paper-header"><div className="sales-estimate-title-block"><select className="sales-estimate-title" aria-label="書類種別" value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select><span>{details.salesCategory || '販売書類'}</span></div><div className="sales-estimate-meta-table"><div><span>日付</span><input type="date" aria-label="発行日" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></div><div><span>販売区分</span><strong>{details.salesCategory || '未設定'}</strong></div><div><span>担当</span><strong>{details.staffName || '未設定'}</strong></div><div><span>見積番号</span><strong>{document.number}</strong></div><div><span>ページ</span><strong>1 / 1</strong></div></div></header><section className="sales-estimate-customer-grid"><div className="sales-estimate-customer-box"><div className="sales-estimate-cell-label">お名前</div><div className="sales-estimate-cell-value"><strong>{customer.name || '未設定'} {details.customerHonorific || '様'}</strong><small>{customer.kana || 'ふりがな未登録'}</small></div><div className="sales-estimate-cell-label">ご住所</div><div className="sales-estimate-cell-value"><span>{customer.postalCode ? `〒${customer.postalCode}` : ''}</span><span>{customer.address || '住所未登録'}</span></div><div className="sales-estimate-cell-label">電話番号</div><div className="sales-estimate-cell-value"><span>{customer.phone || '未登録'}</span></div></div>{hasImage ? <div className="sales-estimate-photo-box"><img src={imageState.url} alt={`${vehicle?.name || '対象車両'}の選択画像`} /><small>{selectedAttachment?.name}</small></div> : <div className="sales-estimate-contact-box"><div className="sales-estimate-cell-label">生年月日</div><div>{details.customerBirthDate || '未設定'}</div><div className="sales-estimate-cell-label">電話番号</div><div>{customer.phone || '未登録'}</div><div className="sales-estimate-cell-label">勤務先等</div><div>{details.customerEmployer || '未設定'}</div><div className="sales-estimate-cell-label">連絡先TEL</div><div>{details.customerContactPhone || '未設定'}</div></div>}</section><EstimateVehicleTable vehicle={vehicle} /><EstimateTradeInTable details={details} /><section className="sales-estimate-summary-top"><div className="sales-estimate-amount-card"><span>お見積金額（税込）</span><strong>{formatYen(totals.total)}</strong></div><div className="sales-estimate-tax-card"><div><span>課税対象額（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div><span>非課税対象額</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div></div></section><div className="sales-estimate-status-line"><span>支払期限：{document.dueDate || '未設定'}</span><span>状態：{document.status}</span></div><div className="sales-estimate-section-title"><h3>見積金額内訳</h3><span /></div><div className="sales-estimate-breakdown-grid"><EstimateVehicleBreakdown totals={totals} taxRate={document.taxRate} /><EstimateFeeBreakdown sections={sections} totals={totals} /><EstimateAccessoryBreakdown sections={sections} totals={totals} /></div><details className="sales-estimate-edit-details"><summary><FileText size={15} />金額明細を編集</summary><div className="sales-estimate-items-table"><div className="sales-estimate-items-head"><span>No.</span><span>作業内容／部品名等</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要・課税</span></div>{document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}><span>{index + 1}</span><input list="sales-preview-item-presets" aria-label="プレビューの明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /><input aria-label="プレビューの数量" type="number" min="0" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} /><input aria-label="プレビューの単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} /><input aria-label="プレビューの単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} /><strong>{formatYen(calculateSalesLineAmount(item))}</strong><input aria-label="プレビューの技術料・他" type="number" value={item.otherAmount} onChange={(event) => onUpdateItem(item.id, 'otherAmount', event.target.value)} /><div className="sales-estimate-summary-cell"><input aria-label="プレビューの摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="プレビューの課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div><button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button></div>)}</div><datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist><div className="sales-estimate-edit-actions"><button className="button button-secondary" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button><span>残金・所要資金は見積総額、下取、頭金から自動計算します。</span></div></details><section className="sales-estimate-bottom-grid"><div><div className="sales-estimate-credit"><h4>クレジットお支払いプラン</h4>{details.credit.enabled ? <div><span>{details.credit.paymentCount || '回数未設定'}</span><span>手数料 {formatYen(details.credit.fee)}</span><span>月々 {formatYen(details.credit.monthlyPayment)}</span><span>初回 {formatYen(details.credit.initialPayment)}</span><span>ボーナス {details.credit.bonusMonths || '月未設定'} / {formatYen(details.credit.bonusPayment)}</span></div> : <p>利用なし</p>}</div><div className="sales-estimate-required"><h4>必要書類</h4><p>{requiredDocumentLabels(details).join(' ／ ') || '未確認'}</p></div></div><div className="sales-estimate-company"><strong>{settings.shop.name || '店舗名未設定'}</strong>{shopLines.slice(0, 4).map((line) => <span key={line}>{line}</span>)}<div className="sales-estimate-company-payment"><span>お支払いについて</span><p>{paymentNote}</p><span>振込先</span><p>{bankAccount}</p></div></div></section><footer className="sales-paper-footer"><span>{document.note || settings.document.footerNote || '見積条件は担当者へご確認ください。'}</span><span>ページ 1 / 1</span></footer></article></div>
+  return <div className="sales-preview-area"><div className="sales-preview-toolbar"><div><strong>見積書プレビュー</strong><span>PDFと同じ帳票構成で確認できます。表示画像と明細はこの画面から変更できます。</span></div><button className="button button-secondary" type="button" onClick={onPdfPreview}><Eye size={16} />PDFで確認</button></div><div className="sales-estimate-image-control"><div><strong><ImageIcon size={16} />帳票に表示する車両画像</strong><span>{selectedVehicle ? `${selectedVehicle.maker} ${selectedVehicle.model}の添付画像から選択できます。` : '対象車両を選択すると添付画像を選択できます。'}</span></div><div className="sales-estimate-image-select"><select aria-label="帳票に表示する車両画像" value={details.selectedImageAttachmentId} disabled={!imageAttachments.length} onChange={(event) => onUpdateDetails({ selectedImageAttachmentId: event.target.value })}><option value="">画像なし（顧客情報を拡張）</option>{imageAttachments.map((attachment) => <option key={attachment.id} value={attachment.id}>{attachment.name}</option>)}</select>{imageState.loading && <small><RefreshCw size={13} className="is-spinning" />画像を読み込んでいます…</small>}{imageState.error && <small className="is-error">画像を表示できないため、顧客情報表示に切り替えています。</small>}{!imageAttachments.length && <small>画像ファイルが登録されていません。</small>}</div></div><article className={`sales-document-paper sales-estimate-paper${hasImage ? ' has-selected-image' : ' has-expanded-customer'}`}><header className="sales-estimate-paper-header"><div className="sales-estimate-title-block"><select className="sales-estimate-title" aria-label="書類種別" value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select><span>{details.salesCategory || '販売書類'}</span></div><div className="sales-estimate-meta-table"><div><span>日付</span><input type="date" aria-label="発行日" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></div><div><span>販売区分</span><strong>{details.salesCategory || '未設定'}</strong></div><div><span>担当</span><strong>{details.staffName || '未設定'}</strong></div><div><span>見積番号</span><strong>{document.number}</strong></div><div><span>ページ</span><strong>1 / 1</strong></div></div></header><section className="sales-estimate-customer-grid"><div className="sales-estimate-customer-box"><div className="sales-estimate-cell-label">お名前</div><div className="sales-estimate-cell-value"><strong>{customer.name || '未設定'} {details.customerHonorific || '様'}</strong><small>{customer.kana || 'ふりがな未登録'}</small></div><div className="sales-estimate-cell-label">ご住所</div><div className="sales-estimate-cell-value"><span>{customer.postalCode ? `〒${customer.postalCode}` : ''}</span><span>{customer.address || '住所未登録'}</span></div><div className="sales-estimate-cell-label">電話番号</div><div className="sales-estimate-cell-value"><span>{customer.phone || '未登録'}</span></div></div>{hasImage ? <div className="sales-estimate-photo-box"><img src={imageState.url} alt={`${vehicle?.name || '対象車両'}の選択画像`} /><small>{selectedAttachment?.name}</small></div> : <div className="sales-estimate-contact-box"><div className="sales-estimate-cell-label">生年月日</div><div>{details.customerBirthDate || customer.birthDate || '未設定'}</div><div className="sales-estimate-cell-label">電話番号</div><div>{customer.phone || '未登録'}</div><div className="sales-estimate-cell-label">勤務先等</div><div>{details.customerEmployer || customer.employer || '未設定'}</div><div className="sales-estimate-cell-label">連絡先TEL</div><div>{details.customerContactPhone || '未設定'}</div></div>}</section><EstimateVehicleTable vehicle={vehicle} /><EstimateTradeInTable details={details} /><section className="sales-estimate-summary-top"><div className="sales-estimate-amount-card"><span>お見積金額（税込）</span><strong>{formatYen(totals.total)}</strong></div><div className="sales-estimate-tax-card"><div><span>課税対象額（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.taxableSubtotal)}</strong></div><div><span>消費税（{formatPercent(document.taxRate)}）</span><strong>{formatYen(totals.tax)}</strong></div><div><span>非課税対象額</span><strong>{formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}</strong></div></div></section><div className="sales-estimate-status-line"><span>支払期限：{document.dueDate || '未設定'}</span><span>状態：{document.status}</span></div><div className="sales-estimate-section-title"><h3>見積金額内訳</h3><span /></div><div className="sales-estimate-breakdown-grid"><EstimateVehicleBreakdown totals={totals} taxRate={document.taxRate} /><EstimateFeeBreakdown sections={sections} totals={totals} /><EstimateAccessoryBreakdown sections={sections} totals={totals} /></div><details className="sales-estimate-edit-details"><summary><FileText size={15} />金額明細を編集</summary><div className="sales-estimate-items-table"><div className="sales-estimate-items-head"><span>No.</span><span>作業内容／部品名等</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要・課税</span></div>{document.items.map((item, index) => <div className="sales-estimate-item-row" key={item.id}><span>{index + 1}</span><input list="sales-preview-item-presets" aria-label="プレビューの明細内容" value={item.description} onChange={(event) => onUpdateItem(item.id, 'description', event.target.value)} placeholder="明細内容" /><input aria-label="プレビューの数量" type="number" min="0" value={item.quantity} onChange={(event) => onUpdateItem(item.id, 'quantity', event.target.value)} /><input aria-label="プレビューの単位" value={item.unit} onChange={(event) => onUpdateItem(item.id, 'unit', event.target.value)} /><input aria-label="プレビューの単価" type="number" value={item.unitPrice} onChange={(event) => onUpdateItem(item.id, 'unitPrice', event.target.value)} /><strong>{formatYen(calculateSalesLineAmount(item))}</strong><input aria-label="プレビューの技術料・他" type="number" value={item.otherAmount} onChange={(event) => onUpdateItem(item.id, 'otherAmount', event.target.value)} /><div className="sales-estimate-summary-cell"><input aria-label="プレビューの摘要" value={item.summary} onChange={(event) => onUpdateItem(item.id, 'summary', event.target.value)} /><select aria-label="プレビューの課税区分" value={item.taxCategory} onChange={(event) => onUpdateItem(item.id, 'taxCategory', event.target.value)}>{salesTaxCategories.map((category) => <option key={category}>{category}</option>)}</select></div><button className="sales-estimate-item-remove" type="button" aria-label="明細を削除" onClick={() => onRemoveLineItemGuard(item.id, document.items.length, onRemoveItem)}><Trash2 size={14} /></button></div>)}</div><datalist id="sales-preview-item-presets">{itemPresets.map((preset) => <option key={preset} value={preset} />)}</datalist><div className="sales-estimate-edit-actions"><button className="button button-secondary" type="button" onClick={onAddItem}><Plus size={15} />明細を追加</button><span>残金・所要資金は見積総額、下取、頭金から自動計算します。</span></div></details><section className="sales-estimate-bottom-grid"><div><div className="sales-estimate-credit"><h4>クレジットお支払いプラン</h4>{details.credit.enabled ? <div><span>{details.credit.paymentCount || '回数未設定'}</span><span>手数料 {formatYen(details.credit.fee)}</span><span>月々 {formatYen(details.credit.monthlyPayment)}</span><span>初回 {formatYen(details.credit.initialPayment)}</span><span>ボーナス {details.credit.bonusMonths || '月未設定'} / {formatYen(details.credit.bonusPayment)}</span></div> : <p>利用なし</p>}</div><div className="sales-estimate-required"><h4>必要書類</h4><p>{requiredDocumentLabels(details).join(' ／ ') || '未確認'}</p></div></div><div className="sales-estimate-company"><strong>{settings.shop.name || '店舗名未設定'}</strong>{shopLines.slice(0, 4).map((line) => <span key={line}>{line}</span>)}<div className="sales-estimate-company-payment"><span>お支払いについて</span><p>{paymentNote}</p><span>振込先</span><p>{bankAccount}</p></div></div></section><footer className="sales-paper-footer"><span>{document.note || settings.document.footerNote || '見積条件は担当者へご確認ください。'}</span><span>ページ 1 / 1</span></footer></article></div>
 }
 
 function EstimateVehicleBreakdown({ totals, taxRate }: { totals: SalesTotals; taxRate: number }) {
@@ -958,15 +1446,15 @@ function requiredDocumentLabels(details: SalesDocumentDetails) {
 }
 
 function mapCustomerDetails(customer: Customer | undefined): SalesDocument['customerDetails'] {
-  return customer ? { name: customer.name, kana: customer.kana, phone: customer.phone, postalCode: customer.postalCode, address: customer.address, birthDate: '', employer: '', contactPhone: '' } : emptyCustomerDetails()
+  return customer ? { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: normalizeSalesCustomerBirthDate(customer.birthDate), employer: normalizeSalesCustomerEmployer(customer.employer), contactPhone: '' } : emptyCustomerDetails()
 }
 
 function pickCustomerOverride(customer: SalesDocument['customerDetails']): NonNullable<SalesDocumentDetails['customerOverride']> {
-  return { name: customer.name, kana: customer.kana, phone: customer.phone, postalCode: customer.postalCode, address: customer.address }
+  return { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email ?? '', postalCode: customer.postalCode, address: customer.address, birthDate: customer.birthDate, employer: customer.employer }
 }
 
 function emptyCustomerDetails(): SalesDocument['customerDetails'] {
-  return { name: '', kana: '', phone: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' }
+  return { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' }
 }
 
 function emptyVehicleDetails(): NonNullable<SalesDocumentDetails['vehicleOverride']> {
@@ -977,90 +1465,231 @@ function mapVehicleDetails(vehicle: Vehicle): NonNullable<SalesDocument['vehicle
   return { maker: vehicle.maker, name: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, inspectionRecordAvailable: vehicle.inspectionRecordAvailable }
 }
 
-function SalesDocumentDialog({ form, customers, creating, onChange, onClose, onSubmit, onCreateCustomer, onCreateVehicle }: { form: SalesCreateForm; customers: Customer[]; creating: boolean; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCreateCustomer: (input: CustomerInput) => Promise<Customer>; onCreateVehicle: (customerId: string, input: VehicleInput) => Promise<{ customer: Customer; vehicleId: string }> }) {
-  const selectedCustomer = customers.find((customer) => customer.id === form.customerId)
+function buildSalesDraftSyncPreviewInput(document: SalesDocumentLike, context: SalesDraftContext): SyncPreviewInput {
+  validateSalesDraftContext(document, context)
+  const customerValues = salesCustomerValuesForSave(document)
+  const input: SyncPreviewInput = {
+    documentType: 'sales',
+    issuedAt: normalizeSalesDocumentDate(document.issuedAt),
+    openedCustomerUpdatedAt: context.customerMode === 'existing' ? context.customerUpdatedAt ?? undefined : undefined,
+    openedVehicleUpdatedAt: context.vehicleMode === 'existing' ? context.vehicleUpdatedAt ?? undefined : undefined,
+  }
+
+  if (context.customerMode === 'new') {
+    input.newCustomer = buildNewSalesCustomer(customerValues)
+  } else {
+    if (!document.customerId) throw new Error('既存顧客が選択されていません。')
+    input.customerId = document.customerId
+    input.customerOverride = customerValues
+  }
+
+  if (context.vehicleMode === 'new') {
+    input.newVehicle = buildNewSalesVehicle(currentSalesVehicleValues(document))
+  } else {
+    if (!document.vehicleId) throw new Error('既存車両が選択されていません。')
+    input.vehicleId = document.vehicleId
+    if (document.details.vehicleOverride) input.vehicleOverride = { ...document.details.vehicleOverride }
+  }
+
+  return input
+}
+
+function buildSalesCreateInput(document: SalesDocumentLike, context: SalesDraftContext, duplicateConfirmation?: SalesDuplicateConfirmation, masterSync?: SalesMasterSync): SalesCreateInput {
+  validateSalesDraftContext(document, context)
+  const customerValues = salesCustomerValuesForSave(document)
+  const input: SalesCreateInput = {
+    type: document.type,
+    status: document.status,
+    issuedAt: document.issuedAt,
+    dueDate: document.dueDate,
+    note: document.note,
+    taxRate: document.taxRate,
+    taxRounding: document.taxRounding,
+    details: { ...document.details, customerBirthDate: customerValues.birthDate, customerEmployer: customerValues.employer, ...(context.customerMode === 'existing' ? { customerOverride: customerValues } : {}) },
+    items: document.items.map(({ id: _id, ...item }) => item),
+  }
+
+  if (context.customerMode === 'new') {
+    input.newCustomer = buildNewSalesCustomer(customerValues)
+  } else {
+    if (!document.customerId) throw new Error('顧客を選択してください。')
+    input.customerId = document.customerId
+  }
+
+  if (context.vehicleMode === 'new') {
+    input.newVehicle = buildNewSalesVehicle(currentSalesVehicleValues(document))
+  } else {
+    if (!document.vehicleId) throw new Error('車両を選択してください。')
+    input.vehicleId = document.vehicleId
+  }
+
+  if (duplicateConfirmation) input.duplicateConfirmation = duplicateConfirmation
+  if (masterSync) input.masterSync = masterSync
+  return input
+}
+
+function validateSalesDraftContext(document: SalesDocumentLike, context: SalesDraftContext) {
+  if (context.customerMode === 'new' && context.vehicleMode === 'existing') throw new Error('新規顧客には既存車両を指定できません。')
+  if (context.customerMode === 'existing' && (!document.customerId || document.customerId !== context.customerId)) throw new Error('顧客の選択状態を確認してください。')
+  if (context.customerMode === 'new' && document.customerId) throw new Error('新規顧客の選択状態を確認してください。')
+  if (context.vehicleMode === 'existing' && (!document.vehicleId || document.vehicleId !== context.vehicleId)) throw new Error('車両の選択状態を確認してください。')
+  if (context.vehicleMode === 'new' && document.vehicleId) throw new Error('新規車両の選択状態を確認してください。')
+}
+
+function buildSalesMasterSync(result: MasterSyncConfirmationResult, preview: SyncPreviewResponse): SalesMasterSync | undefined {
+  if (result.customerFields.length === 0 && result.vehicleFields.length === 0) return undefined
+  return {
+    confirmed: true,
+    customerFields: result.customerFields,
+    vehicleFields: result.vehicleFields,
+    expectedCustomerUpdatedAt: result.customerFields.length > 0 ? preview.expectedCustomerUpdatedAt ?? undefined : undefined,
+    expectedVehicleUpdatedAt: result.vehicleFields.length > 0 ? preview.expectedVehicleUpdatedAt ?? undefined : undefined,
+  }
+}
+
+function currentSalesCustomerValues(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['customerOverride']> {
+  const override = document.details.customerOverride
+  const base = {
+    ...pickCustomerOverride(document.customerDetails),
+    ...(override ?? {}),
+  }
+  return {
+    ...base,
+    birthDate: normalizeSalesCustomerBirthDate(document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate),
+    employer: normalizeSalesCustomerEmployer(document.details.customerEmployer || override?.employer || document.customerDetails.employer),
+  }
+}
+
+function currentSalesVehicleValues(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['vehicleOverride']> {
+  return { ...emptyVehicleDetails(), ...(document.vehicleDetails ?? {}), ...(document.details.vehicleOverride ?? {}) }
+}
+
+function buildNewSalesCustomer(values: NonNullable<SalesDocumentDetails['customerOverride']>): NonNullable<SalesCreateInput['newCustomer']> {
+  const name = values.name.trim()
+  if (!name) throw new Error('顧客名を入力してください。')
+  return {
+    name,
+    nameKana: trimSalesOptional(values.kana),
+    phone: trimSalesOptional(values.phone),
+    email: trimSalesOptional(values.email),
+    postalCode: trimSalesOptional(values.postalCode),
+    address: trimSalesOptional(values.address),
+    birthDate: trimSalesOptional(values.birthDate),
+    employer: trimSalesOptional(values.employer),
+  }
+}
+
+function normalizeSalesCustomerBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized === 'birth_date' ? '' : normalized
+}
+
+function normalizeSalesCustomerBirthDateOnBlur(value: string) {
+  return normalizeSalesCustomerBirthDate(value).replaceAll('-', '/')
+}
+
+function normalizeSalesCustomerEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized === 'employer' ? '' : normalized
+}
+
+function salesCustomerValuesForSave(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['customerOverride']> {
+  const values = currentSalesCustomerValues(document)
+  return { ...values, birthDate: normalizeSalesCustomerBirthDateOnBlur(values.birthDate) }
+}
+
+function buildNewSalesVehicle(values: NonNullable<SalesDocumentDetails['vehicleOverride']>): NonNullable<SalesCreateInput['newVehicle']> {
+  const maker = values.maker.trim()
+  const name = values.name.trim()
+  if (!maker) throw new Error('メーカーを入力してください。')
+  if (!name) throw new Error('車名を入力してください。')
+
+  const vehicle: NonNullable<SalesCreateInput['newVehicle']> = { maker, name }
+  const model = trimSalesOptional(values.modelType)
+  const registrationNumber = trimSalesOptional(values.plate)
+  const chassisNumber = trimSalesOptional(values.vin)
+  const inspectionDate = normalizeSalesDocumentDate(values.inspectionDate)
+  const bodyColor = trimSalesOptional(values.color)
+  const transmission = trimSalesOptional(values.transmission)
+  const modelYear = parseSalesNumber(values.year)
+  const mileage = parseSalesNumber(values.mileage)
+  const displacement = parseSalesNumber(values.displacement)
+  if (model) vehicle.model = model
+  if (registrationNumber) vehicle.registrationNumber = registrationNumber
+  if (chassisNumber) vehicle.chassisNumber = chassisNumber
+  if (modelYear !== undefined) vehicle.modelYear = modelYear
+  if (inspectionDate) vehicle.inspectionDate = inspectionDate
+  if (mileage !== undefined) vehicle.mileage = mileage
+  if (bodyColor) vehicle.bodyColor = bodyColor
+  if (displacement !== undefined) vehicle.displacement = displacement
+  if (transmission) vehicle.transmission = transmission
+  return vehicle
+}
+
+function trimSalesOptional(value: string | undefined | null) {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || undefined
+}
+
+function normalizeSalesDocumentDate(value: string) {
+  const trimmed = value.trim()
+  return trimmed ? trimmed.replaceAll('/', '-') : undefined
+}
+
+function parseSalesNumber(value: string | undefined | null) {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return undefined
+  const digits = trimmed.replace(/[^0-9]/g, '')
+  if (!digits) return undefined
+  const parsed = Number(digits)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+}
+
+
+
+function SalesDocumentDialog({ form, customers, onChange, onClose, onSubmit }: { form: SalesCreateForm; customers: Customer[]; onChange: (form: SalesCreateForm) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const selectedCustomer = form.customerMode === 'existing' ? customers.find((customer) => customer.id === form.customerId) : undefined
   const vehicles = selectedCustomer?.vehicles ?? []
-  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
-  const [newVehicleOpen, setNewVehicleOpen] = useState(false)
-  const [newCustomerForm, setNewCustomerForm] = useState<CustomerInput>({ ...emptySalesCustomerForm })
-  const [newVehicleForm, setNewVehicleForm] = useState<VehicleInput>({ ...emptySalesVehicleForm })
-  const [registeringCustomer, setRegisteringCustomer] = useState(false)
-  const [registeringVehicle, setRegisteringVehicle] = useState(false)
-  const [dialogError, setDialogError] = useState('')
+  const canStart = isValidCreateSelection(form)
 
-  function selectCustomer(customerId: string) {
-    const customer = customers.find((item) => item.id === customerId)
-    onChange({ ...form, customerId, vehicleId: customer?.vehicles[0]?.id ?? '' })
-    setNewVehicleOpen(false)
-    setDialogError('')
-  }
-
-  function openNewCustomerForm() {
-    setNewCustomerForm({ ...emptySalesCustomerForm })
-    setNewCustomerOpen(true)
-    setNewVehicleOpen(false)
-    setDialogError('')
-  }
-
-  function openNewVehicleForm() {
-    if (!selectedCustomer) return
-    setNewVehicleForm({ ...emptySalesVehicleForm })
-    setNewVehicleOpen(true)
-    setNewCustomerOpen(false)
-    setDialogError('')
-  }
-
-  async function saveNewCustomer() {
-    const name = newCustomerForm.name.trim()
-    if (!name) {
-      setDialogError('顧客名を入力してください。')
+  function selectCustomer(value: string) {
+    if (value === NEW_CUSTOMER_VALUE) {
+      onChange({ ...form, customerMode: 'new', customerId: '', vehicleMode: 'new', vehicleId: '' })
       return
     }
-    setRegisteringCustomer(true)
-    setDialogError('')
-    try {
-      const customer = await onCreateCustomer({ ...newCustomerForm, name, memo: '' })
-      onChange({ ...form, customerId: customer.id, vehicleId: customer.vehicles[0]?.id ?? '' })
-      setNewCustomerForm({ ...emptySalesCustomerForm })
-      setNewCustomerOpen(false)
-    } catch (error: unknown) {
-      setDialogError(error instanceof Error ? error.message : '顧客を登録できませんでした。')
-    } finally {
-      setRegisteringCustomer(false)
-    }
+    if (!value || value === '__separator__') return
+    onChange({ ...form, customerMode: 'existing', customerId: value, vehicleMode: null, vehicleId: '' })
   }
 
-  async function saveNewVehicle() {
-    if (!selectedCustomer) return
-    const maker = newVehicleForm.maker.trim()
-    const model = newVehicleForm.model.trim()
-    if (!maker || !model) {
-      setDialogError('メーカーと車名を入力してください。')
+  function selectVehicle(value: string) {
+    if (value === NEW_VEHICLE_VALUE) {
+      onChange({ ...form, vehicleMode: 'new', vehicleId: '' })
       return
     }
-    setRegisteringVehicle(true)
-    setDialogError('')
-    try {
-      const result = await onCreateVehicle(selectedCustomer.id, { ...newVehicleForm, maker, model })
-      onChange({ ...form, vehicleId: result.vehicleId })
-      setNewVehicleForm({ ...emptySalesVehicleForm })
-      setNewVehicleOpen(false)
-    } catch (error: unknown) {
-      setDialogError(error instanceof Error ? error.message : '車両を登録できませんでした。')
-    } finally {
-      setRegisteringVehicle(false)
-    }
+    if (!value || value === '__separator__') return
+    onChange({ ...form, vehicleMode: 'existing', vehicleId: value })
   }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して、下書きの販売書類を作成します。未登録の場合はこの画面から追加できます。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>請求書</option></select></label><div className="form-field sales-create-related-field"><span>顧客<em>必須</em></span><div className="sales-create-select-row"><select required aria-label="顧客" value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled>顧客を選択してください</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" onClick={openNewCustomerForm}><Plus size={14} />新しい顧客</button></div></div><div className="form-field sales-create-related-field"><span>対象車両</span><div className="sales-create-select-row"><select aria-label="対象車両" disabled={!selectedCustomer} value={form.vehicleId} onChange={(event) => onChange({ ...form, vehicleId: event.target.value })}><option value="">車両を指定しない</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</select><button className="button button-secondary sales-create-inline-action" type="button" disabled={!selectedCustomer} onClick={openNewVehicleForm}><Plus size={14} />新しい車両</button></div></div><label className="form-field"><span>支払期限</span><input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></label></div>{newCustomerOpen && <div className="sales-create-inline-panel"><div><h3>新しい顧客を登録</h3><p>顧客名を登録すると、この販売書類の顧客として選択されます。</p></div><div className="form-grid"><label className="form-field"><span>顧客名<em>必須</em></span><input autoFocus value={newCustomerForm.name} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, name: event.target.value })} placeholder="例：山田 太郎" /></label><label className="form-field"><span>ふりがな</span><input value={newCustomerForm.kana} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, kana: event.target.value })} placeholder="例：やまだ たろう" /></label><label className="form-field"><span>電話番号</span><input type="tel" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, phone: event.target.value })} placeholder="例：090-1234-5678" /></label><label className="form-field"><span>メールアドレス</span><input type="email" value={newCustomerForm.email} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, email: event.target.value })} placeholder="例：example@example.com" /></label><label className="form-field"><span>郵便番号</span><input value={newCustomerForm.postalCode ?? ''} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, postalCode: event.target.value })} placeholder="例：100-0001" /></label><label className="form-field"><span>住所</span><input value={newCustomerForm.address} onChange={(event) => setNewCustomerForm({ ...newCustomerForm, address: event.target.value })} placeholder="例：東京都千代田区" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringCustomer} onClick={() => setNewCustomerOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringCustomer} onClick={() => void saveNewCustomer()}><Plus size={15} />{registeringCustomer ? '登録中…' : '顧客を登録'}</button></div></div>}{newVehicleOpen && <div className="sales-create-inline-panel"><div><h3>新しい車両を登録</h3><p>{selectedCustomer?.name} の車両情報を登録します。メーカーと車名は必須です。</p></div><div className="form-grid"><label className="form-field"><span>メーカー<em>必須</em></span><input autoFocus value={newVehicleForm.maker} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, maker: event.target.value })} placeholder="例：トヨタ" /></label><label className="form-field"><span>車名<em>必須</em></span><input value={newVehicleForm.model} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, model: event.target.value })} placeholder="例：プリウス" /></label><label className="form-field"><span>型式</span><input value={newVehicleForm.modelType} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></label><label className="form-field"><span>登録番号</span><input value={newVehicleForm.plate} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></label><label className="form-field"><span>車台番号</span><input value={newVehicleForm.vin} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, vin: event.target.value })} placeholder="例：ZVW5000001" /></label><label className="form-field"><span>年式</span><input value={newVehicleForm.year} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, year: event.target.value })} placeholder="例：2024" /></label><label className="form-field"><span>車検満了日</span><input type="date" value={newVehicleForm.inspectionDate.replaceAll('/', '-')} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, inspectionDate: event.target.value.replaceAll('-', '/') })} /></label><label className="form-field"><span>走行距離</span><input inputMode="numeric" value={newVehicleForm.mileage} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, mileage: event.target.value })} placeholder="例：30000" /></label><label className="form-field"><span>車体色</span><input value={newVehicleForm.color} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, color: event.target.value })} placeholder="例：パールホワイト" /></label><label className="form-field"><span>排気量</span><input inputMode="numeric" value={newVehicleForm.displacement} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, displacement: event.target.value })} placeholder="例：1800" /></label><label className="form-field"><span>ミッション</span><input value={newVehicleForm.transmission} onChange={(event) => setNewVehicleForm({ ...newVehicleForm, transmission: event.target.value })} placeholder="例：CVT" /></label></div><div className="sales-create-inline-actions"><button className="button button-secondary" type="button" disabled={registeringVehicle} onClick={() => setNewVehicleOpen(false)}>閉じる</button><button className="button button-primary" type="button" disabled={registeringVehicle} onClick={() => void saveNewVehicle()}><Plus size={15} />{registeringVehicle ? '登録中…' : '車両を登録'}</button></div></div>}{dialogError && <p className="sales-create-error" role="alert">{dialogError}</p>}<div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={creating || registeringCustomer || registeringVehicle || !form.customerId}><Plus size={16} />{creating ? '作成中…' : '作成する'}</button></div></form></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="sales-modal-title"><div className="modal-header"><h2 id="sales-modal-title">販売書類を作成</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><FileText size={16} />顧客・車両を選択して入力を開始します。</p><div className="form-grid"><label className="form-field"><span>書類種別<em>必須</em></span><select required value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as SalesDocumentType })}><option>見積書</option><option>請求書</option></select></label><label className="form-field"><span>顧客<em>必須</em></span><select required autoFocus aria-label="顧客" value={form.customerMode === 'new' ? NEW_CUSTOMER_VALUE : form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="" disabled hidden>顧客を選択してください</option><option value={NEW_CUSTOMER_VALUE}>＋ 新規顧客</option><option value="__separator__" disabled>────────────</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}（{customer.phone || '電話番号未登録'}）</option>)}</select></label><label className="form-field"><span>車両<em>必須</em></span><select required aria-label="車両" value={form.vehicleMode === 'new' ? NEW_VEHICLE_VALUE : form.vehicleId} disabled={form.customerMode === null} onChange={(event) => selectVehicle(event.target.value)}><option value="" disabled hidden>車両を選択してください</option><option value={NEW_VEHICLE_VALUE}>＋ 新規車両</option>{form.customerMode === 'existing' && <><option value="__separator__" disabled>────────────</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model}{vehicle.plate ? `（${vehicle.plate}）` : ''}</option>)}</>}</select></label></div><div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose}>キャンセル</button><button className="button button-primary" type="submit" disabled={!canStart}><Plus size={16} />入力を開始</button></div></form></section></div>
 }
 
 function emptyCreateForm(): SalesCreateForm {
-  return { type: '見積書', customerId: '', vehicleId: '', dueDate: dateAfter(defaultSettings.document.defaultDueDays), taxRate: defaultSettings.tax.consumptionTaxRate, taxRounding: defaultSettings.tax.rounding, initialItemDescription: '車両本体価格' }
+  return { type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' }
 }
 
 function dateAfter(days: number) {
   const date = new Date()
   date.setDate(date.getDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+function isValidCreateSelection(form: SalesCreateForm) {
+  if (form.customerMode === 'new') return form.vehicleMode === 'new'
+  if (form.customerMode !== 'existing') return false
+  if (!form.customerId) return false
+  return form.vehicleMode === 'new' || (form.vehicleMode === 'existing' && Boolean(form.vehicleId))
+}
+
+function todaySalesDisplay() {
+  return new Date().toISOString().slice(0, 10).replaceAll('-', '/')
 }

@@ -1,9 +1,10 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { customers, inspectionSchedules, maintenanceDocuments, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
@@ -96,7 +97,10 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, 
     email: customer.email,
     postalCode: customer.postalCode,
     address: customer.address,
+    birthDate: normalizeStoredBirthDate(customer.birthDate),
+    employer: normalizeStoredEmployer(customer.employer),
     memo: customer.memo,
+    updatedAt: customer.updatedAt,
     vehicles: (vehiclesByCustomer.get(customer.id) ?? []).map((vehicle) => ({
       id: vehicle.id,
       maker: vehicle.maker,
@@ -116,6 +120,7 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, 
       freeItem1: vehicle.freeItem1,
       freeItem2: vehicle.freeItem2,
       freeItem3: vehicle.freeItem3,
+      updatedAt: vehicle.updatedAt,
       files: (filesByVehicle.get(vehicle.id) ?? []).map(serializeFile),
     })),
   }))
@@ -137,6 +142,8 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
     email: nullableString(body, 'email'),
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
+    birthDate: nullableDateString(body, 'birthDate'),
+    employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
   }).run()
   return jsonResponse({ customer: await findCustomer(database, id, organizationId) }, 201, env)
@@ -154,6 +161,8 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     email: nullableString(body, 'email'),
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
+    birthDate: nullableDateString(body, 'birthDate'),
+    employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
@@ -282,18 +291,20 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
   const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
 
-  const [customer, sales, maintenance, schedules, files, payments] = await Promise.all([
+  const [customer, sales, maintenance, schedules, files, payments, mileageHistoryRows] = await Promise.all([
     database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId))).orderBy(desc(salesDocuments.issuedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
     database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
     database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).orderBy(desc(vehicleFiles.createdAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all(),
+    database.select().from(mileageHistories).where(and(eq(mileageHistories.vehicleId, vehicleId), eq(mileageHistories.organizationId, organizationId))).all(),
   ])
   const documentKeys = new Set([...sales.map((document) => `販売請求書:${document.id}`), ...maintenance.map((document) => `整備請求書:${document.id}`)])
   const relatedPayments = payments.filter((payment) => documentKeys.has(`${payment.documentType}:${payment.documentId}`))
   const salesById = new Map(sales.map((document) => [document.id, document]))
   const maintenanceById = new Map(maintenance.map((document) => [document.id, document]))
+  const mileageByDocumentId = new Map(mileageHistoryRows.map((row) => [row.maintenanceDocumentId, row.mileage]))
 
   return jsonResponse({
     vehicle: {
@@ -317,11 +328,40 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
       freeItem3: vehicle.freeItem3,
     },
     sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
-    maintenance: maintenance.map((document) => ({ id: document.id, number: document.number, type: document.type, category: document.category, status: document.status, issuedAt: document.issuedAt, intakeDate: document.intakeDate, completionDate: document.completionDate, total: document.total })),
+    maintenance: maintenance.map((document) => ({
+      id: document.id,
+      number: document.number,
+      type: document.type,
+      category: document.category,
+      status: document.status,
+      issuedAt: document.issuedAt,
+      intakeDate: document.intakeDate,
+      completionDate: document.completionDate,
+      total: document.total,
+      recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? vehicle.mileage,
+    })),
     inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
     payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
     attachments: files.map(serializeFile),
   }, 200, env)
+}
+
+function extractMileageFromDetailsJson(detailsJson: string | null): number | null {
+  if (!detailsJson) return null
+  try {
+    const parsed = JSON.parse(detailsJson)
+    if (!parsed || typeof parsed !== 'object') return null
+    const vehicleOverride = parsed.vehicleOverride
+    if (!vehicleOverride || typeof vehicleOverride !== 'object') return null
+    const mileage = vehicleOverride.mileage
+    if (typeof mileage !== 'string') return null
+    const digits = mileage.replace(/[^0-9]/g, '')
+    if (!digits) return null
+    const parsed2 = Number(digits)
+    return Number.isFinite(parsed2) ? parsed2 : null
+  } catch {
+    return null
+  }
 }
 
 function groupBy<T>(items: T[], getKey: (item: T) => string) {
@@ -346,6 +386,24 @@ function stringValue(body: Record<string, unknown>, key: string) {
 function nullableString(body: Record<string, unknown>, key: string) {
   const value = stringValue(body, key)
   return value || null
+}
+
+function nullableDateString(body: Record<string, unknown>, key: string) {
+  const value = stringValue(body, key)
+  return normalizeStoredBirthDate(value)
+}
+
+function nullableCustomerEmployer(body: Record<string, unknown>, key = 'employer') {
+  return normalizeStoredEmployer(nullableString(body, key))
+}
+
+function normalizeStoredBirthDate(value: string | null | undefined) {
+  return normalizeCustomerBirthDateForStorage(value) || null
+}
+
+function normalizeStoredEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized && normalized !== 'employer' ? normalized : null
 }
 
 function nullableInteger(body: Record<string, unknown>, key: string) {

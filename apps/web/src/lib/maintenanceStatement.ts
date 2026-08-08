@@ -1,4 +1,4 @@
-import type { MaintenanceDocument, MaintenanceLineItem } from './maintenanceApi'
+import type { MaintenanceDocumentLike, MaintenanceLineItem } from './maintenanceApi'
 import type { AppSettings } from './settingsApi'
 
 export const maintenanceStatementWidth = 1122
@@ -19,7 +19,7 @@ export type MaintenanceStatementSvgOptions = {
 }
 
 export function calculateMaintenanceStatementTotals(
-  document: MaintenanceDocument,
+  document: MaintenanceDocumentLike,
 ): MaintenanceStatementTotals {
   const partsSubtotal = document.items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice), 0)
   const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0)
@@ -31,7 +31,7 @@ export function calculateMaintenanceStatementTotals(
   return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
 }
 
-export function buildMaintenanceStatementSvg(document: MaintenanceDocument, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
+export function buildMaintenanceStatementSvg(document: MaintenanceDocumentLike, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
   const hideEditableValues = options.hideEditableValues ?? false
   const totals = calculateMaintenanceStatementTotals(document)
   const customer = document.details.customerOverride ?? document.customerDetails
@@ -74,7 +74,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${roundedBox(611, 12, 472, 65)}
   ${gridLines([611, 729, 847, 965, 1083], [12, 43, 77])}
   ${headerText(670, 34, '日付')}${headerText(788, 34, '担当')}${headerText(906, 34, '書類番号')}${headerText(1024, 34, 'ページ')}
-  ${valueText(670, 65, statementValue(dateDot(document.issuedAt), hideEditableValues), 'middle', 14)}
+  ${valueText(670, 65, statementValue(dateSlash(document.issuedAt), hideEditableValues), 'middle', 14)}
   ${valueText(788, 65, statementValue(document.details.staffName, hideEditableValues), 'middle', 14)}
   ${valueText(906, 65, statementValue(document.number, hideEditableValues), 'middle', 14)}
   ${valueText(1024, 65, '1/1', 'middle')}
@@ -90,7 +90,7 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${valueText(145, 205, statementValue(customer.postalCode ? `〒${customer.postalCode}` : '', hideEditableValues), 'start')}
   ${valueText(145, 233, statementValue(customer.address, hideEditableValues), 'start')}
   ${headerText(590, 115, '生年月日')}${headerText(590, 157, '電話番号')}${headerText(590, 200, '勤務先等')}${headerText(590, 242, '連絡先TEL')}
-  ${valueText(665, 119, statementValue(dateDot(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
+  ${valueText(665, 119, statementValue(dateSlash(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
   ${valueText(665, 158, statementValue(customer.phone, hideEditableValues), 'start', 14)}
   ${valueText(665, 200, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
   ${valueText(665, 242, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
@@ -119,8 +119,8 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   ${gridLines([832, 916, 999, 1082], [401, 442, 482])}
   ${headerText(874, 429, '入庫区分')}${headerText(957, 429, '入庫日')}${headerText(1040, 429, '出庫日')}
   ${valueText(874, 469, document.category, 'middle', 12, '700')}
-  ${valueText(957, 469, statementValue(dateDot(document.intakeDate), hideEditableValues), 'middle', 12)}
-  ${valueText(1040, 469, statementValue(dateDot(document.plannedReleaseDate || document.completionDate), hideEditableValues), 'middle', 12)}
+  ${valueText(957, 469, statementValue(dateSlash(document.intakeDate), hideEditableValues), 'middle', 12)}
+  ${valueText(1040, 469, statementValue(dateSlash(document.plannedReleaseDate || document.completionDate), hideEditableValues), 'middle', 12)}
 
   ${roundedBox(16, 509, 1067, 620)}
   ${rect(16, 509, 1067, 42, 'url(#maintenance-blue)')}
@@ -142,14 +142,14 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocument, sett
   </svg>`
 }
 
-function vehicleGrid(vehicle: NonNullable<MaintenanceDocument['vehicleDetails']>, hideEditableValues: boolean) {
+function vehicleGrid(vehicle: NonNullable<MaintenanceDocumentLike['vehicleDetails']>, hideEditableValues: boolean) {
   const topX = [16, 115, 351, 455, 568, 683, 810]
   const bottomX = [16, 140, 350, 530, 670, 810]
   return `${rect(17, 327, 792, 38, '#dcecff')}${rect(17, 407, 792, 38, '#dcecff')}${gridLines(topX, [326, 366, 406])}${gridLines(bottomX, [406, 446, 495])}
   ${headerText(65, 354, 'メーカー')}${headerText(233, 354, '車名・仕様')}${headerText(403, 354, '年式')}${headerText(512, 354, '排気量')}${headerText(625, 354, 'ミッション')}${headerText(746, 354, '車体色')}
   ${valueText(65, 394, statementValue(vehicle.maker, hideEditableValues), 'middle', 14)}${valueText(233, 394, statementValue(vehicle.name, hideEditableValues), 'middle', 14)}${valueText(403, 394, statementValue(vehicle.year, hideEditableValues), 'middle', 14)}${valueText(512, 394, statementValue(suffix(vehicle.displacement, 'cc'), hideEditableValues), 'middle', 14)}${valueText(625, 394, statementValue(vehicle.transmission, hideEditableValues), 'middle', 14)}${valueText(746, 394, statementValue(vehicle.color, hideEditableValues), 'middle', 14)}
   ${headerText(78, 434, '型式')}${headerText(245, 434, '車台番号')}${headerText(440, 434, '登録番号')}${headerText(600, 434, '走行距離')}${headerText(740, 434, '車検日')}
-  ${valueText(78, 479, statementValue(vehicle.modelType, hideEditableValues), 'middle', 14)}${valueText(245, 479, statementValue(vehicle.vin, hideEditableValues), 'middle', 14)}${valueText(440, 479, statementValue(vehicle.plate, hideEditableValues), 'middle', 14)}${valueText(600, 479, statementValue(vehicle.mileage, hideEditableValues), 'middle', 14)}${valueText(740, 479, statementValue(dateDot(vehicle.inspectionDate), hideEditableValues), 'middle', 14)}`
+  ${valueText(78, 479, statementValue(vehicle.modelType, hideEditableValues), 'middle', 14)}${valueText(245, 479, statementValue(vehicle.vin, hideEditableValues), 'middle', 14)}${valueText(440, 479, statementValue(vehicle.plate, hideEditableValues), 'middle', 14)}${valueText(600, 479, statementValue(vehicle.mileage, hideEditableValues), 'middle', 14)}${valueText(740, 479, statementValue(dateSlash(vehicle.inspectionDate), hideEditableValues), 'middle', 14)}`
 }
 
 function workGridLines(rowTop: number, rowHeight: number) {
@@ -171,7 +171,7 @@ function workRow(item: StatementRow, index: number, y: number, hideEditableValue
   ${valueText(966, baseline, statementValue(item.summary, hideEditableValues), 'start', 12)}`
 }
 
-function summaryBoxes(document: MaintenanceDocument, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
+function summaryBoxes(document: MaintenanceDocumentLike, totals: MaintenanceStatementTotals, otherFeeLabel: string, hideEditableValues: boolean) {
   const fee = document.fees
   return `${roundedBox(16, 1144, 300, 75)}
   ${rect(17, 1145, 298, 36, '#dcecff')}
@@ -224,22 +224,22 @@ function shopBox(settings: AppSettings) {
 
 type StatementRow = MaintenanceLineItem & { partAmount: number }
 
-function statementRows(document: MaintenanceDocument): StatementRow[] {
+function statementRows(document: MaintenanceDocumentLike): StatementRow[] {
   const rows = document.items.map((item) => ({ ...item, partAmount: Math.round(item.quantity * item.unitPrice) }))
   return rows.slice(0, 18)
 }
 
-const emptyVehicle: NonNullable<MaintenanceDocument['vehicleDetails']> = {
+const emptyVehicle: NonNullable<MaintenanceDocumentLike['vehicleDetails']> = {
   maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false,
 }
 
-function defaultDocumentTitle(type: MaintenanceDocument['type']) {
+function defaultDocumentTitle(type: MaintenanceDocumentLike['type']) {
   if (type === '整備見積書') return '見積書'
   return '請求書'
 }
 
-function dateDot(value: string) {
-  return value ? value.slice(0, 10).replaceAll('/', '.').replaceAll('-', '.') : ''
+function dateSlash(value: string) {
+  return value ? value.slice(0, 10).replaceAll('.', '/').replaceAll('-', '/') : ''
 }
 
 function suffix(value: string, unit: string) {

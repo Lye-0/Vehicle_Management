@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import type {
-  MaintenanceDocument,
+  MaintenanceDocumentLike,
   MaintenanceDocumentDetails,
   MaintenanceFeeKey,
   MaintenanceLineItem,
 } from '../lib/maintenanceApi'
 import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/maintenanceStatement'
+import { DateCalendarButton } from './DateCalendarButton'
 
 export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
-export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'note'
+export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
 
 type Props = {
-  document: MaintenanceDocument
+  document: MaintenanceDocumentLike
   itemPresets: string[]
   onUpdateHeader: (field: MaintenanceStatementHeaderField, value: string) => void
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
@@ -24,7 +26,12 @@ type Props = {
 
 export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHeader, onUpdateDetails, onUpdateItem, onRemoveItem, onUpdateFee, onAddItem }: Props) {
   const details = document.details
-  const customer = details.customerOverride ?? document.customerDetails
+  const customer = {
+    ...document.customerDetails,
+    ...(details.customerOverride ?? {}),
+    birthDate: details.customerBirthDate || details.customerOverride?.birthDate || document.customerDetails.birthDate || '',
+    employer: details.customerEmployer || details.customerOverride?.employer || document.customerDetails.employer || '',
+  }
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
 
   function updateDetails(patch: Partial<MaintenanceDocumentDetails>) {
@@ -32,7 +39,11 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   }
 
   function updateCustomer(field: keyof NonNullable<MaintenanceDocumentDetails['customerOverride']>, value: string) {
-    updateDetails({ customerOverride: { ...customer, [field]: value } })
+    updateDetails({
+      customerOverride: { ...customer, [field]: value },
+      ...(field === 'birthDate' ? { customerBirthDate: value } : {}),
+      ...(field === 'employer' ? { customerEmployer: value } : {}),
+    })
   }
 
   function updateVehicle(field: keyof NonNullable<MaintenanceDocumentDetails['vehicleOverride']>, value: string | boolean) {
@@ -44,21 +55,21 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
 
     <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} className="is-document-number" x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
     <StatementTextControl ariaLabel="担当" value={details.staffName} className="is-document-number" x={729} y={44} width={118} height={32} centered onChange={(value) => updateDetails({ staffName: value })} />
-    <StatementTextControl ariaLabel="請求番号" value={document.number} className="is-document-number" x={847} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('number', value)} />
+    <StatementTextControl ariaLabel="請求番号" value={document.number} className="is-document-number" x={847} y={44} width={118} height={32} centered readOnly={!document.id} onChange={(value) => onUpdateHeader('number', value)} />
 
     <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
     <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
     <StatementTextControl ariaLabel="顧客敬称" value={details.customerHonorific} x={462} y={112} width={54} height={38} centered className="is-large" onChange={(value) => updateDetails({ customerHonorific: value })} />
-    <StatementTextControl ariaLabel="郵便番号" value={`〒${customer.postalCode}`} x={140} y={181} width={200} height={28} onChange={(value) => updateCustomer('postalCode', value)} />
+    <StatementTextControl ariaLabel="郵便番号" displayPrefix="〒" value={customer.postalCode} x={140} y={181} width={200} height={28} normalizeOnBlur={normalizePostalCode} onChange={(value) => updateCustomer('postalCode', value)} />
     <StatementTextControl ariaLabel="顧客住所" value={customer.address} x={140} y={211} width={370} height={41} onChange={(value) => updateCustomer('address', value)} />
-    <StatementTextControl ariaLabel="生年月日" value={details.customerBirthDate} x={650} y={95} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerBirthDate: value })} />
-    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={650} y={137} width={155} height={30} className="is-contact-value" onChange={(value) => updateCustomer('phone', value)} />
-    <StatementTextControl ariaLabel="勤務先等" value={details.customerEmployer} x={650} y={179} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerEmployer: value })} />
+    <StatementTextControl calendar ariaLabel="生年月日" value={customer.birthDate} x={650} y={95} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizeMaintenanceCustomerBirthDateOnBlur} onChange={(value) => updateCustomer('birthDate', value)} />
+    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={650} y={137} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizePhone} onChange={(value) => updateCustomer('phone', value)} />
+    <StatementTextControl ariaLabel="勤務先等" value={customer.employer} x={650} y={179} width={155} height={30} className="is-contact-value" onChange={(value) => updateCustomer('employer', value)} />
     <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={650} y={221} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerContactPhone: value })} />
 
     <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
-    <StatementTextControl ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
-    <StatementTextControl ariaLabel="出庫予定日" value={document.plannedReleaseDate || document.completionDate} x={999} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('plannedReleaseDate', value)} />
+    <StatementTextControl calendar ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
+    <StatementTextControl calendar ariaLabel="出庫予定日" value={document.plannedReleaseDate || document.completionDate} x={999} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('plannedReleaseDate', value)} />
 
     {document.items.slice(0, 18).map((item, index) => <LineEditor key={item.id} item={item} index={index} itemPresets={itemPresets} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />)}
 
@@ -86,7 +97,7 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
     { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <StatementTextControl key={field} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <StatementTextControl key={field} calendar={field === 'inspectionDate'} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
   </>
 }
 
@@ -135,8 +146,28 @@ function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, heig
   </div>
 }
 
-function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '' }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string }) {
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} value={value} style={controlStyle(x, y, width, height)} onChange={(event) => onChange(event.target.value)} />
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
+  const displayValue = value ? `${displayPrefix}${value}` : value
+  function handleChange(nextValue: string) {
+    const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
+    onChange(withoutPrefix)
+  }
+  const inputClassName = `maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`
+  const inputProps = { 'aria-label': ariaLabel, className: inputClassName, value: displayValue, readOnly, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
+  if (!calendar) return <input {...inputProps} style={controlStyle(x, y, width, height)} />
+  return <div className="maintenance-statement-calendar-control" style={controlStyle(x, y, width, height)}>
+    <input {...inputProps} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
+    <DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} />
+  </div>
+}
+
+function normalizeMaintenanceCustomerBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized === 'birth_date' ? '' : normalized
+}
+
+function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
+  return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
 function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {

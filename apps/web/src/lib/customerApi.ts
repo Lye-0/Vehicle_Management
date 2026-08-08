@@ -27,6 +27,7 @@ export type Vehicle = {
   freeItem1: string
   freeItem2: string
   freeItem3: string
+  updatedAt: string
   attachments: Attachment[]
 }
 
@@ -38,7 +39,10 @@ export type Customer = {
   email: string
   postalCode: string
   address: string
+  birthDate: string
+  employer: string
   memo: string
+  updatedAt: string
   vehicles: Vehicle[]
 }
 
@@ -49,6 +53,8 @@ export type CustomerInput = {
   email: string
   postalCode?: string
   address: string
+  birthDate: string
+  employer: string
   memo: string
 }
 
@@ -78,7 +84,10 @@ type ApiCustomer = {
   email: string | null
   postalCode: string | null
   address: string | null
+  birthDate: string | null
+  employer: string | null
   memo: string | null
+  updatedAt: string
   vehicles: ApiVehicle[]
 }
 
@@ -101,6 +110,7 @@ type ApiVehicle = {
   freeItem1: string | null
   freeItem2: string | null
   freeItem3: string | null
+  updatedAt: string
   files: ApiAttachment[]
 }
 
@@ -174,7 +184,7 @@ export type VehicleHistory = {
     freeItem3: string | null
   }
   sales: Array<{ id: string; number: string; type: string; status: string; issuedAt: string; dueDate: string | null; total: number }>
-  maintenance: Array<{ id: string; number: string; type: string; category: string; status: string; issuedAt: string; intakeDate: string | null; completionDate: string | null; total: number }>
+  maintenance: Array<{ id: string; number: string; type: string; category: string; status: string; issuedAt: string; intakeDate: string | null; completionDate: string | null; total: number; recordedMileage: number | null }>
   inspections: Array<{ id: string; inspectionType: string; dueDate: string; status: string; note: string; notifiedAt: string | null }>
   payments: Array<{ id: string; documentType: string; documentId: string; documentNumber: string; paidAmount: number; paymentDate: string | null; method: string | null; note: string | null }>
   attachments: ApiAttachment[]
@@ -193,7 +203,10 @@ function mapCustomer(customer: ApiCustomer): Customer {
     email: customer.email ?? '',
     postalCode: customer.postalCode ?? '',
     address: customer.address ?? '',
+    birthDate: customer.birthDate ?? '',
+    employer: customer.employer ?? '',
     memo: customer.memo ?? '',
+    updatedAt: customer.updatedAt,
     vehicles: customer.vehicles.map(mapVehicle),
   }
 }
@@ -217,6 +230,7 @@ function mapVehicle(vehicle: ApiVehicle): Vehicle {
     freeItem1: vehicle.freeItem1 ?? '',
     freeItem2: vehicle.freeItem2 ?? '',
     freeItem3: vehicle.freeItem3 ?? '',
+    updatedAt: vehicle.updatedAt,
     attachments: vehicle.files.map(mapAttachment),
   }
 }
@@ -230,7 +244,7 @@ function formatDate(date: string) {
 }
 
 function toCustomerPayload(input: CustomerInput) {
-  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, memo: input.memo }
+  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, birthDate: input.birthDate, employer: input.employer, memo: input.memo }
 }
 
 function toVehiclePayload(input: VehicleInput) {

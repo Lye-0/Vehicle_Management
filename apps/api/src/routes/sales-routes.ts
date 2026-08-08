@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { appSettings, customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
@@ -7,6 +8,23 @@ import { restoreArchivedDocument } from '../document-archive'
 import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
+import {
+  CUSTOMER_FIELD_TO_DB_COLUMN,
+  VEHICLE_FIELD_TO_DB_COLUMN,
+  buildCustomerUpdateValues,
+  buildVehicleUpdateValues,
+  computeActualCustomerDiffFields,
+  computeActualVehicleDiffFields,
+  findDuplicateCustomers,
+  findDuplicateVehicles,
+  normalizeCustomerBirthDateForStorage,
+  validateCombination,
+  validateMasterSyncInput,
+  type CustomerSyncField,
+  type NewCustomerInput,
+  type NewVehicleInput,
+  type VehicleSyncField,
+} from '../lib/master-sync-helpers'
 
 const salesDocumentTypes = new Set(['見積書', '請求書'])
 const salesStatuses = new Set(['下書き', '入金待ち', '完了', 'アーカイブ済み'])
@@ -66,40 +84,208 @@ async function listSalesDocuments(request: Request, env: Env, database: ReturnTy
 async function createSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const body = await readJson(request)
   const defaults = await loadSalesDocumentDefaults(database, organizationId)
-  const input = await parseSalesDocumentInput(body, database, organizationId, defaults)
-  const id = crypto.randomUUID()
+
+  const newCustomer = parseNewCustomer(body.newCustomer)
+  const newVehicle = parseNewVehicle(body.newVehicle)
+  const customerId = stringValue(body, 'customerId') || undefined
+  const vehicleId = nullableString(body, 'vehicleId') || undefined
+
+  const combinationError = validateCombination({ customerId, newCustomer, vehicleId, newVehicle, documentType: 'sales' })
+  if (combinationError) throw new HttpError(combinationError.status, combinationError.message)
+
+  let masterSync: ReturnType<typeof validateMasterSyncInput> | undefined
+  if (body.masterSync !== undefined) {
+    const result = validateMasterSyncInput(body.masterSync)
+    if ('error' in result) throw new HttpError(400, result.error)
+    masterSync = result
+
+    if (newCustomer && masterSync.customerFields.length > 0) {
+      throw new HttpError(400, '新規顧客にはcustomerFieldsを指定できません。')
+    }
+    if (newVehicle && masterSync.vehicleFields.length > 0) {
+      throw new HttpError(400, '新規車両にはvehicleFieldsを指定できません。')
+    }
+  }
+
+  if (newVehicle) {
+    const allVehicles = await database
+      .select({ id: vehicles.id, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
+      .from(vehicles)
+      .where(eq(vehicles.organizationId, organizationId))
+      .all()
+    const duplicateVehicles = findDuplicateVehicles(allVehicles, newVehicle)
+
+    const vinDuplicate = duplicateVehicles.find((d) => d.matchReason === 'chassis_number')
+    if (vinDuplicate) {
+      throw new HttpError(409, `車台番号が既存車両（${vinDuplicate.maker ?? ''} ${vinDuplicate.name}）と一致します。既存車両を選択してください。`)
+    }
+
+    const plateDuplicates = duplicateVehicles.filter((d) => d.matchReason === 'registration_number')
+    if (plateDuplicates.length > 0) {
+      const dupConfirm = body.duplicateConfirmation
+      if (!dupConfirm || typeof dupConfirm !== 'object' || Array.isArray(dupConfirm)) {
+        throw new HttpError(409, '登録番号が既存車両と一致します。重複確認が必要です。')
+      }
+      const confirmObj = dupConfirm as Record<string, unknown>
+      if (confirmObj.registrationNumberConfirmed !== true) {
+        throw new HttpError(409, '登録番号の重複確認が完了していません。')
+      }
+      const confirmedId = typeof confirmObj.confirmedVehicleId === 'string' ? confirmObj.confirmedVehicleId : undefined
+      if (!confirmedId || !plateDuplicates.some((candidate) => candidate.id === confirmedId)) {
+        throw new HttpError(400, '確認された車両IDが現在の重複候補と一致しません。')
+      }
+    }
+  }
+
+  if (newCustomer) {
+    const allCustomers = await database
+      .select({ id: customers.id, name: customers.name, phone: customers.phone, email: customers.email })
+      .from(customers)
+      .where(eq(customers.organizationId, organizationId))
+      .all()
+    void findDuplicateCustomers(allCustomers, newCustomer)
+  }
+
+  const input = await parseSalesDocumentInput({
+    ...body,
+    customerId: customerId || '',
+    vehicleId: vehicleId || null,
+  }, database, organizationId, defaults, newCustomer, newVehicle)
+
+  let actualCustomerDiffFields: Set<CustomerSyncField> | undefined
+  let actualVehicleDiffFields: Set<VehicleSyncField> | undefined
+  let currentCustomerForSync: typeof customers.$inferSelect | null = null
+  let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
+
+  if (masterSync && !newCustomer) {
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
+    for (const f of masterSync.customerFields) {
+      if (!actualCustomerDiffFields.has(f)) {
+        throw new HttpError(400, `顧客フィールド「${f}」は現在値と差分がないか、空欄です。`)
+      }
+    }
+  }
+
+  if (masterSync && !newVehicle && input.vehicleId) {
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
+    for (const f of masterSync.vehicleFields) {
+      if (!actualVehicleDiffFields.has(f)) {
+        throw new HttpError(400, `車両フィールド「${f}」は現在値と差分がないか、空欄です。`)
+      }
+    }
+  }
+
+  if (masterSync) {
+    if (masterSync.expectedCustomerUpdatedAt && currentCustomerForSync) {
+      if (currentCustomerForSync.updatedAt !== masterSync.expectedCustomerUpdatedAt) {
+        throw new HttpError(409, '顧客の情報が更新されました。再読み込みしてください。')
+      }
+    }
+    if (masterSync.expectedVehicleUpdatedAt && currentVehicleForSync) {
+      if (currentVehicleForSync.updatedAt !== masterSync.expectedVehicleUpdatedAt) {
+        throw new HttpError(409, '車両の情報が更新されました。再読み込みしてください。')
+      }
+    }
+  }
+
+  const docId = crypto.randomUUID()
   const number = await nextDocumentNumber(env.DB, organizationId, 'S')
   await ensureSalesDocumentNumberAvailable(database, number, organizationId)
   const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
+  const now = new Date().toISOString()
 
-  await database.insert(salesDocuments).values({
-    id,
-    organizationId,
-    number,
-    type: input.type,
-    status: input.status,
-    customerId: input.customerId,
-    vehicleId: input.vehicleId,
-    issuedAt: input.issuedAt,
-    dueDate: input.dueDate,
-    taxRate: input.taxRate,
-    taxRounding: input.rounding,
-    subtotal: totals.subtotal,
-    tax: totals.tax,
-    total: totals.total,
-    note: input.note,
-    detailsJson: JSON.stringify(input.details),
-  }).run()
-  await insertSalesItems(database, id, input.items, organizationId)
+  const statements: D1PreparedStatement[] = []
 
-  return jsonResponse({ document: await findSalesDocument(database, id, organizationId) }, 201, env)
+  let resolvedCustomerId = input.customerId
+  if (newCustomer) {
+    const newCustId = crypto.randomUUID()
+    resolvedCustomerId = newCustId
+    statements.push(env.DB.prepare(
+      `INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email, birth_date, employer)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(newCustId, organizationId, `C-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+      newCustomer.name, newCustomer.nameKana || null, newCustomer.postalCode || null,
+      newCustomer.address || null, newCustomer.phone || null, newCustomer.email || null,
+      newCustomer.birthDate || null, newCustomer.employer || null))
+  }
+
+  let resolvedVehicleId = input.vehicleId
+  if (newVehicle) {
+    const newVehId = crypto.randomUUID()
+    resolvedVehicleId = newVehId
+    statements.push(env.DB.prepare(
+      `INSERT INTO vehicles (id, organization_id, customer_id, maker, name, model, registration_number, chassis_number, model_year, inspection_date, mileage, body_color, displacement, transmission)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(newVehId, organizationId, resolvedCustomerId, newVehicle.maker, newVehicle.name,
+      newVehicle.model || null, newVehicle.registrationNumber || null, newVehicle.chassisNumber || null,
+      newVehicle.modelYear || null, newVehicle.inspectionDate || null, newVehicle.mileage != null ? newVehicle.mileage : null,
+      newVehicle.bodyColor || null, newVehicle.displacement || null, newVehicle.transmission || null))
+  }
+
+  if (masterSync && masterSync.customerFields.length > 0 && !newCustomer && currentCustomerForSync) {
+    const updateValues = buildCustomerUpdateValues(masterSync.customerFields, input.details.customerOverride ?? null)
+    const setEntries = Object.entries(updateValues)
+    if (setEntries.length > 0) {
+      const setClause = setEntries.map(([col]) => `${col} = ?`).join(', ')
+      const bindValues = [...setEntries.map(([, v]) => v), now, input.customerId, organizationId]
+      statements.push(env.DB.prepare(
+        `UPDATE customers SET ${setClause}, updated_at = ? WHERE id = ? AND organization_id = ?`
+      ).bind(...bindValues))
+    }
+  }
+
+  if (masterSync && masterSync.vehicleFields.length > 0 && !newVehicle && currentVehicleForSync && input.vehicleId) {
+    const updateValues = buildVehicleUpdateValues(masterSync.vehicleFields, input.details.vehicleOverride ?? null)
+    const setEntries = Object.entries(updateValues)
+    if (setEntries.length > 0) {
+      const setClause = setEntries.map(([col]) => `${col} = ?`).join(', ')
+      const bindValues = [...setEntries.map(([, v]) => v), now, input.vehicleId, organizationId]
+      statements.push(env.DB.prepare(
+        `UPDATE vehicles SET ${setClause}, updated_at = ? WHERE id = ? AND organization_id = ?`
+      ).bind(...bindValues))
+    }
+  }
+
+  statements.push(env.DB.prepare(
+    `INSERT INTO sales_documents
+      (id, organization_id, number, type, status, customer_id, vehicle_id,
+       issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total,
+       note, details_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    docId, organizationId, number, input.type, input.status,
+    resolvedCustomerId, resolvedVehicleId, input.issuedAt, input.dueDate,
+    input.taxRate, input.rounding, totals.subtotal, totals.tax, totals.total,
+    input.note, JSON.stringify(input.details)
+  ))
+
+  for (let start = 0; start < input.items.length; start += salesItemInsertBatchSize) {
+    const batch = input.items.slice(start, start + salesItemInsertBatchSize)
+    for (let i = 0; i < batch.length; i++) {
+      const item = batch[i]
+      statements.push(env.DB.prepare(
+        `INSERT INTO sales_document_items
+          (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, tax_category, other_amount, summary, amount, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), organizationId, docId, item.itemType, item.description, item.quantity, item.unit, item.unitPrice, item.taxCategory, item.otherAmount, item.summary, item.amount, start + i))
+    }
+  }
+
+  await env.DB.batch(statements)
+
+  return jsonResponse({ document: await findSalesDocument(database, docId, organizationId) }, 201, env)
 }
 
 async function updateSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
   const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
   if (!current) throw new HttpError(404, '販売書類が見つかりません。')
 
+  const currentItems = await loadSalesItems(database, documentId, organizationId)
   const body = await readJson(request)
+  const masterSyncRaw = body.masterSync
+
   const input = await parseSalesDocumentInput({
     ...body,
     type: body.type ?? current.type,
@@ -113,30 +299,125 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     rounding: body.rounding ?? current.taxRounding,
     note: body.note === undefined ? current.note : body.note,
     details: body.details === undefined ? parseSalesDetails(current.detailsJson) : body.details,
-    items: body.items === undefined ? await loadSalesItems(database, documentId, organizationId) : body.items,
+    items: body.items === undefined ? currentItems.map((item) => ({
+      itemType: item.itemType,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      taxCategory: item.taxCategory,
+      otherAmount: item.otherAmount,
+      summary: item.summary,
+      amount: item.amount,
+    })) : body.items,
   }, database, organizationId)
+
+  let masterSync: ReturnType<typeof validateMasterSyncInput> | undefined
+  if (masterSyncRaw !== undefined) {
+    const result = validateMasterSyncInput(masterSyncRaw)
+    if ('error' in result) throw new HttpError(400, result.error)
+    masterSync = result
+  }
+
+  let actualCustomerDiffFields: Set<CustomerSyncField> | undefined
+  let actualVehicleDiffFields: Set<VehicleSyncField> | undefined
+  let currentCustomerForSync: typeof customers.$inferSelect | null = null
+  let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
+
+  if (masterSync && masterSync.customerFields.length > 0) {
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
+    for (const f of masterSync.customerFields) {
+      if (!actualCustomerDiffFields.has(f)) {
+        throw new HttpError(400, `顧客フィールド「${f}」は現在値と差分がないか、空欄です。`)
+      }
+    }
+  }
+
+  if (masterSync && masterSync.vehicleFields.length > 0 && input.vehicleId) {
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
+    for (const f of masterSync.vehicleFields) {
+      if (!actualVehicleDiffFields.has(f)) {
+        throw new HttpError(400, `車両フィールド「${f}」は現在値と差分がないか、空欄です。`)
+      }
+    }
+  }
+
+  if (masterSync) {
+    if (masterSync.expectedCustomerUpdatedAt && currentCustomerForSync) {
+      if (currentCustomerForSync.updatedAt !== masterSync.expectedCustomerUpdatedAt) {
+        throw new HttpError(409, '顧客の情報が更新されました。再読み込みしてください。')
+      }
+    }
+    if (masterSync.expectedVehicleUpdatedAt && currentVehicleForSync) {
+      if (currentVehicleForSync.updatedAt !== masterSync.expectedVehicleUpdatedAt) {
+        throw new HttpError(409, '車両の情報が更新されました。再読み込みしてください。')
+      }
+    }
+  }
+
   const totals = calculateSalesTotals(input.items, input.taxRate, input.rounding, input.details)
+  const number = current.number
+  await ensureSalesDocumentNumberAvailable(database, number, organizationId, documentId)
+  const now = new Date().toISOString()
 
-  await database.update(salesDocuments).set({
-    type: input.type,
-    number: current.number,
-    status: input.status,
-    customerId: input.customerId,
-    vehicleId: input.vehicleId,
-    issuedAt: input.issuedAt,
-    dueDate: input.dueDate,
-    taxRate: input.taxRate,
-    taxRounding: input.rounding,
-    subtotal: totals.subtotal,
-    tax: totals.tax,
-    total: totals.total,
-    note: input.note,
-    detailsJson: JSON.stringify(input.details),
-    updatedAt: new Date().toISOString(),
-  }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+  const statements: D1PreparedStatement[] = []
 
-  await database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.documentId, documentId), eq(salesDocumentItems.organizationId, organizationId))).run()
-  await insertSalesItems(database, documentId, input.items, organizationId)
+  if (masterSync && masterSync.customerFields.length > 0 && currentCustomerForSync) {
+    const updateValues = buildCustomerUpdateValues(masterSync.customerFields, input.details.customerOverride ?? null)
+    const setEntries = Object.entries(updateValues)
+    if (setEntries.length > 0) {
+      const setClause = setEntries.map(([col]) => `${col} = ?`).join(', ')
+      const bindValues = [...setEntries.map(([, v]) => v), now, input.customerId, organizationId]
+      statements.push(env.DB.prepare(
+        `UPDATE customers SET ${setClause}, updated_at = ? WHERE id = ? AND organization_id = ?`
+      ).bind(...bindValues))
+    }
+  }
+
+  if (masterSync && masterSync.vehicleFields.length > 0 && currentVehicleForSync && input.vehicleId) {
+    const updateValues = buildVehicleUpdateValues(masterSync.vehicleFields, input.details.vehicleOverride ?? null)
+    const setEntries = Object.entries(updateValues)
+    if (setEntries.length > 0) {
+      const setClause = setEntries.map(([col]) => `${col} = ?`).join(', ')
+      const bindValues = [...setEntries.map(([, v]) => v), now, input.vehicleId, organizationId]
+      statements.push(env.DB.prepare(
+        `UPDATE vehicles SET ${setClause}, updated_at = ? WHERE id = ? AND organization_id = ?`
+      ).bind(...bindValues))
+    }
+  }
+
+  statements.push(env.DB.prepare(
+    `UPDATE sales_documents SET
+       type = ?, status = ?, customer_id = ?, vehicle_id = ?,
+       issued_at = ?, due_date = ?, tax_rate = ?, tax_rounding = ?,
+       subtotal = ?, tax = ?, total = ?, note = ?, details_json = ?, updated_at = ?
+     WHERE id = ? AND organization_id = ?`
+  ).bind(
+    input.type, input.status, input.customerId, input.vehicleId,
+    input.issuedAt, input.dueDate, input.taxRate, input.rounding,
+    totals.subtotal, totals.tax, totals.total,
+    input.note, JSON.stringify(input.details), now, documentId, organizationId
+  ))
+
+  statements.push(env.DB.prepare(
+    `DELETE FROM sales_document_items WHERE document_id = ? AND organization_id = ?`
+  ).bind(documentId, organizationId))
+
+  for (let start = 0; start < input.items.length; start += salesItemInsertBatchSize) {
+    const batch = input.items.slice(start, start + salesItemInsertBatchSize)
+    for (let i = 0; i < batch.length; i++) {
+      const item = batch[i]
+      statements.push(env.DB.prepare(
+        `INSERT INTO sales_document_items
+          (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, tax_category, other_amount, summary, amount, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), organizationId, documentId, item.itemType, item.description, item.quantity, item.unit, item.unitPrice, item.taxCategory, item.otherAmount, item.summary, item.amount, start + i))
+    }
+  }
+
+  await env.DB.batch(statements)
 
   return jsonResponse({ document: await findSalesDocument(database, documentId, organizationId) }, 200, env)
 }
@@ -169,29 +450,14 @@ async function loadSalesItems(database: ReturnType<typeof createDatabase>, docum
   return database.select().from(salesDocumentItems).where(and(eq(salesDocumentItems.documentId, documentId), eq(salesDocumentItems.organizationId, organizationId))).orderBy(asc(salesDocumentItems.sortOrder)).all()
 }
 
-async function insertSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, items: SalesItemInput[], organizationId: string) {
-  if (!items.length) return
-  for (let start = 0; start < items.length; start += salesItemInsertBatchSize) {
-    const batch = items.slice(start, start + salesItemInsertBatchSize)
-    await database.insert(salesDocumentItems).values(batch.map((item, index) => ({
-      id: crypto.randomUUID(),
-      organizationId,
-      documentId,
-      itemType: item.itemType,
-      description: item.description,
-      quantity: item.quantity,
-      unit: item.unit,
-      unitPrice: item.unitPrice,
-      taxCategory: item.taxCategory,
-      otherAmount: item.otherAmount,
-      summary: item.summary,
-      amount: item.amount,
-      sortOrder: start + index,
-    }))).run()
-  }
-}
-
-async function parseSalesDocumentInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string, defaults = fallbackSalesDocumentDefaults): Promise<SalesDocumentInput> {
+async function parseSalesDocumentInput(
+  body: Record<string, unknown>,
+  database: ReturnType<typeof createDatabase>,
+  organizationId: string,
+  defaults = fallbackSalesDocumentDefaults,
+  newCustomer?: NewCustomerInput,
+  newVehicle?: NewVehicleInput,
+): Promise<SalesDocumentInput> {
   const type = stringValue(body, 'type')
   if (!salesDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
 
@@ -199,11 +465,13 @@ async function parseSalesDocumentInput(body: Record<string, unknown>, database: 
   if (!salesStatuses.has(status)) throw new HttpError(400, '書類ステータスが不正です。')
 
   const customerId = stringValue(body, 'customerId')
-  const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get() : null
-  if (!customer) throw new HttpError(400, '顧客を選択してください。')
+  if (!newCustomer) {
+    const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get() : null
+    if (!customer) throw new HttpError(400, '顧客を選択してください。')
+  }
 
   const vehicleId = nullableString(body, 'vehicleId')
-  if (vehicleId) {
+  if (vehicleId && !newVehicle) {
     const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
@@ -229,6 +497,9 @@ function serializeSalesDocument(
   vehicle: typeof vehicles.$inferSelect | undefined,
   items: Array<typeof salesDocumentItems.$inferSelect>,
 ) {
+  const details = parseSalesDetails(document.detailsJson)
+  const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
+  const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
     id: document.id,
     number: document.number,
@@ -243,8 +514,8 @@ function serializeSalesDocument(
       phone: customer?.phone ?? '',
       postalCode: customer?.postalCode ?? '',
       address: customer?.address ?? '',
-      birthDate: '',
-      employer: '',
+      birthDate: customerBirthDate,
+      employer: customerEmployer,
       contactPhone: '',
     },
     vehicleId: document.vehicleId,
@@ -256,15 +527,15 @@ function serializeSalesDocument(
       modelType: vehicle.model ?? '',
       plate: vehicle.registrationNumber ?? '',
       vin: vehicle.chassisNumber ?? '',
-      year: vehicle.modelYear ? `${vehicle.modelYear}年` : '',
+      year: normalizeModelYear(vehicle.modelYear),
       inspectionDate: vehicle.inspectionDate ?? '',
-      mileage: vehicle.mileage === null ? '' : `${vehicle.mileage.toLocaleString('ja-JP')} km`,
+      mileage: normalizeMileage(vehicle.mileage),
       color: vehicle.bodyColor ?? '',
-      displacement: vehicle.displacement === null ? '' : `${vehicle.displacement.toLocaleString('ja-JP')} cc`,
+      displacement: normalizeDisplacement(vehicle.displacement),
       transmission: vehicle.transmission ?? '',
       inspectionRecordAvailable: Boolean(vehicle.inspectionRecordAvailable),
     } : null,
-    details: parseSalesDetails(document.detailsJson),
+    details: { ...details, customerBirthDate, customerEmployer },
     issuedAt: document.issuedAt,
     dueDate: document.dueDate,
     taxRate: document.taxRate,
@@ -379,16 +650,18 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
     salesCategory: limitedString(record.salesCategory, '中古車', 100),
     staffName: limitedString(record.staffName, '', 100),
     customerHonorific: limitedString(record.customerHonorific, '様', 20),
-    customerBirthDate: dateValue(record.customerBirthDate),
-    customerEmployer: limitedString(record.customerEmployer, '', 200),
+    customerBirthDate: customerBirthDateValue(record.customerBirthDate),
+    customerEmployer: customerEmployerValue(record.customerEmployer),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
     selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
     customerOverride: customerOverride ? {
       name: limitedString(customerOverride.name, '', 200),
       kana: limitedString(customerOverride.kana, '', 200),
-      phone: limitedString(customerOverride.phone, '', 50),
-      postalCode: limitedString(customerOverride.postalCode, '', 20),
+      phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
+      postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
       address: limitedString(customerOverride.address, '', 500),
+      birthDate: customerBirthDateValue(customerOverride.birthDate),
+      employer: customerEmployerValue(customerOverride.employer),
     } : null,
     vehicleOverride: vehicleOverride ? {
       maker: limitedString(vehicleOverride.maker, '', 100),
@@ -396,11 +669,11 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
       modelType: limitedString(vehicleOverride.modelType, '', 100),
       plate: limitedString(vehicleOverride.plate, '', 100),
       vin: limitedString(vehicleOverride.vin, '', 100),
-      year: limitedString(vehicleOverride.year, '', 50),
+      year: normalizeModelYear(limitedString(vehicleOverride.year, '', 50)),
       inspectionDate: dateValue(vehicleOverride.inspectionDate),
-      mileage: limitedString(vehicleOverride.mileage, '', 50),
+      mileage: normalizeMileage(limitedString(vehicleOverride.mileage, '', 50)),
       color: limitedString(vehicleOverride.color, '', 100),
-      displacement: limitedString(vehicleOverride.displacement, '', 50),
+      displacement: normalizeDisplacement(limitedString(vehicleOverride.displacement, '', 50)),
       transmission: limitedString(vehicleOverride.transmission, '', 100),
       inspectionRecordAvailable: booleanValue(vehicleOverride.inspectionRecordAvailable),
     } : null,
@@ -489,6 +762,44 @@ function groupBy<T>(items: T[], getKey: (item: T) => string) {
   return grouped
 }
 
+function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const obj = raw as Record<string, unknown>
+  const name = typeof obj.name === 'string' ? obj.name.trim() : ''
+  if (!name) return undefined
+  return {
+    name,
+    nameKana: typeof obj.nameKana === 'string' ? obj.nameKana.trim() || undefined : undefined,
+    phone: typeof obj.phone === 'string' ? normalizePhone(obj.phone) || undefined : undefined,
+    email: typeof obj.email === 'string' ? obj.email.trim() || undefined : undefined,
+    postalCode: typeof obj.postalCode === 'string' ? normalizePostalCode(obj.postalCode) || undefined : undefined,
+    address: typeof obj.address === 'string' ? obj.address.trim() || undefined : undefined,
+    birthDate: typeof obj.birthDate === 'string' ? customerBirthDateValue(obj.birthDate) || undefined : undefined,
+    employer: typeof obj.employer === 'string' ? customerEmployerValue(obj.employer) || undefined : undefined,
+  }
+}
+
+function parseNewVehicle(raw: unknown): NewVehicleInput | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const obj = raw as Record<string, unknown>
+  const maker = typeof obj.maker === 'string' ? obj.maker.trim() : ''
+  const name = typeof obj.name === 'string' ? obj.name.trim() : ''
+  if (!maker || !name) return undefined
+  return {
+    maker,
+    name,
+    model: typeof obj.model === 'string' ? obj.model.trim() || undefined : undefined,
+    registrationNumber: typeof obj.registrationNumber === 'string' ? obj.registrationNumber.trim() || undefined : undefined,
+    chassisNumber: typeof obj.chassisNumber === 'string' ? obj.chassisNumber.trim() || undefined : undefined,
+    modelYear: typeof obj.modelYear === 'number' ? obj.modelYear : undefined,
+    inspectionDate: typeof obj.inspectionDate === 'string' ? obj.inspectionDate.trim() || undefined : undefined,
+    mileage: typeof obj.mileage === 'number' ? obj.mileage : undefined,
+    bodyColor: typeof obj.bodyColor === 'string' ? obj.bodyColor.trim() || undefined : undefined,
+    displacement: typeof obj.displacement === 'number' ? obj.displacement : undefined,
+    transmission: typeof obj.transmission === 'string' ? obj.transmission.trim() || undefined : undefined,
+  }
+}
+
 function stringValue(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? body[key].trim() : ''
 }
@@ -500,6 +811,15 @@ function nullableString(body: Record<string, unknown>, key: string) {
 
 function dateValue(value: unknown) {
   return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : ''
+}
+
+function customerBirthDateValue(value: unknown) {
+  return normalizeCustomerBirthDateForStorage(value)
+}
+
+function customerEmployerValue(value: unknown) {
+  const normalized = limitedString(value, '', 200).normalize('NFKC')
+  return normalized === 'employer' ? '' : normalized
 }
 
 function nullableDate(value: unknown) {
@@ -602,7 +922,7 @@ type SalesDocumentDetails = {
   customerEmployer: string
   customerContactPhone: string
   selectedImageAttachmentId: string
-  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string } | null
+  customerOverride: { name: string; kana: string; phone: string; postalCode: string; address: string; birthDate: string; employer: string } | null
   vehicleOverride: { maker: string; name: string; modelType: string; plate: string; vin: string; year: string; inspectionDate: string; mileage: string; color: string; displacement: string; transmission: string; inspectionRecordAvailable: boolean } | null
   tradeIn: { name: string; modelYear: string; inspectionDate: string; mileage: string; color: string }
   recycleFee: number

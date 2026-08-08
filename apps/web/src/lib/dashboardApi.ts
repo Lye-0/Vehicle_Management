@@ -15,6 +15,7 @@ export type DashboardCalendarEvent = {
   status: string | null
   amount: number | null
   authorName?: string
+  sharedScheduleId?: string
   navigation?: DashboardNavigationTarget
 }
 

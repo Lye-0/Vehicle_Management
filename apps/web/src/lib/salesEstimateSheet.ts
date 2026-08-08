@@ -1,4 +1,4 @@
-import type { SalesDocument } from './salesApi'
+import type { SalesDocumentLike } from './salesApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, salesDocumentAmountTitle, salesDocumentTitle } from './salesEstimate'
 import type { AppSettings } from './settingsApi'
 
@@ -205,7 +205,7 @@ function createSalesEstimateSheetLayout() {
 
 export const salesEstimateSheetLayout = createSalesEstimateSheetLayout()
 
-export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: AppSettings, { imageHref = '' }: SalesEstimateSheetOptions = {}) {
+export function buildSalesEstimateSheetSvg(document: SalesDocumentLike, settings: AppSettings, { imageHref = '' }: SalesEstimateSheetOptions = {}) {
   const totals = calculateSalesEstimateTotals(document)
   const sections = buildSalesEstimateSections(document)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails
@@ -256,7 +256,7 @@ export function buildSalesEstimateSheetSvg(document: SalesDocument, settings: Ap
   </svg>`
 }
 
-function sheetTitle(document: SalesDocument) {
+function sheetTitle(document: SalesDocumentLike) {
   const rows: Array<[string, string]> = [
     ['日付', formatSlashDate(document.issuedAt)],
     ['販売', document.details.salesCategory || '未設定'],
@@ -287,7 +287,7 @@ function sheetTitle(document: SalesDocument) {
   <line x1="${metaRight}" y1="${metaTableY}" x2="${metaRight}" y2="${metaTableY + metaTableHeight}" class="line"/>`
 }
 
-function imageCustomerBlock(document: SalesDocument, imageHref: string) {
+function imageCustomerBlock(document: SalesDocumentLike, imageHref: string) {
   const customer = { ...document.customerDetails, ...document.details.customerOverride }
   const { x, y, imageX, imageWidthTotal } = salesEstimateSheetLayout.customer
   return `
@@ -303,11 +303,11 @@ function imageCustomerBlock(document: SalesDocument, imageHref: string) {
   <image href="${escapeAttribute(imageHref)}" x="${imageX}" y="${y}" width="${imageWidthTotal}" height="${salesEstimateSheetLayout.imageCustomerHeight}" preserveAspectRatio="xMidYMid slice" clip-path="url(#vehiclePhotoClip)"/>`
 }
 
-function expandedCustomerBlock(document: SalesDocument) {
+function expandedCustomerBlock(document: SalesDocumentLike) {
   const customer = { ...document.customerDetails, ...document.details.customerOverride }
   const details = document.details
   const rows: Array<[string, string]> = [
-    ['生年月日', details.customerBirthDate || customer.birthDate || '未設定'],
+    ['生年月日', formatSlashDate(details.customerBirthDate || customer.birthDate)],
     ['電話番号', customer.phone || document.phone || '未登録'],
     ['勤務先等', details.customerEmployer || customer.employer || '未設定'],
     ['連絡先TEL', details.customerContactPhone || customer.contactPhone || '未設定'],
@@ -343,7 +343,7 @@ function expandedCustomerBlock(document: SalesDocument) {
   }).join('')}`
 }
 
-function amountPanel(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
+function amountPanel(document: SalesDocumentLike, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
   const y = salesEstimateSheetLayout.amountPanelY
   const x = salesEstimateSheetLayout.amountPanelX
   return `
@@ -364,7 +364,7 @@ function amountLine(x: number, y: number, label: string, amount: number, valueX 
   return `${text(x, y, label, 'body')}${text(valueX, y, formatYen(amount), 'body amount', 16, 'end')}`
 }
 
-function vehicleBlock(vehicle: SalesDocument['vehicleDetails'], y: number) {
+function vehicleBlock(vehicle: SalesDocumentLike['vehicleDetails'], y: number) {
   const v = vehicle ?? { maker: '', name: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', inspectionRecordAvailable: false }
   const rows: Array<Array<[string, number]>> = [
     [['メーカー', 92], [v.maker || '未設定', 100], ['車名・仕様', 95], [v.name || '未設定', 100], ['年式', 58], [v.year || '未設定', 82], ['排気量', 67], [v.displacement || '未設定', 67]],
@@ -378,7 +378,7 @@ function vehicleBlock(vehicle: SalesDocument['vehicleDetails'], y: number) {
   ${rows.map((row, index) => tableRow(24, y + 39 + index * 37.6, row, 37.6)).join('')}`
 }
 
-function tradeInBlock(tradeIn: SalesDocument['details']['tradeIn'], y: number) {
+function tradeInBlock(tradeIn: SalesDocumentLike['details']['tradeIn'], y: number) {
   const widths = [180, 105, 118, 137, 121]
   const labels = ['下取車名', '年式', '車検日', '走行距離', '車体色']
   const values = [tradeIn.name || 'なし', tradeIn.modelYear || '-', formatJapaneseDate(tradeIn.inspectionDate) || '-', tradeIn.mileage || '-', tradeIn.color || '-']
@@ -388,7 +388,7 @@ function tradeInBlock(tradeIn: SalesDocument['details']['tradeIn'], y: number) {
   ${simpleColumns(24, y + 68, widths, values, 32, false)}`
 }
 
-function taxCaption(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, y: number) {
+function taxCaption(document: SalesDocumentLike, totals: ReturnType<typeof calculateSalesEstimateTotals>, y: number) {
   return `
   ${text(24, y, `※課税対象額（${formatPercent(document.taxRate)}）${formatYen(totals.taxableSubtotal)}　消費税（${formatPercent(document.taxRate)}）${formatYen(totals.tax)}　非課税対象額 ${formatYen(totals.nonTaxableSubtotal + totals.outOfScopeSubtotal)}`, 'small')}
   ${text(24, y + 27, '（※この見積では、自賠責保険料・重量税・印紙代・証紙代・リサイクル預託金を非課税として表示しています）', 'small')}`
@@ -417,7 +417,7 @@ function noteBlock(note: string) {
   ${text(722, y + 57, note || '特になし', 'small')}`
 }
 
-function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof buildSalesEstimateSections>, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
+function vehiclePriceCard(document: SalesDocumentLike, sections: ReturnType<typeof buildSalesEstimateSections>, totals: ReturnType<typeof calculateSalesEstimateTotals>) {
   const { x, width: w, topY, topHeight, taxY, paymentY, bottomY } = salesEstimateSheetLayout.vehicle
   const y = salesEstimateSheetLayout.lowerY
   const rowH = 35
@@ -440,7 +440,7 @@ function vehiclePriceCard(document: SalesDocument, sections: ReturnType<typeof b
   <rect x="${x}" y="${paymentY}" width="${w}" height="${bottomY - paymentY}" rx="5" fill="none" stroke="${LINE}" stroke-width="1.3"/>`
 }
 
-function taxMatrix(document: SalesDocument, totals: ReturnType<typeof calculateSalesEstimateTotals>, x: number, y: number, w: number) {
+function taxMatrix(document: SalesDocumentLike, totals: ReturnType<typeof calculateSalesEstimateTotals>, x: number, y: number, w: number) {
   const c1 = 95
   const c2 = 115
   return `
@@ -503,7 +503,7 @@ function accessoryCard(rows: Array<{ label: string; amount: number }>, total: nu
   ${valueRow(layout.x, layout.totalY, layout.width, '付属品・特別仕様合計', total, layout.totalHeight, 'bold pale', layout.nameWidth)}`
 }
 
-function creditBlock(credit: SalesDocument['details']['credit']) {
+function creditBlock(credit: SalesDocumentLike['details']['credit']) {
   const y = salesEstimateSheetLayout.creditY
   const layout = salesEstimateSheetLayout.footer.credit
   const columnWidth = layout.width / layout.columnCount
@@ -630,13 +630,18 @@ function formatPercent(rate: number) {
 }
 
 function formatJapaneseDate(value: string) {
-  const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return match ? `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日` : value || '未設定'
+  const match = dateParts(value)
+  return match ? `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日` : formatSlashDate(value)
 }
 
 function formatSlashDate(value: string) {
-  const match = value?.replaceAll('/', '-').match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return match ? `${match[1]}/${match[2]}/${match[3]}` : value || '未設定'
+  const normalized = value?.trim().slice(0, 10).replaceAll('.', '/').replaceAll('-', '/') ?? ''
+  return normalized || '未設定'
+}
+
+function dateParts(value: string) {
+  const normalized = value?.trim().slice(0, 10).replaceAll('.', '/').replaceAll('-', '/') ?? ''
+  return normalized.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/)
 }
 
 function brandMark(x: number, y: number, reversed = false) {

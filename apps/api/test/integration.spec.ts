@@ -524,6 +524,8 @@ describe("CLI authenticated workflow", () => {
 			}, ownerUid);
 			expect(ownerSharedSchedule.response.status).toBe(201);
 			expect(objectValue(ownerSharedSchedule.body.schedule)).toEqual(expect.objectContaining({ title: `${marker} オーナー予定`, startDate: "2026-08-20", endDate: "2026-08-22", detail: `${marker} オーナー詳細`, authorName: `${marker} 表示名変更` }));
+			const ownerSharedScheduleId = stringValue(objectValue(ownerSharedSchedule.body.schedule).id);
+			expect(ownerSharedScheduleId).toBeTruthy();
 			const employeeSharedSchedule = await requestJson<JsonObject>("/api/shared-schedules", "POST", {
 				title: `${marker} 従業員予定`,
 				startDate: "2026-08-24",
@@ -531,17 +533,32 @@ describe("CLI authenticated workflow", () => {
 				detail: `${marker} 従業員詳細`,
 			}, employeeUid);
 			expect(employeeSharedSchedule.response.status).toBe(201);
+			const employeeSharedScheduleId = stringValue(objectValue(employeeSharedSchedule.body.schedule).id);
+			expect(employeeSharedScheduleId).toBeTruthy();
+			const updatedSharedSchedule = await requestJson<JsonObject>(`/api/shared-schedules/${ownerSharedScheduleId}`, "PATCH", {
+				title: `${marker} オーナー予定 更新`,
+				startDate: "2026-08-21",
+				endDate: "2026-08-23",
+				detail: `${marker} オーナー詳細 更新`,
+			}, employeeUid);
+			expect(updatedSharedSchedule.response.status).toBe(200);
+			expect(objectValue(updatedSharedSchedule.body.schedule)).toEqual(expect.objectContaining({ title: `${marker} オーナー予定 更新`, startDate: "2026-08-21", endDate: "2026-08-23", detail: `${marker} オーナー詳細 更新`, authorName: `${marker} 表示名変更` }));
 			const listedSharedSchedules = await requestJson<JsonObject>("/api/shared-schedules", "GET", undefined, employeeUid);
 			expect(listedSharedSchedules.response.status).toBe(200);
 			expect(arrayValue(listedSharedSchedules.body.schedules)).toEqual(expect.arrayContaining([
-				expect.objectContaining({ title: `${marker} オーナー予定`, authorName: `${marker} 表示名変更` }),
+				expect.objectContaining({ title: `${marker} オーナー予定 更新`, authorName: `${marker} 表示名変更` }),
 				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 再追加従業員` }),
 			]));
 			const dashboardWithSharedSchedules = await requestJson<JsonObject>("/api/dashboard", "GET", undefined, employeeUid);
 			expect(dashboardWithSharedSchedules.response.status).toBe(200);
 			expect(arrayValue(objectValue(dashboardWithSharedSchedules.body.dashboard).calendarEvents)).toEqual(expect.arrayContaining([
-				expect.objectContaining({ date: "2026-08-20", endDate: "2026-08-22", category: "shared", title: `${marker} オーナー予定`, authorName: `${marker} 表示名変更`, detail: `${marker} オーナー詳細` }),
+				expect.objectContaining({ date: "2026-08-21", endDate: "2026-08-23", category: "shared", title: `${marker} オーナー予定 更新`, sharedScheduleId: ownerSharedScheduleId, authorName: `${marker} 表示名変更`, detail: `${marker} オーナー詳細 更新` }),
 			]));
+			const deletedSharedSchedule = await requestJson<JsonObject>(`/api/shared-schedules/${employeeSharedScheduleId}`, "DELETE", undefined, employeeUid);
+			expect(deletedSharedSchedule.response.status).toBe(200);
+			expect(deletedSharedSchedule.body.deleted).toBe(true);
+			const listedAfterSharedScheduleDelete = await requestJson<JsonObject>("/api/shared-schedules", "GET", undefined, employeeUid);
+			expect(arrayValue(listedAfterSharedScheduleDelete.body.schedules)).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: employeeSharedScheduleId })]));
 
 			const otherOrganizationAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, ownerUid, otherOrganizationId);
 			expect(otherOrganizationAccess.response.status).toBe(400);

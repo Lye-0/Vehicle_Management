@@ -212,6 +212,7 @@
 .shared-schedule-modal .modal-header { align-items: flex-start; }
 .shared-schedule-form-grid .shared-schedule-title-field, .shared-schedule-form-grid .shared-schedule-detail-field { grid-column: 1 / -1; }
 .shared-schedule-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
+.shared-schedule-delete-button { margin-right: auto; }
 .panel { min-width: 0; padding: 22px 24px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
 .panel h2 { font-size: 16px; letter-spacing: -0.02em; }
@@ -383,15 +384,18 @@
 .form-field input, .form-field textarea { width: 100%; min-height: 40px; padding: 10px 11px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
 .form-field textarea { min-height: 66px; resize: vertical; }
 .form-field input:focus, .form-field textarea:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-.sales-create-select-row { display: flex; align-items: stretch; gap: 8px; }
-.sales-create-select-row select { min-width: 0; flex: 1 1 auto; }
-.sales-create-inline-action { min-height: 40px; padding: 0 11px; font-size: 11px; box-shadow: none; }
-.sales-create-inline-panel { display: grid; gap: 14px; margin-top: 16px; padding: 16px; border: 1px solid #cddcf2; border-radius: 10px; background: #f8fbff; }
-.sales-create-inline-panel h3 { margin: 0; color: var(--text); font-size: 13px; }
-.sales-create-inline-panel p { margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
-.sales-create-inline-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.sales-create-inline-actions .button { min-height: 36px; padding: 0 12px; font-size: 11px; box-shadow: none; }
-.sales-create-error { margin: 14px 0 0; color: var(--danger); font-size: 11px; line-height: 1.5; }
+.optional-date-field { min-width: 0; }
+.optional-date-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 11px; font-weight: 800; }
+.optional-date-field-heading label { color: inherit; font-size: inherit; font-weight: inherit; }
+.optional-date-field-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0; color: var(--text-muted); border: 0; background: transparent; font: inherit; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.optional-date-field-toggle:hover { color: var(--text-secondary); }
+.optional-date-field-toggle:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.2); outline-offset: 3px; border-radius: 4px; }
+.optional-date-field-toggle-track { position: relative; width: 30px; height: 18px; flex: 0 0 30px; border-radius: 999px; background: #d7dee8; transition: background 160ms ease; }
+.optional-date-field-toggle-track > span { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 27, 46, 0.18); transition: transform 160ms ease; }
+.optional-date-field-toggle.is-enabled { color: var(--primary); }
+.optional-date-field-toggle.is-enabled .optional-date-field-toggle-track { background: var(--primary); }
+.optional-date-field-toggle.is-enabled .optional-date-field-toggle-track > span { transform: translateX(12px); }
+.optional-date-field input:disabled { color: var(--text-muted); background: #f1f4f8; cursor: not-allowed; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .button-secondary { color: var(--text-secondary); border-color: var(--border); background: var(--surface); }
 .button-secondary:hover { color: var(--text); border-color: #c3d0de; background: var(--surface-subtle); }
@@ -460,6 +464,7 @@
 .sales-detail-title { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 0 1 auto; }
 .sales-detail-title > div { min-width: 0; display: grid; }
 .sales-detail-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.document-draft-badge { display: inline-flex; align-items: center; padding: 3px 7px; border: 1px dashed var(--primary); border-radius: 999px; color: var(--primary); background: var(--surface-subtle); font-size: 11px; font-weight: 700; }
 .sales-detail-title h2 { margin: 5px 0 0; color: var(--text); font-size: 22px; letter-spacing: -0.03em; }
 .sales-detail-title small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; }
 .sales-detail-actions { display: flex; gap: 8px; flex: 0 0 auto; }
@@ -587,8 +592,18 @@
 .sales-estimate-sheet-field-control:focus { z-index: 25; border-color: #2563eb; background: #fff; box-shadow: inset 0 0 0 1px #2563eb; }
 .sales-estimate-sheet-field-control.is-centered { text-align: center; }
 .sales-estimate-sheet-field-control.is-multiline { padding-top: 4px; resize: none; }
+.date-calendar-picker { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
+.date-calendar-picker-button { display: grid; place-items: center; width: 100%; height: 100%; padding: 0; color: #101820; border: 0; background: transparent; cursor: pointer; }
+.date-calendar-picker-button:hover { background: transparent; }
+.date-calendar-picker-button:focus-visible { position: relative; z-index: 2; outline: 2px solid #2563eb; outline-offset: -2px; }
+.date-calendar-picker-button svg { width: 14px; height: 14px; flex: 0 0 14px; }
+.date-calendar-picker-native { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-customer-name { color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; }
 .sales-estimate-sheet-field-control.is-customer-value { font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(8px, 1.232cqw, 13px); }
+.sales-estimate-sheet-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
+.sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control { padding-right: 1.6em; }
+.sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control:hover { background: #fff; }
+.sales-estimate-sheet-calendar-control > .date-calendar-picker { width: clamp(12px, 1.8cqw, 20px); }
 .sales-estimate-sheet-customer-honorific { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: flex-end; box-sizing: border-box; overflow: hidden; color: #06377d; font-family: "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; font-size: clamp(10px, 1.706cqw, 18px); font-weight: 800; line-height: 1.15; pointer-events: none; }
 .sales-estimate-sheet-field-control.is-select { appearance: auto; padding-right: 3px; cursor: pointer; }
 .sales-estimate-sheet-checkbox { position: absolute; z-index: 4; display: grid; place-items: center; pointer-events: auto; cursor: pointer; }
@@ -856,6 +871,8 @@
 .maintenance-statement { position: relative; width: 100%; aspect-ratio: 1122 / 1407; }
 .maintenance-statement > div:first-child { position: absolute; inset: 0; z-index: 1; }
 .maintenance-statement svg { display: block; width: 100%; height: auto; }
+.sales-estimate-sheet .date-calendar-picker-button svg,
+.maintenance-statement .date-calendar-picker-button svg { width: 14px; height: 14px; flex: 0 0 14px; }
 .maintenance-statement-editor { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .maintenance-statement-control { position: absolute; box-sizing: border-box; min-width: 0; padding: 0 5px; overflow: hidden; color: #101820; caret-color: auto; border: 1px solid transparent; border-radius: 0; outline: 0; background: transparent; font: inherit; font-size: clamp(6px, 1.05vw, 13px); line-height: 1.15; pointer-events: auto; }
 .maintenance-statement-control:hover { border-color: #86a5d0; background: transparent; }
@@ -872,6 +889,9 @@
 .maintenance-statement-control.is-header-label { font-size: clamp(10px, 1.45vw, 18px); }
 .maintenance-statement-control.is-section-label { font-size: clamp(12px, 1.9vw, 24px); }
 .maintenance-statement-control.is-bank-value { font-size: clamp(8px, 1.4vw, 17px); }
+.maintenance-statement-calendar-control { position: absolute; z-index: 4; pointer-events: auto; }
+.maintenance-statement-calendar-control > .maintenance-statement-control { padding-right: 1.7em; }
+.maintenance-statement-calendar-control > .date-calendar-picker { width: clamp(10px, 1.7vw, 18px); }
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
@@ -1128,11 +1148,11 @@
 .customer-identity > span:last-child { min-width: 0; display: grid; gap: 5px; }
 .customer-identity h2 { margin: 0; color: var(--text); font-size: 24px; letter-spacing: -0.03em; }
 .customer-identity small { color: var(--text-secondary); font-size: 13px; }
-.customer-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 20px 28px 20px; }
+.customer-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 0; row-gap: 16px; padding: 20px 28px 20px; }
 .customer-info-item { min-width: 0; display: grid; gap: 9px; padding-right: 24px; }
 .customer-info-label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 800; }
 .customer-info-label svg { color: var(--text-muted); }
-.customer-info-item strong { overflow: hidden; color: var(--text); font-size: 13px; line-height: 1.7; text-overflow: ellipsis; }
+.customer-info-item strong { display: block; overflow: hidden; padding-left: 22px; color: var(--text); font-size: 13px; line-height: 1.7; text-overflow: ellipsis; }
 .customer-memo { margin: 20px 28px 24px; padding: 13px 15px; border-radius: 8px; background: #fff9e9; }
 .customer-memo span { display: block; margin-bottom: 5px; color: var(--warning); font-size: 11px; font-weight: 800; }
 .customer-memo p { margin: 0; color: #8b5b16; font-size: 12px; line-height: 1.7; }
@@ -1630,8 +1650,8 @@
   .csv-export-grid { grid-template-columns: 1fr; }
   .csv-import-controls { grid-template-columns: 1fr; align-items: stretch; }
   .modal-form, .modal-header { padding-left: 18px; padding-right: 18px; }
-  .sales-create-select-row { flex-direction: column; }
-  .sales-create-inline-action { width: 100%; }
+  .modal.master-sync-modal .master-sync-modal-footer { padding: 18px; flex-wrap: wrap; }
+  .modal.master-sync-modal .master-sync-modal-footer .button { flex: 1 1 auto; }
   .attachment-preview-modal { width: 100%; max-height: calc(100vh - 24px); }
   .attachment-preview-modal .modal-header { padding-top: 16px; padding-bottom: 16px; }
   .attachment-preview-content { padding: 10px; }
@@ -1859,14 +1879,12 @@
 .vehicle-history-group { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
 .vehicle-history-group-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; color: var(--text); font-size: 12px; }
 .vehicle-history-group-header span { color: var(--text-muted); font-size: 10px; }
-.vehicle-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); }
-.vehicle-history-row.is-action { width: 100%; color: inherit; font: inherit; text-align: left; border-right: 0; border-bottom: 0; border-left: 0; background: transparent; cursor: pointer; }
-.vehicle-history-row.is-action:hover { background: var(--primary-soft); }
-.vehicle-history-row:first-of-type { border-top: 0; }
-.vehicle-history-row span { display: grid; gap: 3px; min-width: 0; }
-.vehicle-history-row strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.vehicle-history-row small, .vehicle-history-none { color: var(--text-muted); font-size: 10px; }
-.vehicle-history-row b { flex: 0 0 auto; color: var(--text-secondary); font-size: 10px; }
+.vehicle-history-row-label { display: grid; gap: 3px; min-width: 0; }
+.vehicle-history-row-label strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.vehicle-history-row-label small { color: var(--text-muted); font-size: 10px; }
+.vehicle-history-row-action { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; min-width: 0; padding: 4px 10px; margin: -4px -10px; color: inherit; font: inherit; text-align: left; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.vehicle-history-row-action:hover { background: var(--primary-soft); }
+.vehicle-history-none { color: var(--text-muted); font-size: 10px; }
 .vehicle-history-empty { padding: 22px 24px; color: var(--text-muted); font-size: 12px; }
 .vehicle-history-empty.is-error { color: var(--danger); }
 .inspection-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
@@ -1911,15 +1929,44 @@
 .icon-button.danger { color: var(--danger); }
 .inspection-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
 .inspection-empty strong { color: var(--text); font-size: 13px; }
+@media (max-width: 1200px) {
+  .vehicle-timeline-table { column-gap: 16px; padding-inline: 24px; }
+  .vehicle-timeline-header { grid-template-columns: minmax(100px, 1.1fr) minmax(80px, 0.9fr) minmax(110px, 1.05fr) minmax(100px, 0.9fr) minmax(200px, 1.6fr); }
+  .vehicle-timeline-row { grid-template-columns: minmax(100px, 1.1fr) minmax(80px, 0.9fr) minmax(110px, 1.05fr) minmax(100px, 0.9fr) minmax(200px, 1.6fr); }
+}
 @media (max-width: 1100px) {
   .vehicle-history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .inspection-schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 980px) {
+  .vehicle-timeline-table { column-gap: 12px; padding-inline: 16px; }
+  .vehicle-timeline-header { grid-template-columns: minmax(90px, 1fr) minmax(72px, 0.85fr) minmax(95px, 1fr) minmax(90px, 0.85fr) minmax(170px, 1.4fr); }
+  .vehicle-timeline-row { grid-template-columns: minmax(90px, 1fr) minmax(72px, 0.85fr) minmax(95px, 1fr) minmax(90px, 0.85fr) minmax(170px, 1.4fr); }
 }
 @media (max-width: 760px) {
   .vehicle-free-items, .vehicle-history-grid, .inspection-schedule-grid { grid-template-columns: 1fr; }
   .inspection-toolbar { align-items: stretch; flex-direction: column; }
   .inspection-result-summary { text-align: left; }
+  .vehicle-timeline-table { display: flex; flex-direction: column; gap: 12px; padding-inline: 0; }
+  .vehicle-timeline-header { display: none; }
+  .vehicle-timeline-row { display: grid; grid-template-columns: 1fr; border: 1px solid var(--border); border-radius: 8px; padding: 12px; gap: 8px; }
+  .vehicle-timeline-row .vehicle-timeline-cell { padding: 0; border: 0; }
+  .vehicle-timeline-row .vehicle-timeline-date,
+  .vehicle-timeline-row .vehicle-timeline-category,
+  .vehicle-timeline-row .vehicle-timeline-mileage { font-size: 11px; color: var(--text-secondary); }
+  .vehicle-timeline-row .vehicle-timeline-amount { font-size: 11px; color: var(--text-secondary); font-weight: 400; justify-content: flex-start; }
+  .vehicle-timeline-row .vehicle-timeline-document { padding-top: 8px; border-top: 1px solid var(--border); }
 }
+.vehicle-timeline-table { display: grid; border-top: 1px solid var(--border); column-gap: clamp(12px, 1.8vw, 24px); padding-inline: clamp(20px, 2.5vw, 36px); }
+.vehicle-timeline-header { display: grid; grid-template-columns: minmax(110px, 1.15fr) minmax(90px, 0.95fr) minmax(120px, 1.15fr) minmax(110px, 0.95fr) minmax(220px, 1.8fr); background: var(--surface-subtle); font-size: 11px; font-weight: 700; color: var(--text-secondary); }
+.vehicle-timeline-row { display: grid; grid-template-columns: minmax(110px, 1.15fr) minmax(90px, 0.95fr) minmax(120px, 1.15fr) minmax(110px, 0.95fr) minmax(220px, 1.8fr); border-bottom: 1px solid var(--border); }
+.vehicle-timeline-row:last-child { border-bottom: 0; }
+.vehicle-timeline-cell { padding: 12px 8px; display: flex; align-items: center; }
+.vehicle-timeline-date { font-size: 12px; color: var(--text); }
+.vehicle-timeline-category { font-size: 12px; color: var(--text-secondary); }
+.vehicle-timeline-mileage { font-size: 12px; color: var(--text); font-weight: 600; }
+.vehicle-timeline-amount { font-size: 12px; color: var(--text); font-weight: 600; white-space: nowrap; }
+.vehicle-timeline-document { padding: 8px; min-width: 0; }
 .button-danger { color: var(--danger); border: 1px solid #f2c4c4; background: var(--danger-soft); }
 .button-danger:hover { background: #ffe8e8; }
 .document-header-editor { margin-bottom: 18px; padding: 18px; }
@@ -1951,3 +1998,23 @@
   .sales-estimate-accessory-breakdown { grid-column: auto; }
   .sales-estimate-edit-actions { align-items: flex-start; flex-direction: column; }
 }
+
+/* MasterSyncConfirmationDialog */
+.master-sync-modal { max-width: 560px; }
+.master-sync-modal-footer { margin-top: 0; padding: 18px 24px 24px; }
+.master-sync-warning { padding: 12px 14px; color: #8a6d00; border: 1px solid #e6d17a; border-radius: 8px; background: #fdf8e8; font-size: 12px; }
+.master-sync-warning-header { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.master-sync-conflict { padding: 10px 14px; color: var(--danger); border: 1px solid #f3c8c8; border-radius: 8px; background: var(--danger-soft); font-size: 12px; }
+.master-sync-section-title { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+.master-sync-diff-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; }
+.master-sync-diff-row:not(.is-disabled):hover { background: var(--surface-subtle); }
+.master-sync-diff-row.is-disabled { opacity: 0.6; }
+.master-sync-diff-info { min-width: 0; flex: 1; }
+.master-sync-diff-label { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text); }
+.master-sync-attention-badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: #f59e0b; color: #fff; font-size: 9px; font-weight: 800; }
+.master-sync-diff-values { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; }
+.master-sync-diff-current { color: var(--text-muted); }
+.master-sync-diff-arrow { color: var(--text-muted); }
+.master-sync-diff-document { color: var(--primary); font-weight: 600; }
+.master-sync-diff-note { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+.master-sync-toggle { flex: 0 0 auto; }

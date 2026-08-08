@@ -27,7 +27,7 @@ import { changeCurrentPassword, createAccountWithEmailPassword, observeAuthState
 import { setActiveOrganizationId } from './lib/api'
 import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
-import { createSharedSchedule } from './lib/sharedSchedulesApi'
+import { createSharedSchedule, deleteSharedSchedule, updateSharedSchedule } from './lib/sharedSchedulesApi'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'inspections' | 'payments' | 'settings'
@@ -425,6 +425,16 @@ function Dashboard({ onNavigate }: { onNavigate: (target: CustomerVehicleNavigat
     setReloadToken((current) => current + 1)
   }
 
+  async function handleUpdateSharedSchedule(id: string, input: Parameters<typeof updateSharedSchedule>[1]) {
+    await updateSharedSchedule(id, input)
+    setReloadToken((current) => current + 1)
+  }
+
+  async function handleDeleteSharedSchedule(id: string) {
+    await deleteSharedSchedule(id)
+    setReloadToken((current) => current + 1)
+  }
+
   const summary = dashboard?.summary
   return (
     <>
@@ -437,7 +447,7 @@ function Dashboard({ onNavigate }: { onNavigate: (target: CustomerVehicleNavigat
         <StatCard label="車検期限30日以内" value={String(summary?.inspectionsWithin30Days ?? 0)} suffix="台" note={`期限超過 ${summary?.overdueInspections ?? 0}台`} icon={CalendarDays} tone="orange" />
         <StatCard label="未入金の請求" value={String(summary?.unpaidInvoices ?? 0)} suffix="件" note={`合計 ${formatYen(summary?.unpaidAmount ?? 0)}`} icon={CircleDollarSign} tone="red" />
       </section>
-      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} defaultEnabledCategories={['inspection', 'vehicle-inspection', 'shared']} onCreateSharedSchedule={handleCreateSharedSchedule} onSelectEvent={(event) => { if (event.navigation) onNavigate(event.navigation) }} />
+      <DashboardCalendar events={dashboard?.calendarEvents ?? []} loading={loading} defaultEnabledCategories={['inspection', 'vehicle-inspection', 'shared']} onCreateSharedSchedule={handleCreateSharedSchedule} onUpdateSharedSchedule={handleUpdateSharedSchedule} onDeleteSharedSchedule={handleDeleteSharedSchedule} onSelectEvent={(event) => { if (event.navigation) onNavigate(event.navigation) }} />
       <section className="dashboard-grid">
         <Panel title="車検・点検期限が近い車両">
           <div className="data-list">{dashboard?.inspections.length ? dashboard.inspections.map((row, index) => <DashboardVehicleRow key={`${row.vehicleId}-${row.date}-${index}`} row={row} onSelect={() => onNavigate({ section: 'customers', customerId: row.customerId, vehicleId: row.vehicleId })} />) : <DashboardEmpty loading={loading}>対象車両はありません。</DashboardEmpty>}</div>

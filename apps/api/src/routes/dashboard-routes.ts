@@ -75,12 +75,13 @@ type CalendarEvent = {
   status: string | null
   amount: number | null
   endDate: string
+  sharedScheduleId?: string
   navigation?: CalendarEventNavigation
 }
 
 const calendarEventLabels: Record<CalendarEventCategory, string> = {
   'vehicle-inspection': '車検満了',
-  inspection: '車検',
+  inspection: '整備',
   maintenance: '整備書類作成日',
   sales: '販売書類作成日',
   'payment-due': '支払期限',
@@ -88,7 +89,7 @@ const calendarEventLabels: Record<CalendarEventCategory, string> = {
   shared: '組織内共有スケジュール',
 }
 
-function buildCalendarEvents(
+export function buildCalendarEvents(
   vehicleRows: Array<typeof vehicles.$inferSelect>,
   scheduleRows: Array<typeof inspectionSchedules.$inferSelect>,
   salesRows: Array<typeof salesDocuments.$inferSelect>,
@@ -126,9 +127,7 @@ function buildCalendarEvents(
     const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
     const documentLabel = `${document.type} ・ #${document.number}`
     addCalendarEvent(events, document.issuedAt, `maintenance-${document.id}-issued`, 'maintenance', `整備書類：${customer}`, documentLabel, document.status, document.total, { section: 'maintenance', recordId: document.id })
-    if (document.category === '車検') {
-      addCalendarEvent(events, document.intakeDate, `inspection-document-${document.id}`, 'inspection', customerVehicleLabel(customer, vehicle), documentLabel, document.status, null, { section: 'maintenance', recordId: document.id }, document.plannedReleaseDate ?? document.completionDate ?? document.intakeDate)
-    }
+    addCalendarEvent(events, document.intakeDate, `inspection-document-${document.id}`, 'inspection', customerVehicleLabel(customer, vehicle), documentLabel, document.status, null, { section: 'maintenance', recordId: document.id }, document.plannedReleaseDate ?? document.completionDate ?? document.intakeDate, null, null, `整備：${document.category}`)
     addCalendarEvent(events, document.dueDate, `maintenance-${document.id}-due`, 'payment-due', `支払期限：${customer}`, documentLabel, document.status, document.total, { section: 'maintenance', recordId: document.id })
   }
 
@@ -144,7 +143,7 @@ function buildCalendarEvents(
 
   for (const schedule of sharedScheduleRows) {
     const authorName = staffProfilesByUid.get(schedule.createdByUid) ?? '未設定ユーザー'
-    addCalendarEvent(events, schedule.startDate, `shared-${schedule.id}`, 'shared', schedule.title, schedule.detail, null, null, undefined, schedule.endDate, authorName)
+    addCalendarEvent(events, schedule.startDate, `shared-${schedule.id}`, 'shared', schedule.title, schedule.detail, null, null, undefined, schedule.endDate, authorName, schedule.id)
   }
 
   return events.sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title, 'ja'))
@@ -162,12 +161,14 @@ function addCalendarEvent(
   navigation?: CalendarEventNavigation,
   endDate: string | null = null,
   authorName: string | null = null,
+  sharedScheduleId: string | null = null,
+  categoryLabel?: string,
 ) {
   const normalizedDate = date ? normalizeDate(date) : ''
   if (!isCalendarDate(normalizedDate)) return
   const normalizedEndDate = endDate ? normalizeDate(endDate) : normalizedDate
   const safeEndDate = isCalendarDate(normalizedEndDate) && normalizedEndDate >= normalizedDate ? normalizedEndDate : normalizedDate
-  events.push({ id, date: normalizedDate, category, categoryLabel: calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}) })
+  events.push({ id, date: normalizedDate, category, categoryLabel: categoryLabel?.trim() || calendarEventLabels[category], title, detail, status, amount, endDate: safeEndDate, navigation, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}), ...(sharedScheduleId?.trim() ? { sharedScheduleId: sharedScheduleId.trim() } : {}) })
 }
 
 function isCalendarDate(value: string) {
