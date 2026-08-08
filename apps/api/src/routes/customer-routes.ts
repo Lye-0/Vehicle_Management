@@ -97,8 +97,8 @@ async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, 
     email: customer.email,
     postalCode: customer.postalCode,
     address: customer.address,
-    birthDate: customer.birthDate,
-    employer: customer.employer,
+    birthDate: normalizeStoredBirthDate(customer.birthDate),
+    employer: normalizeStoredEmployer(customer.employer),
     memo: customer.memo,
     updatedAt: customer.updatedAt,
     vehicles: (vehiclesByCustomer.get(customer.id) ?? []).map((vehicle) => ({
@@ -143,7 +143,7 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
     birthDate: nullableDateString(body, 'birthDate'),
-    employer: nullableString(body, 'employer'),
+    employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
   }).run()
   return jsonResponse({ customer: await findCustomer(database, id, organizationId) }, 201, env)
@@ -162,7 +162,7 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     postalCode: nullableString(body, 'postalCode'),
     address: nullableString(body, 'address'),
     birthDate: nullableDateString(body, 'birthDate'),
-    employer: nullableString(body, 'employer'),
+    employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
@@ -390,7 +390,21 @@ function nullableString(body: Record<string, unknown>, key: string) {
 
 function nullableDateString(body: Record<string, unknown>, key: string) {
   const value = stringValue(body, key)
-  return value ? normalizeDate(value) : null
+  return normalizeStoredBirthDate(value)
+}
+
+function nullableCustomerEmployer(body: Record<string, unknown>, key = 'employer') {
+  return normalizeStoredEmployer(nullableString(body, key))
+}
+
+function normalizeStoredBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(normalized) ? normalizeDate(normalized) : null
+}
+
+function normalizeStoredEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized && normalized !== 'employer' ? normalized : null
 }
 
 function nullableInteger(body: Record<string, unknown>, key: string) {

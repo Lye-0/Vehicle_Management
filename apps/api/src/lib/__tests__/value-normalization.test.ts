@@ -9,6 +9,7 @@ import {
   normalizeValueForComparison,
 } from '@vehicle-management/shared'
 import {
+  buildCustomerUpdateValues,
   buildVehicleUpdateValues,
   computeActualCustomerDiffFields,
   computeActualVehicleDiffFields,
@@ -58,6 +59,14 @@ describe('マスタ同期の正規化比較', () => {
     const current = { name: '山田 太郎', nameKana: null, phone: null, postalCode: null, address: null, birthDate: '1990-01-23', employer: null }
     expect(computeCustomerDiffs(current, { birthDate: '1990/01/23' })).toEqual([])
     expect(computeActualCustomerDiffFields(current, { birthDate: '1990/01/23' })).toEqual(new Set())
+  })
+
+  it('顧客情報の列名プレースホルダーを空値として扱う', () => {
+    const current = { name: '山田 太郎', nameKana: null, phone: null, postalCode: null, address: null, birthDate: 'birth_date', employer: 'employer' }
+    expect(computeCustomerDiffs(current, { birthDate: 'birth_date', employer: 'employer' })).toEqual([])
+    expect(computeActualCustomerDiffFields(current, { birthDate: 'birth_date', employer: 'employer' })).toEqual(new Set())
+    expect(computeCustomerDiffs(current, { birthDate: '1990/01/23', employer: '株式会社サンプル' }).map((diff) => diff.field)).toEqual(['birthDate', 'employer'])
+    expect(buildCustomerUpdateValues(['birthDate', 'employer'], { birthDate: 'birth_date', employer: 'employer' })).toEqual({})
   })
 
   it('年式・排気量の単位省略を差分にしない', () => {

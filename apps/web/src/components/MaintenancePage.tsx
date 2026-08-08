@@ -179,6 +179,11 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       return
     }
     if (!selectedPersistedDocument) return
+    if (selectedDocumentId !== selectedPersistedDocument.id) {
+      // 一覧の先頭をフォールバック表示している場合も、編集対象をIDで固定する。
+      // 支払期限の変更で一覧順が変わっても別書類へ切り替わらないようにする。
+      setSelectedDocumentId(selectedPersistedDocument.id)
+    }
     setDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as MaintenanceDocument : document))
   }
 

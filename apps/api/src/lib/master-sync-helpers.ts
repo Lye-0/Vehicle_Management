@@ -186,7 +186,8 @@ export function extractCustomerFieldsFromOverride(
   for (const [overrideKey, syncField] of Object.entries(CUSTOMER_OVERRIDE_TO_SYNC)) {
     const value = override[overrideKey]
     if (typeof value === 'string' && value.trim()) {
-      result[syncField] = normalizeCustomerSyncValue(syncField, value)
+      const normalized = normalizeCustomerSyncValue(syncField, value)
+      if (normalized) result[syncField] = normalized
     }
   }
   return result
@@ -211,8 +212,19 @@ export function extractVehicleFieldsFromOverride(
 function normalizeCustomerSyncValue(field: CustomerSyncField, value: string): string {
   if (field === 'phone') return normalizePhone(value)
   if (field === 'postalCode') return normalizePostalCode(value)
-  if (field === 'birthDate') return normalizeDate(value)
+  if (field === 'birthDate') return normalizeCustomerBirthDateValue(value)
+  if (field === 'employer') return normalizeCustomerEmployerValue(value)
   return value.normalize('NFKC').trim()
+}
+
+function normalizeCustomerBirthDateValue(value: string | number): string {
+  const normalized = normalizeDate(value)
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : ''
+}
+
+function normalizeCustomerEmployerValue(value: string): string {
+  const normalized = value.normalize('NFKC').trim()
+  return normalized === 'employer' ? '' : normalized
 }
 
 function normalizeVehicleSyncValue(field: VehicleSyncField, value: string | number): string {
@@ -249,7 +261,8 @@ function formatMasterValue(value: string | number | null | undefined, field: str
   if (field === 'mileage') return normalizeMileage(value)
   if (field === 'phone') return normalizePhone(value)
   if (field === 'postalCode') return normalizePostalCode(value)
-  if (field === 'birthDate') return normalizeDate(value)
+  if (field === 'birthDate') return normalizeCustomerBirthDateValue(value ?? '')
+  if (field === 'employer') return normalizeCustomerEmployerValue(String(value))
   return String(value).normalize('NFKC').trim()
 }
 

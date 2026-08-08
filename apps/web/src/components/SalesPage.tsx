@@ -209,6 +209,11 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       return
     }
     if (!selectedPersistedDocument) return
+    if (selectedDocumentId !== selectedPersistedDocument.id) {
+      // 一覧の先頭をフォールバック表示している場合も、編集対象をIDで固定する。
+      // 支払期限の変更で一覧順が変わっても別書類へ切り替わらないようにする。
+      setSelectedDocumentId(selectedPersistedDocument.id)
+    }
     replaceDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as SalesDocument : document))
   }
 
@@ -436,7 +441,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         taxRate: documentToSave.taxRate,
         taxRounding: documentToSave.taxRounding,
         note: documentToSave.note,
-        details: documentToSave.details,
+        details: { ...documentToSave.details, customerOverride: currentSalesCustomerValues(documentToSave) },
         items: documentToSave.items.map(({ id: _id, ...item }) => item),
         masterSync,
       }
@@ -563,7 +568,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         documentId: selectedPersistedDocument.id,
         customerId: selectedPersistedDocument.customerId || undefined,
         vehicleId: selectedPersistedDocument.vehicleId || undefined,
-        customerOverride: selectedPersistedDocument.details.customerOverride ?? undefined,
+        customerOverride: currentSalesCustomerValues(selectedPersistedDocument),
         vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
         issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
         openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
@@ -929,7 +934,7 @@ function SalesDocumentEditor(props: { document: SalesDocumentLike; isDraft: bool
     </section>
     <details className="sales-details-accordion">
       <summary><span>詳細</span><ChevronDown size={16} aria-hidden="true" /></summary>
-      <div className="sales-details-accordion-content"><div className="form-grid"><label className="form-field"><span>顧客ふりがな</span><input value={document.details.customerOverride?.kana ?? document.customerDetails.kana ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...(document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)), kana: event.target.value } })} /></label><label className="form-field"><span>顧客メールアドレス</span><input type="email" value={document.details.customerOverride?.email ?? document.customerDetails.email ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...(document.details.customerOverride ?? pickCustomerOverride(document.customerDetails)), email: event.target.value } })} /></label></div><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
+      <div className="sales-details-accordion-content"><div className="form-grid"><label className="form-field"><span>顧客ふりがな</span><input value={document.details.customerOverride?.kana ?? document.customerDetails.kana ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...currentSalesCustomerValues(document), kana: event.target.value } })} /></label><label className="form-field"><span>顧客メールアドレス</span><input type="email" value={document.details.customerOverride?.email ?? document.customerDetails.email ?? ''} onChange={(event) => props.onUpdateDetails({ customerOverride: { ...currentSalesCustomerValues(document), email: event.target.value } })} /></label></div><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={props.onUpdateTaxRate} /></div>
     </details>
   </>
 }
@@ -1039,12 +1044,16 @@ const salesEstimateSheetLinePositions: SheetLinePosition[] = [
 ]
 
 export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPresetGroups, onUpdateDetails, onUpdateHeader, onUpdateLine }: { document: SalesDocumentLike; hasImage: boolean; sections: SalesEstimateSections; itemPresetGroups: SalesItemPresetGroups; onUpdateDetails: SalesPreviewProps['onUpdateDetails']; onUpdateHeader: SalesPreviewProps['onUpdateHeader']; onUpdateLine: SalesPreviewProps['onUpdateSheetLine'] }) {
-  const customer = { ...pickCustomerOverride(document.customerDetails), ...(document.details.customerOverride ?? {}) }
+  const customer = currentSalesCustomerValues(document)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicleDetails()
   const tradeInLine = sections.tradeIns[0]
 
   function updateCustomer(field: keyof NonNullable<SalesDocumentDetails['customerOverride']>, value: string) {
-    onUpdateDetails({ customerOverride: { ...customer, [field]: value } })
+    onUpdateDetails({
+      customerOverride: { ...customer, [field]: value },
+      ...(field === 'birthDate' ? { customerBirthDate: value } : {}),
+      ...(field === 'employer' ? { customerEmployer: value } : {}),
+    })
   }
 
   function updateVehicle(field: keyof NonNullable<SalesDocumentDetails['vehicleOverride']>, value: string | boolean) {
@@ -1117,9 +1126,9 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
     <SheetTextControl variant="customer-value" ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
     {hasImage && left.phone ? <SheetTextControl variant="customer-value" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
     {!hasImage ? <>
-      <SheetTextControl grid ariaLabel="生年月日" value={document.details.customerBirthDate || customer.birthDate} x={478} y={customerLayout.y + 1} width={207} height={41} onChange={(customerBirthDate) => onUpdateDetails({ customerBirthDate })} />
+      <SheetTextControl grid ariaLabel="生年月日" value={customer.birthDate} x={478} y={customerLayout.y + 1} width={207} height={41} normalizeOnBlur={normalizeSalesCustomerBirthDateOnBlur} onChange={(value) => onUpdateCustomer('birthDate', value)} />
       <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} />
-      <SheetTextControl grid ariaLabel="勤務先等" value={document.details.customerEmployer || customer.employer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(customerEmployer) => onUpdateDetails({ customerEmployer })} />
+      <SheetTextControl grid ariaLabel="勤務先等" value={customer.employer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(value) => onUpdateCustomer('employer', value)} />
       <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
@@ -1431,7 +1440,7 @@ function requiredDocumentLabels(details: SalesDocumentDetails) {
 }
 
 function mapCustomerDetails(customer: Customer | undefined): SalesDocument['customerDetails'] {
-  return customer ? { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: customer.birthDate, employer: customer.employer, contactPhone: '' } : emptyCustomerDetails()
+  return customer ? { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: normalizeSalesCustomerBirthDate(customer.birthDate), employer: normalizeSalesCustomerEmployer(customer.employer), contactPhone: '' } : emptyCustomerDetails()
 }
 
 function pickCustomerOverride(customer: SalesDocument['customerDetails']): NonNullable<SalesDocumentDetails['customerOverride']> {
@@ -1535,10 +1544,12 @@ function currentSalesCustomerValues(document: SalesDocumentLike): NonNullable<Sa
   const base = {
     ...pickCustomerOverride(document.customerDetails),
     ...(override ?? {}),
-    birthDate: document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate,
-    employer: document.details.customerEmployer || override?.employer || document.customerDetails.employer,
   }
-  return base
+  return {
+    ...base,
+    birthDate: normalizeSalesCustomerBirthDate(document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate),
+    employer: normalizeSalesCustomerEmployer(document.details.customerEmployer || override?.employer || document.customerDetails.employer),
+  }
 }
 
 function currentSalesVehicleValues(document: SalesDocumentLike): NonNullable<SalesDocumentDetails['vehicleOverride']> {
@@ -1558,6 +1569,26 @@ function buildNewSalesCustomer(values: NonNullable<SalesDocumentDetails['custome
     birthDate: trimSalesOptional(values.birthDate),
     employer: trimSalesOptional(values.employer),
   }
+}
+
+function normalizeSalesCustomerBirthDate(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim().replaceAll('/', '-') : ''
+  return normalized === 'birth_date' ? '' : normalized
+}
+
+function normalizeSalesCustomerBirthDateOnBlur(value: string) {
+  const normalized = normalizeSalesCustomerBirthDate(value)
+  const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (!match) return normalized
+  const [, year, month, day] = match
+  const padded = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  const date = new Date(`${padded}T00:00:00Z`)
+  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() + 1 === Number(month) && date.getUTCDate() === Number(day) ? padded : normalized
+}
+
+function normalizeSalesCustomerEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized === 'employer' ? '' : normalized
 }
 
 function buildNewSalesVehicle(values: NonNullable<SalesDocumentDetails['vehicleOverride']>): NonNullable<SalesCreateInput['newVehicle']> {

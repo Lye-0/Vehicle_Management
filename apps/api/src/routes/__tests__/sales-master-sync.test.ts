@@ -57,6 +57,10 @@ function patchReq(url: string, body: unknown) {
   return new Request(url, { method: "PATCH", headers: authHeaders(), body: JSON.stringify(body) });
 }
 
+function getReq(url: string) {
+  return new Request(url, { method: "GET", headers: authHeaders() });
+}
+
 async function seedCustomer(id: string, name: string, phone?: string, email?: string, address?: string) {
   await env.DB.prepare(
     "INSERT INTO customers (id, organization_id, customer_number, name, phone, email, address) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -151,6 +155,71 @@ describe("POST sales documents masterSync", () => {
       .first<{ birth_date: string | null; employer: string | null }>();
     expect(customer?.birth_date).toBe("1985-06-07");
     expect(customer?.employer).toBe("既存顧客株式会社");
+  });
+
+  it("顧客マスタの列名プレースホルダーを販売書類と顧客一覧へ再表示しない", async () => {
+    const cid = "sms-cust-legacy-placeholder-001";
+    const vid = "sms-veh-legacy-placeholder-001";
+    await seedCustomer(cid, "旧プレースホルダー顧客");
+    await env.DB.prepare("UPDATE customers SET birth_date = ?, employer = ? WHERE id = ?")
+      .bind("birth_date", "employer", cid)
+      .run();
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
+
+    const salesRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "請求書",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(salesRes.status).toBe(201);
+    const salesBody = await salesRes.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(salesBody.document.customerDetails.birthDate).toBe("");
+    expect(salesBody.document.customerDetails.employer).toBe("");
+    expect(salesBody.document.details.customerBirthDate).toBe("");
+    expect(salesBody.document.details.customerEmployer).toBe("");
+
+    const customersRes = await SELF.fetch(getReq("https://example.com/api/customers"));
+    expect(customersRes.status).toBe(200);
+    const customersBody = await customersRes.json() as { customers: Array<{ id: string; birthDate: string | null; employer: string | null }> };
+    const customer = customersBody.customers.find((item) => item.id === cid);
+    expect(customer?.birthDate).toBeNull();
+    expect(customer?.employer).toBeNull();
+  });
+
+  it("販売書類で編集した生年月日・勤務先等をPATCH後も保持する", async () => {
+    const cid = "sms-cust-birth-employer-patch-001";
+    const vid = "sms-veh-birth-employer-patch-001";
+    await seedCustomer(cid, "販売書類の顧客情報編集");
+    await seedVehicle(vid, cid, "ホンダ", "N-BOX");
+
+    const createRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "請求書",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json() as { document: { id: string } };
+
+    const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${created.document.id}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "1988/02/03",
+        customerEmployer: "販売先株式会社",
+        customerOverride: { name: "販売書類の顧客情報編集", kana: "", phone: "", postalCode: "", address: "", birthDate: "1988/02/03", employer: "販売先株式会社" },
+        vehicleOverride: null,
+      },
+    }));
+    expect(patchRes.status).toBe(200);
+    const patched = await patchRes.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(patched.document.customerDetails.birthDate).toBe("1988-02-03");
+    expect(patched.document.customerDetails.employer).toBe("販売先株式会社");
+    expect(patched.document.details.customerBirthDate).toBe("1988-02-03");
+    expect(patched.document.details.customerEmployer).toBe("販売先株式会社");
   });
 
   it("既存顧客＋既存車両＋販売書類を一体作成", async () => {
