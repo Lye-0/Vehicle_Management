@@ -49,12 +49,12 @@ export function MaintenanceDuplicateConfirmationDialog({
                 ))}
               </div>
               <p style={{ margin: '16px 0 0', color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
-                既存顧客を使用せず、新規顧客として登録する場合は「新規顧客として続ける」を選択してください。
+                既存顧客を使用しない場合は「新規顧客として作成を続ける」を選択してください。
               </p>
             </>
           ) : state.matchReason === 'chassis_number' ? (
             <>
-              <p className="modal-description"><AlertTriangle size={16} />車台番号が一致するため、新規車両として保存できません。</p>
+              <p className="modal-description"><AlertTriangle size={16} />車台番号が一致する既存車両があるため、新規車両として保存できません。</p>
               <div className="master-sync-section">
                 {state.candidates.map((candidate) => {
                   const canUse = canUseExistingVehicle(candidate.id)
@@ -84,8 +84,8 @@ export function MaintenanceDuplicateConfirmationDialog({
         </div>
 
         <div className="modal-footer">
-          <button className="button button-secondary" type="button" onClick={onCancel}>保存を中止</button>
-          {state.kind === 'customer' && <button className="button button-primary" type="button" onClick={onContinueAsNewCustomer}>新規顧客として続ける</button>}
+          <button className="button button-secondary" type="button" onClick={onCancel}>保存せず閉じる</button>
+          {state.kind === 'customer' && <button className="button button-primary" type="button" onClick={onContinueAsNewCustomer}>新規顧客として作成を続ける</button>}
         </div>
       </section>
     </div>
@@ -107,7 +107,7 @@ function RegistrationDuplicateContent({
 
   return (
     <>
-      <p className="modal-description"><CarFront size={16} />登録番号が一致する候補を確認してください。</p>
+      <p className="modal-description"><CarFront size={16} />入力した登録番号と一致する既存車両があります。使用するか、重複を確認して新規車両として作成を続けてください。</p>
       <div className="master-sync-section">
         {candidates.map((candidate) => {
           const canUse = canUseExistingVehicle(candidate.id)
@@ -121,7 +121,7 @@ function RegistrationDuplicateContent({
                 <button className="button button-secondary" type="button" disabled={!canUse} onClick={() => onUseExistingVehicle(candidate.id)}>{canUse ? 'この既存車両を使用' : '別顧客のため選択不可'}</button>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
                   <input type="radio" name="maintenance-registration-duplicate" checked={selectedCandidateId === candidate.id} onChange={() => setSelectedCandidateId(candidate.id)} />
-                  この候補との重複を確認
+                  この候補の登録番号重複を確認
                 </label>
               </div>
             </div>
@@ -129,11 +129,11 @@ function RegistrationDuplicateContent({
         })}
       </div>
       <p style={{ margin: '16px 0 0', color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
-        既存車両を使用しない場合は、候補を1件選択して重複確認後に新規車両として続けます。
+        既存車両を使用しない場合は、候補を1件選択して重複確認後に新規車両として作成を続けます。
       </p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
         <button className="button button-primary" type="button" disabled={!selectedCandidateId} onClick={() => { if (selectedCandidateId) onContinueAsNewVehicle(selectedCandidateId) }}>
-          確認して新規車両として続ける
+          確認して新規車両として作成を続ける
         </button>
       </div>
     </>

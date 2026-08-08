@@ -138,10 +138,10 @@ export function MasterSyncConfirmationDialog({
                     <span className="master-sync-diff-arrow">→</span>
                     <span className="master-sync-diff-document">{formatMileage(mileageDiff.documentValue)}</span>
                   </div>
-                  <span className="master-sync-diff-note">走行距離履歴にも記録されます</span>
+                  <span className="master-sync-diff-note">走行距離は整備履歴として保存されるため、OFFにできません。</span>
                 </div>
                 <label className="backup-toggle master-sync-toggle" style={{ cursor: 'default' }}>
-                  <input type="checkbox" checked readOnly disabled />
+                  <input type="checkbox" checked readOnly disabled aria-label="走行距離の同期（必須・変更不可）" />
                   <span className="backup-toggle-track" aria-hidden="true"><span /></span>
                 </label>
               </div>
@@ -155,7 +155,7 @@ export function MasterSyncConfirmationDialog({
           )}
         </div>
         <div className="modal-footer">
-          <button className="button button-secondary" type="button" onClick={onCancel}>キャンセル</button>
+          <button className="button button-secondary" type="button" onClick={onCancel}>保存せず閉じる</button>
           <button className="button button-primary" type="button" disabled={!hasAnyDiff} onClick={handleConfirm}>
             {hasMileageOnly ? '走行距離を記録して保存' : '保存して選択項目を反映'}
           </button>

@@ -111,10 +111,6 @@ type SalesCreateForm = {
   customerId: string
   vehicleMode: 'existing' | 'new' | null
   vehicleId: string
-  dueDate: string
-  taxRate: number
-  taxRounding: '切り捨て' | '四捨五入'
-  initialItemDescription: string
 }
 
 const NEW_CUSTOMER_VALUE = '__new_customer__'
@@ -482,7 +478,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '', dueDate: dateAfter(settings.document.defaultDueDays), taxRate: settings.tax.consumptionTaxRate, taxRounding: settings.tax.rounding, initialItemDescription: settings.salesItemPresets[0] ?? '車両本体価格' })
+    setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
     setCreateDialogOpen(true)
   }
 
@@ -505,16 +501,16 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       vehicleDetails: vehicle ? mapVehicleDetails(vehicle) : null,
       details: structuredClone(defaultSalesDocumentDetails),
       issuedAt: todaySalesDisplay(),
-      dueDate: createForm.dueDate,
-      taxRate: createForm.taxRate / 100,
-      taxRounding: createForm.taxRounding,
+      dueDate: dateAfter(settings.document.defaultDueDays),
+      taxRate: settings.tax.consumptionTaxRate / 100,
+      taxRounding: settings.tax.rounding,
       note: '',
       archivedAt: null,
       archivedPreviousStatus: null,
       archivedBy: null,
       purgeAt: null,
       keepForever: false,
-      items: [{ id: 'draft-item-1', itemType: 'その他', description: createForm.initialItemDescription, quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }],
+      items: [{ id: 'draft-item-1', itemType: 'その他', description: settings.salesItemPresets[0] ?? '車両本体価格', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }],
     }
     draftContextRef.current = {
       customerMode: createForm.customerMode!,
@@ -688,7 +684,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
           openedMasterSnapshotRef.current = { state: 'invalid' }
         }
       } catch {
-        setSyncError('書類は作成されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
+        setSyncError('書類は保存されましたが、最新の顧客・車両情報を再取得できませんでした。画面を再読み込みしてください。')
         lastOpenedDocumentIdRef.current = nextDocument.id
         openedMasterSnapshotRef.current = { state: 'invalid' }
       }
@@ -1629,7 +1625,7 @@ function SalesDocumentDialog({ form, customers, onChange, onClose, onSubmit }: {
 }
 
 function emptyCreateForm(): SalesCreateForm {
-  return { type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '', dueDate: dateAfter(defaultSettings.document.defaultDueDays), taxRate: defaultSettings.tax.consumptionTaxRate, taxRounding: defaultSettings.tax.rounding, initialItemDescription: '車両本体価格' }
+  return { type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' }
 }
 
 function dateAfter(days: number) {

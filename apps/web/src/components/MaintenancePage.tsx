@@ -51,7 +51,7 @@ type CategoryFilter = 'すべて' | IntakeCategory
 type MaintenanceTypeFilter = 'すべて' | MaintenanceDocumentType
 type MaintenanceStatusFilter = 'すべて' | Exclude<MaintenanceStatus, 'アーカイブ済み'>
 type MaintenanceDocumentView = 'edit' | 'preview'
-type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCategory; customerMode: 'existing' | 'new' | null; customerId: string; vehicleMode: 'existing' | 'new' | null; vehicleId: string; intakeDate: string; plannedReleaseDate: string; dueDate: string }
+type MaintenanceCreateForm = { type: MaintenanceDocumentType; category: IntakeCategory; customerMode: 'existing' | 'new' | null; customerId: string; vehicleMode: 'existing' | 'new' | null; vehicleId: string }
 type CompletedMaintenanceGroup = { key: string; label: string; documents: MaintenanceDocument[] }
 
 type MasterSnapshot =
@@ -94,7 +94,7 @@ const maintenanceCategoryFilterOptions: DocumentFilterOption<CategoryFilter>[] =
   { value: '一般整備', label: '一般整備', tone: 'general' },
 ]
 const emptyFees: MandatoryFees = { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 }
-const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '', intakeDate: todayDisplay(), plannedReleaseDate: addDaysDisplay(2), dueDate: addDaysDisplay(defaultSettings.document.defaultDueDays) }
+const emptyCreateForm: MaintenanceCreateForm = { type: '整備見積書', category: '一般整備', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' }
 const NEW_CUSTOMER_VALUE = '__new_customer__'
 const NEW_VEHICLE_VALUE = '__new_vehicle__'
 
@@ -138,7 +138,6 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         setCustomers(nextCustomers)
         setSettings(nextSettings)
         setSelectedDocumentId(initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : '')
-        setCreateForm(createFormForCustomers(nextCustomers, nextSettings.document.defaultDueDays))
         setError('')
       })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '整備データを読み込めませんでした。') })
@@ -715,7 +714,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    setCreateForm(createFormForCustomers(customers, settings.document.defaultDueDays))
+    setCreateForm(emptyCreateForm)
     setCreateDialogOpen(true)
   }
 
@@ -739,11 +738,11 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       mileage: vehicle?.mileage ?? '',
       vehicleDetails: vehicle ? mapMaintenanceVehicleDetails(vehicle) : null,
       details: structuredClone(defaultMaintenanceDocumentDetails),
-      intakeDate: createForm.intakeDate,
-      plannedReleaseDate: createForm.plannedReleaseDate,
+      intakeDate: todayDisplay(),
+      plannedReleaseDate: addDaysDisplay(2),
       completionDate: '',
       issuedAt: todayDisplay(),
-      dueDate: createForm.dueDate,
+      dueDate: addDaysDisplay(settings.document.defaultDueDays),
       taxRate: settings.tax.consumptionTaxRate / 100,
       taxRounding: settings.tax.rounding,
       fees: { ...emptyFees },
@@ -1139,7 +1138,6 @@ function mapMaintenanceVehicleDetails(vehicle: Customer['vehicles'][number] | un
     inspectionRecordAvailable: vehicle.inspectionRecordAvailable,
   }
 }
-function createFormForCustomers(_customers: Customer[], defaultDueDays: number): MaintenanceCreateForm { return { ...emptyCreateForm, dueDate: addDaysDisplay(defaultDueDays) } }
 function todayDisplay() { return new Date().toISOString().slice(0, 10).replaceAll('-', '/') }
 function addDaysDisplay(days: number) { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10).replaceAll('-', '/') }
 function parseMileageString(value: string | undefined | null): number | null {
