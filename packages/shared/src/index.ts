@@ -22,7 +22,12 @@ function parseIntegerWithOptionalUnit(value: unknown): number | null {
 function normalizeIntegerUnit(value: unknown, unit: '年' | 'cc' | 'km'): string {
   const text = normalizedString(value)
   if (!text) return ''
-  const parsed = parseIntegerWithOptionalUnit(value)
+  const completedText = unit === 'cc'
+    ? text.replace(/^(\d[\d,\s]*\s*)c$/i, '$1cc')
+    : unit === 'km'
+      ? text.replace(/^(\d[\d,\s]*\s*)k$/i, '$1km')
+      : text
+  const parsed = parseIntegerWithOptionalUnit(completedText)
   if (parsed === null) return text
   return unit === '年' ? `${parsed}年` : `${numberFormatter.format(parsed)} ${unit}`
 }

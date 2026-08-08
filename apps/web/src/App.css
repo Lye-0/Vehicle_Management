@@ -384,6 +384,10 @@
 .form-field input, .form-field textarea { width: 100%; min-height: 40px; padding: 10px 11px; color: var(--text); outline: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
 .form-field textarea { min-height: 66px; resize: vertical; }
 .form-field input:focus, .form-field textarea:focus { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+.modal-date-input { position: relative; min-width: 0; }
+.modal-date-input > input { padding-right: 40px; }
+.modal-date-input > .date-calendar-picker { right: 1px; width: 36px; }
+.modal-date-input .date-calendar-picker-native { width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; }
 .optional-date-field { min-width: 0; }
 .optional-date-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 11px; font-weight: 800; }
 .optional-date-field-heading label { color: inherit; font-size: inherit; font-weight: inherit; }
@@ -1090,10 +1094,7 @@
 .payment-form-header { padding-bottom: 13px; border-bottom: 1px solid var(--border); }
 .payment-form-header > svg { color: var(--primary); }
 .payment-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.payment-input-with-prefix { display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
-.payment-input-with-prefix:focus-within { border-color: #8eafe8; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-.payment-input-with-prefix > span { color: var(--text-muted); font-size: 12px; }
-.payment-input-with-prefix input { width: 100%; min-width: 0; height: 38px; padding: 0; color: var(--text); outline: 0; border: 0; background: transparent; font-size: 12px; text-align: right; }
+.payment-amount-input { text-align: right; font-variant-numeric: tabular-nums; }
 .payment-note-field { margin-top: 14px; }
 .payment-save-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .payment-save-row > div { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
@@ -1859,7 +1860,6 @@
   .maintenance-item-row select,
   .maintenance-fee-input,
   .maintenance-totals > div input,
-  .payment-input-with-prefix,
   .payment-form-panel input,
   .payment-form-panel select,
   .payment-form-panel textarea { border: 0 !important; background: transparent !important; box-shadow: none !important; }

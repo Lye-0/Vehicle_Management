@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
-import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import type {
   MaintenanceDocumentLike,
   MaintenanceDocumentDetails,
@@ -10,6 +10,7 @@ import type {
 import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/maintenanceStatement'
 import { DateCalendarButton } from './DateCalendarButton'
 import { toNativeDateValue } from './dateInput'
+import { sanitizeNormalizedDraft, toEditableNormalizedValue } from './normalizedInput'
 
 export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
 export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
@@ -61,12 +62,12 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     <StatementTextControl ariaLabel="顧客名" value={customer.name} x={140} y={101} width={320} height={38} className="is-large" onChange={(value) => updateCustomer('name', value)} />
     <StatementTextControl ariaLabel="顧客ふりがな" value={customer.kana} x={140} y={139} width={320} height={25} onChange={(value) => updateCustomer('kana', value)} />
     <StatementTextControl ariaLabel="顧客敬称" value={details.customerHonorific} x={462} y={112} width={54} height={38} centered className="is-large" onChange={(value) => updateDetails({ customerHonorific: value })} />
-    <StatementTextControl ariaLabel="郵便番号" displayPrefix="〒" value={customer.postalCode} x={140} y={181} width={200} height={28} normalizeOnBlur={normalizePostalCode} onChange={(value) => updateCustomer('postalCode', value)} />
+    <StatementTextControl normalization="postalCode" ariaLabel="郵便番号" displayPrefix="〒" value={customer.postalCode} x={140} y={181} width={200} height={28} normalizeOnBlur={normalizePostalCode} onChange={(value) => updateCustomer('postalCode', value)} />
     <StatementTextControl ariaLabel="顧客住所" value={customer.address} x={140} y={211} width={370} height={41} onChange={(value) => updateCustomer('address', value)} />
     <StatementTextControl calendar ariaLabel="生年月日" value={customer.birthDate} x={650} y={95} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizeMaintenanceCustomerBirthDateOnBlur} onChange={(value) => updateCustomer('birthDate', value)} />
-    <StatementTextControl ariaLabel="顧客電話番号" value={customer.phone} x={650} y={137} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizePhone} onChange={(value) => updateCustomer('phone', value)} />
+    <StatementTextControl normalization="phone" ariaLabel="顧客電話番号" value={customer.phone} x={650} y={137} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizePhone} onChange={(value) => updateCustomer('phone', value)} />
     <StatementTextControl ariaLabel="勤務先等" value={customer.employer} x={650} y={179} width={155} height={30} className="is-contact-value" onChange={(value) => updateCustomer('employer', value)} />
-    <StatementTextControl ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={650} y={221} width={155} height={30} className="is-contact-value" onChange={(value) => updateDetails({ customerContactPhone: value })} />
+    <StatementTextControl normalization="phone" ariaLabel="連絡先電話番号" value={details.customerContactPhone} x={650} y={221} width={155} height={30} className="is-contact-value" normalizeOnBlur={normalizePhone} onChange={(value) => updateDetails({ customerContactPhone: value })} />
 
     <VehicleEditor vehicle={vehicle} onUpdate={updateVehicle} />
     <StatementTextControl calendar ariaLabel="入庫日" value={document.intakeDate} x={916} y={443} width={83} height={35} centered className="is-compact-date" onChange={(value) => onUpdateHeader('intakeDate', value)} />
@@ -98,7 +99,7 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
     { field: 'inspectionDate', x: 670, y: 447, width: 140, height: 47, centered: true },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <StatementTextControl key={field} calendar={field === 'inspectionDate'} calendarControlClassName={field === 'inspectionDate' ? 'is-vehicle-inspection-date' : undefined} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <StatementTextControl key={field} calendar={field === 'inspectionDate'} calendarControlClassName={field === 'inspectionDate' ? 'is-vehicle-inspection-date' : undefined} normalization={field === 'year' ? 'modelYear' : field === 'displacement' ? 'displacement' : field === 'mileage' ? 'mileage' : undefined} className="is-compact-value" ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
   </>
 }
 
@@ -147,14 +148,43 @@ function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, heig
   </div>
 }
 
-function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', calendarControlClassName = '', readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; calendarControlClassName?: string; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
-  const displayValue = value ? `${displayPrefix}${value}` : value
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', calendarControlClassName = '', normalization, readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; calendarControlClassName?: string; normalization?: NormalizableField; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
+  const [draft, setDraft] = useState(() => normalization ? toEditableNormalizedValue(normalization, value) : value)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    if (!focused) setDraft(normalization ? toEditableNormalizedValue(normalization, value) : value)
+  }, [focused, normalization, value])
+
+  const editableValue = normalization && focused ? draft : value
+  const displayValue = editableValue ? `${displayPrefix}${editableValue}` : editableValue
   function handleChange(nextValue: string) {
     const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
-    onChange(withoutPrefix)
+    if (!normalization) {
+      onChange(withoutPrefix)
+      return
+    }
+    const sanitized = sanitizeNormalizedDraft(normalization, withoutPrefix)
+    if (sanitized === null) return
+    setDraft(sanitized)
+  }
+  function beginEdit() {
+    if (!normalization) return
+    setFocused(true)
+    setDraft(toEditableNormalizedValue(normalization, value))
+  }
+  function finish() {
+    setFocused(false)
+    if (!normalizeOnBlur) return
+    if (!normalization) {
+      const normalized = normalizeOnBlur(value)
+      if (normalized !== value) onChange(normalized)
+      return
+    }
+    const normalized = normalizeOnBlur(draft)
+    if (normalized !== value) onChange(normalized)
   }
   const inputClassName = `maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`
-  const inputProps = { 'aria-label': ariaLabel, className: inputClassName, value: displayValue, readOnly, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
+  const inputProps = { 'aria-label': ariaLabel, className: inputClassName, value: displayValue, readOnly, onFocus: normalization ? beginEdit : undefined, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: finish }
   if (!calendar) return <input {...inputProps} style={controlStyle(x, y, width, height)} />
   return <div className={`maintenance-statement-calendar-control${calendarControlClassName ? ` ${calendarControlClassName}` : ''}`} style={controlStyle(x, y, width, height)}>
     <input {...inputProps} type="date" value={toNativeDateValue(value)} onChange={(event) => onChange(event.target.value.replaceAll('-', '/'))} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />

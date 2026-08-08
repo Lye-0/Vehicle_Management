@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
+import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { updateCurrentProfile } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
@@ -11,6 +12,7 @@ import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
 import { IconWithChain } from './IconWithChain'
+import { NormalizedInput } from './NormalizedValueInput'
 
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
@@ -121,9 +123,18 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     if (saving) return
     setSaving(true)
     setSaved(false)
+    const normalizedSettings = {
+      ...settings,
+      shop: {
+        ...settings.shop,
+        postalCode: normalizePostalCode(settings.shop.postalCode),
+        phone: normalizePhone(settings.shop.phone),
+        fax: normalizePhone(settings.shop.fax),
+      },
+    }
     try {
       const [nextSettings, nextBackupSettings] = await Promise.all([
-        updateSettings(settings),
+        updateSettings(normalizedSettings),
         canManageBackupSettings ? updateBackupSettings({ ...backupSettings, destination: 'b2' }) : Promise.resolve(backupSettings),
       ])
       setSettings(nextSettings)
@@ -722,7 +733,7 @@ function addRetentionDays(value: string, days: number) {
 }
 
 function ShopSettingsPanel({ settings, onUpdate }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" normalization="postalCode" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" normalization="phone" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" normalization="phone" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
 }
 
 function ShopLogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -770,8 +781,8 @@ function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof 
   return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
 }
 
-function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean }) {
-  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; normalization?: NormalizableField }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
 }
 
 function SalesPresetPanel({ groups, onUpdate, onAdd, onRemove }: { groups: SalesItemPresetGroups; onUpdate: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAdd: (group: SalesItemPresetGroupKey) => void; onRemove: (group: SalesItemPresetGroupKey, index: number) => void }) {
