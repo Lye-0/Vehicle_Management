@@ -120,9 +120,10 @@ export async function completeInitialOrganizationSetup(database: Database, env: 
   const target = await database.select().from(organizations).where(eq(organizations.setupCompleted, false)).orderBy(asc(organizations.createdAt)).get()
   if (!target) throw new HttpError(409, '初回セットアップはすでに完了しています。')
 
-  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, target.id), eq(organizationMemberships.uid, user.uid))).get()
   const now = new Date().toISOString()
-  await database.update(organizations).set({ name: normalizedName, ownerUid: user.uid, setupCompleted: true, updatedAt: now }).where(and(eq(organizations.id, target.id), eq(organizations.setupCompleted, false))).run()
+  const updated = await database.update(organizations).set({ name: normalizedName, ownerUid: user.uid, setupCompleted: true, updatedAt: now }).where(and(eq(organizations.id, target.id), eq(organizations.setupCompleted, false))).run()
+  if (updated.meta.changes !== 1) throw new HttpError(409, '初回セットアップは別のユーザーによって完了しました。')
+  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, target.id), eq(organizationMemberships.uid, user.uid))).get()
   if (!existingMembership) {
     await database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId: target.id, uid: user.uid, role: 'owner', status: 'active', updatedAt: now }).run()
   }

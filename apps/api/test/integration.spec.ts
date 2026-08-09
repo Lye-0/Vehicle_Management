@@ -511,10 +511,8 @@ describe("CLI authenticated workflow", () => {
 			const invalidRowCommitFile = new FormData();
 			invalidRowCommitFile.append("file", new File([invalidRowCsv], "invalid-row.csv", { type: "text/csv" }));
 			const invalidRowCommit = await requestForm<JsonObject>("/api/import/customers/commit", invalidRowCommitFile);
-			expect(invalidRowCommit.response.status).toBe(200);
-			expect(invalidRowCommit.body.imported).toBe(0);
-			expect(invalidRowCommit.body.skipped).toBe(1);
-			expect(arrayValue(invalidRowCommit.body.errors)).toHaveLength(1);
+			expect(invalidRowCommit.response.status).toBe(400);
+			expect(stringValue(invalidRowCommit.body.error)).toContain("変更は反映されていません");
 
 			const employeeCannotManageMembers = await requestJson<JsonObject>(`/api/organization/members/${ownerUid}`, "PATCH", { status: "suspended" }, employeeUid);
 			expect(employeeCannotManageMembers.response.status).toBe(403);

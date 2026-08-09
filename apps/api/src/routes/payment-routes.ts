@@ -74,7 +74,19 @@ async function addPaymentEntry(request: Request, env: Env, database: ReturnType<
   const existingEntries = await ensurePaymentHistory(database, documentType, documentId, organizationId)
   assertWithinOutstanding(invoice.total, sumPaymentEntries(existingEntries), input.amount)
   const now = new Date().toISOString()
-  await database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: input.amount, paymentDate: input.paymentDate, method: input.method, note: input.note, createdAt: now, updatedAt: now }).run()
+  const inserted = await env.DB.prepare(`
+    INSERT INTO payment_entries (id, organization_id, document_type, document_id, amount, payment_date, method, note, created_at, updated_at)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE ? <= ? - COALESCE((
+      SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)
+      FROM payment_entries
+      WHERE organization_id = ? AND document_type = ? AND document_id = ?
+    ), 0)
+  `).bind(
+    crypto.randomUUID(), organizationId, documentType, documentId, input.amount, input.paymentDate, input.method, input.note, now, now,
+    input.amount, invoice.total, organizationId, documentType, documentId,
+  ).run()
+  if (inserted.meta.changes !== 1) throw new HttpError(400, '入金額が請求残額を超えています。')
   await syncPaymentRecord(database, invoice, documentType, documentId, organizationId)
   return paymentResponse(env, database, documentType, documentId, organizationId, 201)
 }

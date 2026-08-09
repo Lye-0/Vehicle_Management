@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
-import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, mileageHistories, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireOrganizationContext, requireOrganizationPermission } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { addDays, loadBackupSettings, normalizeBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
@@ -10,6 +10,9 @@ import { loadOrganizationPermissions } from '../organization-permissions'
 import { createB2Storage } from '../storage/b2'
 
 const preRestoreProtectionDays = 30
+const maximumBackupFileBytes = 20 * 1024 * 1024
+const maximumBackupTotalFileBytes = 50 * 1024 * 1024
+const maximumBackupRequestBytes = 80 * 1024 * 1024
 
 export async function handleBackupRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -88,16 +91,21 @@ async function exportBackup(request: Request, env: Env, database: ReturnType<typ
   const snapshot = await loadSnapshot(database, context.organization.organizationId, crypto.randomUUID(), context.organization.name)
   snapshot.note = normalizeBackupNote(new URL(request.url).searchParams.get('note'))
   const files: BackupExportFile[] = []
+  let totalFileBytes = 0
   for (const file of snapshot.tables.vehicleFiles) {
+    if (file.sizeBytes > maximumBackupFileBytes || totalFileBytes + file.sizeBytes > maximumBackupTotalFileBytes) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
     const response = await storage.getObject(file.objectKey)
-    files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(await response.arrayBuffer()) })
+    const bytes = await response.arrayBuffer()
+    if (bytes.byteLength > maximumBackupFileBytes || totalFileBytes + bytes.byteLength > maximumBackupTotalFileBytes) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+    totalFileBytes += bytes.byteLength
+    files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(bytes) })
   }
   return jsonResponse({ backup: { ...snapshot, files } }, 200, env)
 }
 
 async function importBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
-  const body = await readJson(request)
+  const body = await readJson(request, maximumBackupRequestBytes)
   const source = assertExportManifest(body.backup, context.organization.organizationId)
   const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
   const storage = getStorage(env)
@@ -264,7 +272,7 @@ async function deleteBackupRecord(database: ReturnType<typeof createDatabase>, e
 }
 
 async function loadSnapshot(database: ReturnType<typeof createDatabase>, organizationId: string, id: string, organizationName: string): Promise<BackupManifest> {
-  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, scheduleRows, sharedScheduleRows, settingsRows] = await Promise.all([
+  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, mileageHistoryRows, scheduleRows, sharedScheduleRows, settingsRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.createdAt)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.createdAt)).all(),
     database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
@@ -274,6 +282,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(asc(paymentRecords.createdAt)).all(),
     database.select().from(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).orderBy(asc(paymentEntries.createdAt)).all(),
+    database.select().from(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)).orderBy(asc(mileageHistories.createdAt)).all(),
     database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(asc(inspectionSchedules.createdAt)).all(),
     database.select().from(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).orderBy(asc(sharedSchedules.createdAt)).all(),
     database.select().from(appSettings).where(eq(appSettings.organizationId, organizationId)).orderBy(asc(appSettings.key)).all(),
@@ -295,6 +304,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
       maintenanceItems: maintenanceItemRows,
       paymentRecords: paymentRows,
       paymentEntries: paymentEntryRows,
+      mileageHistories: mileageHistoryRows,
       inspectionSchedules: scheduleRows,
       sharedSchedules: sharedScheduleRows,
       appSettings: settingsRows,
@@ -303,6 +313,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
 }
 
 async function clearOrganizationData(database: ReturnType<typeof createDatabase>, organizationId: string) {
+  await database.delete(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)).run()
   await database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).run()
   await database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).run()
   await database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).run()
@@ -330,6 +341,7 @@ async function insertSnapshot(database: ReturnType<typeof createDatabase>, manif
   for (const row of manifest.tables.maintenanceItems) await database.insert(maintenanceItems).values(row).run()
   for (const row of manifest.tables.paymentRecords) await database.insert(paymentRecords).values(row).run()
   for (const row of manifest.tables.paymentEntries ?? []) await database.insert(paymentEntries).values(row).run()
+  for (const row of manifest.tables.mileageHistories ?? []) await database.insert(mileageHistories).values(row).run()
   for (const row of manifest.tables.inspectionSchedules) await database.insert(inspectionSchedules).values(row).run()
   for (const row of manifest.tables.sharedSchedules ?? []) await database.insert(sharedSchedules).values(row).run()
   for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
@@ -348,7 +360,7 @@ function assertManifest(value: unknown, organizationId: string): BackupManifest 
     throw new HttpError(400, 'このバックアップは現在の組織へ復元できません。')
   }
   const tables = manifest.tables as BackupManifest['tables']
-  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
+  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.mileageHistories ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
   if (organizationRows.some((rows) => rows.some((row) => !row || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
   const expectedObjectKeyPrefix = `organizations/${organizationId}/`
   if (tables.vehicleFiles.some((file) => typeof file.objectKey !== 'string' || !file.objectKey.startsWith(expectedObjectKeyPrefix))) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
@@ -358,7 +370,16 @@ function assertManifest(value: unknown, organizationId: string): BackupManifest 
 function assertExportManifest(value: unknown, organizationId: string): BackupExport {
   const manifest = assertManifest(value, organizationId)
   const files = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray((value as { files?: unknown }).files) ? (value as { files: unknown[] }).files : []
+  let totalFileBytes = 0
   if (files.length !== manifest.tables.vehicleFiles.length || files.some((file) => !file || typeof file !== 'object' || typeof (file as BackupExportFile).id !== 'string' || typeof (file as BackupExportFile).data !== 'string' || typeof (file as BackupExportFile).contentType !== 'string' || typeof (file as BackupExportFile).fileName !== 'string')) throw new HttpError(400, 'PCバックアップの添付ファイル情報が不正です。')
+  const fileIds = new Set<string>()
+  for (const file of files as BackupExportFile[]) {
+    if (fileIds.has(file.id)) throw new HttpError(400, 'PCバックアップの添付ファイルIDが重複しています。')
+    fileIds.add(file.id)
+    const byteLength = base64ByteLength(file.data)
+    if (byteLength > maximumBackupFileBytes || totalFileBytes + byteLength > maximumBackupTotalFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイル合計が上限を超えています。')
+    totalFileBytes += byteLength
+  }
   return { ...manifest, files: files as BackupExportFile[] }
 }
 
@@ -403,8 +424,15 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
 function base64ToArrayBuffer(value: string) {
   let binary: string
   try { binary = atob(value) } catch { throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。') }
+  if (binary.length > maximumBackupFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイルが上限を超えています。')
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
   return bytes.buffer
+}
+
+function base64ByteLength(value: string) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。')
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  return Math.max(0, (value.length * 3) / 4 - padding)
 }
 
 type BackupManifest = {
@@ -424,6 +452,7 @@ type BackupManifest = {
     maintenanceItems: Array<typeof maintenanceItems.$inferSelect>
     paymentRecords: Array<typeof paymentRecords.$inferSelect>
     paymentEntries: Array<typeof paymentEntries.$inferSelect>
+    mileageHistories: Array<typeof mileageHistories.$inferSelect>
     inspectionSchedules: Array<typeof inspectionSchedules.$inferSelect>
     sharedSchedules?: Array<typeof sharedSchedules.$inferSelect>
     appSettings: Array<typeof appSettings.$inferSelect>

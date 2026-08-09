@@ -119,6 +119,11 @@ function validateRows(resource: ImportResource, rows: CsvRow[]) {
 }
 
 async function importRows(database: ReturnType<typeof createDatabase>, organizationId: string, resource: ImportResource, rows: CsvRow[]) {
+  const validationErrors = [...validateRows(resource, rows), ...findDuplicateImportKeys(resource, rows)]
+  if (validationErrors.length) {
+    const details = validationErrors.slice(0, 10).map((error) => `${error.row}行目: ${error.message}`).join(' ')
+    throw new HttpError(400, `CSVに不正な行があります。変更は反映されていません。${details}`)
+  }
   const result = { imported: 0, updated: 0, skipped: 0, errors: [] as Array<{ row: number; message: string }> }
   for (let index = 0; index < rows.length; index += 1) {
     try {
@@ -133,11 +138,31 @@ async function importRows(database: ReturnType<typeof createDatabase>, organizat
               : await importPayment(database, organizationId, rows[index])
       result[outcome] += 1
     } catch (error) {
-      if (result.errors.length < 100) result.errors.push({ row: index + 2, message: error instanceof Error ? error.message : '取込できない行です。' })
-      result.skipped += 1
+      const message = error instanceof Error ? error.message : '取込できない行です。'
+      throw new HttpError(400, `CSV ${index + 2}行目の取込に失敗しました。変更は反映されていません。${message}`)
     }
   }
   return result
+}
+
+function findDuplicateImportKeys(resource: ImportResource, rows: CsvRow[]) {
+  const seen = new Map<string, number>()
+  const errors: Array<{ row: number; message: string }> = []
+  rows.forEach((row, index) => {
+    const key = resource === 'customers'
+      ? value(row, '顧客ID') || value(row, '顧客番号')
+      : resource === 'vehicles'
+        ? value(row, '車両ID') || (value(row, '登録番号') ? `${value(row, '顧客ID')}:${value(row, '顧客番号')}:${value(row, '登録番号')}` : '')
+        : resource === 'payments'
+          ? `${value(row, '請求書種別')}:${value(row, '請求書ID')}`
+          : value(row, '書類ID') || value(row, '書類番号')
+    if (!key || !seen.has(key)) {
+      if (key) seen.set(key, index + 2)
+      return
+    }
+    errors.push({ row: index + 2, message: `同じ識別子が${seen.get(key)}行目にもあります。` })
+  })
+  return errors
 }
 
 async function importCustomer(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
