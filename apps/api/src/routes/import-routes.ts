@@ -6,6 +6,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
 import { assertRequestContentLength, HttpError, corsHeaders, jsonResponse, readFormData } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { maximumCsvDetailItemCount, pushD1BatchStatement } from '../lib/resource-limits'
 
 const importResources = ['customers', 'vehicles', 'sales', 'maintenance', 'payments'] as const
 const paymentMethods = new Set(['現金', '銀行振込', 'クレジットカード', 'その他'])
@@ -150,6 +151,7 @@ async function importRows(database: ReturnType<typeof createDatabase>, organizat
               : await importPayment(database, organizationId, rows[index], writes)
       result[outcome] += 1
     } catch (error) {
+      if (error instanceof HttpError && error.status === 413) throw error
       const message = error instanceof Error ? error.message : '取込できない行です。'
       throw new HttpError(400, `CSV ${index + 2}行目の取込に失敗しました。変更は反映されていません。${message}`)
     }
@@ -204,10 +206,10 @@ async function importCustomer(database: ReturnType<typeof createDatabase>, organ
     updatedAt: new Date().toISOString(),
   }
   if (existing) {
-    writes.push(database.update(customers).set(data).where(and(eq(customers.organizationId, organizationId), eq(customers.id, existing.id))))
+    pushD1BatchStatement(writes, database.update(customers).set(data).where(and(eq(customers.organizationId, organizationId), eq(customers.id, existing.id))))
     return 'updated'
   }
-  writes.push(database.insert(customers).values({ id: id || crypto.randomUUID(), ...data }))
+  pushD1BatchStatement(writes, database.insert(customers).values({ id: id || crypto.randomUUID(), ...data }))
   return 'imported'
 }
 
@@ -241,10 +243,10 @@ async function importVehicle(database: ReturnType<typeof createDatabase>, organi
     updatedAt: new Date().toISOString(),
   }
   if (existing) {
-    writes.push(database.update(vehicles).set(data).where(and(eq(vehicles.organizationId, organizationId), eq(vehicles.id, existing.id))))
+    pushD1BatchStatement(writes, database.update(vehicles).set(data).where(and(eq(vehicles.organizationId, organizationId), eq(vehicles.id, existing.id))))
     return 'updated'
   }
-  writes.push(database.insert(vehicles).values({ id: id || crypto.randomUUID(), ...data }))
+  pushD1BatchStatement(writes, database.insert(vehicles).values({ id: id || crypto.randomUUID(), ...data }))
   return 'imported'
 }
 
@@ -275,8 +277,8 @@ async function importSales(database: ReturnType<typeof createDatabase>, organiza
     updatedAt: new Date().toISOString(),
   }
   const documentId = existing?.id ?? id ?? crypto.randomUUID()
-  if (existing) writes.push(database.update(salesDocuments).set(data).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.id, existing.id))))
-  else writes.push(database.insert(salesDocuments).values({ id: documentId, ...data }))
+  if (existing) pushD1BatchStatement(writes, database.update(salesDocuments).set(data).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(salesDocuments).values({ id: documentId, ...data }))
   replaceSalesItems(database, organizationId, documentId, items, writes)
   return existing ? 'updated' : 'imported'
 }
@@ -311,8 +313,8 @@ async function importMaintenance(database: ReturnType<typeof createDatabase>, or
     updatedAt: new Date().toISOString(),
   }
   const documentId = existing?.id ?? id ?? crypto.randomUUID()
-  if (existing) writes.push(database.update(maintenanceDocuments).set(data).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.id, existing.id))))
-  else writes.push(database.insert(maintenanceDocuments).values({ id: documentId, ...data }))
+  if (existing) pushD1BatchStatement(writes, database.update(maintenanceDocuments).set(data).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(maintenanceDocuments).values({ id: documentId, ...data }))
   replaceMaintenanceItems(database, organizationId, documentId, items, writes)
   return existing ? 'updated' : 'imported'
 }
@@ -338,12 +340,12 @@ async function importPayment(database: ReturnType<typeof createDatabase>, organi
     note: nullableText(row, 'メモ'),
     updatedAt: new Date().toISOString(),
   }
-  if (existing) writes.push(database.update(paymentRecords).set(data).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.id, existing.id))))
-  else writes.push(database.insert(paymentRecords).values({ id: crypto.randomUUID(), ...data }))
-  writes.push(database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))))
+  if (existing) pushD1BatchStatement(writes, database.update(paymentRecords).set(data).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(paymentRecords).values({ id: crypto.randomUUID(), ...data }))
+  pushD1BatchStatement(writes, database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))))
   if (data.paidAmount > 0 || data.paymentDate || data.method || data.note) {
     const now = new Date().toISOString()
-    writes.push(database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: data.paidAmount, paymentDate: data.paymentDate, method: data.method, note: data.note ?? '', createdAt: now, updatedAt: now }))
+    pushD1BatchStatement(writes, database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: data.paidAmount, paymentDate: data.paymentDate, method: data.method, note: data.note ?? '', createdAt: now, updatedAt: now }))
   }
   return existing ? 'updated' : 'imported'
 }
@@ -389,32 +391,42 @@ async function findMaintenanceDocument(database: ReturnType<typeof createDatabas
 }
 
 function replaceSalesItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[], writes: BatchItem<'sqlite'>[]) {
-  writes.push(database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.organizationId, organizationId), eq(salesDocumentItems.documentId, documentId))))
-  for (const [index, item] of items.entries()) writes.push(database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? 'その他', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, taxCategory: item.taxCategory ?? '課税', otherAmount: item.otherAmount ?? 0, summary: item.summary ?? '', amount: item.amount, sortOrder: index }))
+  pushD1BatchStatement(writes, database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.organizationId, organizationId), eq(salesDocumentItems.documentId, documentId))))
+  for (const [index, item] of items.entries()) pushD1BatchStatement(writes, database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? 'その他', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, taxCategory: item.taxCategory ?? '課税', otherAmount: item.otherAmount ?? 0, summary: item.summary ?? '', amount: item.amount, sortOrder: index }))
 }
 
 function replaceMaintenanceItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[], writes: BatchItem<'sqlite'>[]) {
-  writes.push(database.delete(maintenanceItems).where(and(eq(maintenanceItems.organizationId, organizationId), eq(maintenanceItems.documentId, documentId))))
-  for (const [index, item] of items.entries()) writes.push(database.insert(maintenanceItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }))
+  pushD1BatchStatement(writes, database.delete(maintenanceItems).where(and(eq(maintenanceItems.organizationId, organizationId), eq(maintenanceItems.documentId, documentId))))
+  for (const [index, item] of items.entries()) pushD1BatchStatement(writes, database.insert(maintenanceItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }))
 }
 
-function parseSalesItems(text: string, detailText: string): ImportItem[] {
+export function parseSalesItems(text: string, detailText: string): ImportItem[] {
   if (detailText) {
     try {
       const details = JSON.parse(detailText)
-      if (Array.isArray(details)) return details.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
-        const quantity = numberValue(item.quantity, 1)
-        const unitPrice = integerValueObject(item.unitPrice, 0)
-        const otherAmount = integerValueObject(item.otherAmount, 0)
-        return { itemType: stringObject(item.itemType) || 'その他', description: stringObject(item.description), quantity, unit: stringObject(item.unit) || '式', unitPrice, taxCategory: ['課税', '非課税', '対象外'].includes(stringObject(item.taxCategory)) ? stringObject(item.taxCategory) : '課税', otherAmount, summary: stringObject(item.summary), amount: Math.round(quantity * unitPrice) + otherAmount }
-      })
-    } catch { /* fall back to the legacy readable column */ }
+      if (Array.isArray(details)) {
+        if (details.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの販売明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+        return details.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
+          const quantity = numberValue(item.quantity, 1)
+          const unitPrice = integerValueObject(item.unitPrice, 0)
+          const otherAmount = integerValueObject(item.otherAmount, 0)
+          return { itemType: stringObject(item.itemType) || 'その他', description: stringObject(item.description), quantity, unit: stringObject(item.unit) || '式', unitPrice, taxCategory: ['課税', '非課税', '対象外'].includes(stringObject(item.taxCategory)) ? stringObject(item.taxCategory) : '課税', otherAmount, summary: stringObject(item.summary), amount: Math.round(quantity * unitPrice) + otherAmount }
+        })
+      }
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 413) throw error
+      /* fall back to the legacy readable column */
+    }
   }
-  return text ? text.split(/\s+\/\s+/).map((item) => parseItem(item)) : []
+  const items = text ? text.split(/\s+\/\s+/) : []
+  if (items.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの販売明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+  return items.map((item) => parseItem(item))
 }
 
-function parseMaintenanceItems(text: string): ImportItem[] {
-  return text ? text.split(/\s+\/\s+/).map((item) => { const match = item.match(/^(作業|部品):(.*)$/); const parsed = parseItem(match?.[2] ?? item); return { ...parsed, itemType: match?.[1] ?? '作業' } }) : []
+export function parseMaintenanceItems(text: string): ImportItem[] {
+  const items = text ? text.split(/\s+\/\s+/) : []
+  if (items.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの整備明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+  return items.map((item) => { const match = item.match(/^(作業|部品):(.*)$/); const parsed = parseItem(match?.[2] ?? item); return { ...parsed, itemType: match?.[1] ?? '作業' } })
 }
 
 function parseItem(text: string): ImportItem {

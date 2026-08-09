@@ -9,6 +9,7 @@ import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
   CUSTOMER_SYNC_ALLOWLIST,
@@ -342,6 +343,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     ).bind(mileageSync.inputMileage, now, resolvedVehicleId, organizationId, mileageSync.inputMileage))
   }
 
+  assertD1BatchStatementCount(statements.length)
   await env.DB.batch(statements)
 
   return jsonResponse({ document: await findMaintenanceDocument(database, docId, organizationId) }, 201, env)
@@ -530,6 +532,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     ).bind(mileageSync.inputMileage, now, input.vehicleId, organizationId, mileageSync.inputMileage))
   }
 
+  assertD1BatchStatementCount(statements.length)
   await env.DB.batch(statements)
 
   return jsonResponse({ document: await findMaintenanceDocument(database, documentId, organizationId) }, 200, env)
@@ -602,7 +605,7 @@ async function parseMaintenanceInput(
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
-  const items = parseItems(body.items)
+  const items = parseMaintenanceItems(body.items)
   const fees = parseFees(body.fees)
   const adjustment = integerNumber(body.adjustment, 0)
   const taxRate = parseTaxRate(body.taxRate)
@@ -825,8 +828,9 @@ function normalizeTaxRounding(rounding: string | null | undefined): '切り捨�
   return rounding === '四捨五入' ? '四捨五入' : '切り捨て'
 }
 
-function parseItems(value: unknown): MaintenanceItemInput[] {
+export function parseMaintenanceItems(value: unknown): MaintenanceItemInput[] {
   if (!Array.isArray(value)) return []
+  assertArrayLength(value, maximumDocumentItemCount, `整備明細は${maximumDocumentItemCount}件以内で入力してください。`)
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)

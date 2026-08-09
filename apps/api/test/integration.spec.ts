@@ -54,6 +54,7 @@ describe("CLI authenticated workflow", () => {
 				employeeCanEditTax: true,
 				employeeCanCreateRestoreBackup: true,
 				employeeCanManageBackupRetention: false,
+				employeeCanManageArchiveRetention: false,
 			});
 			const disabledEmployeePermissions = await requestJson<JsonObject>("/api/organization/permissions", "PATCH", {
 				permissions: {
@@ -62,6 +63,7 @@ describe("CLI authenticated workflow", () => {
 					employeeCanEditTax: false,
 					employeeCanCreateRestoreBackup: false,
 					employeeCanManageBackupRetention: false,
+					employeeCanManageArchiveRetention: false,
 				},
 			});
 			expect(disabledEmployeePermissions.response.status).toBe(200);
@@ -76,6 +78,7 @@ describe("CLI authenticated workflow", () => {
 					employeeCanEditTax: true,
 					employeeCanCreateRestoreBackup: true,
 					employeeCanManageBackupRetention: false,
+					employeeCanManageArchiveRetention: false,
 				},
 			});
 			expect(restoredEmployeePermissions.response.status).toBe(200);

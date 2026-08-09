@@ -382,16 +382,16 @@ function assertManifest(value: unknown, organizationId: string, options: { requi
 export function assertManifestReferences(tables: BackupManifest['tables']) {
   const customerIds = manifestIds(tables.customers, '顧客')
   const vehicleIds = manifestIds(tables.vehicles, '車両')
-  const vehicleFileIds = manifestIds(tables.vehicleFiles, '添付ファイル')
+  manifestIds(tables.vehicleFiles, '添付ファイル')
   const salesDocumentIds = manifestIds(tables.salesDocuments, '販売書類')
-  const salesItemIds = manifestIds(tables.salesDocumentItems, '販売明細')
+  manifestIds(tables.salesDocumentItems, '販売明細')
   const maintenanceDocumentIds = manifestIds(tables.maintenanceDocuments, '整備書類')
-  const maintenanceItemIds = manifestIds(tables.maintenanceItems, '整備明細')
-  const paymentRecordIds = manifestIds(tables.paymentRecords, '入金記録')
-  const paymentEntryIds = manifestIds(tables.paymentEntries ?? [], '入金明細')
-  const mileageHistoryIds = manifestIds(tables.mileageHistories ?? [], '走行履歴')
-  const inspectionScheduleIds = manifestIds(tables.inspectionSchedules, '点検予定')
-  const sharedScheduleIds = manifestIds(tables.sharedSchedules ?? [], '共有予定')
+  manifestIds(tables.maintenanceItems, '整備明細')
+  manifestIds(tables.paymentRecords, '入金記録')
+  manifestIds(tables.paymentEntries ?? [], '入金明細')
+  manifestIds(tables.mileageHistories ?? [], '走行履歴')
+  manifestIds(tables.inspectionSchedules, '点検予定')
+  manifestIds(tables.sharedSchedules ?? [], '共有予定')
 
   for (const row of tables.vehicles) assertManifestReference(customerIds, row.customerId, '車両の顧客')
   for (const row of tables.vehicleFiles) assertManifestReference(vehicleIds, row.vehicleId, '添付ファイルの車両')
@@ -416,15 +416,6 @@ export function assertManifestReferences(tables: BackupManifest['tables']) {
     assertManifestReference(maintenanceDocumentIds, row.maintenanceDocumentId, '走行履歴の整備書類')
   }
 
-  // The remaining sets are intentionally materialized here so duplicate IDs are rejected consistently,
-  // even when a table has no relationship to another restored table.
-  void vehicleFileIds
-  void salesItemIds
-  void paymentRecordIds
-  void paymentEntryIds
-  void mileageHistoryIds
-  void inspectionScheduleIds
-  void sharedScheduleIds
 }
 
 function manifestIds(rows: Array<{ id: string }>, label: string) {

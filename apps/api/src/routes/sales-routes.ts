@@ -9,6 +9,7 @@ import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
   VEHICLE_FIELD_TO_DB_COLUMN,
@@ -274,6 +275,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     }
   }
 
+  assertD1BatchStatementCount(statements.length)
   await env.DB.batch(statements)
 
   return jsonResponse({ document: await findSalesDocument(database, docId, organizationId) }, 201, env)
@@ -418,6 +420,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
     }
   }
 
+  assertD1BatchStatementCount(statements.length)
   await env.DB.batch(statements)
 
   return jsonResponse({ document: await findSalesDocument(database, documentId, organizationId) }, 200, env)
@@ -488,7 +491,7 @@ async function parseSalesDocumentInput(
     const image = await database.select({ id: vehicleFiles.id }).from(vehicleFiles).where(and(eq(vehicleFiles.id, details.selectedImageAttachmentId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId), eq(vehicleFiles.fileKind, 'image'))).get()
     if (!image) throw new HttpError(400, '選択した画像が対象車両に紐づいていません。')
   }
-  const items = parseItems(body.items)
+  const items = parseSalesItems(body.items)
   return { number, type, status, customerId, vehicleId, issuedAt, dueDate, taxRate, rounding, note: nullableString(body, 'note'), details, items }
 }
 
@@ -618,8 +621,9 @@ function classifySalesItem(item: SalesItemInput): SalesItemBucket {
   return 'taxableFees'
 }
 
-function parseItems(value: unknown): SalesItemInput[] {
+export function parseSalesItems(value: unknown): SalesItemInput[] {
   if (!Array.isArray(value)) return []
+  assertArrayLength(value, maximumDocumentItemCount, `販売明細は${maximumDocumentItemCount}件以内で入力してください。`)
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
