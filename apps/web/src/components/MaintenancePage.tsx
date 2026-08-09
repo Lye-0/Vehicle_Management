@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Archive,
   CarFront,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
   ClipboardCheck,
@@ -110,6 +111,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [statusFilter, setStatusFilter] = useState<MaintenanceStatusFilter>('すべて')
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('すべて')
   const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialDocumentId ? 'detail' : 'list')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<MaintenanceCreateForm>(emptyCreateForm)
   const [draftDocument, setDraftDocument] = useState<MaintenanceDocumentLike | null>(null)
@@ -138,7 +140,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        setSelectedDocumentId(initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : '')
+        const nextSelectedDocumentId = initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : ''
+        setSelectedDocumentId(nextSelectedDocumentId)
+        if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setError('')
       })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '整備データを読み込めませんでした。') })
@@ -187,6 +191,16 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as MaintenanceDocument : document))
   }
 
+  function openMobileDetail() {
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
+  function openMobileList() {
+    setMobileWorkspaceView('list')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
   function discardDraftIfConfirmed(action: string) {
     if (!draftDocument) return true
     if (draftDirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
@@ -205,6 +219,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     if (!discardDraftIfConfirmed('別の書類を表示')) return
     setSelectedDocumentId(documentId)
     setDocumentView('edit')
+    openMobileDetail()
   }
 
   // Reset documentOpenedMileage and openedMasterSnapshot only when selected document ID changes
@@ -781,6 +796,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setPendingDraftDuplicateConfirmation(undefined)
     setError('')
     setDocumentView('edit')
+    openMobileDetail()
     setCreateDialogOpen(false)
   }
 
@@ -789,8 +805,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
-    <div className="document-filter-panel maintenance-document-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className="maintenance-workspace"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} />{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+    <div className="document-filter-panel maintenance-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
+    <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
     {maintenanceDuplicateDialog && <MaintenanceDuplicateConfirmationDialog state={maintenanceDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleMaintenanceDuplicateCancel} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMaintenanceMasterSyncCancel} />}

@@ -1618,6 +1618,130 @@
   .settings-permission-list { grid-template-columns: 1fr; }
 }
 
+/* Mobile workspace navigation and compact controls */
+.mobile-workspace-list,
+.mobile-workspace-detail { min-width: 0; }
+.mobile-workspace-back,
+.mobile-filter-toggle,
+.mobile-inspection-switch { display: none; }
+.inspection-mobile-view { min-width: 0; }
+
+@media (max-width: 760px) {
+  .topbar { position: relative; height: 58px; align-items: center; flex-direction: row; gap: 12px; padding: 0 14px; }
+  .breadcrumb { min-width: 0; overflow: hidden; font-size: 11px; }
+  .breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .notification-button { margin-left: auto; flex: 0 0 38px; }
+
+  .page-eyebrow { margin-bottom: 5px; font-size: 10px; }
+  .page-header h1 { font-size: 23px; }
+  .page-header p { margin-top: 6px; font-size: 12px; line-height: 1.55; }
+  .button { min-height: 38px; padding-inline: 12px; font-size: 12px; }
+  .panel h2 { font-size: 15px; }
+
+  .customer-toolbar,
+  .inspection-vehicle-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 8px; }
+  .customer-search { width: auto; min-width: 0; padding: 10px 11px; }
+  .customer-search input { font-size: 11px; }
+  .customer-search-filter { width: 100px; min-width: 0; flex: 0 0 100px; }
+  .customer-search-filter select { min-height: 42px; padding: 0 8px; font-size: 10px; }
+  .inspection-result-summary { grid-column: 1 / -1; justify-content: flex-start; text-align: left; font-size: 10px; }
+  .inspection-result-summary strong { font-size: 13px; }
+
+  .sales-toolbar,
+  .maintenance-toolbar,
+  .payment-toolbar { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr) minmax(0, 0.55fr); align-items: stretch; gap: 6px; }
+  .sales-search,
+  .maintenance-search,
+  .payment-search { width: auto; min-width: 0; padding: 10px 11px; }
+  .sales-search input,
+  .maintenance-search input,
+  .payment-search input { font-size: 11px; }
+  .document-sort-controls { display: contents; }
+  .document-sort-controls select { width: 100%; min-width: 0; min-height: 42px; padding: 0 20px 0 8px; font-size: 10px; }
+  .mobile-filter-panel { display: grid; gap: 8px; margin-bottom: 12px; padding: 10px 12px; }
+  .document-filter-group,
+  .payment-filter-group { grid-template-columns: 76px minmax(0, 1fr); gap: 7px; }
+  .document-filter-label,
+  .payment-filter-label { font-size: 10px; }
+  .document-filter-options,
+  .payment-filter-options { width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+  .document-filter-option,
+  .payment-filter-options button { padding: 6px 8px; font-size: 10px; }
+  .document-filter-reset,
+  .payment-filter-reset { font-size: 10px; }
+
+  .customer-directory,
+  .sales-workspace,
+  .maintenance-workspace,
+  .payment-workspace { display: block; }
+  .mobile-workspace.mobile-workspace-list > .mobile-workspace-detail { display: none; }
+  .mobile-workspace.mobile-workspace-detail > .mobile-workspace-list { display: none; }
+  .mobile-workspace-back { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 10px; padding: 0; color: var(--primary); border: 0; background: transparent; font-size: 11px; font-weight: 800; }
+  .mobile-workspace-back svg { flex: 0 0 auto; }
+
+  .sales-detail-title h2,
+  .maintenance-detail-title h2,
+  .payment-detail-title h2 { font-size: 18px; }
+  .customer-identity h2 { font-size: 20px; }
+  .customer-profile-header { padding: 18px; }
+  .customer-list-header,
+  .sales-list-header,
+  .maintenance-list-header,
+  .payment-list-header { padding: 16px 14px 13px; }
+  .customer-list-header span:not(.results-count),
+  .sales-list-header span:not(.results-count),
+  .maintenance-list-header span:not(.results-count),
+  .payment-list-header span:not(.results-count) { font-size: 9px; }
+  .customer-list-item { min-height: 56px; padding: 10px 12px; }
+  .customer-list-avatar { width: 30px; height: 30px; flex-basis: 30px; }
+  .customer-list-copy strong { font-size: 12px; }
+  .customer-list-copy small { font-size: 9px; }
+  .sales-card-number,
+  .maintenance-card-number,
+  .payment-card-number { font-size: 12px; }
+  .sales-card-customer,
+  .sales-card-vehicle,
+  .maintenance-card-customer,
+  .maintenance-card-vehicle,
+  .payment-card-customer,
+  .payment-card-vehicle { font-size: 10px; }
+  .sales-card-bottom,
+  .maintenance-card-bottom,
+  .payment-card-bottom { font-size: 9px; }
+  .sales-card-bottom strong { font-size: 11px; }
+
+  .sales-document-tabs,
+  .maintenance-document-tabs { position: sticky; z-index: 3; top: 0; }
+
+  .settings-layout { display: block; }
+  .settings-nav { position: relative; display: flex; gap: 4px; margin-bottom: 12px; padding: 6px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
+  .settings-nav button { width: auto; min-width: max-content; min-height: 40px; align-items: center; flex: 0 0 auto; padding: 7px 9px; }
+  .settings-nav-icon { width: 25px; height: 25px; flex-basis: 25px; }
+  .settings-nav button > span:last-child { display: block; }
+  .settings-nav small { display: none; }
+  .settings-nav strong { font-size: 11px; }
+
+  .mobile-inspection-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+  .mobile-inspection-switch button { min-height: 36px; color: var(--text-secondary); border: 0; border-radius: 6px; background: transparent; font-size: 11px; font-weight: 800; }
+  .mobile-inspection-switch button[aria-selected="true"] { color: var(--primary); background: var(--surface); box-shadow: var(--shadow-card); }
+  .inspection-mobile-view-calendar .inspection-list-view { display: none; }
+  .inspection-mobile-view-list .inspection-calendar-view { display: none; }
+}
+
+@media (max-width: 480px) {
+  .page-header h1 { font-size: 21px; }
+  .page-header p { font-size: 11px; }
+  .customer-search-filter { width: 92px; flex-basis: 92px; }
+  .customer-search-filter select { font-size: 9px; }
+  .sales-toolbar,
+  .maintenance-toolbar,
+  .payment-toolbar { grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr) minmax(0, 0.55fr); gap: 5px; }
+  .document-sort-controls select { min-height: 40px; padding-right: 17px; padding-left: 7px; font-size: 9px; }
+  .sales-detail-title h2,
+  .maintenance-detail-title h2,
+  .payment-detail-title h2 { font-size: 17px; }
+}
+
 @media (max-width: 640px) {
   .app-shell { display: block; }
   .sidebar { width: 100%; min-height: 0; }

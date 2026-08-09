@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CarFront,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   FileDown,
@@ -38,6 +39,7 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   const [statusFilter, setStatusFilter] = useState<PaymentFilter>('すべて')
   const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<InvoiceTypeFilter>('すべて')
   const [selectedRecordId, setSelectedRecordId] = useState(initialRecordId ?? '')
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialRecordId ? 'detail' : 'list')
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -46,7 +48,7 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   useEffect(() => {
     let cancelled = false
     fetchPayments()
-      .then((nextRecords) => { if (!cancelled) { const pendingRecords = nextRecords.filter((record) => record.documentStatus === '入金待ち'); setRecords(pendingRecords); setSelectedRecordId(initialRecordId && pendingRecords.some((record) => record.id === initialRecordId) ? initialRecordId : ''); setError('') } })
+      .then((nextRecords) => { if (!cancelled) { const pendingRecords = nextRecords.filter((record) => record.documentStatus === '入金待ち'); const nextSelectedRecordId = initialRecordId && pendingRecords.some((record) => record.id === initialRecordId) ? initialRecordId : ''; setRecords(pendingRecords); setSelectedRecordId(nextSelectedRecordId); if (nextSelectedRecordId) setMobileWorkspaceView('detail'); setError('') } })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '入金データを読み込めませんでした。') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -63,6 +65,16 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   }, [invoiceTypeFilter, query, records, sortDirection, sortKey, statusFilter])
 
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0] ?? null
+
+  function openMobileDetail() {
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
+  function openMobileList() {
+    setMobileWorkspaceView('list')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
 
   async function saveEntry(entryId: string | undefined, input: PaymentEntryInput) {
     if (!selectedRecord) return false
@@ -104,7 +116,10 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
     const firstUnpaid = records.find((record) => record.documentStatus === '入金待ち' && getPaymentStatus(record) === '未入金')
     setStatusFilter('未入金')
     setInvoiceTypeFilter('すべて')
-    if (firstUnpaid) setSelectedRecordId(firstUnpaid.id)
+    if (firstUnpaid) {
+      setSelectedRecordId(firstUnpaid.id)
+      openMobileDetail()
+    }
   }
 
   function resetFilters() {
@@ -118,8 +133,8 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
     {loading && <div className="customer-sync-status"><span>請求・入金データを読み込んでいます。</span></div>}
     <div className="payment-scope-note"><Info size={17} /><div><strong>表示対象</strong><span>販売タブの請求書と、車検・点検・一般タブの整備請求書のうち、書類状態が「入金待ち」のものだけを表示しています。</span></div></div>
     <div className="payment-toolbar"><label className="payment-search"><Search size={18} /><span className="sr-only">入金情報を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="請求書番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
-    <div className="payment-filter-panel"><PaymentFilterGroup label="請求書の種類" kind="invoice-type" value={invoiceTypeFilter} options={['すべて', '販売請求書', '整備請求書'] as InvoiceTypeFilter[]} onChange={setInvoiceTypeFilter} /><PaymentFilterGroup label="入金状況" kind="payment-status" value={statusFilter} options={['すべて', '未入金', '一部入金', '入金済み'] as PaymentFilter[]} onChange={setStatusFilter} /><button className="text-button payment-filter-reset" type="button" onClick={resetFilters} disabled={statusFilter === 'すべて' && invoiceTypeFilter === 'すべて'}>条件をリセット</button></div>
-    <div className="payment-workspace"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false) }} />{selectedRecord ? <PaymentRecordDetail key={selectedRecord.id} record={selectedRecord} saved={saved} saving={saving} onSaveEntry={saveEntry} onDeleteEntry={removeEntry} onOpenDocument={onNavigate ? () => onNavigate({ section: selectedRecord.sourceType === '販売請求書' ? 'sales' : 'maintenance', recordId: selectedRecord.documentId }) : undefined} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または入金状況を変更してください。'}</span></div>}</div>
+    <div className="payment-filter-panel mobile-filter-panel"><PaymentFilterGroup label="請求書の種類" kind="invoice-type" value={invoiceTypeFilter} options={['すべて', '販売請求書', '整備請求書'] as InvoiceTypeFilter[]} onChange={setInvoiceTypeFilter} /><PaymentFilterGroup label="入金状況" kind="payment-status" value={statusFilter} options={['すべて', '未入金', '一部入金', '入金済み'] as PaymentFilter[]} onChange={setStatusFilter} /><button className="text-button payment-filter-reset" type="button" onClick={resetFilters} disabled={statusFilter === 'すべて' && invoiceTypeFilter === 'すべて'}>条件をリセット</button></div>
+    <div className={`payment-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false); openMobileDetail() }} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />請求一覧へ戻る</button>{selectedRecord ? <PaymentRecordDetail key={selectedRecord.id} record={selectedRecord} saved={saved} saving={saving} onSaveEntry={saveEntry} onDeleteEntry={removeEntry} onOpenDocument={onNavigate ? () => onNavigate({ section: selectedRecord.sourceType === '販売請求書' ? 'sales' : 'maintenance', recordId: selectedRecord.documentId }) : undefined} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
   </>
 }
 

@@ -4,6 +4,7 @@ import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizeP
 import {
   CarFront,
   CalendarDays,
+  ChevronLeft,
   ChevronRight,
   Download,
   Eye,
@@ -84,6 +85,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedVehicleId, setSelectedVehicleId] = useState('')
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialCustomerId ? 'detail' : 'list')
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false)
   const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false)
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
@@ -108,6 +110,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       if (targetCustomer) {
         setSelectedCustomerId(targetCustomer.id)
         setSelectedVehicleId(targetCustomer.vehicles.some((vehicle) => vehicle.id === initialNavigationRef.current.vehicleId) ? initialNavigationRef.current.vehicleId ?? '' : targetCustomer.vehicles[0]?.id ?? '')
+        setMobileWorkspaceView('detail')
         onNavigationConsumedRef.current?.()
       }
       setError('')
@@ -140,9 +143,20 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
 
+  function openMobileDetail() {
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
+  function openMobileList() {
+    setMobileWorkspaceView('list')
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(customer.vehicles[0]?.id ?? '')
+    openMobileDetail()
   }
 
   function selectVehicle(customer: Customer, vehicle: Vehicle) {
@@ -179,6 +193,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       setCustomers((current) => editingCustomerId ? current.map((customer) => customer.id === savedCustomer.id ? savedCustomer : customer) : [...current, savedCustomer])
       setSelectedCustomerId(savedCustomer.id)
       setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
+      openMobileDetail()
       closeCustomerDialog()
     } catch (reason: unknown) {
       setError(getErrorMessage(reason))
@@ -222,6 +237,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         setSelectedCustomerId(result.customer.id)
         setSelectedVehicleId(result.vehicleId)
       }
+      openMobileDetail()
       closeVehicleDialog()
     } catch (reason: unknown) {
       setError(getErrorMessage(reason))
@@ -313,9 +329,12 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as CustomerSearchField)}>{customerSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
       </div>
 
-      <div className="customer-directory">
-        <CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} />
-        <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
+      <div className={`customer-directory mobile-workspace mobile-workspace-${mobileWorkspaceView}`}>
+        <div className="mobile-workspace-list"><CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} /></div>
+        <div className="mobile-workspace-detail">
+          <button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />顧客一覧へ戻る</button>
+          <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
+        </div>
       </div>
 
       {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} onChange={setCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
