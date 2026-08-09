@@ -2615,3 +2615,37 @@
     flex: 0 0 auto;
   }
 }
+
+/* Final mobile header and settings navigation corrections */
+@media (max-width: 760px) {
+  .topbar {
+    position: relative;
+    height: 58px;
+    align-items: center;
+    flex-direction: row;
+    gap: 12px;
+    padding: 0 18px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .notification-button {
+    position: fixed;
+    top: 18px;
+    right: 14px;
+    z-index: 30;
+    margin-left: 0;
+    flex: 0 0 38px;
+    color: #eaf0f8;
+  }
+  .settings-nav {
+    position: relative;
+    top: 0;
+    bottom: auto;
+    margin-bottom: 24px;
+    padding: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar { padding-right: 14px; padding-left: 14px; }
+}
