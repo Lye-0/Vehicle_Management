@@ -32,6 +32,11 @@ export async function readJson(request: Request, maximumBytes = defaultJsonBodyL
   return body as Record<string, unknown>
 }
 
+export function assertRequestContentLength(request: Request, maximumBytes: number) {
+  const contentLength = Number(request.headers.get('Content-Length'))
+  if (Number.isFinite(contentLength) && contentLength > maximumBytes) throw new HttpError(413, 'リクエスト本文が大きすぎます。')
+}
+
 async function readRequestText(request: Request, maximumBytes: number) {
   const contentLength = Number(request.headers.get('Content-Length'))
   if (Number.isFinite(contentLength) && contentLength > maximumBytes) throw new HttpError(413, 'リクエスト本文が大きすぎます。')

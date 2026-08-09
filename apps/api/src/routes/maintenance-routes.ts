@@ -8,6 +8,7 @@ import { restoreArchivedDocument } from '../document-archive'
 import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
   CUSTOMER_SYNC_ALLOWLIST,
@@ -865,7 +866,7 @@ function normalizeCustomerEmployerValue(value: unknown) {
   return normalized === 'employer' ? '' : normalized
 }
 function nullableString(body: Record<string, unknown>, key: string) { const value = stringValue(body, key); return value || null }
-function dateValue(value: unknown) { return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : '' }
+function dateValue(value: unknown) { return normalizeCalendarDate(value) ?? '' }
 function nullableDate(value: unknown) { return dateValue(value) || null }
 function parseTaxRate(value: unknown) { const number = typeof value === 'number' ? value : Number(value); const normalized = number > 0 && number < 1 ? number * 100 : number; return Number.isFinite(normalized) && normalized >= 0 && normalized <= 100 ? Math.round(normalized) : 10 }
 function nonNegativeNumber(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) && number >= 0 ? number : fallback }

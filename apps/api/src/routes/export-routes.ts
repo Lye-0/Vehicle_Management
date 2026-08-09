@@ -82,7 +82,8 @@ function csvResponse(headers: string[], rows: unknown[][], filename: string, env
 }
 
 function csvValue(value: unknown) {
-  const text = value === null || value === undefined ? '' : String(value)
+  const rawText = value === null || value === undefined ? '' : String(value)
+  const text = typeof value === 'string' && /^[\t\r ]*[=+\-@]/u.test(rawText) ? `'${rawText}` : rawText
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 

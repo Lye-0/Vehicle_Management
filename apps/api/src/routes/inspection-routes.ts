@@ -4,6 +4,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 
 const inspectionTypes = new Set(['車検', '12か月点検', '24か月点検', '一般点検'])
 const inspectionStatuses = new Set(['予定', '完了', 'キャンセル'])
@@ -108,5 +109,5 @@ function serializeSchedules(rows: Array<typeof inspectionSchedules.$inferSelect>
 
 function stringValue(body: Record<string, unknown>, key: string) { return typeof body[key] === 'string' ? body[key].trim() : '' }
 function nullableString(body: Record<string, unknown>, key: string) { const value = stringValue(body, key); return value || null }
-function dateValue(value: unknown) { return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : '' }
+function dateValue(value: unknown) { return normalizeCalendarDate(value) ?? '' }
 function nullableDate(value: unknown) { return dateValue(value) || null }

@@ -4,6 +4,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 
 const paymentDocumentTypes = new Set(['販売請求書', '整備請求書'])
 const paymentMethods = new Set(['現金', '銀行振込', 'クレジットカード', 'その他'])
@@ -246,7 +247,7 @@ function comparePaymentEntries(left: { paymentDate: string | null; createdAt: st
 function optionalPaymentMethod(value: unknown) { return typeof value === 'string' && paymentMethods.has(value) ? value : null }
 function stringValue(body: Record<string, unknown>, key: string) { return typeof body[key] === 'string' ? body[key].trim() : '' }
 function nullableString(body: Record<string, unknown>, key: string) { const value = stringValue(body, key); return value || null }
-function nullableDate(value: unknown) { return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : null }
+function nullableDate(value: unknown) { return normalizeCalendarDate(value) }
 function integerNumber(value: unknown, fallback: number) { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) ? Math.round(number) : fallback }
 
 type InvoiceRow = typeof salesDocuments.$inferSelect | typeof maintenanceDocuments.$inferSelect

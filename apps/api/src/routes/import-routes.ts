@@ -3,9 +3,11 @@ import { customers, maintenanceDocuments, maintenanceItems, paymentEntries, paym
 import { requireAdminOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
-import { HttpError, corsHeaders, jsonResponse } from '../http'
+import { assertRequestContentLength, HttpError, corsHeaders, jsonResponse } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 
 const importResources = ['customers', 'vehicles', 'sales', 'maintenance', 'payments'] as const
+const paymentMethods = new Set(['現金', '銀行振込', 'クレジットカード', 'その他'])
 type ImportResource = typeof importResources[number]
 type ImportOutcome = 'imported' | 'updated'
 
@@ -50,6 +52,7 @@ export async function handleImportRoutes(request: Request, env: Env): Promise<Re
 }
 
 async function readCsvUpload(request: Request, resource: ImportResource) {
+  assertRequestContentLength(request, 6 * 1024 * 1024)
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'CSVファイルを選択してください。')
@@ -315,7 +318,7 @@ async function importPayment(database: ReturnType<typeof createDatabase>, organi
     invoiceAmount: invoice.total,
     paidAmount: Math.min(invoice.total, Math.max(0, integerValue(row, '入金済み'))),
     paymentDate: nullableDate(row, '入金日'),
-    method: nullableText(row, '入金方法'),
+    method: nullablePaymentMethod(row),
     note: nullableText(row, 'メモ'),
     updatedAt: new Date().toISOString(),
   }
@@ -412,10 +415,10 @@ function parseDetailsJson(value: string) {
 }
 
 function documentTotals(row: CsvRow, items: ImportItem[]) {
-  const subtotal = integerValue(row, '小計') || items.reduce((sum, item) => sum + item.amount, 0)
+  const subtotal = optionalIntegerValue(row, '小計') ?? items.reduce((sum, item) => sum + item.amount, 0)
   const tax = integerValue(row, '消費税')
-  const total = integerValue(row, '合計') || subtotal + tax
-  return { taxRate: integerValue(row, '税率') || 10, subtotal, tax, total }
+  const total = optionalIntegerValue(row, '合計') ?? subtotal + tax
+  return { taxRate: optionalIntegerValue(row, '税率') ?? 10, subtotal, tax, total }
 }
 
 function requiredText(row: CsvRow, key: string) {
@@ -432,10 +435,23 @@ function requiredDate(row: CsvRow, key: string) {
 
 function nullableDate(row: CsvRow, key: string) { return parseDate(value(row, key)) }
 function nullableText(row: CsvRow, key: string) { const text = value(row, key); return text ? text.slice(0, 500) : null }
-function nullableInteger(row: CsvRow, key: string) { const number = integerValue(row, key); return number || null }
+function nullablePaymentMethod(row: CsvRow) {
+  const method = nullableText(row, '入金方法')
+  if (method && !paymentMethods.has(method)) throw new Error('入金方法が不正です。')
+  return method
+}
+function nullableInteger(row: CsvRow, key: string) {
+  const text = value(row, key)
+  if (!text) return null
+  const normalized = text.replace(/[,%¥円\s]/g, '')
+  const number = Number(normalized)
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${key}は0以上の整数で入力してください。`)
+  return Math.round(number)
+}
 function integerValue(row: CsvRow, key: string) { return integerText(value(row, key)) }
+function optionalIntegerValue(row: CsvRow, key: string) { return value(row, key) ? integerValue(row, key) : null }
 function integerText(text: string) { const normalized = text.replace(/[,%¥円\s]/g, ''); const number = Number(normalized); return Number.isFinite(number) ? Math.round(number) : 0 }
-function parseDate(text: string) { return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(text) ? text.replaceAll('/', '-').replace(/-(\d)(?=-|$)/g, '-0$1') : null }
+function parseDate(text: string) { return normalizeCalendarDate(text) }
 function value(row: CsvRow, key: string) { return typeof row[key] === 'string' ? row[key].trim() : '' }
 
 type CsvRow = Record<string, string>

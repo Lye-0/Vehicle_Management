@@ -8,6 +8,7 @@ import { restoreArchivedDocument } from '../document-archive'
 import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
   VEHICLE_FIELD_TO_DB_COLUMN,
@@ -810,7 +811,7 @@ function nullableString(body: Record<string, unknown>, key: string) {
 }
 
 function dateValue(value: unknown) {
-  return typeof value === 'string' && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(value.trim()) ? value.trim().replaceAll('/', '-') : ''
+  return normalizeCalendarDate(value) ?? ''
 }
 
 function customerBirthDateValue(value: unknown) {

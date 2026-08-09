@@ -3,7 +3,8 @@ import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories,
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
-import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { createB2Storage } from '../storage/b2'
 
@@ -185,11 +186,11 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
     model: nullableString(body, 'modelType'),
     registrationNumber: nullableString(body, 'registrationNumber'),
     chassisNumber: nullableString(body, 'chassisNumber'),
-    modelYear: nullableInteger(body, 'modelYear'),
-    inspectionDate: nullableString(body, 'inspectionDate'),
-    mileage: nullableInteger(body, 'mileage'),
+    modelYear: nonNegativeInteger(body, 'modelYear'),
+    inspectionDate: nullableCalendarDate(body, 'inspectionDate'),
+    mileage: nonNegativeInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
-    displacement: nullableInteger(body, 'displacement'),
+    displacement: nonNegativeInteger(body, 'displacement'),
     transmission: nullableString(body, 'transmission'),
     memo: nullableString(body, 'memo'),
     freeItem1: nullableString(body, 'freeItem1'),
@@ -211,11 +212,11 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
     model: nullableString(body, 'modelType'),
     registrationNumber: nullableString(body, 'registrationNumber'),
     chassisNumber: nullableString(body, 'chassisNumber'),
-    modelYear: nullableInteger(body, 'modelYear'),
-    inspectionDate: nullableString(body, 'inspectionDate'),
-    mileage: nullableInteger(body, 'mileage'),
+    modelYear: nonNegativeInteger(body, 'modelYear'),
+    inspectionDate: nullableCalendarDate(body, 'inspectionDate'),
+    mileage: nonNegativeInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
-    displacement: nullableInteger(body, 'displacement'),
+    displacement: nonNegativeInteger(body, 'displacement'),
     transmission: nullableString(body, 'transmission'),
     memo: nullableString(body, 'memo'),
     freeItem1: nullableString(body, 'freeItem1'),
@@ -228,6 +229,7 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
 
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
   if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
+  assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024)
   const formData = await request.formData()
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
@@ -406,11 +408,20 @@ function normalizeStoredEmployer(value: string | null | undefined) {
   return normalized && normalized !== 'employer' ? normalized : null
 }
 
-function nullableInteger(body: Record<string, unknown>, key: string) {
+function nonNegativeInteger(body: Record<string, unknown>, key: string) {
   const value = body[key]
   if (value === null || value === undefined || value === '') return null
   const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) ? Math.round(number) : null
+  if (!Number.isFinite(number) || number < 0) throw new HttpError(400, `${key}は0以上の整数で入力してください。`)
+  return Math.round(number)
+}
+
+function nullableCalendarDate(body: Record<string, unknown>, key: string) {
+  const value = stringValue(body, key)
+  if (!value) return null
+  const normalized = normalizeCalendarDate(value)
+  if (!normalized) throw new HttpError(400, `${key}を正しい日付で入力してください。`)
+  return normalized
 }
 
 function getFileKind(contentType: string): 'image' | 'pdf' | 'other' {
