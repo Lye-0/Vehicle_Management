@@ -20,6 +20,7 @@ export type ArchiveRecord = {
 
 export type ArchiveList = {
   canManage: boolean
+  canManageRetention: boolean
   archives: ArchiveRecord[]
 }
 

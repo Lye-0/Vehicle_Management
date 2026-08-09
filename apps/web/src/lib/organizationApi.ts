@@ -16,6 +16,7 @@ export type OrganizationPermissions = {
   employeeCanEditTax: boolean
   employeeCanCreateRestoreBackup: boolean
   employeeCanManageBackupRetention: boolean
+  employeeCanManageArchiveRetention: boolean
 }
 
 export type AuthSession = {

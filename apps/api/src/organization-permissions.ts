@@ -8,6 +8,7 @@ export const defaultOrganizationPermissions: OrganizationPermissions = {
   employeeCanEditTax: true,
   employeeCanCreateRestoreBackup: true,
   employeeCanManageBackupRetention: false,
+  employeeCanManageArchiveRetention: false,
 }
 
 export type OrganizationPermissions = {
@@ -16,6 +17,7 @@ export type OrganizationPermissions = {
   employeeCanEditTax: boolean
   employeeCanCreateRestoreBackup: boolean
   employeeCanManageBackupRetention: boolean
+  employeeCanManageArchiveRetention: boolean
 }
 
 export async function loadOrganizationPermissions(database: Database, organizationId: string): Promise<OrganizationPermissions> {
@@ -43,7 +45,12 @@ export function normalizeOrganizationPermissions(value: unknown): OrganizationPe
     employeeCanEditTax: booleanValue(record.employeeCanEditTax, defaultOrganizationPermissions.employeeCanEditTax),
     employeeCanCreateRestoreBackup: booleanValue(record.employeeCanCreateRestoreBackup, defaultOrganizationPermissions.employeeCanCreateRestoreBackup),
     employeeCanManageBackupRetention: booleanValue(record.employeeCanManageBackupRetention, defaultOrganizationPermissions.employeeCanManageBackupRetention),
+    employeeCanManageArchiveRetention: booleanValue(record.employeeCanManageArchiveRetention, defaultOrganizationPermissions.employeeCanManageArchiveRetention),
   }
+}
+
+export function canManageArchiveRetention(role: string, permissions: OrganizationPermissions) {
+  return role === 'owner' || role === 'admin' || permissions.employeeCanManageArchiveRetention
 }
 
 function booleanValue(value: unknown, fallback: boolean) {

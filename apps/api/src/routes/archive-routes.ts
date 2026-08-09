@@ -1,11 +1,12 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceDocuments, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
-import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
+import { requireAdminOrganizationContext, requireOrganizationContext, requireOrganizationPermission } from '../auth/organization'
 import { loadBackupSettings } from '../backup-settings'
 import { archiveDocument, permanentlyDeleteArchivedDocument, restoreArchivedDocument, setArchiveKeepForever, type ArchivedDocumentKind } from '../document-archive'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { canManageArchiveRetention, loadOrganizationPermissions } from '../organization-permissions'
 
 export async function handleArchiveRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -31,6 +32,7 @@ export async function handleArchiveRoutes(request: Request, env: Env): Promise<R
 
 async function listArchives(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationContext(request, env, database)
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
   const query = new URL(request.url).searchParams.get('q')?.trim().toLocaleLowerCase() ?? ''
   const [salesRows, maintenanceRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, context.organization.organizationId), eq(salesDocuments.status, 'アーカイブ済み'))).orderBy(desc(salesDocuments.archivedAt)).all(),
@@ -47,7 +49,7 @@ async function listArchives(request: Request, env: Env, database: ReturnType<typ
     if (!query) return true
     return `${record.number} ${record.type} ${record.category} ${record.customerName} ${record.vehicle}`.toLocaleLowerCase().includes(query)
   }).sort((left, right) => (right.archivedAt ?? '').localeCompare(left.archivedAt ?? ''))
-  return jsonResponse({ canManage: context.organization.role === 'owner' || context.organization.role === 'admin', archives: records }, 200, env)
+  return jsonResponse({ canManage: context.organization.role === 'owner' || context.organization.role === 'admin', canManageRetention: canManageArchiveRetention(context.organization.role, permissions), archives: records }, 200, env)
 }
 
 async function restoreArchive(request: Request, env: Env, database: ReturnType<typeof createDatabase>, kind: ArchivedDocumentKind, documentId: string) {
@@ -58,7 +60,7 @@ async function restoreArchive(request: Request, env: Env, database: ReturnType<t
 }
 
 async function updateArchive(request: Request, env: Env, database: ReturnType<typeof createDatabase>, kind: ArchivedDocumentKind, documentId: string) {
-  const context = await requireOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanManageArchiveRetention')
   const body = await readJson(request)
   if (typeof body.keepForever !== 'boolean') throw new HttpError(400, '永久保存の指定が不正です。')
   const settings = await loadBackupSettings(database, context.organization.organizationId)

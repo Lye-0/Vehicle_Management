@@ -309,6 +309,7 @@ export const organizationPermissions = sqliteTable('organization_permissions', {
   employeeCanEditTax: integer('employee_can_edit_tax', { mode: 'boolean' }).notNull().default(true),
   employeeCanCreateRestoreBackup: integer('employee_can_create_restore_backup', { mode: 'boolean' }).notNull().default(true),
   employeeCanManageBackupRetention: integer('employee_can_manage_backup_retention', { mode: 'boolean' }).notNull().default(false),
+  employeeCanManageArchiveRetention: integer('employee_can_manage_archive_retention', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 })
 
