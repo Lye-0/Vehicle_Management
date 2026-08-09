@@ -3,15 +3,10 @@
 顧客・車両・販売・整備・車検予定・入金を、店舗単位でまとめて管理するWebアプリケーションです。
 顧客情報を起点に、車両の履歴、見積書・請求書、帳票PDF、入金状況まで一つの流れで確認できます。
 
-![ダッシュボード](docs/images/readme/dashboard.png)
-
-<p align="center"><sub>開発用シードデータによる画面例</sub></p>
-
 ## 目次
 
 - [このシステムでできること](#このシステムでできること)
 - [業務の流れ](#業務の流れ)
-- [画面ギャラリー](#画面ギャラリー)
 - [詳細機能](#詳細機能)
 - [利用開始](#利用開始)
 - [開発者向け情報](#開発者向け情報)
@@ -53,56 +48,6 @@ flowchart LR
 
 顧客・車両を一度登録すると、販売書類、整備書類、入金管理、車検予定から同じ顧客・車両を参照できます。
 
-## 画面ギャラリー
-
-### 顧客・車両
-
-顧客を選択すると、連絡先、所有車両、車検情報、添付ファイル、車両履歴を同じ画面で確認できます。
-
-![顧客・車両](docs/images/readme/customer-vehicle.png)
-
-### 販売と整備
-
-販売書類と整備書類は、左側の一覧で対象書類を選び、右側で入力またはプレビューを確認します。
-
-<table>
-  <tr>
-    <td><img src="docs/images/readme/sales-document.png" alt="販売画面"></td>
-    <td><img src="docs/images/readme/maintenance-document.png" alt="車検・点検・一般画面"></td>
-  </tr>
-  <tr>
-    <td align="center">販売書類の一覧・絞り込み</td>
-    <td align="center">整備書類の一覧・絞り込み</td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/readme/sales-document-preview.png" alt="販売帳票プレビュー"></td>
-    <td><img src="docs/images/readme/maintenance-document-preview.png" alt="整備帳票プレビュー"></td>
-  </tr>
-  <tr>
-    <td align="center">販売帳票のプレビュー</td>
-    <td align="center">整備帳票のプレビュー</td>
-  </tr>
-</table>
-
-### 点検予定と入金管理
-
-<table>
-  <tr>
-    <td><img src="docs/images/readme/inspection-schedules.png" alt="点検予定"></td>
-    <td><img src="docs/images/readme/payments.png" alt="入金管理"></td>
-  </tr>
-  <tr>
-    <td align="center">車検満了カレンダー</td>
-    <td align="center">請求一覧と入金状況</td>
-  </tr>
-</table>
-
-### 設定
-
-店舗情報や帳票に表示する内容を、組織単位で設定できます。
-
-![設定](docs/images/readme/settings.png)
-
 ## 詳細機能
 
 ### 共通画面の使い方
@@ -116,6 +61,10 @@ flowchart LR
 
 <details>
 <summary><strong>ダッシュボード</strong> — 店舗の状況と直近の作業を確認する</summary>
+
+![ダッシュボード](docs/images/readme/dashboard.png)
+
+<p align="center"><sub>開発用シードデータによる画面例</sub></p>
 
 #### 表示内容
 
@@ -138,6 +87,8 @@ flowchart LR
 
 <details>
 <summary><strong>顧客・車両</strong> — 顧客情報と所有車両を管理する</summary>
+
+![顧客・車両](docs/images/readme/customer-vehicle.png)
 
 #### 顧客
 
@@ -173,6 +124,17 @@ flowchart LR
 <details>
 <summary><strong>販売</strong> — 販売見積書・請求書を作成する</summary>
 
+<table>
+  <tr>
+    <td><img src="docs/images/readme/sales-document.png" alt="販売書類一覧"></td>
+    <td><img src="docs/images/readme/sales-document-preview.png" alt="販売帳票プレビュー"></td>
+  </tr>
+  <tr>
+    <td align="center">販売書類の一覧・絞り込み</td>
+    <td align="center">販売帳票のプレビュー</td>
+  </tr>
+</table>
+
 #### 書類作成
 
 `販売書類を作成`から、書類種別、顧客、対象車両を選んで`入力を開始`します。既存の顧客・車両だけでなく、新規顧客・新規車両を作成しながら開始できます。
@@ -199,6 +161,17 @@ flowchart LR
 
 <details>
 <summary><strong>車検・点検・一般</strong> — 整備受付と作業明細を管理する</summary>
+
+<table>
+  <tr>
+    <td><img src="docs/images/readme/maintenance-document.png" alt="整備書類一覧"></td>
+    <td><img src="docs/images/readme/maintenance-document-preview.png" alt="整備帳票プレビュー"></td>
+  </tr>
+  <tr>
+    <td align="center">整備書類の一覧・絞り込み</td>
+    <td align="center">整備帳票のプレビュー</td>
+  </tr>
+</table>
 
 #### 書類作成
 
@@ -227,6 +200,8 @@ flowchart LR
 <details>
 <summary><strong>点検予定</strong> — 車検満了日を確認する</summary>
 
+![点検予定](docs/images/readme/inspection-schedules.png)
+
 - 顧客・車両に登録された車検満了日をカレンダーで確認します。
 - `今日`、`前月`、`次月`でカレンダーを移動します。
 - 満了年・満了月で絞り込みます。
@@ -238,6 +213,8 @@ flowchart LR
 
 <details>
 <summary><strong>入金管理</strong> — 請求ごとの入金状況を管理する</summary>
+
+![入金管理](docs/images/readme/payments.png)
 
 販売請求書・整備請求書のうち、状態が`入金待ち`の書類を表示します。
 
@@ -253,26 +230,24 @@ flowchart LR
 
 </details>
 
-### 設定の詳細
+### 設定
+
+<details>
+<summary><strong>設定</strong> — 店舗・帳票・データ・権限を管理する</summary>
+
+![設定](docs/images/readme/settings.png)
 
 設定画面には、利用者の権限に応じて次のサブタブが表示されます。
 
-<details>
-<summary><strong>店舗情報</strong></summary>
+#### 店舗情報
 
 帳票の発行元として利用する店舗名、郵便番号、住所、電話番号、FAX番号、適格請求書発行事業者番号、ロゴ画像を設定します。請求書に表示する振込口座・口座名義も管理できます。
 
-</details>
-
-<details>
-<summary><strong>税・端数処理</strong></summary>
+#### 税・端数処理
 
 消費税率、端数処理、販売書類の支払期限の初期日数を設定します。端数処理は`切り捨て`と`四捨五入`から選択できます。
 
-</details>
-
-<details>
-<summary><strong>明細候補</strong></summary>
+#### 明細候補
 
 販売書類の候補を次の3グループで管理します。
 
@@ -282,10 +257,7 @@ flowchart LR
 
 整備書類では、整備作業・部品候補を追加・名称変更・削除できます。登録した候補は、販売・整備書類の入力欄から選択できます。
 
-</details>
-
-<details>
-<summary><strong>アーカイブ</strong></summary>
+#### アーカイブ
 
 販売・整備画面でアーカイブした書類を検索・確認します。
 
@@ -296,16 +268,13 @@ flowchart LR
 
 永久保存していない書類は、設定した保管期間を過ぎると自動削除の対象になります。完全削除は復元できないため、対象と確認ダイアログを確認してから実行します。
 
-</details>
+#### データ
 
-<details>
-<summary><strong>データ</strong></summary>
-
-#### CSV出力
+##### CSV出力
 
 顧客一覧、車両一覧、販売書類、整備書類、入金管理をUTF-8 CSVとして出力できます。
 
-#### CSVインポート・移行
+##### CSVインポート・移行
 
 1. 取込対象を選択します。
 2. CSVファイルを選択します。
@@ -314,25 +283,19 @@ flowchart LR
 
 対象は顧客一覧、車両一覧、販売書類、整備書類、入金管理です。ファイルは5MB以内、5,000行以内で使用します。取込後は追加・更新・スキップ件数を確認します。
 
-#### バックアップ・復元
+##### バックアップ・復元
 
 D1の組織データと、B2に保存された車両添付ファイルをバックアップします。オンライン（B2）、PC、または両方への手動保存、メモ、保管期間、永久保存、復元を利用できます。
 
 定期バックアップはオンライン（B2）のみ利用でき、頻度は`毎日`または`毎週`です。PCの定期バックアップは実装されていません。復元前には安全バックアップを作成し、復元対象と復元後の件数を確認します。
 
-</details>
-
-<details>
-<summary><strong>管理者・従業員</strong></summary>
+#### 管理者・従業員
 
 自分の表示名、メールアドレス＋パスワード、Googleログインを管理します。メール確認、パスワード変更、Googleログインの連携・解除もここから行います。
 
 管理者・オーナーは、組織に所属する従業員の追加、ロール変更、利用停止、組織からの削除を行えます。従業員を追加したときに表示される初期パスワードは、画面を閉じると再表示できないため、安全な方法で本人へ伝えてください。
 
-</details>
-
-<details>
-<summary><strong>権限管理</strong></summary>
+#### 権限管理
 
 管理可能な利用者にのみ表示されます。従業員に対して、次の操作を許可するか設定できます。
 
@@ -349,7 +312,8 @@ D1の組織データと、B2に保存された車両添付ファイルをバッ�
 
 ## 利用開始
 
-### 本番環境での初回セットアップ
+<details>
+<summary><strong>初回セットアップとログイン</strong> — 本番環境で利用を開始する</summary>
 
 1. ログイン画面でメールアドレス＋パスワード、またはGoogleアカウントで認証します。
 2. 初回利用時は、組織名・店舗名と管理者用のセットアップキーを入力します。
@@ -361,6 +325,8 @@ D1の組織データと、B2に保存された車両添付ファイルをバッ�
 ![ログイン](docs/images/readme/login.png)
 
 本番のセットアップキー、パスワード、APIキー、サービスアカウント、B2キーなどの秘密情報は、READMEやリポジトリへ記載しません。
+
+</details>
 
 ## 開発者向け情報
 
@@ -464,4 +430,3 @@ pnpm deploy:production
 
 - [ローカル開発環境](docs/local-development.md)
 - [開発・本番環境の分離](docs/environment-separation.md)
-
