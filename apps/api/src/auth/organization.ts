@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { authAccounts, organizationMemberships, organizations, staffProfiles } from '@vehicle-management/database'
 import { requireAuthenticatedUser, type FirebaseUser } from './firebase'
+import { IdentityToolkitError, updatePasswordWithIdToken } from './identity-toolkit'
 import { HttpError } from '../http'
 import type { Database } from '../db/client'
 import { loadOrganizationPermissions, type OrganizationPermissions } from '../organization-permissions'
@@ -35,6 +36,8 @@ export async function requireOrganizationContext(request: Request, env: Env, dat
     throw new HttpError(400, '利用する組織を選択してください。')
   }
   if (organization.status !== 'active') throw new HttpError(403, 'この組織の利用権限が無効です。')
+  const account = await database.select({ mustChangePassword: authAccounts.mustChangePassword }).from(authAccounts).where(eq(authAccounts.uid, user.uid)).get()
+  if (account?.mustChangePassword) throw new HttpError(403, '初期パスワードの変更が必要です。')
   return { user, organization }
 }
 
@@ -128,11 +131,20 @@ export async function completeInitialOrganizationSetup(database: Database, env: 
   return target.id
 }
 
-export async function completeInitialPasswordChange(database: Database, uid: string) {
+export async function completeInitialPasswordChange(database: Database, env: Env, uid: string, idToken: string, password: string) {
   const account = await database.select({ uid: authAccounts.uid, mustChangePassword: authAccounts.mustChangePassword }).from(authAccounts).where(eq(authAccounts.uid, uid)).get()
   if (!account) throw new HttpError(404, '認証アカウント情報が見つかりません。')
   if (!account.mustChangePassword) return
-  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(eq(authAccounts.uid, uid)).run()
+  if (!idToken) throw new HttpError(401, '認証トークンが見つかりません。')
+  try {
+    await updatePasswordWithIdToken(env, idToken, password)
+  } catch (error) {
+    if (error instanceof IdentityToolkitError && error.code === 'WEAK_PASSWORD') throw new HttpError(400, 'パスワードは8文字以上で設定してください。')
+    if (error instanceof IdentityToolkitError && ['INVALID_ID_TOKEN', 'TOKEN_EXPIRED', 'USER_NOT_FOUND'].includes(error.code)) throw new HttpError(401, '認証情報を確認できません。')
+    throw new HttpError(503, 'パスワードを変更できませんでした。Firebaseの設定を確認してください。')
+  }
+  const now = new Date().toISOString()
+  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: now, updatedAt: now }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.mustChangePassword, true))).run()
 }
 
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {
@@ -153,8 +165,9 @@ async function upsertProfile(database: Database, user: FirebaseUser, role: Organ
   const existing = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName, email: staffProfiles.email }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const now = new Date().toISOString()
   const displayName = user.displayName || user.email || 'ログインユーザー'
+  const authenticatedEmail = user.email?.trim().toLowerCase() ?? null
   if (existing) {
-    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: existing.email ?? user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
+    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: authenticatedEmail ?? existing.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
   } else {
     await database.insert(staffProfiles).values({ uid: user.uid, displayName, email: user.email, role, updatedAt: now }).run()
   }

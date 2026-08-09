@@ -43,7 +43,7 @@ export function requireAuthenticatedUser(request: Request, env: Pick<Env, 'APP_E
   return requireFirebaseUser(request, env.FIREBASE_PROJECT_ID, allowEmulatorToken)
 }
 
-function getBearerToken(request: Request) {
+export function getBearerToken(request: Request) {
   const authorization = request.headers.get('Authorization')
   const match = authorization?.match(/^Bearer\s+(.+)$/i)
   return match?.[1] ?? null

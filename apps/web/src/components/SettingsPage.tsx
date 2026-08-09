@@ -317,10 +317,11 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
 
   const [memberError, setMemberError] = useState('')
   const [memberMessage, setMemberMessage] = useState('')
-  const [memberModal, setMemberModal] = useState<'add' | 'temporaryPassword' | null>(null)
+  const [memberModal, setMemberModal] = useState<'add' | 'temporaryPassword' | 'invitation' | null>(null)
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [invitation, setInvitation] = useState<{ code: string; email: string; expiresAt: string } | null>(null)
   const [accountModal, setAccountModal] = useState<'displayName' | 'password' | 'google' | null>(null)
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
@@ -342,6 +343,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       if (event.key === 'Escape' && !memberLoading) {
         setMemberModal(null)
         setTemporaryPassword('')
+        setInvitation(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -352,6 +354,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     if (memberLoading) return
     setMemberModal(null)
     setTemporaryPassword('')
+    setInvitation(null)
   }
 
   useEffect(() => {
@@ -492,16 +495,21 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setMemberMessage('')
     try {
       const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
-      if (response.member) setMembers((current) => current.some((member) => member.uid === response.member.uid) ? current.map((member) => member.uid === response.member.uid ? response.member : member) : [...current, response.member])
+      const createdMember = response.member
+      if (createdMember) setMembers((current) => current.some((member) => member.uid === createdMember.uid) ? current.map((member) => member.uid === createdMember.uid ? createdMember : member) : [...current, createdMember])
       setTemporaryPassword(response.temporaryPassword ?? '')
+      setInvitation(response.invitation ?? null)
       setNewMemberName('')
       setNewMemberEmail('')
       if (response.temporaryPassword) {
         setMemberModal('temporaryPassword')
         setMemberMessage('従業員を登録しました。')
+      } else if (response.invitation) {
+        setMemberModal('invitation')
+        setMemberMessage('既存のアカウントへ招待を作成しました。招待コードを本人へ安全に伝えてください。')
       } else {
         setMemberModal(null)
-        setMemberMessage('既存のアカウントを組織に再追加し、初期パスワードを再発行しました。')
+        setMemberMessage('従業員を登録しました。')
       }
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
@@ -550,6 +558,16 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     }
     await navigator.clipboard.writeText(temporaryPassword)
     setMemberMessage('初期パスワードをコピーしました。')
+  }
+
+  async function copyInvitationCode() {
+    if (!invitation?.code) return
+    if (!navigator.clipboard) {
+      setMemberMessage('この環境では自動コピーできません。招待コードを安全に控えてください。')
+      return
+    }
+    await navigator.clipboard.writeText(invitation.code)
+    setMemberMessage('招待コードをコピーしました。')
   }
 
   return (
@@ -615,17 +633,22 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       {memberModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMemberModal() }}>
         <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="account-modal-header">
-            <div><span className="page-eyebrow">組織ユーザー</span><h2 id="member-modal-title">{memberModal === 'add' ? '従業員を追加' : '初期パスワード'}</h2></div>
+            <div><span className="page-eyebrow">組織ユーザー</span><h2 id="member-modal-title">{memberModal === 'add' ? '従業員を追加' : memberModal === 'temporaryPassword' ? '初期パスワード' : '組織への招待'}</h2></div>
             <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>×</button>
           </div>
           {memberError && <div className="auth-error" role="alert">{memberError}</div>}
           {memberModal === 'add' ? <form className="account-modal-content" onSubmit={(event) => void addMember(event)}>
-            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。新規追加でも、過去に削除したアカウントの再追加でも、新しい初期パスワードが表示されます。</p>
+            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。既存アカウントにはパスワードを上書きせず、本人受け入れ用の招待コードを発行します。</p>
             <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
-          </form> : <div className="account-modal-content">
+          </form> : memberModal === 'temporaryPassword' ? <div className="account-modal-content">
             <p className="account-modal-note">従業員へ安全な方法で伝えてください。このパスワードはこの画面を閉じると再表示できません。</p>
             <div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button></div>
+            {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
+            <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
+          </div> : <div className="account-modal-content">
+            <p className="account-modal-note">{invitation?.email} の本人がログイン後、このワンタイム招待コードを入力して組織へ参加します。有効期限は {invitation ? formatBackupDate(invitation.expiresAt) : '7日間'} です。</p>
+            <div className="temporary-password-value"><code>{invitation?.code}</code><button className="button button-secondary" type="button" onClick={() => void copyInvitationCode()}><Copy size={15} />コピー</button></div>
             {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
             <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
           </div>}

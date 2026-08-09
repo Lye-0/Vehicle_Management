@@ -65,7 +65,7 @@ export async function completeOrganizationSetup(name: string, setupKey: string) 
   return response.session
 }
 
-export async function completeInitialPasswordChange() {
-  const response = await apiFetch<{ session: AuthSession }>('/api/auth/password/complete', { method: 'POST' })
+export async function completeInitialPasswordChange(password: string) {
+  const response = await apiFetch<{ session: AuthSession }>('/api/auth/password/complete', { method: 'POST', body: JSON.stringify({ password }) })
   return response.session
 }

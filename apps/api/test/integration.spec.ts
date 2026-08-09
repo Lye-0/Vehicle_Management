@@ -32,9 +32,9 @@ describe("CLI authenticated workflow", () => {
 		let salesDocumentId: string | undefined;
 		let maintenanceDocumentId: string | undefined;
 		let inspectionScheduleId: string | undefined;
-		let attachmentId: string | undefined;
-		let backupId: string | undefined;
-		let safetyBackupId: string | undefined;
+			let attachmentId: string | undefined;
+			let backupId: string | undefined;
+			let safetyBackupId: string | undefined;
 
 		await prepareTestOrganizations();
 
@@ -82,18 +82,18 @@ describe("CLI authenticated workflow", () => {
 
 			const updatedProfile = await requestJson<JsonObject>("/api/auth/profile", "PATCH", {
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			});
 			expect(updatedProfile.response.status).toBe(200);
 			expect(updatedProfile.body.profile).toEqual({
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			});
 
 			const refreshedSession = await requestJson<JsonObject>("/api/auth/me");
 			expect(refreshedSession.body.profile).toEqual(expect.objectContaining({
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			}));
 
 			const members = await requestJson<JsonObject>("/api/organization/members");
@@ -101,7 +101,7 @@ describe("CLI authenticated workflow", () => {
 			expect(members.body.currentRole).toBe("owner");
 			expect(members.body.members).toEqual(expect.arrayContaining([
 				expect.objectContaining({ uid: employeeUid, role: "employee", status: "active" }),
-				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${marker.toLowerCase()}-profile@example.com` }),
+				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${ownerUid}@example.com` }),
 		]));
 
 			const createdCustomer = await requestJson<JsonObject>("/api/customers", "POST", {
@@ -542,11 +542,14 @@ describe("CLI authenticated workflow", () => {
 
 			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(removedEmployeeAccess.response.status).toBe(400);
-            const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: marker + " 再追加従業員", email: employeeUid + "@example.com" });
-            expect(readdedEmployee.response.status).toBe(201);
-            expect(readdedEmployee.body.temporaryPassword).toEqual(expect.any(String));
-            expect(stringValue(readdedEmployee.body.temporaryPassword).length).toBeGreaterThanOrEqual(16);
-            expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: marker + " 再追加従業員", role: "employee", status: "active", mustChangePassword: true }));
+			const invitationCode = `${marker}-invite-code`;
+			const invitationHash = await hashInvitationToken(invitationCode);
+			await env.DB.prepare("INSERT INTO organization_invites (id, organization_id, email, token_hash, role, status, expires_at, created_by_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+				.bind(`invite-${marker.toLowerCase()}`, organizationId, `${employeeUid}@example.com`, invitationHash, "employee", "pending", new Date(Date.now() + 86_400_000).toISOString(), ownerUid)
+				.run();
+			const readdedEmployee = await requestJson<JsonObject>("/api/organization/invitations/accept", "POST", { code: invitationCode }, employeeUid);
+			expect(readdedEmployee.response.status).toBe(201);
+			expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, role: "employee", status: "active", mustChangePassword: false }));
 			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(readdedEmployeeAccess.response.status).toBe(200);
 
@@ -581,7 +584,7 @@ describe("CLI authenticated workflow", () => {
 			expect(listedSharedSchedules.response.status).toBe(200);
 			expect(arrayValue(listedSharedSchedules.body.schedules)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ title: `${marker} オーナー予定 更新`, authorName: `${marker} 表示名変更` }),
-				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 再追加従業員` }),
+				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 従業員` }),
 			]));
 			const dashboardWithSharedSchedules = await requestJson<JsonObject>("/api/dashboard", "GET", undefined, employeeUid);
 			expect(dashboardWithSharedSchedules.response.status).toBe(200);
@@ -709,6 +712,7 @@ async function cleanupTestData(state: { attachmentId?: string; backupId?: string
 		"inspection_schedules",
 		"shared_schedules",
 		"app_settings",
+		"organization_invites",
 		"backup_records",
 	]) {
 		await env.DB.prepare(`DELETE FROM ${table} WHERE organization_id = ?`).bind(organizationId).run();
@@ -777,6 +781,14 @@ function authHeaders(uid: string, selectedOrganizationId: string) {
 		Authorization: `Bearer ${emulatorToken(uid)}`,
 		"X-Organization-Id": selectedOrganizationId,
 	});
+}
+
+async function hashInvitationToken(value: string) {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+	const bytes = new Uint8Array(digest);
+	let binary = "";
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary);
 }
 
 function emulatorToken(uid: string) {

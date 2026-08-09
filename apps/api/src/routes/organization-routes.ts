@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { staffProfiles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError, type FirebaseUser } from '../auth/firebase'
+import { getBearerToken, requireAuthenticatedUser, UnauthorizedError, type FirebaseUser } from '../auth/firebase'
 import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession, requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
@@ -35,7 +35,8 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
       return jsonResponse({ session: await loadAuthSession(database, env, user), organizationId }, 201, env)
     }
     if (isPasswordCompleteRoute && request.method === 'POST') {
-      await completeInitialPasswordChange(database, user.uid)
+      const body = await readJson(request)
+      await completeInitialPasswordChange(database, env, user.uid, getBearerToken(request) ?? '', requiredInitialPassword(body.password))
       return jsonResponse({ session: await loadAuthSession(database, env, user) }, 200, env)
     }
     throw new HttpError(405, 'この操作には対応していません。')
@@ -52,7 +53,7 @@ async function updateProfile(request: Request, database: ReturnType<typeof creat
   const body = await readJson(request)
   const existing = await database.select().from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const displayName = body.displayName === undefined ? existing?.displayName ?? user.displayName ?? user.email ?? 'ログインユーザー' : requiredProfileDisplayName(body.displayName)
-  const email = body.email === undefined ? existing?.email ?? user.email : normalizedProfileEmail(body.email)
+  const email = body.email === undefined ? existing?.email ?? user.email : normalizedProfileEmail(body.email, user.email)
   const now = new Date().toISOString()
   if (existing) {
     await database.update(staffProfiles).set({ displayName, email, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
@@ -68,11 +69,12 @@ function requiredProfileDisplayName(value: unknown) {
   return displayName
 }
 
-function normalizedProfileEmail(value: unknown) {
+function normalizedProfileEmail(value: unknown, authenticatedEmail: string | null) {
   if (value === null) return null
   if (typeof value !== 'string') throw new HttpError(400, 'メールアドレスが不正です。')
   const email = value.trim().toLowerCase()
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, '有効なメールアドレスを入力してください。')
+  if (!authenticatedEmail || email !== authenticatedEmail.trim().toLowerCase()) throw new HttpError(400, '認証済みアカウントのメールアドレスのみ保存できます。')
   return email
 }
 function stringValue(body: Record<string, unknown>, key: string) {
@@ -81,4 +83,9 @@ function stringValue(body: Record<string, unknown>, key: string) {
 
 function isAdministrator(role: string) {
   return role === 'owner' || role === 'admin'
+}
+
+function requiredInitialPassword(value: unknown) {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128) throw new HttpError(400, 'パスワードは8文字以上128文字以内で設定してください。')
+  return value
 }
