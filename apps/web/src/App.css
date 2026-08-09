@@ -2124,7 +2124,7 @@
 .sales-details-accordion summary svg { color: var(--text-muted); transition: transform 180ms ease; }
 .sales-details-accordion[open] summary { border-bottom: 1px solid var(--border); }
 .sales-details-accordion[open] summary svg { transform: rotate(180deg); }
-.sales-details-accordion-content { min-height: 0; }
+.sales-details-accordion-content { min-height: 0; padding: 14px 16px 16px; }
 .sales-estimate-meta-table input[aria-label="書類番号"] { pointer-events: none; cursor: default; }
 .maintenance-header-editor { margin: 20px 0; }
 .sales-items-head, .sales-item-row { grid-template-columns: 125px minmax(170px, 1fr) 58px 44px 92px 92px 84px 130px 100px 28px; min-width: 1040px; }
