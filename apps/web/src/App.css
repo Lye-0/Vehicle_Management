@@ -2895,3 +2895,26 @@
   .inspection-vehicle-card-button { padding-inline: 18px; }
   .inspection-card-date strong { font-size: 14px; }
 }
+
+/* Keep mobile archive actions on one compact row */
+@media (max-width: 480px) {
+  .archive-actions {
+    flex-wrap: nowrap;
+    justify-self: center;
+    width: max-content;
+    max-width: 100%;
+  }
+  .archive-actions .button {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 4px;
+    padding-inline: 7px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .archive-actions .button svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 auto;
+  }
+}
