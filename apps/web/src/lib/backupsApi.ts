@@ -15,7 +15,14 @@ export type BackupRecord = {
 
 export type BackupList = {
   canManage: boolean
+  canManageCreateRestore: boolean
+  canManageRetention: boolean
   backups: BackupRecord[]
+}
+
+export type BackupPermissions = {
+  canManageCreateRestore: boolean
+  canManageRetention: boolean
 }
 
 export type BackupDestination = 'b2' | 'pc' | 'both'
@@ -46,7 +53,7 @@ export async function fetchBackups() {
 }
 
 export async function fetchBackupSettings() {
-  return apiFetch<{ canManage: boolean; settings: BackupSettings }>('/api/backups/settings')
+  return apiFetch<{ canManage: boolean; canManageCreateRestore: boolean; canManageRetention: boolean; settings: BackupSettings }>('/api/backups/settings')
 }
 
 export async function updateBackupSettings(settings: BackupSettings) {

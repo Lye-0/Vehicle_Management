@@ -3,6 +3,7 @@ import { authAccounts, organizationMemberships, organizations, staffProfiles } f
 import { requireAuthenticatedUser, type FirebaseUser } from './firebase'
 import { HttpError } from '../http'
 import type { Database } from '../db/client'
+import { loadOrganizationPermissions, type OrganizationPermissions } from '../organization-permissions'
 
 export const defaultOrganizationId = 'org-default'
 export const organizationRoles = ['owner', 'admin', 'employee'] as const
@@ -42,6 +43,14 @@ export async function requireAdminOrganizationContext(request: Request, env: Env
   if (context.organization.role !== 'owner' && context.organization.role !== 'admin') {
     throw new HttpError(403, 'この操作には管理者権限が必要です。')
   }
+  return context
+}
+
+export async function requireOrganizationPermission(request: Request, env: Env, database: Database, permission: keyof OrganizationPermissions): Promise<OrganizationContext> {
+  const context = await requireOrganizationContext(request, env, database)
+  if (context.organization.role === 'owner' || context.organization.role === 'admin') return context
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
+  if (!permissions[permission]) throw new HttpError(403, 'この操作は組織の権限設定で許可されていません。')
   return context
 }
 

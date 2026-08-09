@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } fr
 import type { User } from 'firebase/auth'
 import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
-import { updateCurrentProfile } from '../lib/organizationApi'
+import { fetchOrganizationPermissions, updateCurrentProfile, updateOrganizationPermissions, type OrganizationPermissions } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
@@ -14,10 +14,11 @@ import { BackupSettingsPanel } from './BackupSettingsPanel'
 import { IconWithChain } from './IconWithChain'
 import { NormalizedInput } from './NormalizedValueInput'
 
-type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members'
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members' | 'permissions'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
 const initialBackupSettings: BackupSettings = { autoEnabled: false, frequency: 'daily', destination: 'b2', retentionDays: 30, archiveRetentionDays: 30, pcRetentionDays: 30 }
+const initialOrganizationPermissions: OrganizationPermissions = { employeeCanExportCsv: true, employeeCanEditShop: true, employeeCanEditTax: true, employeeCanCreateRestoreBackup: true, employeeCanManageBackupRetention: false }
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗情報', description: '店舗情報と帳票に表示する内容', icon: Building2 },
@@ -26,6 +27,7 @@ const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: t
   { id: 'archive', label: 'アーカイブ', description: '削除した書類の復元と整理', icon: Archive },
   { id: 'data', label: 'データ', description: 'データの入出力とバックアップ', icon: Table2 },
   { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
+  { id: 'permissions', label: '権限管理', description: '従業員に許可する操作', icon: ShieldCheck },
 ]
 
 const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; description: string }> = [
@@ -37,7 +39,9 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
 export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
-  const [canManageBackupSettings, setCanManageBackupSettings] = useState(false)
+  const [backupPermissions, setBackupPermissions] = useState({ canManageCreateRestore: false, canManageRetention: false })
+  const [permissions, setPermissions] = useState<OrganizationPermissions>(initialOrganizationPermissions)
+  const [canManagePermissions, setCanManagePermissions] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -47,12 +51,14 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([fetchSettings(), fetchBackupSettings()])
-      .then(([nextSettings, backupResponse]) => {
+    Promise.all([fetchSettings(), fetchBackupSettings(), fetchOrganizationPermissions()])
+      .then(([nextSettings, backupResponse, permissionsResponse]) => {
         if (!cancelled) {
           setSettings(nextSettings)
           setBackupSettings(backupResponse.settings)
-          setCanManageBackupSettings(backupResponse.canManage)
+          setBackupPermissions({ canManageCreateRestore: backupResponse.canManageCreateRestore, canManageRetention: backupResponse.canManageRetention })
+          setPermissions(permissionsResponse.permissions)
+          setCanManagePermissions(permissionsResponse.canManage)
           setError('')
         }
       })
@@ -77,6 +83,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   function updateTax(field: keyof TaxSettings, value: string | number) {
     setSettings((current) => ({ ...current, tax: { ...current.tax, [field]: value } as TaxSettings }))
+    setSaved(false)
+  }
+
+  function updatePermission(field: keyof OrganizationPermissions, value: boolean) {
+    setPermissions((current) => ({ ...current, [field]: value }))
     setSaved(false)
   }
 
@@ -133,12 +144,14 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       },
     }
     try {
-      const [nextSettings, nextBackupSettings] = await Promise.all([
+      const [nextSettings, nextBackupSettings, nextPermissions] = await Promise.all([
         updateSettings(normalizedSettings),
-        canManageBackupSettings ? updateBackupSettings({ ...backupSettings, destination: 'b2' }) : Promise.resolve(backupSettings),
+        backupPermissions.canManageCreateRestore || backupPermissions.canManageRetention ? updateBackupSettings(backupSettings) : Promise.resolve(backupSettings),
+        canManagePermissions ? updateOrganizationPermissions(permissions).then((response) => response.permissions) : Promise.resolve(permissions),
       ])
       setSettings(nextSettings)
       setBackupSettings(nextBackupSettings)
+      setPermissions(nextPermissions)
       setSaved(true)
       setError('')
       onReloadSession?.()
@@ -153,6 +166,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setBackupSettings(nextSettings)
     setSaved(false)
   }, [])
+
+  const visibleTabs = tabs.filter((tab) => tab.id !== 'permissions' || canManagePermissions)
 
   async function exportCsv(resource: CsvResource) {
     setExporting(resource)
@@ -179,8 +194,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
-        <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <nav className="panel settings-nav" aria-label="設定メニュー">{visibleTabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} editable={permissions.employeeCanEditShop} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} editable={permissions.employeeCanEditTax} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'permissions' ? <PermissionsPanel permissions={permissions} onUpdate={updatePermission} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
@@ -196,6 +211,14 @@ function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetG
 
 function DataSettingsPanel({ exporting, onExport, backupSettings, onBackupSettingsChange }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void; backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></>
+}
+
+function PermissionsPanel({ permissions, onUpdate }: { permissions: OrganizationPermissions; onUpdate: (field: keyof OrganizationPermissions, value: boolean) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={ShieldCheck} title="権限管理" description="従業員が設定・出力・バックアップで実行できる操作を管理します。" /><section className="panel settings-panel"><div className="settings-section-heading"><ShieldCheck size={18} /><div><h2>従業員に許可する操作</h2><p>管理者・オーナーは常にすべての操作を実行できます。変更後は画面上部の「設定を保存」で反映します。</p></div></div><div className="settings-permission-list"><PermissionToggle label="CSV出力" description="顧客・車両・販売・整備・入金のCSV出力" checked={permissions.employeeCanExportCsv} onChange={(value) => onUpdate('employeeCanExportCsv', value)} /><PermissionToggle label="店舗情報の変更" description="店舗名、連絡先、振込先、帳票ロゴなど" checked={permissions.employeeCanEditShop} onChange={(value) => onUpdate('employeeCanEditShop', value)} /><PermissionToggle label="税率情報の変更" description="消費税率、表示方法、端数処理" checked={permissions.employeeCanEditTax} onChange={(value) => onUpdate('employeeCanEditTax', value)} /><PermissionToggle label="バックアップの作成・PC出力・インポート復元・B2復元" description="バックアップ作成、PCへの出力、PCインポート復元、B2復元" checked={permissions.employeeCanCreateRestoreBackup} onChange={(value) => onUpdate('employeeCanCreateRestoreBackup', value)} /><PermissionToggle label="バックアップの削除・永久保存・保持期限変更" description="B2/PCバックアップの削除、永久保存切替、保持期間の変更" checked={permissions.employeeCanManageBackupRetention} onChange={(value) => onUpdate('employeeCanManageBackupRetention', value)} /></div></section></div>
+}
+
+function PermissionToggle({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <label className="backup-toggle settings-permission-toggle"><span><strong>{label}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="backup-toggle-track" aria-hidden="true"><span /></span></label>
 }
 
 function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
@@ -732,7 +755,8 @@ function addRetentionDays(value: string, days: number) {
   return date.toISOString()
 }
 
-function ShopSettingsPanel({ settings, onUpdate }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
+function ShopSettingsPanel({ settings, editable, onUpdate: saveUpdate }: { settings: AppSettings; editable: boolean; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
+  const onUpdate = editable ? saveUpdate : () => undefined
   return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" normalization="postalCode" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" normalization="phone" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" normalization="phone" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
 }
 
@@ -769,7 +793,8 @@ function ShopLogoField({ value, onChange }: { value: string; onChange: (value: s
   return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone"><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
 }
 
-function TaxSettingsPanel({ settings, onUpdateTax, onUpdateDocument }: { settings: AppSettings; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+function TaxSettingsPanel({ settings, editable, onUpdateTax: saveTaxUpdate, onUpdateDocument }: { settings: AppSettings; editable: boolean; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+  const onUpdateTax = editable ? saveTaxUpdate : () => undefined
   return <div className="settings-panel-stack"><SettingsPanelHeader icon={ReceiptText} title="税・端数処理" description="販売書類・整備書類の金額計算に使う初期値です。" /><section className="panel settings-panel"><div className="settings-section-heading"><ReceiptText size={18} /><div><h2>消費税</h2><p>書類作成時の税率と端数処理を設定します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>消費税率</span><div className="settings-number-input"><input type="number" min="0" max="100" value={settings.tax.consumptionTaxRate} onChange={(event) => onUpdateTax('consumptionTaxRate', Number(event.target.value))} /><span>%</span></div></label><label className="form-field"><span>端数処理</span><select value={settings.tax.rounding} onChange={(event) => onUpdateTax('rounding', event.target.value)}><option value="切り捨て">切り捨て</option><option value="四捨五入">四捨五入</option></select></label></div></section><section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>帳票の初期値</h2><p>新しい販売書類を作成するときに適用します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>支払期限の初期日数</span><div className="settings-number-input"><input type="number" min="0" max="365" value={settings.document.defaultDueDays} onChange={(event) => onUpdateDocument('defaultDueDays', Number(event.target.value))} /><span>日後</span></div></label></div></section></div>
 }
 

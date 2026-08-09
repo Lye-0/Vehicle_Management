@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm'
 import { staffProfiles } from '@vehicle-management/database'
 import { requireAuthenticatedUser, UnauthorizedError, type FirebaseUser } from '../auth/firebase'
-import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession } from '../auth/organization'
+import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession, requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { loadOrganizationPermissions, saveOrganizationPermissions } from '../organization-permissions'
 
 export async function handleOrganizationRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -11,12 +12,22 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
   const isSetupRoute = pathname === '/api/setup/organization'
   const isPasswordCompleteRoute = pathname === '/api/auth/password/complete'
   const isProfileRoute = pathname === '/api/auth/profile'
-  if (!isSessionRoute && !isSetupRoute && !isPasswordCompleteRoute && !isProfileRoute) return null
+  const isPermissionsRoute = pathname === '/api/organization/permissions'
+  if (!isSessionRoute && !isSetupRoute && !isPasswordCompleteRoute && !isProfileRoute && !isPermissionsRoute) return null
 
   try {
     const user = await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
     if (isSessionRoute && request.method === 'GET') return jsonResponse(await loadAuthSession(database, env, user), 200, env)
+    if (isPermissionsRoute && request.method === 'GET') {
+      const context = await requireOrganizationContext(request, env, database)
+      return jsonResponse({ canManage: isAdministrator(context.organization.role), permissions: await loadOrganizationPermissions(database, context.organization.organizationId) }, 200, env)
+    }
+    if (isPermissionsRoute && request.method === 'PATCH') {
+      const context = await requireAdminOrganizationContext(request, env, database)
+      const body = await readJson(request)
+      return jsonResponse({ permissions: await saveOrganizationPermissions(database, context.organization.organizationId, body.permissions) }, 200, env)
+    }
     if (isProfileRoute && request.method === 'PATCH') return await updateProfile(request, database, user, env)
     if (isSetupRoute && request.method === 'POST') {
       const body = await readJson(request)
@@ -66,4 +77,8 @@ function normalizedProfileEmail(value: unknown) {
 }
 function stringValue(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? body[key].trim() : ''
+}
+
+function isAdministrator(role: string) {
+  return role === 'owner' || role === 'admin'
 }

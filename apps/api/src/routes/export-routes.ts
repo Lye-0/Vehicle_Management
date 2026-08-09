@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
-import { requireOrganizationContext } from '../auth/organization'
+import { requireOrganizationPermission } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, corsHeaders } from '../http'
 
@@ -17,7 +17,7 @@ export async function handleExportRoutes(request: Request, env: Env): Promise<Re
     const resource = match[1]
     if (!resources.has(resource)) throw new HttpError(404, '出力対象が見つかりません。')
     const database = createDatabase(env.DB)
-    const context = await requireOrganizationContext(request, env, database)
+    const context = await requireOrganizationPermission(request, env, database, 'employeeCanExportCsv')
     const organizationId = context.organization.organizationId
     if (resource === 'customers') return await exportCustomers(env, database, organizationId)
     if (resource === 'vehicles') return await exportVehicles(env, database, organizationId)

@@ -285,6 +285,16 @@ export const sharedSchedules = sqliteTable('shared_schedules', {
   index('shared_schedules_created_by_uid_idx').on(table.createdByUid),
 ])
 
+export const organizationPermissions = sqliteTable('organization_permissions', {
+  organizationId: text('organization_id').primaryKey(),
+  employeeCanExportCsv: integer('employee_can_export_csv', { mode: 'boolean' }).notNull().default(true),
+  employeeCanEditShop: integer('employee_can_edit_shop', { mode: 'boolean' }).notNull().default(true),
+  employeeCanEditTax: integer('employee_can_edit_tax', { mode: 'boolean' }).notNull().default(true),
+  employeeCanCreateRestoreBackup: integer('employee_can_create_restore_backup', { mode: 'boolean' }).notNull().default(true),
+  employeeCanManageBackupRetention: integer('employee_can_manage_backup_retention', { mode: 'boolean' }).notNull().default(false),
+  ...timestamps,
+})
+
 export const appSettings = sqliteTable('app_settings', {
   organizationId: text('organization_id').notNull().default('org-default'),
   key: text('key').notNull(),
@@ -345,6 +355,7 @@ export const databaseSchema = {
   paymentEntries,
   inspectionSchedules,
   sharedSchedules,
+  organizationPermissions,
   appSettings,
   backupRecords,
   mileageHistories,

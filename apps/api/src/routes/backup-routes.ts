@@ -1,11 +1,12 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
 import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
-import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
+import { requireOrganizationContext, requireOrganizationPermission } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
-import { addDays, loadBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
+import { addDays, loadBackupSettings, normalizeBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
 import { purgeExpiredArchivedDocuments } from '../document-archive'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { loadOrganizationPermissions } from '../organization-permissions'
 import { createB2Storage } from '../storage/b2'
 
 const preRestoreProtectionDays = 30
@@ -42,23 +43,39 @@ export async function handleBackupRoutes(request: Request, env: Env): Promise<Re
 
 async function getSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationContext(request, env, database)
-  return jsonResponse({ canManage: isAdmin(context.organization.role), settings: await loadBackupSettings(database, context.organization.organizationId) }, 200, env)
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
+  const canManageCreateRestore = isAdmin(context.organization.role) || permissions.employeeCanCreateRestoreBackup
+  const canManageRetention = isAdmin(context.organization.role) || permissions.employeeCanManageBackupRetention
+  return jsonResponse({ canManage: canManageCreateRestore || canManageRetention, canManageCreateRestore, canManageRetention, settings: await loadBackupSettings(database, context.organization.organizationId) }, 200, env)
 }
 
 async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationContext(request, env, database)
   const body = await readJson(request)
-  return jsonResponse({ settings: await saveBackupSettings(database, context.organization.organizationId, body.settings) }, 200, env)
+  const organizationId = context.organization.organizationId
+  const current = await loadBackupSettings(database, organizationId)
+  const next = normalizeBackupSettings(body.settings)
+  if (!isAdmin(context.organization.role)) {
+    const permissions = await loadOrganizationPermissions(database, organizationId)
+    const canManageCreateRestore = permissions.employeeCanCreateRestoreBackup
+    const canManageRetention = permissions.employeeCanManageBackupRetention
+    if (!canManageCreateRestore && hasBackupCreationSettingChange(current, next)) throw new HttpError(403, 'バックアップ作成設定の変更は組織の権限設定で許可されていません。')
+    if (!canManageRetention && hasBackupRetentionSettingChange(current, next)) throw new HttpError(403, 'バックアップ保持設定の変更は組織の権限設定で許可されていません。')
+  }
+  return jsonResponse({ settings: await saveBackupSettings(database, organizationId, next) }, 200, env)
 }
 
 async function listBackups(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationContext(request, env, database)
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
   const records = await database.select().from(backupRecords).where(eq(backupRecords.organizationId, context.organization.organizationId)).orderBy(desc(backupRecords.createdAt)).all()
-  return jsonResponse({ canManage: isAdmin(context.organization.role), backups: records.map(serializeBackup) }, 200, env)
+  const canManageCreateRestore = isAdmin(context.organization.role) || permissions.employeeCanCreateRestoreBackup
+  const canManageRetention = isAdmin(context.organization.role) || permissions.employeeCanManageBackupRetention
+  return jsonResponse({ canManage: canManageCreateRestore || canManageRetention, canManageCreateRestore, canManageRetention, backups: records.map(serializeBackup) }, 200, env)
 }
 
 async function createBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
   const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
   const note = normalizeBackupNote(body.note)
   const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual', note })
@@ -66,7 +83,7 @@ async function createBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function exportBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
   const storage = getStorage(env)
   const snapshot = await loadSnapshot(database, context.organization.organizationId, crypto.randomUUID(), context.organization.name)
   snapshot.note = normalizeBackupNote(new URL(request.url).searchParams.get('note'))
@@ -79,7 +96,7 @@ async function exportBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function importBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
   const body = await readJson(request)
   const source = assertExportManifest(body.backup, context.organization.organizationId)
   const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
@@ -109,7 +126,7 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function restoreBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
   const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
   if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
@@ -127,7 +144,7 @@ async function restoreBackup(request: Request, env: Env, database: ReturnType<ty
 }
 
 async function deleteBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanManageBackupRetention')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
   await deleteBackupRecord(database, env, record)
@@ -135,7 +152,7 @@ async function deleteBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function updateBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanManageBackupRetention')
   const body = await readJson(request)
   if (typeof body.keepForever !== 'boolean') throw new HttpError(400, '永久保存の指定が不正です。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
@@ -365,6 +382,14 @@ function serializeBackup(record: { id: string; organizationId: string; manifestK
 
 function isAdmin(role: string) {
   return role === 'owner' || role === 'admin'
+}
+
+function hasBackupCreationSettingChange(current: BackupSettings, next: BackupSettings) {
+  return current.autoEnabled !== next.autoEnabled || current.frequency !== next.frequency || current.destination !== next.destination
+}
+
+function hasBackupRetentionSettingChange(current: BackupSettings, next: BackupSettings) {
+  return current.retentionDays !== next.retentionDays || current.archiveRetentionDays !== next.archiveRetentionDays || current.pcRetentionDays !== next.pcRetentionDays
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {

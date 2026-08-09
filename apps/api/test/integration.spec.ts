@@ -46,6 +46,40 @@ describe("CLI authenticated workflow", () => {
 				expect.objectContaining({ organizationId, role: "owner", status: "active" }),
 		]));
 
+			const defaultPermissions = await requestJson<JsonObject>("/api/organization/permissions");
+			expect(defaultPermissions.response.status).toBe(200);
+			expect(defaultPermissions.body.permissions).toEqual({
+				employeeCanExportCsv: true,
+				employeeCanEditShop: true,
+				employeeCanEditTax: true,
+				employeeCanCreateRestoreBackup: true,
+				employeeCanManageBackupRetention: false,
+			});
+			const disabledEmployeePermissions = await requestJson<JsonObject>("/api/organization/permissions", "PATCH", {
+				permissions: {
+					employeeCanExportCsv: false,
+					employeeCanEditShop: false,
+					employeeCanEditTax: false,
+					employeeCanCreateRestoreBackup: false,
+					employeeCanManageBackupRetention: false,
+				},
+			});
+			expect(disabledEmployeePermissions.response.status).toBe(200);
+			const employeeDeniedExport = await requestRaw("/api/export/customers", employeeUid);
+			expect(employeeDeniedExport.status).toBe(403);
+			const employeeDeniedShopUpdate = await requestJson<JsonObject>("/api/settings", "PATCH", { settings: { shop: { name: `${marker} 従業員変更` } } }, employeeUid);
+			expect(employeeDeniedShopUpdate.response.status).toBe(403);
+			const restoredEmployeePermissions = await requestJson<JsonObject>("/api/organization/permissions", "PATCH", {
+				permissions: {
+					employeeCanExportCsv: true,
+					employeeCanEditShop: true,
+					employeeCanEditTax: true,
+					employeeCanCreateRestoreBackup: true,
+					employeeCanManageBackupRetention: false,
+				},
+			});
+			expect(restoredEmployeePermissions.response.status).toBe(200);
+
 			const updatedProfile = await requestJson<JsonObject>("/api/auth/profile", "PATCH", {
 				displayName: `${marker} 表示名変更`,
 				email: `${marker.toLowerCase()}-profile@example.com`,
@@ -488,8 +522,8 @@ describe("CLI authenticated workflow", () => {
 			employeeImportAttemptFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
 			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", employeeImportAttemptFile, employeeUid);
 			expect(employeeCannotImport.response.status).toBe(403);
-			const employeeCannotBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
-			expect(employeeCannotBackup.response.status).toBe(403);
+			const employeeBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
+			expect(employeeBackup.response.status).toBe(b2Configured ? 201 : 503);
 
 			const suspended = await requestJson<JsonObject>(`/api/organization/members/${employeeUid}`, "PATCH", { status: "suspended" });
 			expect(suspended.response.status).toBe(200);

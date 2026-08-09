@@ -10,6 +10,14 @@ export type OrganizationMembership = {
   status: string
 }
 
+export type OrganizationPermissions = {
+  employeeCanExportCsv: boolean
+  employeeCanEditShop: boolean
+  employeeCanEditTax: boolean
+  employeeCanCreateRestoreBackup: boolean
+  employeeCanManageBackupRetention: boolean
+}
+
 export type AuthSession = {
   user: {
     uid: string
@@ -30,6 +38,17 @@ export async function updateCurrentProfile(input: { displayName?: string; email?
   return apiFetch<{ profile: { displayName: string; email: string | null } }>('/api/auth/profile', {
     method: 'PATCH',
     body: JSON.stringify(input),
+  })
+}
+
+export async function fetchOrganizationPermissions() {
+  return apiFetch<{ canManage: boolean; permissions: OrganizationPermissions }>('/api/organization/permissions')
+}
+
+export async function updateOrganizationPermissions(permissions: OrganizationPermissions) {
+  return apiFetch<{ permissions: OrganizationPermissions }>('/api/organization/permissions', {
+    method: 'PATCH',
+    body: JSON.stringify({ permissions }),
   })
 }
 
