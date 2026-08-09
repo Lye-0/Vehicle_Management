@@ -131,7 +131,8 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
     await restoreManifest(env, database, context.organization.organizationId, manifest)
     return jsonResponse({ restored: true, backupId: source.id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
   } catch (error) {
-    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    const rolledBack = await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    if (!rolledBack) throw new HttpError(503, 'PCバックアップの復元に失敗し、復元前の状態にも戻せませんでした。管理者による手動復旧が必要です。')
     throw error instanceof HttpError ? error : new HttpError(500, 'PCバックアップからの復元に失敗しました。復元前の状態へ戻しました。')
   } finally {
     await deleteObjects(storage, stagedKeys)
@@ -150,7 +151,8 @@ async function restoreBackup(request: Request, env: Env, database: ReturnType<ty
     await restoreManifest(env, database, context.organization.organizationId, manifest)
     return jsonResponse({ restored: true, backupId: id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
   } catch (error) {
-    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    const rolledBack = await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    if (!rolledBack) throw new HttpError(503, 'バックアップの復元に失敗し、復元前の状態にも戻せませんでした。管理者による手動復旧が必要です。')
     if (error instanceof HttpError) throw error
     throw new HttpError(500, 'バックアップの復元に失敗しました。復元前の状態へ戻しました。')
   }
@@ -212,11 +214,13 @@ async function createSafetyBackup(env: Env, database: ReturnType<typeof createDa
 async function rollbackToSafetyBackup(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, safetyBackupId: string) {
   try {
     const safety = await database.select().from(backupRecords).where(and(eq(backupRecords.id, safetyBackupId), eq(backupRecords.organizationId, organizationId))).get()
-    if (!safety) return
+    if (!safety) return false
     const manifest = await readManifest(getStorage(env), safety.manifestKey, organizationId)
     await restoreManifest(env, database, organizationId, manifest)
+    return true
   } catch (rollbackError) {
     console.error(`[backup] rollback failed for ${organizationId}`, rollbackError)
+    return false
   }
 }
 
