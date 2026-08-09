@@ -23,8 +23,8 @@ const expectedHeaders: Record<ImportResource, string[]> = {
 const requiredHeaders: Record<ImportResource, string[]> = {
   customers: ['顧客名'],
   vehicles: ['車名'],
-  sales: ['書類番号', '書類種別', '顧客名', '発行日'],
-  maintenance: ['書類番号', '書類種別', '入庫区分', '顧客名', '発行日'],
+  sales: ['書類番号', '書類種別', '顧客名', '発行日', '消費税'],
+  maintenance: ['書類番号', '書類種別', '入庫区分', '顧客名', '発行日', '消費税'],
   payments: ['請求書ID', '請求書種別'],
 }
 
@@ -117,6 +117,7 @@ function validateRows(resource: ImportResource, rows: CsvRow[]) {
     if (resource === 'vehicles' && !value(row, '車名')) messages.push('車名がありません。')
     if ((resource === 'sales' || resource === 'maintenance') && !value(row, '顧客名')) messages.push('顧客名がありません。')
     if ((resource === 'sales' || resource === 'maintenance') && !parseDate(value(row, '発行日'))) messages.push('発行日が不正です。')
+    if ((resource === 'sales' || resource === 'maintenance') && !isNonNegativeIntegerText(value(row, '消費税'))) messages.push('消費税は0以上の整数で入力してください。')
     if (resource === 'payments' && !value(row, '請求書ID')) messages.push('請求書IDがありません。')
     return messages.length ? [{ row: index + 2, message: messages.join('') }] : []
   })
@@ -425,7 +426,7 @@ function parseDetailsJson(value: string) {
 
 function documentTotals(row: CsvRow, items: ImportItem[]) {
   const subtotal = optionalIntegerValue(row, '小計') ?? items.reduce((sum, item) => sum + item.amount, 0)
-  const tax = integerValue(row, '消費税')
+  const tax = requiredNonNegativeInteger(row, '消費税')
   const total = optionalIntegerValue(row, '合計') ?? subtotal + tax
   return { taxRate: optionalIntegerValue(row, '税率') ?? 10, subtotal, tax, total }
 }
@@ -460,6 +461,16 @@ function nullableInteger(row: CsvRow, key: string) {
 function integerValue(row: CsvRow, key: string) { return integerText(value(row, key)) }
 function optionalIntegerValue(row: CsvRow, key: string) { return value(row, key) ? integerValue(row, key) : null }
 function integerText(text: string) { const normalized = text.replace(/[,%¥円\s]/g, ''); const number = Number(normalized); return Number.isFinite(number) ? Math.round(number) : 0 }
+export function isNonNegativeIntegerText(text: string) {
+  if (!text) return false
+  const normalized = text.replace(/[,%¥円\s]/g, '')
+  return /^\d+$/u.test(normalized) && Number.isSafeInteger(Number(normalized))
+}
+function requiredNonNegativeInteger(row: CsvRow, key: string) {
+  const text = value(row, key)
+  if (!isNonNegativeIntegerText(text)) throw new Error(`${key}は0以上の整数で入力してください。`)
+  return Number(text.replace(/[,%¥円\s]/g, ''))
+}
 function parseDate(text: string) { return normalizeCalendarDate(text) }
 function value(row: CsvRow, key: string) { return typeof row[key] === 'string' ? row[key].trim() : '' }
 

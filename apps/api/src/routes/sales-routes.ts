@@ -221,8 +221,8 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(newVehId, organizationId, resolvedCustomerId, newVehicle.maker, newVehicle.name,
       newVehicle.model || null, newVehicle.registrationNumber || null, newVehicle.chassisNumber || null,
-      newVehicle.modelYear || null, newVehicle.inspectionDate || null, newVehicle.mileage != null ? newVehicle.mileage : null,
-      newVehicle.bodyColor || null, newVehicle.displacement || null, newVehicle.transmission || null))
+      newVehicle.modelYear ?? null, newVehicle.inspectionDate ?? null, newVehicle.mileage ?? null,
+      newVehicle.bodyColor || null, newVehicle.displacement ?? null, newVehicle.transmission || null))
   }
 
   if (masterSync && masterSync.customerFields.length > 0 && !newCustomer && currentCustomerForSync) {
@@ -780,25 +780,40 @@ function parseNewCustomer(raw: unknown): NewCustomerInput | undefined {
   }
 }
 
-function parseNewVehicle(raw: unknown): NewVehicleInput | undefined {
+export function parseNewVehicle(raw: unknown): NewVehicleInput | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const obj = raw as Record<string, unknown>
   const maker = typeof obj.maker === 'string' ? obj.maker.trim() : ''
   const name = typeof obj.name === 'string' ? obj.name.trim() : ''
-  if (!maker || !name) return undefined
+  if (!maker || !name) throw new HttpError(400, '新規車両のメーカーと車名を入力してください。')
+  const inspectionDate = optionalVehicleDate(obj.inspectionDate)
   return {
     maker,
     name,
     model: typeof obj.model === 'string' ? obj.model.trim() || undefined : undefined,
     registrationNumber: typeof obj.registrationNumber === 'string' ? obj.registrationNumber.trim() || undefined : undefined,
     chassisNumber: typeof obj.chassisNumber === 'string' ? obj.chassisNumber.trim() || undefined : undefined,
-    modelYear: typeof obj.modelYear === 'number' ? obj.modelYear : undefined,
-    inspectionDate: typeof obj.inspectionDate === 'string' ? obj.inspectionDate.trim() || undefined : undefined,
-    mileage: typeof obj.mileage === 'number' ? obj.mileage : undefined,
+    modelYear: optionalVehicleInteger(obj.modelYear, '年式', 9999),
+    inspectionDate,
+    mileage: optionalVehicleInteger(obj.mileage, '走行距離', 999_999_999),
     bodyColor: typeof obj.bodyColor === 'string' ? obj.bodyColor.trim() || undefined : undefined,
-    displacement: typeof obj.displacement === 'number' ? obj.displacement : undefined,
+    displacement: optionalVehicleInteger(obj.displacement, '排気量', 999_999),
     transmission: typeof obj.transmission === 'string' ? obj.transmission.trim() || undefined : undefined,
   }
+}
+
+function optionalVehicleInteger(value: unknown, label: string, maximum: number) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > maximum) throw new HttpError(400, `${label}は0以上${maximum}以下の整数で入力してください。`)
+  return value
+}
+
+function optionalVehicleDate(value: unknown) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string') throw new HttpError(400, '車検満了日は正しい日付で入力してください。')
+  const normalized = normalizeCalendarDate(value)
+  if (!normalized) throw new HttpError(400, '車検満了日は正しい日付で入力してください。')
+  return normalized
 }
 
 function stringValue(body: Record<string, unknown>, key: string) {
