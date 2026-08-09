@@ -2038,3 +2038,399 @@
 .master-sync-diff-document { color: var(--primary); font-weight: 600; }
 .master-sync-diff-note { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; }
 .master-sync-toggle { flex: 0 0 auto; }
+
+/* Responsive layout overrides */
+.sidebar-mobile-context { display: none; }
+.sidebar-mobile-organization { min-width: 0; }
+.sidebar-mobile-organization > span { display: block; color: #8297b3; font-size: 11px; font-weight: 700; }
+.sidebar-mobile-organization > strong,
+.sidebar-mobile-organization > select { display: block; width: 100%; min-width: 0; margin-top: 4px; color: #eaf0f8; border: 0; background: transparent; font: inherit; font-size: 15px; font-weight: 700; letter-spacing: 0.01em; outline: none; }
+.sidebar-mobile-organization > select option { color: var(--text); background: var(--surface); }
+.sidebar-mobile-signout { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 11px; color: #dbe7f7; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 8px; background: rgba(255, 255, 255, 0.08); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.sidebar-mobile-signout:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
+
+@media (max-width: 900px) {
+  .app-shell { display: block; }
+  .sidebar { width: 100%; min-height: 0; }
+  .sidebar-brand { padding: 16px 24px; }
+  .branch-card, .sidebar-footer { display: none; }
+  .sidebar-mobile-context { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 24px 12px; }
+  .sidebar-nav { display: flex; gap: 6px; padding: 10px 24px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .nav-item { width: auto; flex: 0 0 auto; min-height: 42px; padding: 10px 12px; font-size: 12px; }
+  .nav-item svg { width: 18px; height: 18px; }
+  .topbar { height: auto; align-items: flex-start; flex-direction: column; gap: 12px; padding: 16px 24px; }
+  .page-content { padding: 28px 24px 52px; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .page-header { align-items: flex-start; flex-wrap: wrap; }
+  .page-header > div { min-width: 0; }
+  .sales-toolbar, .maintenance-toolbar, .payment-toolbar, .inspection-toolbar { flex-wrap: wrap; }
+  .sales-search, .maintenance-search, .payment-search, .inspection-search { min-width: 0; }
+  .sales-detail-header, .maintenance-detail-header, .payment-detail-header { flex-wrap: wrap; }
+  .sales-detail-title, .maintenance-detail-title, .payment-detail-title { min-width: 0; flex: 1 1 260px; }
+  .sales-detail-actions, .maintenance-detail-actions, .payment-detail-actions { flex-wrap: wrap; }
+  .sales-detail-actions .button, .maintenance-detail-actions .button, .payment-detail-actions .button { flex: 1 1 130px; }
+  .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .document-tax-settings { width: 100%; }
+}
+
+@media (max-width: 760px) {
+  .topbar, .page-content { padding-left: 18px; padding-right: 18px; }
+  .page-content { padding-top: 24px; }
+  .page-header { flex-direction: column; gap: 14px; margin-bottom: 22px; }
+  .page-header > div { width: 100%; }
+  .page-header .button { width: 100%; }
+  .panel, .placeholder-card { padding: 18px; }
+  .dashboard-calendar-panel { padding: 0; }
+  .dashboard-calendar-top { padding: 18px 18px 0; }
+  .dashboard-calendar-heading { align-items: stretch; flex-direction: column; gap: 14px; }
+  .calendar-add-button { align-self: stretch; justify-content: center; }
+  .dashboard-calendar-board { padding: 16px 14px 18px; }
+  .dashboard-calendar-monthbar { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .dashboard-calendar-monthbar .calendar-controls { align-self: flex-end; }
+  .dashboard-calendar-detail { padding: 18px; }
+  .customer-toolbar, .sales-toolbar, .maintenance-toolbar, .payment-toolbar, .inspection-toolbar { align-items: stretch; flex-direction: column; }
+  .customer-search, .sales-search, .maintenance-search, .payment-search, .inspection-search { width: 100%; min-width: 0; }
+  .customer-search-filter { flex-basis: auto; }
+  .document-sort-controls { width: 100%; flex-wrap: wrap; }
+  .document-sort-controls select { min-width: 0; flex: 1 1 140px; }
+  .inspection-date-filter-row { align-items: stretch; flex-wrap: wrap; }
+  .inspection-date-filter-label { width: 100%; }
+  .inspection-date-filter { flex: 1 1 0; min-width: 140px; }
+  .inspection-date-filter-reset { width: 100%; margin-left: 0; text-align: right; }
+  .sales-detail-header, .maintenance-detail-header, .payment-detail-header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }
+  .sales-detail-title, .maintenance-detail-title, .payment-detail-title { width: 100%; flex: 0 1 auto; }
+  .sales-detail-actions, .maintenance-detail-actions, .payment-detail-actions { width: 100%; }
+  .sales-detail-actions .button, .maintenance-detail-actions .button, .payment-detail-actions .button { flex: 1 1 140px; }
+  .sales-document-tabs, .maintenance-document-tabs { padding-left: 18px; padding-right: 18px; }
+  .sales-document-tabs button, .maintenance-document-tabs button { flex: 1; justify-content: center; }
+  .sales-detail-content, .maintenance-detail-content, .payment-detail-content { padding: 18px; }
+  .sales-context-grid, .sales-summary-grid, .maintenance-context-grid, .maintenance-summary-grid, .payment-context-grid, .payment-form-grid { grid-template-columns: 1fr; }
+  .sales-summary-grid, .maintenance-summary-grid { gap: 18px; }
+  .intake-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .maintenance-fees-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payment-amount-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payment-entry-submit-row { align-items: stretch; flex-direction: column; }
+  .payment-entry-submit-row > div { justify-content: flex-end; }
+  .payment-card-top { flex-wrap: wrap; }
+  .payment-detail-title > .payment-status-tag { align-self: flex-start; }
+  .payment-history-entry-main { align-items: flex-start; flex-wrap: wrap; }
+  .payment-history-entry-main > div { flex-wrap: wrap; }
+  .customer-profile-header, .owned-vehicles-header { align-items: flex-start; flex-direction: column; }
+  .customer-profile-header .button, .owned-vehicles-header .button { width: 100%; }
+  .customer-info-grid { grid-template-columns: 1fr; gap: 17px; padding: 18px; }
+  .customer-info-item { padding-right: 0; }
+  .customer-memo { margin: 0 18px 18px; }
+  .detail-fields { grid-template-columns: 1fr; }
+  .owner-summary { flex-wrap: wrap; }
+  .owner-contact { flex-basis: 100%; margin-left: 0; }
+  .attachments-header { align-items: stretch; flex-direction: column; }
+  .attachment-add-button { justify-content: center; }
+  .vehicle-summary-header { padding: 20px 18px; }
+  .vehicle-summary-body, .attachments-panel { padding-left: 18px; padding-right: 18px; }
+  .vehicle-summary-header .detail-action-button { width: 100%; justify-content: center; }
+  .vehicle-choice-grid { scroll-snap-type: x proximity; }
+  .vehicle-choice-card { scroll-snap-align: start; }
+  .vehicle-timeline-table { display: flex; flex-direction: column; gap: 12px; padding-inline: 0; }
+  .vehicle-timeline-header { display: none; }
+  .vehicle-timeline-row { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+  .vehicle-timeline-row .vehicle-timeline-cell { padding: 0; border: 0; }
+  .vehicle-timeline-row .vehicle-timeline-date, .vehicle-timeline-row .vehicle-timeline-category, .vehicle-timeline-row .vehicle-timeline-mileage { color: var(--text-secondary); font-size: 11px; }
+  .vehicle-timeline-row .vehicle-timeline-amount { justify-content: flex-start; color: var(--text-secondary); font-size: 11px; font-weight: 400; }
+  .vehicle-timeline-row .vehicle-timeline-document { padding-top: 8px; border-top: 1px solid var(--border); }
+  .sales-items-table, .maintenance-items-table, .sales-estimate-items-table, .sales-estimate-vehicle-table, .sales-estimate-tradein-table { overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
+  .sales-estimate-image-control { align-items: stretch; flex-direction: column; }
+  .sales-estimate-image-select { width: 100%; min-width: 0; }
+  .sales-estimate-paper-header, .sales-estimate-customer-grid, .sales-estimate-summary-top, .sales-estimate-bottom-grid { grid-template-columns: 1fr; }
+  .sales-estimate-paper.has-selected-image .sales-estimate-photo-box { border-top: 1px solid #263443; border-left: 0; }
+  .sales-estimate-meta-table { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sales-estimate-meta-table > div:nth-child(2n) { border-right: 0; }
+  .sales-estimate-meta-table > div:last-child { grid-column: 1 / -1; border-top: 1px solid #263443; }
+  .sales-estimate-vehicle-row { min-width: 520px; }
+  .sales-estimate-breakdown-grid { grid-template-columns: 1fr; }
+  .sales-estimate-edit-actions { align-items: flex-start; flex-direction: column; }
+  .sales-estimate-sheet-frame { overflow: hidden; }
+  .sales-estimate-sheet { min-width: 0; }
+  .maintenance-preview-content { padding: 12px; overflow-x: auto; }
+  .maintenance-statement-frame { overflow: hidden; }
+  .maintenance-statement { min-width: 0; }
+  .settings-nav { grid-template-columns: 1fr; }
+  .settings-form-grid, .csv-import-controls { grid-template-columns: 1fr; }
+  .settings-section-heading { flex-wrap: wrap; }
+  .settings-section-heading .settings-add-button { margin-left: auto; }
+  .backup-settings-table { overflow-x: auto; overscroll-behavior-inline: contain; }
+  .backup-history-heading { align-items: flex-start; flex-direction: column; }
+  .backup-history-heading-actions { width: 100%; justify-content: space-between; }
+  .backup-row { align-items: flex-start; flex-wrap: wrap; }
+  .backup-copy { flex: 1 1 calc(100% - 55px); }
+  .backup-meta { width: 100%; justify-items: start; margin-left: 43px; }
+  .backup-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
+  .archive-row { grid-template-columns: auto minmax(0, 1fr); }
+  .archive-meta { grid-column: 1 / -1; justify-items: start; }
+  .archive-actions { flex-wrap: wrap; }
+  .account-setting-row { grid-template-columns: 1fr auto; }
+  .member-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .member-role-control, .member-status-control, .member-remove-button { grid-column: 2 / -1; justify-self: start; }
+  .modal-backdrop, .account-modal-backdrop { padding: 12px; }
+  .modal, .account-modal { width: 100%; max-height: calc(100dvh - 24px); }
+  .modal-header { padding: 16px 18px; }
+  .modal-header > div { min-width: 0; }
+  .modal-form, .payment-delete-body { padding-left: 18px; padding-right: 18px; }
+  .modal-footer, .master-sync-modal-footer, .pc-restore-modal-footer, .pc-backup-warning-footer { flex-wrap: wrap; }
+  .modal-footer .button, .master-sync-modal-footer .button, .pc-restore-modal-footer .button, .pc-backup-warning-footer .button { flex: 1 1 140px; }
+  .modal.master-sync-modal, .account-modal { max-height: calc(100dvh - 24px) !important; }
+  .modal.master-sync-modal .modal-form { overflow-y: auto; }
+  .master-sync-diff-row { align-items: flex-start; flex-wrap: wrap; }
+  .master-sync-diff-row > .button { flex-basis: 100%; }
+  .attachment-preview-modal { width: 100%; max-height: calc(100dvh - 24px); }
+  .attachment-preview-modal .modal-header { align-items: flex-start; flex-wrap: wrap; }
+  .attachment-preview-modal .modal-header h2 { max-width: none; overflow-wrap: anywhere; white-space: normal; }
+  .attachment-preview-header-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .attachment-preview-header-actions .button { flex: 1 1 150px; max-width: none; }
+}
+
+@media (max-width: 480px) {
+  .sidebar-brand { padding-left: 18px; padding-right: 18px; }
+  .sidebar-mobile-context { grid-template-columns: minmax(0, 1fr) auto; padding-left: 18px; padding-right: 18px; }
+  .sidebar-nav { padding-left: 12px; padding-right: 12px; }
+  .topbar, .page-content { padding-left: 14px; padding-right: 14px; }
+  .page-content { padding-top: 20px; padding-bottom: 40px; }
+  .panel, .placeholder-card { padding: 16px; }
+  .data-list-row-action { width: calc(100% + 32px); margin-inline: -16px; padding-inline: 16px; }
+  .calendar-add-button { width: 100%; }
+  .intake-summary-grid, .maintenance-fees-grid, .payment-amount-grid { grid-template-columns: 1fr; }
+  .payment-detail-title { display: block; }
+  .payment-detail-title > .payment-status-tag { display: inline-flex; margin-top: 10px; }
+  .payment-history-entry-main { flex-direction: column; gap: 8px; }
+  .payment-history-method { align-self: flex-start; }
+  .settings-section-heading .settings-add-button { width: 100%; margin-left: 0; }
+  .account-setting-row { grid-template-columns: 1fr; }
+  .account-change-button { justify-self: start; }
+  .archive-retention-settings { grid-template-columns: 1fr; }
+  .archive-retention-field { grid-column: 1; }
+  .archive-row { grid-template-columns: 1fr; }
+  .archive-meta { grid-column: auto; }
+  .archive-actions .button { flex: 1 1 140px; }
+  .modal-backdrop, .account-modal-backdrop { padding: 8px; }
+  .modal, .account-modal { max-height: calc(100dvh - 16px); border-radius: 12px; }
+  .modal-header { padding: 14px; }
+  .modal-form, .payment-delete-body { padding-left: 14px; padding-right: 14px; }
+  .modal-footer .button, .master-sync-modal-footer .button, .pc-restore-modal-footer .button, .pc-backup-warning-footer .button { flex-basis: 100%; }
+  .auth-page { min-height: 100dvh; padding: 16px; align-content: center; }
+  .auth-card { padding: 22px 18px; border-radius: 16px; }
+  .auth-card h1 { font-size: 22px; }
+  .auth-dev-login { position: static; margin-top: 12px; }
+}
+
+/* Mobile document editor controls */
+@media (max-width: 760px) {
+  .maintenance-statement-frame {
+    container-type: inline-size;
+  }
+
+  .sales-estimate-sheet-calendar-control,
+  .maintenance-statement-calendar-control {
+    overflow: hidden;
+  }
+
+  .sales-estimate-sheet-calendar-control > input[type="date"],
+  .maintenance-statement-calendar-control > input[type="date"] {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 0;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .sales-estimate-sheet-calendar-control > input[type="date"]::-webkit-datetime-edit,
+  .sales-estimate-sheet-calendar-control > input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit,
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+
+  .sales-estimate-sheet-calendar-control > .date-calendar-picker,
+  .maintenance-statement-calendar-control > .date-calendar-picker {
+    right: clamp(1px, 0.4cqw, 4px);
+    width: clamp(5px, 1.8cqw, 20px);
+  }
+
+  .sales-estimate-sheet-calendar-control .date-calendar-picker-button svg,
+  .maintenance-statement-calendar-control .date-calendar-picker-button svg {
+    width: clamp(5px, 1.3cqw, 14px) !important;
+    height: clamp(5px, 1.3cqw, 14px) !important;
+    flex: 0 0 auto;
+  }
+
+  .sales-estimate-sheet-field-control.is-customer-name,
+  .sales-estimate-sheet-customer-honorific {
+    font-size: clamp(6px, 1.706cqw, 18px);
+  }
+
+  .sales-estimate-sheet-field-control.is-customer-value {
+    font-size: clamp(6px, 1.232cqw, 13px);
+  }
+
+  .sales-estimate-sheet-field-control.is-multiline {
+    padding-top: clamp(1px, 0.5cqw, 4px);
+  }
+
+  .sales-sheet-fixed-label {
+    padding-inline: clamp(2px, 1.05cqw, 11px);
+  }
+
+  .sales-sheet-amount-input {
+    padding: 0 clamp(2px, 0.85cqw, 9px) 0 clamp(1px, 0.4cqw, 4px);
+  }
+
+  .sales-sheet-name-combobox > input {
+    position: absolute;
+    inset: 1px;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+    padding: 0 clamp(2px, 1.05cqw, 11px);
+  }
+
+  .sales-sheet-name-combobox > button,
+  .maintenance-statement-combobox > button {
+    min-width: 0;
+    min-height: 0;
+    width: clamp(5px, 1.9cqw, 20px);
+    transform: none;
+  }
+
+  .sales-sheet-name-combobox > button svg,
+  .maintenance-statement-combobox > button svg {
+    width: clamp(4px, 1.2cqw, 13px) !important;
+    height: clamp(4px, 1.2cqw, 13px) !important;
+    flex: 0 0 auto;
+  }
+
+  .sales-sheet-candidate-menu,
+  .maintenance-statement-candidates {
+    width: max(100%, clamp(90px, 17cqw, 190px));
+    padding: clamp(2px, 0.4cqw, 4px);
+  }
+
+  .sales-sheet-candidate-menu button,
+  .maintenance-statement-candidates button {
+    padding: clamp(3px, 0.6cqw, 6px) clamp(4px, 0.75cqw, 8px);
+    font-size: clamp(6px, 1.1cqw, 12px);
+  }
+
+  .sales-estimate-sheet-field-control.is-select {
+    -webkit-appearance: none;
+    appearance: none;
+    padding-right: clamp(3px, 1.2cqw, 12px);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%231f4f91' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right clamp(1px, 0.4cqw, 4px) center;
+    background-size: clamp(4px, 1.2cqw, 13px) clamp(4px, 1.2cqw, 13px);
+  }
+
+  .sales-estimate-sheet-checkbox input {
+    display: block;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: clamp(0.5px, 0.1cqw, 1px) solid #7f8a95;
+    border-radius: clamp(1px, 0.2cqw, 3px);
+    background: #fff;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .sales-estimate-sheet-checkbox input:checked {
+    background-color: #06377d;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 75% 75%;
+  }
+
+  .maintenance-statement-combobox > input {
+    position: absolute;
+    inset: 1px;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+    padding: 0 clamp(2px, 1cqw, 11px);
+  }
+
+  .maintenance-statement-control.is-title {
+    font-size: clamp(6px, 2cqw, 25px);
+  }
+
+  .maintenance-statement-control.is-large {
+    font-size: clamp(6px, 1.8cqw, 22px);
+  }
+
+  .maintenance-statement-control.is-header-label {
+    font-size: clamp(6px, 1.45cqw, 18px);
+  }
+
+  .maintenance-statement-control.is-section-label {
+    font-size: clamp(6px, 1.9cqw, 24px);
+  }
+
+  .maintenance-statement-control.is-bank-value {
+    font-size: clamp(6px, 1.4cqw, 17px);
+  }
+
+  .maintenance-statement-control.is-document-number {
+    font-size: clamp(5px, 0.9cqw, 10px);
+  }
+
+  .maintenance-statement-control {
+    padding-inline: clamp(1px, 0.45cqw, 5px);
+  }
+
+  .maintenance-statement-control.is-contact-value {
+    padding-inline: clamp(1px, 0.45cqw, 5px);
+  }
+
+  .maintenance-statement-control.is-number {
+    padding-right: clamp(2px, 1.25cqw, 14px);
+  }
+
+  .maintenance-statement-control.is-number.is-centered {
+    padding-inline: clamp(1px, 0.45cqw, 5px);
+  }
+
+  .maintenance-statement-control.is-item-text {
+    padding-left: clamp(2px, 1.25cqw, 14px);
+  }
+
+  .maintenance-statement-combobox > button {
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+  }
+
+  .maintenance-statement-add {
+    gap: clamp(1px, 0.35cqw, 4px);
+    padding-inline: clamp(2px, 0.65cqw, 7px);
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .maintenance-statement-add svg,
+  .maintenance-statement-remove svg {
+    width: clamp(4px, 1.1cqw, 13px) !important;
+    height: clamp(4px, 1.1cqw, 13px) !important;
+    flex: 0 0 auto;
+  }
+}

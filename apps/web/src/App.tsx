@@ -389,6 +389,13 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
         <span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span>
         <span className="brand-copy"><strong>車両管理</strong></span>
       </div>
+      <div className="sidebar-mobile-context">
+        <div className="sidebar-mobile-organization">
+          <span>組織</span>
+          {organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}
+        </div>
+        <button className="sidebar-mobile-signout" type="button" onClick={onSignOut}><LogOut size={16} /><span>ログアウト</span></button>
+      </div>
       <div className="branch-card"><span>組織</span>{organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}</div>
       <nav className="sidebar-nav" aria-label="メインメニュー">
         {navItems.map(({ id, label, icon: Icon }) => {

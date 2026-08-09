@@ -4,13 +4,14 @@
   background: #f4f7fb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; min-height: 100%; background: #f4f7fb; }
-body { min-width: 320px; min-height: 100vh; margin: 0; }
+html { min-width: 320px; min-height: 100%; overflow-x: clip; background: #f4f7fb; }
+body { min-width: 320px; min-height: 100vh; min-height: 100dvh; margin: 0; overflow-x: clip; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
-#root { min-height: 100vh; }
+#root { min-height: 100vh; min-height: 100dvh; }
