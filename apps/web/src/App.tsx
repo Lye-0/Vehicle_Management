@@ -401,7 +401,7 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
         {navItems.map(({ id, label, icon: Icon }) => {
           const isActive = activeSection === id
           return (
-            <button className={`nav-item${isActive ? ' is-active' : ''}`} key={id} type="button" aria-current={isActive ? 'page' : undefined} onClick={() => onSelect(id)}>
+            <button className={`nav-item${isActive ? ' is-active' : ''}`} key={id} type="button" aria-label={label} title={label} aria-current={isActive ? 'page' : undefined} onClick={() => onSelect(id)}>
               <Icon size={22} strokeWidth={2} /><span>{label}</span>
             </button>
           )

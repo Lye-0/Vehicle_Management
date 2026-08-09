@@ -226,12 +226,12 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   function openMobileList() {
     setMobileWorkspaceView('list')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   function discardDraftIfConfirmed(action: string) {

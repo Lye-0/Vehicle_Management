@@ -68,12 +68,12 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   function openMobileList() {
     setMobileWorkspaceView('list')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   async function saveEntry(entryId: string | undefined, input: PaymentEntryInput) {

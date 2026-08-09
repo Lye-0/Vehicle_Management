@@ -145,12 +145,12 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   function openMobileList() {
     setMobileWorkspaceView('list')
-    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
   function selectCustomer(customer: Customer) {
