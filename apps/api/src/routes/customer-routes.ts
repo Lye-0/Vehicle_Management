@@ -229,7 +229,7 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
 
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
   if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
-  assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024)
+  assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024, { required: true })
   const formData = await request.formData()
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
