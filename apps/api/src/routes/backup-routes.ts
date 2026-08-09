@@ -145,9 +145,9 @@ async function restoreBackup(request: Request, env: Env, database: ReturnType<ty
   if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+  const manifest = await readManifest(getStorage(env), record.manifestKey, context.organization.organizationId)
   const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
   try {
-    const manifest = await readManifest(getStorage(env), record.manifestKey, context.organization.organizationId)
     await restoreManifest(env, database, context.organization.organizationId, manifest)
     return jsonResponse({ restored: true, backupId: id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
   } catch (error) {
@@ -371,11 +371,85 @@ function assertManifest(value: unknown, organizationId: string, options: { requi
   const tables = manifest.tables as BackupManifest['tables']
   const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.mileageHistories ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
   if (organizationRows.some((rows) => rows.some((row) => !row || typeof row !== 'object' || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
+  assertManifestReferences(tables)
   for (const file of tables.vehicleFiles) {
     if (!file || typeof file !== 'object' || typeof file.id !== 'string' || !isSafePathSegment(file.id) || typeof file.vehicleId !== 'string' || !isSafePathSegment(file.vehicleId) || typeof file.fileName !== 'string' || !file.fileName.trim() || file.fileName.length > 120 || !isSupportedAttachmentContentType(file.contentType) || file.fileKind !== attachmentKind(file.contentType) || !Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 0 || file.sizeBytes > maximumBackupFileBytes || !isVehicleFileObjectKey(file.objectKey, organizationId, file.vehicleId, file.id)) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
     if (options.requireBackupObjectKeys && (typeof file.backupObjectKey !== 'string' || !isBackupObjectKey(file.backupObjectKey, organizationId, file.id))) throw new HttpError(400, 'バックアップ内の添付ファイル保存先が不正です。')
   }
   return manifest as BackupManifest
+}
+
+export function assertManifestReferences(tables: BackupManifest['tables']) {
+  const customerIds = manifestIds(tables.customers, '顧客')
+  const vehicleIds = manifestIds(tables.vehicles, '車両')
+  const vehicleFileIds = manifestIds(tables.vehicleFiles, '添付ファイル')
+  const salesDocumentIds = manifestIds(tables.salesDocuments, '販売書類')
+  const salesItemIds = manifestIds(tables.salesDocumentItems, '販売明細')
+  const maintenanceDocumentIds = manifestIds(tables.maintenanceDocuments, '整備書類')
+  const maintenanceItemIds = manifestIds(tables.maintenanceItems, '整備明細')
+  const paymentRecordIds = manifestIds(tables.paymentRecords, '入金記録')
+  const paymentEntryIds = manifestIds(tables.paymentEntries ?? [], '入金明細')
+  const mileageHistoryIds = manifestIds(tables.mileageHistories ?? [], '走行履歴')
+  const inspectionScheduleIds = manifestIds(tables.inspectionSchedules, '点検予定')
+  const sharedScheduleIds = manifestIds(tables.sharedSchedules ?? [], '共有予定')
+
+  for (const row of tables.vehicles) assertManifestReference(customerIds, row.customerId, '車両の顧客')
+  for (const row of tables.vehicleFiles) assertManifestReference(vehicleIds, row.vehicleId, '添付ファイルの車両')
+  for (const row of tables.salesDocuments) {
+    assertManifestReference(customerIds, row.customerId, '販売書類の顧客')
+    if (row.vehicleId !== null) assertManifestReference(vehicleIds, row.vehicleId, '販売書類の車両')
+  }
+  for (const row of tables.salesDocumentItems) assertManifestReference(salesDocumentIds, row.documentId, '販売明細の販売書類')
+  for (const row of tables.maintenanceDocuments) {
+    assertManifestReference(customerIds, row.customerId, '整備書類の顧客')
+    assertManifestReference(vehicleIds, row.vehicleId, '整備書類の車両')
+  }
+  for (const row of tables.maintenanceItems) assertManifestReference(maintenanceDocumentIds, row.documentId, '整備明細の整備書類')
+  for (const row of tables.paymentRecords) assertPaymentReference(row.documentType, row.documentId, salesDocumentIds, maintenanceDocumentIds, '入金記録')
+  for (const row of tables.paymentEntries ?? []) assertPaymentReference(row.documentType, row.documentId, salesDocumentIds, maintenanceDocumentIds, '入金明細')
+  for (const row of tables.inspectionSchedules) {
+    assertManifestReference(customerIds, row.customerId, '点検予定の顧客')
+    assertManifestReference(vehicleIds, row.vehicleId, '点検予定の車両')
+  }
+  for (const row of tables.mileageHistories ?? []) {
+    assertManifestReference(vehicleIds, row.vehicleId, '走行履歴の車両')
+    assertManifestReference(maintenanceDocumentIds, row.maintenanceDocumentId, '走行履歴の整備書類')
+  }
+
+  // The remaining sets are intentionally materialized here so duplicate IDs are rejected consistently,
+  // even when a table has no relationship to another restored table.
+  void vehicleFileIds
+  void salesItemIds
+  void paymentRecordIds
+  void paymentEntryIds
+  void mileageHistoryIds
+  void inspectionScheduleIds
+  void sharedScheduleIds
+}
+
+function manifestIds(rows: Array<{ id: string }>, label: string) {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    if (typeof row.id !== 'string' || !row.id || ids.has(row.id)) throw new HttpError(400, `バックアップ内の${label}IDが不正または重複しています。`)
+    ids.add(row.id)
+  }
+  return ids
+}
+
+function assertManifestReference(ids: Set<string>, id: unknown, label: string) {
+  if (typeof id !== 'string' || !ids.has(id)) throw new HttpError(400, `バックアップ内の${label}参照が不正です。`)
+}
+
+function assertPaymentReference(documentType: string, documentId: string, salesDocumentIds: Set<string>, maintenanceDocumentIds: Set<string>, label: string) {
+  if (documentType === '販売請求書') {
+    assertManifestReference(salesDocumentIds, documentId, `${label}の販売請求書`)
+    return
+  }
+  if (documentType === '整備請求書') {
+    assertManifestReference(maintenanceDocumentIds, documentId, `${label}の整備請求書`)
+    return
+  }
+  throw new HttpError(400, `バックアップ内の${label}の請求書種別が不正です。`)
 }
 
 function assertExportManifest(value: unknown, organizationId: string): BackupExport {
@@ -509,7 +583,7 @@ function base64ByteLength(value: string) {
   return Math.max(0, (value.length * 3) / 4 - padding)
 }
 
-type BackupManifest = {
+export type BackupManifest = {
   version: 1
   id: string
   organizationId: string
