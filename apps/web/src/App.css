@@ -2858,3 +2858,40 @@
   .document-sort-controls .document-sort-key { width: 94px; }
   .document-sort-controls .document-sort-direction { width: 58px; }
 }
+
+/* Compact mobile inspection schedule cards */
+@media (max-width: 760px) {
+  .inspection-schedule-grid { gap: 10px; }
+  .inspection-schedule-card { padding: 16px 16px 12px; }
+  .inspection-vehicle-card-button { padding: 12px 18px; }
+  .inspection-type-badge { padding: 4px 7px; font-size: 9px; }
+  .inspection-type-badge svg { width: 14px; height: 14px; }
+  .inspection-schedule-card h2 {
+    margin: 12px 0 0;
+    font-size: 16px;
+    line-height: 1.3;
+  }
+  .inspection-vehicle-card-button > p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .inspection-card-date {
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+  .inspection-card-date span { font-size: 9px; }
+  .inspection-card-date strong { font-size: 15px; }
+  .inspection-card-note {
+    margin-top: 8px;
+    padding: 7px 9px;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+}
+
+@media (max-width: 480px) {
+  .inspection-vehicle-card-button { padding-inline: 18px; }
+  .inspection-card-date strong { font-size: 14px; }
+}
