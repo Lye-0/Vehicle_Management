@@ -121,14 +121,35 @@ export async function completeInitialOrganizationSetup(database: Database, env: 
   if (!target) throw new HttpError(409, '初回セットアップはすでに完了しています。')
 
   const now = new Date().toISOString()
-  const updated = await database.update(organizations).set({ name: normalizedName, ownerUid: user.uid, setupCompleted: true, updatedAt: now }).where(and(eq(organizations.id, target.id), eq(organizations.setupCompleted, false))).run()
-  if (updated.meta.changes !== 1) throw new HttpError(409, '初回セットアップは別のユーザーによって完了しました。')
-  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, target.id), eq(organizationMemberships.uid, user.uid))).get()
-  if (!existingMembership) {
-    await database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId: target.id, uid: user.uid, role: 'owner', status: 'active', updatedAt: now }).run()
-  }
-  await upsertProfile(database, user, 'owner')
-  await ensureAuthAccount(database, user.uid)
+  const databaseClient = database.$client
+  const setupGate = 'id = ? AND setup_completed = 1 AND owner_uid = ? AND updated_at = ?'
+  const statements = [
+    databaseClient.prepare('UPDATE organizations SET name = ?, owner_uid = ?, setup_completed = 1, updated_at = ? WHERE id = ? AND setup_completed = 0').bind(normalizedName, user.uid, now, target.id),
+    databaseClient.prepare(`
+      INSERT INTO organization_memberships (id, organization_id, uid, role, status, updated_at)
+      SELECT ?, ?, ?, 'owner', 'active', ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (organization_id, uid) DO UPDATE SET role = excluded.role, status = excluded.status, updated_at = excluded.updated_at
+    `).bind(crypto.randomUUID(), target.id, user.uid, now, target.id, user.uid, now),
+    databaseClient.prepare(`
+      INSERT INTO staff_profiles (uid, display_name, email, role, updated_at)
+      SELECT ?, ?, ?, 'owner', ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (uid) DO UPDATE SET
+        display_name = CASE WHEN staff_profiles.display_name = '' THEN excluded.display_name ELSE staff_profiles.display_name END,
+        email = COALESCE(excluded.email, staff_profiles.email),
+        role = excluded.role,
+        updated_at = excluded.updated_at
+    `).bind(user.uid, user.displayName || user.email || 'ログインユーザー', user.email?.trim().toLowerCase() ?? null, now, target.id, user.uid, now),
+    databaseClient.prepare(`
+      INSERT INTO auth_accounts (uid)
+      SELECT ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (uid) DO NOTHING
+    `).bind(user.uid, target.id, user.uid, now),
+  ]
+  const results = await databaseClient.batch(statements as [D1PreparedStatement, ...D1PreparedStatement[]])
+  if (results[0].meta.changes !== 1) throw new HttpError(409, '初回セットアップは別のユーザーによって完了しました。')
   return target.id
 }
 

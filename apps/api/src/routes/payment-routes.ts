@@ -75,7 +75,7 @@ async function addPaymentEntry(request: Request, env: Env, database: ReturnType<
   const existingEntries = await ensurePaymentHistory(database, documentType, documentId, organizationId)
   assertWithinOutstanding(invoice.total, sumPaymentEntries(existingEntries), input.amount)
   const now = new Date().toISOString()
-  const inserted = await env.DB.prepare(`
+  const insertEntry = env.DB.prepare(`
     INSERT INTO payment_entries (id, organization_id, document_type, document_id, amount, payment_date, method, note, created_at, updated_at)
     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE ? <= ? - COALESCE((
@@ -86,9 +86,9 @@ async function addPaymentEntry(request: Request, env: Env, database: ReturnType<
   `).bind(
     crypto.randomUUID(), organizationId, documentType, documentId, input.amount, input.paymentDate, input.method, input.note, now, now,
     input.amount, invoice.total, organizationId, documentType, documentId,
-  ).run()
-  if (inserted.meta.changes !== 1) throw new HttpError(400, '入金額が請求残額を超えています。')
-  await syncPaymentRecord(database, invoice, documentType, documentId, organizationId)
+  )
+  const results = await runPaymentBatch(env, [insertEntry, paymentRecordUpsertStatement(env, invoice.total, documentType, documentId, organizationId, now)])
+  if (results[0].meta.changes !== 1) throw new HttpError(409, '入金情報が同時に変更されました。画面を更新して再度お試しください。')
   return paymentResponse(env, database, documentType, documentId, organizationId, 201)
 }
 
@@ -102,8 +102,23 @@ async function updatePaymentEntry(request: Request, env: Env, database: ReturnTy
   const existingEntries = await loadRawPaymentEntries(database, documentType, documentId, organizationId)
   const otherPaidAmount = sumPaymentEntries(existingEntries) - current.amount
   assertWithinOutstanding(invoice.total, otherPaidAmount, input.amount)
-  await database.update(paymentEntries).set({ amount: input.amount, paymentDate: input.paymentDate, method: input.method, note: input.note, updatedAt: new Date().toISOString() }).where(and(eq(paymentEntries.id, entryId), eq(paymentEntries.organizationId, organizationId))).run()
-  await syncPaymentRecord(database, invoice, documentType, documentId, organizationId)
+  const now = new Date().toISOString()
+  const updateEntry = env.DB.prepare(`
+    UPDATE payment_entries
+    SET amount = ?, payment_date = ?, method = ?, note = ?, updated_at = ?
+    WHERE id = ? AND organization_id = ? AND document_type = ? AND document_id = ?
+      AND ? <= ? - COALESCE((
+        SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)
+        FROM payment_entries
+        WHERE organization_id = ? AND document_type = ? AND document_id = ? AND id <> ?
+      ), 0)
+  `).bind(
+    input.amount, input.paymentDate, input.method, input.note, now,
+    entryId, organizationId, documentType, documentId,
+    input.amount, invoice.total, organizationId, documentType, documentId, entryId,
+  )
+  const results = await runPaymentBatch(env, [updateEntry, paymentRecordUpsertStatement(env, invoice.total, documentType, documentId, organizationId, now)])
+  if (results[0].meta.changes !== 1) throw new HttpError(409, '入金情報が同時に変更されました。画面を更新して再度お試しください。')
   return paymentResponse(env, database, documentType, documentId, organizationId, 200)
 }
 
@@ -113,8 +128,10 @@ async function deletePaymentEntry(request: Request, env: Env, database: ReturnTy
   await ensurePaymentHistory(database, documentType, documentId, organizationId)
   const current = await database.select().from(paymentEntries).where(and(eq(paymentEntries.id, entryId), eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))).get()
   if (!current) throw new HttpError(404, '入金履歴が見つかりません。')
-  await database.delete(paymentEntries).where(and(eq(paymentEntries.id, entryId), eq(paymentEntries.organizationId, organizationId))).run()
-  await syncPaymentRecord(database, invoice, documentType, documentId, organizationId)
+  const now = new Date().toISOString()
+  const deleteEntry = env.DB.prepare('DELETE FROM payment_entries WHERE id = ? AND organization_id = ? AND document_type = ? AND document_id = ?').bind(entryId, organizationId, documentType, documentId)
+  const results = await runPaymentBatch(env, [deleteEntry, paymentRecordUpsertStatement(env, invoice.total, documentType, documentId, organizationId, now)])
+  if (results[0].meta.changes !== 1) throw new HttpError(409, '入金情報が同時に変更されました。画面を更新して再度お試しください。')
   return paymentResponse(env, database, documentType, documentId, organizationId, 200)
 }
 
@@ -127,12 +144,16 @@ async function replacePayment(request: Request, env: Env, database: ReturnType<t
   const paymentDate = nullableDate(body.paymentDate)
   const method = optionalPaymentMethod(body.method)
   const note = nullableString(body, 'note') ?? ''
-  await database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))).run()
+  const now = new Date().toISOString()
+  const statements: D1PreparedStatement[] = [env.DB.prepare('DELETE FROM payment_entries WHERE organization_id = ? AND document_type = ? AND document_id = ?').bind(organizationId, documentType, documentId)]
   if (paidAmount > 0 || paymentDate || method || note) {
-    const now = new Date().toISOString()
-    await database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: paidAmount, paymentDate, method, note, createdAt: now, updatedAt: now }).run()
+    statements.push(env.DB.prepare(`
+      INSERT INTO payment_entries (id, organization_id, document_type, document_id, amount, payment_date, method, note, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), organizationId, documentType, documentId, paidAmount, paymentDate, method, note, now, now))
   }
-  await syncPaymentRecord(database, invoice, documentType, documentId, organizationId)
+  statements.push(paymentRecordUpsertStatement(env, invoice.total, documentType, documentId, organizationId, now))
+  await runPaymentBatch(env, statements)
   return paymentResponse(env, database, documentType, documentId, organizationId, 200)
 }
 
@@ -177,14 +198,40 @@ async function ensurePaymentHistory(database: ReturnType<typeof createDatabase>,
   return [entry]
 }
 
-async function syncPaymentRecord(database: ReturnType<typeof createDatabase>, invoice: InvoiceRow, documentType: string, documentId: string, organizationId: string) {
-  const entries = await loadRawPaymentEntries(database, documentType, documentId, organizationId)
-  const paidAmount = sumPaymentEntries(entries)
-  const latest = entries.slice().sort(comparePaymentEntries)[0]
-  const current = await database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get()
-  const data = { invoiceAmount: invoice.total, paidAmount, paymentDate: latest?.paymentDate ?? null, method: latest?.method ?? null, note: latest?.note ?? null, updatedAt: new Date().toISOString() }
-  if (current) await database.update(paymentRecords).set(data).where(and(eq(paymentRecords.id, current.id), eq(paymentRecords.organizationId, organizationId))).run()
-  else await database.insert(paymentRecords).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, ...data }).run()
+async function runPaymentBatch(env: Env, statements: D1PreparedStatement[]) {
+  if (!statements.length) throw new HttpError(500, '入金処理の更新内容がありません。')
+  return env.DB.batch(statements as [D1PreparedStatement, ...D1PreparedStatement[]])
+}
+
+export function paymentRecordUpsertStatement(env: Env, invoiceAmount: number, documentType: string, documentId: string, organizationId: string, now: string) {
+  return env.DB.prepare(`
+    WITH current_entries AS (
+      SELECT amount, payment_date, method, note, created_at
+      FROM payment_entries
+      WHERE organization_id = ? AND document_type = ? AND document_id = ?
+    ), summary AS (
+      SELECT
+        COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS paid_amount,
+        (SELECT payment_date FROM current_entries ORDER BY payment_date DESC, created_at DESC LIMIT 1) AS payment_date,
+        (SELECT method FROM current_entries ORDER BY payment_date DESC, created_at DESC LIMIT 1) AS method,
+        (SELECT note FROM current_entries ORDER BY payment_date DESC, created_at DESC LIMIT 1) AS note
+      FROM current_entries
+    )
+    INSERT INTO payment_records (id, organization_id, document_type, document_id, invoice_amount, paid_amount, payment_date, method, note, created_at, updated_at)
+    SELECT ?, ?, ?, ?, ?, paid_amount, payment_date, method, note, ?, ?
+    FROM summary
+    WHERE 1 = 1
+    ON CONFLICT (organization_id, document_type, document_id) DO UPDATE SET
+      invoice_amount = excluded.invoice_amount,
+      paid_amount = excluded.paid_amount,
+      payment_date = excluded.payment_date,
+      method = excluded.method,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).bind(
+    organizationId, documentType, documentId,
+    crypto.randomUUID(), organizationId, documentType, documentId, invoiceAmount, now, now,
+  )
 }
 
 function serializePayment(documentType: '販売請求書' | '整備請求書', document: InvoiceRow, payment: typeof paymentRecords.$inferSelect | undefined, entries: Array<typeof paymentEntries.$inferSelect>, customersById: Map<string, typeof customers.$inferSelect>, vehiclesById: Map<string, typeof vehicles.$inferSelect>) {
