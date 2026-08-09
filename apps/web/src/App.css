@@ -3881,3 +3881,205 @@
     grid-column: auto;
   }
 }
+
+/* Size-specific corrections requested after the first tablet pass. */
+@media (max-width: 900px) {
+  /* Once a document is open, the list controls are no longer useful and
+     should not push the detail view down the page. */
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-page-header > .button,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-page-header > .button,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-page-header > .button,
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-toolbar,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-toolbar,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-toolbar,
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-document-filter-panel,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-document-filter-panel,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-filter-panel {
+    display: none;
+  }
+}
+
+/* Second size: keep the notification at the physical top-right of the
+   compact top bar. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .topbar {
+    position: relative;
+    height: 58px;
+    min-height: 58px;
+    align-items: center;
+    flex-direction: row;
+    padding: 0 18px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .notification-button {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    margin-left: 0;
+    flex: 0 0 38px;
+    z-index: 40;
+    color: #e7eefb;
+  }
+
+  .breadcrumb {
+    min-width: 0;
+    max-width: calc(100% - 48px);
+    overflow: hidden;
+    font-size: 11px;
+  }
+}
+
+/* The four vehicle-history values fit on one line at both intermediate
+   sizes; the document name remains a full-width second row. */
+@media (min-width: 761px) and (max-width: 1399px) {
+  .vehicle-timeline-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .vehicle-timeline-row .vehicle-timeline-document {
+    grid-column: 1 / -1;
+  }
+}
+
+/* First size: prevent the vehicle summary hero from squeezing its copy into
+   a vertical strip, and keep the customer/vehicle headings inside the page. */
+@media (max-width: 760px) {
+  .customer-profile,
+  .owned-vehicles-section,
+  .selected-vehicle-grid,
+  .vehicle-summary-panel {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .customer-profile-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .customer-profile-header .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  .customer-info-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 8px 18px 14px;
+  }
+
+  .customer-info-item {
+    gap: 6px;
+    padding: 11px 0;
+    border-bottom: 1px solid #edf1f5;
+  }
+
+  .customer-info-item:last-child {
+    border-bottom: 0;
+  }
+
+  .customer-info-item strong {
+    padding-left: 22px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .owned-vehicles-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+
+  .owned-vehicles-header > div {
+    min-width: 0;
+  }
+
+  .owned-vehicles-header h2 {
+    font-size: 20px;
+  }
+
+  .owned-vehicles-header .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  .vehicle-summary-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .vehicle-summary-header > div {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .vehicle-summary-header h2 {
+    font-size: 20px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .vehicle-summary-header .detail-action-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .vehicle-summary-body {
+    padding: 8px 18px 18px;
+  }
+
+  .vehicle-summary-body .detail-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Second size: give each employee card a compact, intentional three-row
+   structure instead of letting every control fall into one narrow column. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .member-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+    padding: 13px 14px;
+  }
+
+  .member-avatar {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .member-main {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .member-role-control {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  .member-status-control {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .member-remove-button {
+    grid-column: 2 / -1;
+    grid-row: 3;
+    justify-self: start;
+  }
+
+  .member-role-control select {
+    min-height: 36px;
+  }
+}
