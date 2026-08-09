@@ -79,7 +79,7 @@ async function listBackups(request: Request, env: Env, database: ReturnType<type
 
 async function createBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
-  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  const body = await readOptionalJson(request)
   const note = normalizeBackupNote(body.note)
   const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual', note })
   return jsonResponse({ backup }, 201, env)
@@ -135,7 +135,7 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
 
 async function restoreBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
   const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
-  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  const body = await readOptionalJson(request)
   if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
@@ -403,6 +403,16 @@ function serializeBackup(record: { id: string; organizationId: string; manifestK
 
 function isAdmin(role: string) {
   return role === 'owner' || role === 'admin'
+}
+
+async function readOptionalJson(request: Request) {
+  if (!request.body) return {} as Record<string, unknown>
+  try {
+    return await readJson(request)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) return {} as Record<string, unknown>
+    throw error
+  }
 }
 
 function hasBackupCreationSettingChange(current: BackupSettings, next: BackupSettings) {
