@@ -6,10 +6,10 @@ import { createDatabase } from '../db/client'
 import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
+import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
-const allowedContentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png'])
 
 export async function handleCustomerRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -233,20 +233,21 @@ async function uploadVehicleFile(request: Request, env: Env, database: ReturnTyp
   const formData = await request.formData()
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
-  if (!allowedContentTypes.has(file.type)) throw new HttpError(415, 'JPEG・PNG・PDFのみ添付できます。')
+  const contentType = assertSupportedAttachmentContentType(file.type)
   if (file.size > maximumAttachmentSize) throw new HttpError(413, '添付ファイルは20MB以下にしてください。')
+  const fileBody = new Uint8Array(await file.arrayBuffer())
+  assertAttachmentSignature(fileBody, contentType)
 
   const fileId = crypto.randomUUID()
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  const objectKey = `organizations/${organizationId}/vehicles/${vehicleId}/${fileId}-${safeName}`
+  const objectKey = createVehicleFileObjectKey(organizationId, vehicleId, fileId, file.name)
   try {
-    await createB2Storage(env).putObject({ key: objectKey, body: await file.arrayBuffer(), contentType: file.type })
+    await createB2Storage(env).putObject({ key: objectKey, body: fileBody.buffer as ArrayBuffer, contentType })
   } catch {
     throw new HttpError(503, 'ファイル保存先を利用できません。B2の設定を確認してください。')
   }
 
   try {
-    await database.insert(vehicleFiles).values({ id: fileId, organizationId, vehicleId, objectKey, fileName: file.name, contentType: file.type, sizeBytes: file.size, fileKind: getFileKind(file.type) }).run()
+    await database.insert(vehicleFiles).values({ id: fileId, organizationId, vehicleId, objectKey, fileName: file.name.slice(0, 120), contentType, sizeBytes: fileBody.byteLength, fileKind: attachmentKind(contentType) }).run()
   } catch (error) {
     await createB2Storage(env).deleteObject(objectKey).catch(() => undefined)
     throw error
@@ -277,9 +278,11 @@ async function downloadVehicleFile(_request: Request, env: Env, database: Return
     throw new HttpError(503, 'ファイル保存先を利用できません。')
   }
   const headers = new Headers(corsHeaders(env))
-  headers.set('Content-Type', file.contentType)
+  const contentType = file.contentType === 'application/pdf' || file.contentType === 'image/jpeg' || file.contentType === 'image/png' ? file.contentType : 'application/octet-stream'
+  headers.set('Content-Type', contentType)
   headers.set('Content-Length', String(file.sizeBytes))
-  headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+  headers.set('Content-Disposition', contentType === 'application/octet-stream' ? `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}` : `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+  headers.set('X-Content-Type-Options', 'nosniff')
   headers.set('Cache-Control', 'private, max-age=300')
   return new Response(response.body, { status: 200, headers })
 }
@@ -424,8 +427,3 @@ function nullableCalendarDate(body: Record<string, unknown>, key: string) {
   return normalized
 }
 
-function getFileKind(contentType: string): 'image' | 'pdf' | 'other' {
-  if (contentType === 'application/pdf') return 'pdf'
-  if (contentType.startsWith('image/')) return 'image'
-  return 'other'
-}

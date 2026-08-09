@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, mileageHistories, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireOrganizationContext, requireOrganizationPermission } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
@@ -7,6 +8,7 @@ import { purgeExpiredArchivedDocuments } from '../document-archive'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { loadOrganizationPermissions } from '../organization-permissions'
+import { attachmentKind, assertAttachmentSignature, assertSupportedAttachmentContentType, createVehicleFileObjectKey, isSafePathSegment, isSupportedAttachmentContentType, type SupportedAttachmentContentType } from '../lib/file-validation'
 import { createB2Storage } from '../storage/b2'
 
 const preRestoreProtectionDays = 30
@@ -95,8 +97,7 @@ async function exportBackup(request: Request, env: Env, database: ReturnType<typ
   for (const file of snapshot.tables.vehicleFiles) {
     if (file.sizeBytes > maximumBackupFileBytes || totalFileBytes + file.sizeBytes > maximumBackupTotalFileBytes) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
     const response = await storage.getObject(file.objectKey)
-    const bytes = await response.arrayBuffer()
-    if (bytes.byteLength > maximumBackupFileBytes || totalFileBytes + bytes.byteLength > maximumBackupTotalFileBytes) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+    const bytes = await readResponseBytes(response, maximumBackupFileBytes, maximumBackupTotalFileBytes - totalFileBytes)
     totalFileBytes += bytes.byteLength
     files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(bytes) })
   }
@@ -118,9 +119,13 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
       const sourceFile = filesById.get(file.id)
       if (!sourceFile) throw new HttpError(400, `添付ファイルが見つかりません: ${file.fileName}`)
       const backupObjectKey = `imports/${context.organization.organizationId}/${restoreId}/files/${file.id}`
-      await storage.putObject({ key: backupObjectKey, body: base64ToArrayBuffer(sourceFile.data), contentType: sourceFile.contentType })
+      const contentType = assertSupportedAttachmentContentType(sourceFile.contentType)
+      const fileBody = base64ToArrayBuffer(sourceFile.data, contentType)
+      const objectKey = createVehicleFileObjectKey(context.organization.organizationId, file.vehicleId, file.id, file.fileName)
+      const fileName = file.fileName.trim().slice(0, 120) || 'file'
+      await storage.putObject({ key: backupObjectKey, body: fileBody, contentType })
       stagedKeys.push(backupObjectKey)
-      vehicleFilesWithKeys.push({ ...file, backupObjectKey })
+      vehicleFilesWithKeys.push({ ...file, objectKey, fileName, contentType, fileKind: attachmentKind(contentType), sizeBytes: fileBody.byteLength, backupObjectKey })
     }
     const manifest: BackupManifest = { ...source, tables: { ...source.tables, vehicleFiles: vehicleFilesWithKeys } }
     await restoreManifest(env, database, context.organization.organizationId, manifest)
@@ -247,8 +252,8 @@ async function restoreManifest(env: Env, database: ReturnType<typeof createDatab
     await storage.copyObject(file.backupObjectKey, file.objectKey)
   }
   const currentFiles = await database.select({ objectKey: vehicleFiles.objectKey }).from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).all()
-  await clearOrganizationData(database, organizationId)
-  await insertSnapshot(database, manifest)
+  const writes = buildRestoreStatements(database, organizationId, manifest)
+  await database.batch(writes as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   const backupObjectKeys = new Set(manifest.tables.vehicleFiles.map((file) => file.objectKey))
   await deleteObjects(storage, currentFiles.map((file) => file.objectKey).filter((key) => !backupObjectKeys.has(key)))
 }
@@ -312,48 +317,48 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
   }
 }
 
-async function clearOrganizationData(database: ReturnType<typeof createDatabase>, organizationId: string) {
-  await database.delete(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)).run()
-  await database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).run()
-  await database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).run()
-  await database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).run()
-  await database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).run()
-  await database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).run()
-  await database.delete(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).run()
-  await database.delete(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).run()
-  await database.delete(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).run()
-  await database.delete(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).run()
-  await database.delete(vehicles).where(eq(vehicles.organizationId, organizationId)).run()
-  await database.delete(customers).where(eq(customers.organizationId, organizationId)).run()
-  await database.delete(appSettings).where(eq(appSettings.organizationId, organizationId)).run()
-}
-
-async function insertSnapshot(database: ReturnType<typeof createDatabase>, manifest: BackupManifest) {
-  for (const row of manifest.tables.customers) await database.insert(customers).values(row).run()
-  for (const row of manifest.tables.vehicles) await database.insert(vehicles).values(row).run()
+function buildRestoreStatements(database: ReturnType<typeof createDatabase>, organizationId: string, manifest: BackupManifest) {
+  const writes: BatchItem<'sqlite'>[] = [
+    database.delete(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)),
+    database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)),
+    database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)),
+    database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)),
+    database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)),
+    database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)),
+    database.delete(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)),
+    database.delete(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)),
+    database.delete(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)),
+    database.delete(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)),
+    database.delete(vehicles).where(eq(vehicles.organizationId, organizationId)),
+    database.delete(customers).where(eq(customers.organizationId, organizationId)),
+    database.delete(appSettings).where(eq(appSettings.organizationId, organizationId)),
+  ]
+  for (const row of manifest.tables.customers) writes.push(database.insert(customers).values(row))
+  for (const row of manifest.tables.vehicles) writes.push(database.insert(vehicles).values(row))
   for (const row of manifest.tables.vehicleFiles) {
     const { backupObjectKey: _backupObjectKey, ...file } = row
-    await database.insert(vehicleFiles).values(file).run()
+    writes.push(database.insert(vehicleFiles).values(file))
   }
-  for (const row of manifest.tables.salesDocuments) await database.insert(salesDocuments).values(row).run()
-  for (const row of manifest.tables.salesDocumentItems) await database.insert(salesDocumentItems).values(row).run()
-  for (const row of manifest.tables.maintenanceDocuments) await database.insert(maintenanceDocuments).values(row).run()
-  for (const row of manifest.tables.maintenanceItems) await database.insert(maintenanceItems).values(row).run()
-  for (const row of manifest.tables.paymentRecords) await database.insert(paymentRecords).values(row).run()
-  for (const row of manifest.tables.paymentEntries ?? []) await database.insert(paymentEntries).values(row).run()
-  for (const row of manifest.tables.mileageHistories ?? []) await database.insert(mileageHistories).values(row).run()
-  for (const row of manifest.tables.inspectionSchedules) await database.insert(inspectionSchedules).values(row).run()
-  for (const row of manifest.tables.sharedSchedules ?? []) await database.insert(sharedSchedules).values(row).run()
-  for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
+  for (const row of manifest.tables.salesDocuments) writes.push(database.insert(salesDocuments).values(row))
+  for (const row of manifest.tables.salesDocumentItems) writes.push(database.insert(salesDocumentItems).values(row))
+  for (const row of manifest.tables.maintenanceDocuments) writes.push(database.insert(maintenanceDocuments).values(row))
+  for (const row of manifest.tables.maintenanceItems) writes.push(database.insert(maintenanceItems).values(row))
+  for (const row of manifest.tables.paymentRecords) writes.push(database.insert(paymentRecords).values(row))
+  for (const row of manifest.tables.paymentEntries ?? []) writes.push(database.insert(paymentEntries).values(row))
+  for (const row of manifest.tables.mileageHistories ?? []) writes.push(database.insert(mileageHistories).values(row))
+  for (const row of manifest.tables.inspectionSchedules) writes.push(database.insert(inspectionSchedules).values(row))
+  for (const row of manifest.tables.sharedSchedules ?? []) writes.push(database.insert(sharedSchedules).values(row))
+  for (const row of manifest.tables.appSettings) writes.push(database.insert(appSettings).values(row))
+  return writes
 }
 
 async function readManifest(storage: ReturnType<typeof createB2Storage>, key: string, organizationId: string) {
   const response = await storage.getObject(key)
   const value: unknown = await response.json().catch(() => null)
-  return assertManifest(value, organizationId)
+  return assertManifest(value, organizationId, { requireBackupObjectKeys: true })
 }
 
-function assertManifest(value: unknown, organizationId: string): BackupManifest {
+function assertManifest(value: unknown, organizationId: string, options: { requireBackupObjectKeys: boolean } = { requireBackupObjectKeys: true }): BackupManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'バックアップマニフェストが不正です。')
   const manifest = value as Partial<BackupManifest>
   if (manifest.version !== 1 || typeof manifest.id !== 'string' || manifest.organizationId !== organizationId || !manifest.tables || !Array.isArray(manifest.tables.customers) || !Array.isArray(manifest.tables.vehicles) || !Array.isArray(manifest.tables.vehicleFiles) || !Array.isArray(manifest.tables.salesDocuments) || !Array.isArray(manifest.tables.salesDocumentItems) || !Array.isArray(manifest.tables.maintenanceDocuments) || !Array.isArray(manifest.tables.maintenanceItems) || !Array.isArray(manifest.tables.paymentRecords) || !Array.isArray(manifest.tables.inspectionSchedules) || !Array.isArray(manifest.tables.appSettings)) {
@@ -361,14 +366,16 @@ function assertManifest(value: unknown, organizationId: string): BackupManifest 
   }
   const tables = manifest.tables as BackupManifest['tables']
   const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.mileageHistories ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
-  if (organizationRows.some((rows) => rows.some((row) => !row || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
-  const expectedObjectKeyPrefix = `organizations/${organizationId}/`
-  if (tables.vehicleFiles.some((file) => typeof file.objectKey !== 'string' || !file.objectKey.startsWith(expectedObjectKeyPrefix))) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
+  if (organizationRows.some((rows) => rows.some((row) => !row || typeof row !== 'object' || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
+  for (const file of tables.vehicleFiles) {
+    if (!file || typeof file !== 'object' || typeof file.id !== 'string' || !isSafePathSegment(file.id) || typeof file.vehicleId !== 'string' || !isSafePathSegment(file.vehicleId) || typeof file.fileName !== 'string' || !file.fileName.trim() || file.fileName.length > 120 || !isSupportedAttachmentContentType(file.contentType) || file.fileKind !== attachmentKind(file.contentType) || !Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 0 || file.sizeBytes > maximumBackupFileBytes || !isVehicleFileObjectKey(file.objectKey, organizationId, file.vehicleId, file.id)) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
+    if (options.requireBackupObjectKeys && (typeof file.backupObjectKey !== 'string' || !isBackupObjectKey(file.backupObjectKey, organizationId, file.id))) throw new HttpError(400, 'バックアップ内の添付ファイル保存先が不正です。')
+  }
   return manifest as BackupManifest
 }
 
 function assertExportManifest(value: unknown, organizationId: string): BackupExport {
-  const manifest = assertManifest(value, organizationId)
+  const manifest = assertManifest(value, organizationId, { requireBackupObjectKeys: false })
   const files = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray((value as { files?: unknown }).files) ? (value as { files: unknown[] }).files : []
   let totalFileBytes = 0
   if (files.length !== manifest.tables.vehicleFiles.length || files.some((file) => !file || typeof file !== 'object' || typeof (file as BackupExportFile).id !== 'string' || typeof (file as BackupExportFile).data !== 'string' || typeof (file as BackupExportFile).contentType !== 'string' || typeof (file as BackupExportFile).fileName !== 'string')) throw new HttpError(400, 'PCバックアップの添付ファイル情報が不正です。')
@@ -376,8 +383,13 @@ function assertExportManifest(value: unknown, organizationId: string): BackupExp
   for (const file of files as BackupExportFile[]) {
     if (fileIds.has(file.id)) throw new HttpError(400, 'PCバックアップの添付ファイルIDが重複しています。')
     fileIds.add(file.id)
+    const row = manifest.tables.vehicleFiles.find((vehicleFile) => vehicleFile.id === file.id)
+    if (!row || row.contentType !== file.contentType) throw new HttpError(400, 'PCバックアップの添付ファイル種別が一致しません。')
+    if (!isSupportedAttachmentContentType(file.contentType)) throw new HttpError(400, 'PCバックアップの添付ファイル種別が不正です。')
     const byteLength = base64ByteLength(file.data)
     if (byteLength > maximumBackupFileBytes || totalFileBytes + byteLength > maximumBackupTotalFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイル合計が上限を超えています。')
+    const bytes = base64ToArrayBuffer(file.data, file.contentType)
+    if (bytes.byteLength !== byteLength) throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。')
     totalFileBytes += byteLength
   }
   return { ...manifest, files: files as BackupExportFile[] }
@@ -385,6 +397,53 @@ function assertExportManifest(value: unknown, organizationId: string): BackupExp
 
 function getStorage(env: Env) {
   try { return createB2Storage(env) } catch { throw new HttpError(503, 'B2のバックアップ設定がありません。') }
+}
+
+function isVehicleFileObjectKey(objectKey: string, organizationId: string, vehicleId: string, fileId: string) {
+  const prefix = `organizations/${organizationId}/vehicles/${vehicleId}/${fileId}-`
+  if (!objectKey.startsWith(prefix) || objectKey.length > prefix.length + 120) return false
+  const fileName = objectKey.slice(prefix.length)
+  return Boolean(fileName) && !fileName.includes('/') && !fileName.includes('\\') && !fileName.includes('..')
+}
+
+function isBackupObjectKey(objectKey: string, organizationId: string, fileId: string) {
+  const match = objectKey.match(/^(backups|imports)\/([^/]+)\/([^/]+)\/files\/([^/]+)$/u)
+  return Boolean(match && match[2] === organizationId && match[4] === fileId && isSafePathSegment(match[3]))
+}
+
+async function readResponseBytes(response: Response, maximumBytes: number, remainingTotalBytes: number) {
+  const limit = Math.min(maximumBytes, remainingTotalBytes)
+  const contentLengthHeader = response.headers.get('Content-Length')
+  if (contentLengthHeader !== null) {
+    if (!/^\d+$/u.test(contentLengthHeader)) throw new HttpError(502, 'B2のファイルサイズが不正です。')
+    const contentLength = Number(contentLengthHeader)
+    if (!Number.isSafeInteger(contentLength) || contentLength > limit) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+  }
+  if (!response.body) throw new HttpError(502, 'B2のファイル本文を取得できません。')
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      totalBytes += next.value.byteLength
+      if (totalBytes > limit) {
+        await reader.cancel()
+        throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
 async function deleteObjects(storage: ReturnType<typeof createB2Storage>, keys: string[]) {
@@ -423,19 +482,20 @@ function hasBackupRetentionSettingChange(current: BackupSettings, next: BackupSe
   return current.retentionDays !== next.retentionDays || current.archiveRetentionDays !== next.archiveRetentionDays || current.pcRetentionDays !== next.pcRetentionDays
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer)
+function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   let binary = ''
   const chunkSize = 0x8000
   for (let index = 0; index < bytes.length; index += chunkSize) binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
   return btoa(binary)
 }
 
-function base64ToArrayBuffer(value: string) {
+function base64ToArrayBuffer(value: string, contentType?: SupportedAttachmentContentType) {
   let binary: string
   try { binary = atob(value) } catch { throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。') }
   if (binary.length > maximumBackupFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイルが上限を超えています。')
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  if (contentType) assertAttachmentSignature(bytes, contentType)
   return bytes.buffer
 }
 
