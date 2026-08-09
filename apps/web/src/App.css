@@ -1329,7 +1329,7 @@
 .account-modal-note { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
 .account-modal-actions .verified-label { margin-right: auto; }
 .settings-success { padding: 10px 12px; color: #16794a; border: 1px solid #b9e7ca; border-radius: 8px; background: #eefbf2; font-size: 12px; }
-.member-list { display: grid; gap: 8px; }
+.member-list { display: grid; gap: 8px; container: member-list / inline-size; }
 .member-list-empty { min-height: 120px; }
 .member-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 12px; padding: 12px 13px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .member-avatar { display: grid; place-items: center; width: 34px; height: 34px; color: var(--primary); border-radius: 50%; background: var(--primary-soft); }
@@ -3883,7 +3883,7 @@
 }
 
 /* Size-specific corrections requested after the first tablet pass. */
-@media (max-width: 900px) {
+@container tablet-page (max-width: 939px) {
   /* Once a document is open, the list controls are no longer useful and
      should not push the detail view down the page. */
   .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-page-header > .button,
@@ -4041,45 +4041,278 @@
   }
 }
 
-/* Second size: give each employee card a compact, intentional three-row
-   structure instead of letting every control fall into one narrow column. */
+/* Second size: keep the organization-user card compact without stacking the
+   controls into a tall column. */
 @media (min-width: 761px) and (max-width: 900px) {
-  .member-row {
-    grid-template-columns: 36px minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 10px 12px;
-    padding: 13px 14px;
+  .settings-panel .settings-section-heading {
+    align-items: center;
+    margin-bottom: 14px;
   }
 
-  .member-avatar {
+  .settings-panel .settings-section-heading h2 {
+    font-size: 15px;
+  }
+
+  .settings-panel .settings-section-heading p {
+    font-size: 10px;
+  }
+
+  .settings-panel .settings-add-button {
+    min-height: 36px;
+    padding-inline: 12px;
+    font-size: 10px;
+  }
+
+  .settings-panel .member-list {
+    gap: 8px;
+  }
+
+  .settings-panel .member-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 12px 13px;
+    box-sizing: border-box;
+  }
+
+  .settings-panel .member-avatar,
+  .settings-panel .member-main,
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    justify-self: auto;
+  }
+
+  .settings-panel .member-role-control select {
+    min-height: 32px;
+  }
+}
+
+/* Third size: keep the organization-user card compact even when a narrower
+   tablet rule would otherwise make each control occupy its own row. */
+@media (min-width: 901px) and (max-width: 1399px) {
+  .settings-panel .settings-section-heading {
+    align-items: center;
+    margin-bottom: 14px;
+  }
+
+  .settings-panel .settings-section-heading h2 {
+    font-size: 15px;
+  }
+
+  .settings-panel .settings-section-heading p {
+    font-size: 10px;
+  }
+
+  .settings-panel .settings-add-button {
+    min-height: 36px;
+    padding-inline: 12px;
+    font-size: 10px;
+  }
+
+  .settings-panel .member-list {
+    gap: 8px;
+  }
+
+  .settings-panel .member-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 12px 13px;
+    box-sizing: border-box;
+  }
+
+  .settings-panel .member-avatar,
+  .settings-panel .member-main,
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    justify-self: auto;
+  }
+}
+
+/* First size: use three deliberate rows so the narrow card stays compact;
+   the role and status controls share the middle row. */
+@media (max-width: 760px) {
+  .settings-panel .member-list {
+    gap: 8px;
+  }
+
+  .settings-panel .member-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+    min-height: 0;
+    padding: 12px 13px;
+    box-sizing: border-box;
+  }
+
+  .settings-panel .member-avatar {
     grid-column: 1;
     grid-row: 1 / span 2;
   }
 
-  .member-main {
+  .settings-panel .member-main {
     grid-column: 2 / -1;
     grid-row: 1;
   }
 
-  .member-role-control {
+  .settings-panel .member-role-control {
     grid-column: 2;
     grid-row: 2;
     justify-self: start;
   }
 
-  .member-status-control {
+  .settings-panel .member-status-control {
     grid-column: 3;
     grid-row: 2;
     justify-self: end;
   }
 
-  .member-remove-button {
+  .settings-panel .member-remove-button {
     grid-column: 2 / -1;
     grid-row: 3;
     justify-self: start;
   }
 
-  .member-role-control select {
-    min-height: 36px;
+  .settings-panel .member-role-control select {
+    min-height: 32px;
+  }
+}
+
+/* First-size wide variant: once the card has enough room, use the same
+   single-line arrangement as the tablet card. */
+@media (min-width: 520px) and (max-width: 760px) {
+  .settings-panel .member-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 64px;
+    padding: 12px 13px;
+  }
+
+  .settings-panel .member-avatar,
+  .settings-panel .member-main,
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    justify-self: auto;
+  }
+}
+
+/* Use the actual member-card width for first-size devices whose browser
+   viewport is narrow but whose settings panel still has room for one row. */
+@media (max-width: 760px) {
+  @container member-list (min-width: 480px) {
+    .settings-panel .member-row {
+      grid-template-columns: 34px minmax(0, 1fr) auto auto auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 64px;
+      padding: 12px 13px;
+    }
+
+    .settings-panel .member-avatar,
+    .settings-panel .member-main,
+    .settings-panel .member-role-control,
+    .settings-panel .member-status-control,
+    .settings-panel .member-remove-button {
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .settings-panel .member-role-control,
+    .settings-panel .member-status-control,
+    .settings-panel .member-remove-button {
+      justify-self: auto;
+    }
+  }
+}
+
+/* First-size narrow variant: fit all member actions on one compact row at
+   common 390px-class phone widths. */
+@media (min-width: 360px) and (max-width: 519px) {
+  .settings-panel .member-row {
+    grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 4px;
+    min-height: 58px;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  .settings-panel .member-avatar,
+  .settings-panel .member-main,
+  .settings-panel .member-role-control,
+  .settings-panel .member-status-control,
+  .settings-panel .member-remove-button {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .settings-panel .member-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .settings-panel .member-heading {
+    gap: 3px;
+  }
+
+  .settings-panel .member-main strong {
+    font-size: 10px;
+  }
+
+  .settings-panel .member-main small {
+    font-size: 8px;
+  }
+
+  .settings-panel .member-pending-badge,
+  .settings-panel .member-self-badge {
+    padding: 2px 4px;
+    font-size: 7px;
+  }
+
+  .settings-panel .member-role-control select {
+    width: 62px;
+    min-height: 30px;
+    padding: 5px 17px 5px 5px;
+    font-size: 9px;
+  }
+
+  .settings-panel .member-status-button,
+  .settings-panel .member-status-badge {
+    min-width: 44px;
+    padding: 4px 5px;
+    font-size: 9px;
+  }
+
+  .settings-panel .member-remove-button {
+    font-size: 8px;
+    letter-spacing: -0.04em;
+    white-space: nowrap;
   }
 }
