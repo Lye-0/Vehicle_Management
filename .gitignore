@@ -47,6 +47,9 @@ Thumbs.db
 .codex/
 .kilo/
 
+#セキュリティレポート
+security-reports/
+
 
 # 以下はViteの自動生成内容
 
