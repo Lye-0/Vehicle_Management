@@ -2224,6 +2224,57 @@
 
 /* Mobile document editor controls */
 @media (max-width: 760px) {
+  .sales-estimate-sheet-editor {
+    --sales-sheet-control-line-width: clamp(0.5px, 0.18cqw, 1px);
+  }
+
+  .sales-estimate-sheet-field-control {
+    font-size: clamp(4px, 1.1cqw, 13px);
+    padding-inline: clamp(1px, 0.85cqw, 5px);
+    border-width: var(--sales-sheet-control-line-width);
+  }
+
+  .sales-estimate-sheet-line-control {
+    font-size: clamp(4px, 1.1cqw, 13px);
+  }
+
+  .sales-estimate-sheet-field-control.is-centered {
+    padding-inline: clamp(1px, 0.85cqw, 5px);
+  }
+
+  .sales-estimate-sheet-calendar-control > .sales-estimate-sheet-field-control {
+    padding-right: clamp(2px, 1.1cqw, 1.6em);
+  }
+
+  .sales-estimate-sheet-line-control.is-accessory-line::before {
+    width: var(--sales-sheet-control-line-width);
+  }
+
+  .sales-estimate-sheet-line-control:not(.is-amount-only)::after {
+    left: calc(var(--sheet-label-width) - var(--sales-sheet-control-line-width));
+    width: var(--sales-sheet-control-line-width);
+  }
+
+  .sales-estimate-sheet-line-control.is-amount-only .sales-sheet-amount-input {
+    border-top-width: var(--sales-sheet-control-line-width);
+    border-right-width: 0;
+    border-bottom-width: var(--sales-sheet-control-line-width);
+    border-left-width: var(--sales-sheet-control-line-width);
+  }
+
+  .sales-sheet-name-combobox > button {
+    border-left-width: var(--sales-sheet-control-line-width);
+  }
+
+  .sales-estimate-sheet-field-control:focus {
+    box-shadow: inset 0 0 0 var(--sales-sheet-control-line-width) #2563eb;
+  }
+
+  .sales-estimate-sheet-line-control input:focus {
+    outline-width: var(--sales-sheet-control-line-width);
+    outline-offset: calc(var(--sales-sheet-control-line-width) * -1);
+  }
+
   .maintenance-statement-frame {
     container-type: inline-size;
   }
@@ -2269,11 +2320,17 @@
 
   .sales-estimate-sheet-field-control.is-customer-name,
   .sales-estimate-sheet-customer-honorific {
-    font-size: clamp(6px, 1.706cqw, 18px);
+    font-size: clamp(4px, 1.706cqw, 18px);
   }
 
   .sales-estimate-sheet-field-control.is-customer-value {
-    font-size: clamp(6px, 1.232cqw, 13px);
+    font-size: clamp(4px, 1.232cqw, 13px);
+  }
+
+  .sales-estimate-sheet-field-control[aria-label="車両displacement"] {
+    font-size: clamp(2.5px, 0.85cqw, 13px);
+    letter-spacing: -0.15px;
+    padding-inline: 0;
   }
 
   .sales-estimate-sheet-field-control.is-multiline {
