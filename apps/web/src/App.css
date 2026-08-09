@@ -1230,9 +1230,9 @@
 .settings-section-heading h2 { margin: 0; color: var(--text); font-size: 15px; }
 .settings-section-heading p { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .settings-section-heading .settings-add-button { margin-left: auto; flex: 0 0 auto; }
-.settings-permission-list { display: grid; gap: 10px; }
-.settings-permission-toggle { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; width: 100%; min-height: 70px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
-.settings-permission-toggle:hover { border-color: #b7c9e4; background: #f8fbff; }
+.settings-permission-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.backup-toggle.settings-permission-toggle { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; width: 100%; min-height: 92px; padding: 15px 16px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.backup-toggle.settings-permission-toggle:hover { border-color: #b7c9e4; background: #f8fbff; }
 .settings-permission-toggle > span:first-child { display: grid; gap: 4px; min-width: 0; }
 .settings-permission-toggle > span:first-child strong { color: var(--text); font-size: 13px; line-height: 1.4; }
 .settings-permission-toggle > span:first-child small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
@@ -1615,6 +1615,7 @@
   .account-setting-row-display-name .account-setting-label { grid-column: 1 / -1; }
   .account-setting-row-display-name .account-setting-input { grid-column: 1; }
   .settings-sales-preset-grid { grid-template-columns: 1fr; }
+  .settings-permission-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
