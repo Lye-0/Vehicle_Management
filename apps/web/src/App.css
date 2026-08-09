@@ -1230,6 +1230,13 @@
 .settings-section-heading h2 { margin: 0; color: var(--text); font-size: 15px; }
 .settings-section-heading p { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .settings-section-heading .settings-add-button { margin-left: auto; flex: 0 0 auto; }
+.settings-permission-list { display: grid; gap: 10px; }
+.settings-permission-toggle { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; width: 100%; min-height: 70px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.settings-permission-toggle:hover { border-color: #b7c9e4; background: #f8fbff; }
+.settings-permission-toggle > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.settings-permission-toggle > span:first-child strong { color: var(--text); font-size: 13px; line-height: 1.4; }
+.settings-permission-toggle > span:first-child small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.settings-permission-toggle .backup-toggle-track { flex: 0 0 auto; }
 .settings-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .settings-field-wide { grid-column: 1 / -1; }
 .settings-number-input { display: flex; align-items: center; gap: 8px; }
