@@ -4,7 +4,7 @@ import { customers, maintenanceDocuments, maintenanceItems, paymentEntries, paym
 import { requireAdminOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
-import { assertRequestContentLength, HttpError, corsHeaders, jsonResponse } from '../http'
+import { assertRequestContentLength, HttpError, corsHeaders, jsonResponse, readFormData } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 
 const importResources = ['customers', 'vehicles', 'sales', 'maintenance', 'payments'] as const
@@ -54,7 +54,13 @@ export async function handleImportRoutes(request: Request, env: Env): Promise<Re
 
 async function readCsvUpload(request: Request, resource: ImportResource) {
   assertRequestContentLength(request, 6 * 1024 * 1024, { required: true })
-  const formData = await request.formData().catch(() => null)
+  let formData: FormData | null
+  try {
+    formData = await readFormData(request, 6 * 1024 * 1024)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) formData = null
+    else throw error
+  }
   const file = formData?.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'CSVファイルを選択してください。')
   if (file.size === 0) throw new HttpError(400, 'CSVファイルが空です。')

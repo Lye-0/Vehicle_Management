@@ -3,7 +3,7 @@ import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories,
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
-import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readFormData, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
@@ -230,7 +230,7 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
   if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
   assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024, { required: true })
-  const formData = await request.formData()
+  const formData = await readFormData(request, maximumAttachmentSize + 1024 * 1024)
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
   const contentType = assertSupportedAttachmentContentType(file.type)

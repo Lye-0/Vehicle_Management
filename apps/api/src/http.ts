@@ -32,6 +32,17 @@ export async function readJson(request: Request, maximumBytes = defaultJsonBodyL
   return body as Record<string, unknown>
 }
 
+export async function readFormData(request: Request, maximumBytes: number) {
+  const bytes = await readRequestBytes(request, maximumBytes)
+  const headers = new Headers(request.headers)
+  headers.delete('content-length')
+  try {
+    return await new Request(request.url, { method: request.method, headers, body: bytes }).formData()
+  } catch {
+    throw new HttpError(400, 'multipart形式の入力が不正です。')
+  }
+}
+
 export function assertRequestContentLength(request: Request, maximumBytes: number, options: { required?: boolean } = {}) {
   const header = request.headers.get('Content-Length')
   if (!header) {
@@ -45,9 +56,13 @@ export function assertRequestContentLength(request: Request, maximumBytes: numbe
 }
 
 async function readRequestText(request: Request, maximumBytes: number) {
+  return new TextDecoder().decode(await readRequestBytes(request, maximumBytes))
+}
+
+async function readRequestBytes(request: Request, maximumBytes: number) {
   const contentLength = Number(request.headers.get('Content-Length'))
   if (Number.isFinite(contentLength) && contentLength > maximumBytes) throw new HttpError(413, 'リクエスト本文が大きすぎます。')
-  if (!request.body) return ''
+  if (!request.body) return new Uint8Array()
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
   let totalBytes = 0
@@ -71,5 +86,5 @@ async function readRequestText(request: Request, maximumBytes: number) {
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
-  return new TextDecoder().decode(bytes)
+  return bytes
 }
