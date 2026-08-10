@@ -77,6 +77,24 @@ public partial class App : Application
             var workspaceService = new AbacusWorkspaceService(inspector);
             var workspace = await workspaceService.CreateAsync(before, destination);
             var verifiedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
+            var mutablePath = Path.Combine(workspace.WorkspacePath, "abx-cs-mn.ucs");
+            var mutableBytes = await File.ReadAllBytesAsync(mutablePath);
+            mutableBytes[^1] ^= 0x01;
+            await File.WriteAllBytesAsync(mutablePath, mutableBytes);
+            var verifiedUsedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
+            var forbiddenPath = Path.Combine(workspace.WorkspacePath, "BackUp-5.fp5");
+            var forbiddenBytes = await File.ReadAllBytesAsync(forbiddenPath);
+            forbiddenBytes[^1] ^= 0x01;
+            await File.WriteAllBytesAsync(forbiddenPath, forbiddenBytes);
+            var rejectedUnallowedChange = false;
+            try
+            {
+                await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
+            }
+            catch (InvalidDataException)
+            {
+                rejectedUnallowedChange = true;
+            }
             var parser = new AbacusTabParser();
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
             var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
@@ -96,6 +114,9 @@ public partial class App : Application
                 File.Exists(workspace.ManifestPath) &&
                 verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 verifiedWorkspace.WorkspacePath == workspace.WorkspacePath &&
+                verifiedWorkspace.AllowedRuntimeChanges.Count == 0 &&
+                verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 1 &&
+                rejectedUnallowedChange &&
                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&

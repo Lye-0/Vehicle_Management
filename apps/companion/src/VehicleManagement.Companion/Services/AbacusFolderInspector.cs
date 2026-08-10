@@ -12,6 +12,7 @@ public static class AbacusConstants
     public static readonly IReadOnlyList<string> RequiredFiles =
     [
         ExecutableFileName,
+        "abx-cs-mn.ucs",
         "abx-cs-sk.ucs",
         "BackUp-2.tab",
         "BackUp-3.tab",

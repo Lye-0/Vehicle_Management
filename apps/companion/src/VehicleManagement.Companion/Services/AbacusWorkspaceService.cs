@@ -20,10 +20,14 @@ public sealed record AbacusWorkspaceVerificationResult(
     string WorkspacePath,
     string ManifestPath,
     AbacusFolderReport WorkspaceReport,
-    string OriginalFingerprint);
+    string OriginalFingerprint,
+    IReadOnlyList<string> AllowedRuntimeChanges);
 
 public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
 {
+    private const string RuntimeMutableFile = "abx-cs-mn.ucs";
+    private const int MaximumRuntimeChangedBytes = 4096;
+
     private sealed record WorkspaceManifest(
         int Version,
         DateTime CreatedAtUtc,
@@ -175,10 +179,29 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
             cancellationToken) ?? throw new InvalidDataException("検証マニフェストを読み取れません。");
 
-        if (manifest.Version != 1 || string.IsNullOrWhiteSpace(manifest.WorkspacePath) ||
+        if (manifest.Version != 1 || string.IsNullOrWhiteSpace(manifest.SourcePath) ||
+            string.IsNullOrWhiteSpace(manifest.WorkspacePath) ||
             !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifest.WorkspacePath)), root, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("検証マニフェストが選択した作業用コピーと一致しません。");
+        }
+
+        var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifest.SourcePath));
+        if (IsSameOrSubPath(root, sourceRoot) || IsSameOrSubPath(sourceRoot, root))
+        {
+            throw new InvalidDataException("保存用原本と作業用コピーが分離されていません。");
+        }
+
+        var sourceReport = await inspector.InspectAsync(
+            sourceRoot,
+            new Progress<AbacusInspectionProgress>(item =>
+                progress?.Report(new AbacusWorkspaceProgress("保存用原本確認中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
+            cancellationToken);
+        if (!sourceReport.IsValid || sourceReport.FileCount != manifest.FileCount ||
+            sourceReport.TotalBytes != manifest.TotalBytes ||
+            !string.Equals(sourceReport.FolderFingerprint, manifest.FolderFingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("保存用原本が作業用コピー作成時の検証結果と一致しません。");
         }
 
         var report = await inspector.InspectAsync(
@@ -186,13 +209,87 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
             new Progress<AbacusInspectionProgress>(item =>
                 progress?.Report(new AbacusWorkspaceProgress("作業用コピー再検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
             cancellationToken);
-        if (!report.IsValid || report.FileCount != manifest.FileCount || report.TotalBytes != manifest.TotalBytes ||
-            !string.Equals(report.FolderFingerprint, manifest.FolderFingerprint, StringComparison.Ordinal))
+        if (!report.IsValid || report.FileCount != manifest.FileCount || report.TotalBytes != manifest.TotalBytes)
         {
             throw new InvalidDataException("作業用コピーが作成時の検証結果と一致しません。起動対象にできません。");
         }
 
-        return new AbacusWorkspaceVerificationResult(root, manifestPath, report, manifest.FolderFingerprint);
+        var sourceFiles = sourceReport.Files.ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var workspaceFiles = report.Files.ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+        if (sourceFiles.Count != workspaceFiles.Count || sourceFiles.Keys.Any(path => !workspaceFiles.ContainsKey(path)))
+        {
+            throw new InvalidDataException("作業用コピーのファイル構成が保存用原本と一致しません。");
+        }
+
+        var allowedRuntimeChanges = new List<string>();
+        foreach (var (relativePath, sourceFile) in sourceFiles)
+        {
+            var workspaceFile = workspaceFiles[relativePath];
+            if (string.Equals(sourceFile.Sha256, workspaceFile.Sha256, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!string.Equals(relativePath, RuntimeMutableFile, StringComparison.OrdinalIgnoreCase) ||
+                sourceFile.Length != workspaceFile.Length)
+            {
+                throw new InvalidDataException($"許可されていない変更があります: {relativePath}");
+            }
+
+            var changedBytes = await CountChangedBytesAsync(
+                SafeCombine(sourceRoot, relativePath),
+                SafeCombine(root, relativePath),
+                MaximumRuntimeChangedBytes,
+                cancellationToken);
+            if (changedBytes > MaximumRuntimeChangedBytes)
+            {
+                throw new InvalidDataException($"{RuntimeMutableFile}の変更量が起動時管理情報の上限を超えています。");
+            }
+
+            allowedRuntimeChanges.Add($"{relativePath}（{changedBytes:N0}バイト差分）");
+        }
+
+        return new AbacusWorkspaceVerificationResult(
+            root,
+            manifestPath,
+            report,
+            manifest.FolderFingerprint,
+            allowedRuntimeChanges);
+    }
+
+    private static async Task<int> CountChangedBytesAsync(
+        string sourcePath,
+        string workspacePath,
+        int stopAfter,
+        CancellationToken cancellationToken)
+    {
+        await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
+        await using var workspace = new FileStream(workspacePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
+        var sourceBuffer = new byte[64 * 1024];
+        var workspaceBuffer = new byte[64 * 1024];
+        var changedBytes = 0;
+        while (true)
+        {
+            var sourceRead = await source.ReadAsync(sourceBuffer, cancellationToken);
+            var workspaceRead = await workspace.ReadAsync(workspaceBuffer, cancellationToken);
+            if (sourceRead != workspaceRead)
+            {
+                return stopAfter + 1;
+            }
+
+            if (sourceRead == 0)
+            {
+                return changedBytes;
+            }
+
+            for (var index = 0; index < sourceRead; index++)
+            {
+                if (sourceBuffer[index] != workspaceBuffer[index] && ++changedBytes > stopAfter)
+                {
+                    return changedBytes;
+                }
+            }
+        }
     }
 
     private static async Task VerifyFileHashAsync(string path, string expectedHash, CancellationToken cancellationToken)

@@ -379,8 +379,11 @@ public partial class MainWindow : Window
                 operationCancellation!.Token);
             verifiedWorkspacePath = result.WorkspacePath;
             workspaceResult = null;
+            var runtimeChangeDetail = result.AllowedRuntimeChanges.Count == 0
+                ? "作成時から変更なし"
+                : $"FileMaker起動時の限定的な変更を許容: {string.Join("、", result.AllowedRuntimeChanges)}";
             ImageDiagnosticStatusText.Text =
-                $"再検証に合格しました（{result.WorkspaceReport.FileCount:N0}ファイル）。コピー側ABACUSを起動できます。";
+                $"再検証に合格しました（{result.WorkspaceReport.FileCount:N0}ファイル、{runtimeChangeDetail}）。コピー側ABACUSを起動できます。";
             ImageLaunchAbacusButton.IsEnabled = !abacusMayBeRunning;
             LaunchAbacusButton.IsEnabled = !abacusMayBeRunning;
         }
