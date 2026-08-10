@@ -216,6 +216,25 @@ public partial class App : Application
                 new AbacusLinkagePlanner(new AbacusTabParser()))
                 .CreateAsync(source, packageParent);
             var migrationManifestText = await File.ReadAllTextAsync(migrationPreview.ManifestPath);
+            var legacyExportFolder = Path.Combine(testRoot, "legacy-export");
+            Directory.CreateDirectory(legacyExportFolder);
+            var salesExportFields = Enumerable.Repeat(string.Empty, 33).ToArray();
+            salesExportFields[0] = "2026/08/11";
+            salesExportFields[1] = "S-1";
+            salesExportFields[5] = "顧客A";
+            var maintenanceExportFields = Enumerable.Repeat(string.Empty, 29).ToArray();
+            maintenanceExportFields[0] = "2026/08/11";
+            maintenanceExportFields[1] = "M-1";
+            maintenanceExportFields[4] = "顧客A";
+            maintenanceExportFields[28] = "既知\u0004区切り";
+            var vehicleExportFields = Enumerable.Repeat(string.Empty, 23).ToArray();
+            vehicleExportFields[0] = "顧客A";
+            vehicleExportFields[12] = "車両A";
+            await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "hanbai.csv"), string.Join(',', salesExportFields), shiftJis);
+            await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "seibi.csv"), string.Join(',', maintenanceExportFields), shiftJis);
+            await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
+            await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou2.csv"), string.Join(',', vehicleExportFields), shiftJis);
+            var legacyExportAnalysis = await new AbacusLegacyExportInspector().AnalyzeAsync(legacyExportFolder);
             var invalidFolder = Path.Combine(testRoot, "invalid");
             Directory.CreateDirectory(invalidFolder);
             await File.WriteAllTextAsync(
@@ -263,6 +282,11 @@ public partial class App : Application
                 migrationManifestText.Contains("\"status\": \"preview-only\"", StringComparison.OrdinalIgnoreCase) &&
                 migrationManifestText.Contains("\"dataFiles\": []", StringComparison.OrdinalIgnoreCase) &&
                 migrationManifestText.Contains("\"imageFiles\": []", StringComparison.OrdinalIgnoreCase) &&
+                legacyExportAnalysis.IsValid &&
+                legacyExportAnalysis.SalesRows == 1 &&
+                legacyExportAnalysis.MaintenanceRows == 1 &&
+                legacyExportAnalysis.VehicleRows == 2 &&
+                legacyExportAnalysis.VehicleFileCount == 2 &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
         }
