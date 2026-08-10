@@ -518,7 +518,7 @@
                                 <DataGridTextColumn Header="構造正常" Binding="{Binding ValidRows}" Width="85" />
                                 <DataGridTextColumn Header="必須値空欄" Binding="{Binding BlankRequiredRows}" Width="90" />
                                 <DataGridTextColumn Header="日付不正" Binding="{Binding InvalidDateRows}" Width="80" />
-                                <DataGridCheckBoxColumn Header="合格" Binding="{Binding IsValid}" Width="65" />
+                                <DataGridCheckBoxColumn Header="合格" Binding="{Binding IsValid, Mode=OneWay}" Width="65" />
                             </DataGrid.Columns>
                         </DataGrid>
                         <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
