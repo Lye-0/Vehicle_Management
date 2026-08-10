@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using VehicleManagement.AbacusImport;
 using VehicleManagement.Companion.Services;
 
 namespace VehicleManagement.Companion;
@@ -12,6 +13,7 @@ public partial class MainWindow : Window
     private readonly LegacyHostSession session = new();
     private readonly AbacusFolderInspector folderInspector = new();
     private readonly AbacusWorkspaceService workspaceService;
+    private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
@@ -84,6 +86,51 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             SourcePathTextBox.Text = dialog.FolderName;
+            AnalysisPathTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private void SelectAnalysisFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "分析するABACUSフォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            AnalysisPathTextBox.Text = dialog.FolderName;
+            ResetDataAnalysis();
+        }
+    }
+
+    private void AnalysisPathTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ResetDataAnalysis();
+
+    private async void AnalyzeDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(AnalysisPathTextBox.Text))
+        {
+            MessageBox.Show(this, "分析するABACUSフォルダーを指定してください。", "フォルダー未選択");
+            return;
+        }
+
+        AnalyzeDataButton.IsEnabled = false;
+        AnalysisPathTextBox.IsEnabled = false;
+        AnalysisStatusText.Text = "販売・整備バックアップを読み取り専用で分析しています…";
+        try
+        {
+            var analysis = await dataAnalyzer.AnalyzeAsync(AnalysisPathTextBox.Text.Trim());
+            RenderDataAnalysis(analysis);
+        }
+        catch (Exception exception)
+        {
+            AnalysisStatusText.Text = $"分析に失敗しました: {exception.Message}";
+        }
+        finally
+        {
+            AnalyzeDataButton.IsEnabled = true;
+            AnalysisPathTextBox.IsEnabled = true;
         }
     }
 
@@ -312,6 +359,50 @@ public partial class MainWindow : Window
         OperationStatusText.Text = report.IsValid
             ? "保存用原本の読取検査が完了しました。ファイルへの書き込みは行っていません。"
             : "検査に合格しませんでした。表示された内容を確認してください。";
+        if (string.IsNullOrWhiteSpace(AnalysisPathTextBox.Text))
+        {
+            AnalysisPathTextBox.Text = report.SourcePath;
+        }
+    }
+
+    private void RenderDataAnalysis(AbacusDataAnalysis analysis)
+    {
+        OverallAnalysisResultText.Text = analysis.IsStructurallyValid
+            ? "構造検査に合格しました"
+            : "構造エラーがあります";
+        OverallAnalysisResultText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+            analysis.IsStructurallyValid ? "#17643A" : "#A61B1B")!;
+        OverallAnalysisDetailText.Text =
+            $"取込候補 {analysis.TotalImportCandidateRows:N0}行 / 顧客名空欄で除外 {analysis.TotalSkippedBlankCustomerRows:N0}行 / 保守的な車両候補 {analysis.ConservativeVehicleCandidates:N0}台";
+        SalesAnalysisText.Text = FormatDocumentAnalysis(analysis.Sales);
+        MaintenanceAnalysisText.Text = FormatDocumentAnalysis(analysis.Maintenance);
+        AnalysisErrorsText.Text = string.Join("\n", analysis.Sales.Errors.Concat(analysis.Maintenance.Errors)
+            .Take(20)
+            .Select(error => $"{error.RowNumber?.ToString() ?? "ファイル"}: {error.Message}"));
+        AnalysisStatusText.Text = analysis.IsStructurallyValid
+            ? "分析が完了しました。ファイルへの書き込みは行っていません。"
+            : "分析が完了しました。構造エラーのため、このファイルは取込対象にできません。";
+    }
+
+    private static string FormatDocumentAnalysis(AbacusDocumentAnalysis analysis) =>
+        $"全行: {analysis.TotalRows:N0}\n" +
+        $"列形式: {analysis.ExpectedColumns}列\n" +
+        $"構造正常: {analysis.StructurallyValidRows:N0}\n" +
+        $"取込候補: {analysis.ImportCandidateRows:N0}\n" +
+        $"顧客名空欄で除外: {analysis.SkippedBlankCustomerRows:N0}\n" +
+        $"車両情報なし: {analysis.CandidateRowsWithoutVehicle:N0}\n" +
+        $"書類番号重複: {analysis.DuplicateDocumentNumberRows:N0}\n" +
+        $"車両候補: {analysis.ConservativeVehicleCandidates:N0}\n" +
+        $"既知の内部区切り: {analysis.LegacyControlCharacterCount:N0}";
+
+    private void ResetDataAnalysis()
+    {
+        AnalysisStatusText.Text = "未分析";
+        OverallAnalysisResultText.Text = "分析結果はまだありません。";
+        OverallAnalysisDetailText.Text = "";
+        SalesAnalysisText.Text = "未分析";
+        MaintenanceAnalysisText.Text = "未分析";
+        AnalysisErrorsText.Text = "";
     }
 
     private void RenderAbacusResult(AbacusRuntimeSnapshot result)
