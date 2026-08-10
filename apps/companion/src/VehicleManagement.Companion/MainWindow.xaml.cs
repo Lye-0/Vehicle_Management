@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
     private readonly LegacyHostSession session = new();
     private readonly AbacusFolderInspector folderInspector = new();
     private readonly AbacusWorkspaceService workspaceService;
+    private readonly AbacusClipboardInspector clipboardInspector = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
@@ -428,6 +430,50 @@ public partial class MainWindow : Window
         finally
         {
             InspectImageUiButton.IsEnabled = abacusMayBeRunning;
+        }
+    }
+
+    private async void InspectClipboardButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectClipboardButton.IsEnabled = false;
+        ClipboardInspectionStatusText.Text = "クリップボードの形式と画像寸法を読み取り診断しています…";
+        try
+        {
+            var result = await clipboardInspector.InspectAsync();
+            ClipboardFormatsText.Text = result.Formats.Count == 0
+                ? "形式: なし"
+                : $"形式: {string.Join(" / ", result.Formats)}";
+            ClipboardFileDropText.Text = result.FileCount == 0
+                ? "ファイル参照: なし"
+                : $"ファイル参照: {result.FileCount:N0}件（拡張子: {string.Join("、", result.FileExtensions)}）";
+
+            if (result.HasBitmapImage)
+            {
+                ClipboardInspectionStatusText.Text =
+                    $"標準画像として取得できます（{result.PixelWidth:N0} × {result.PixelHeight:N0}px）。次段階で1件だけ保存する検証へ進めます。";
+                ClipboardInspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            }
+            else if (result.HasPotentialImageData)
+            {
+                ClipboardInspectionStatusText.Text =
+                    "画像候補の形式はありますが、標準画像には変換できませんでした。表示された形式を基に専用読取方式を検討します。";
+                ClipboardInspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#805B10")!;
+            }
+            else
+            {
+                ClipboardInspectionStatusText.Text =
+                    "画像データを確認できませんでした。ABACUSで画像部分をクリックして選択し、Ctrl+Cの直後にもう一度診断してください。";
+                ClipboardInspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
+        }
+        catch (Exception exception) when (exception is COMException or InvalidOperationException)
+        {
+            ClipboardInspectionStatusText.Text = $"クリップボード診断に失敗しました: {exception.Message}";
+            ClipboardInspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            InspectClipboardButton.IsEnabled = true;
         }
     }
 
