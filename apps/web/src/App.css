@@ -3880,9 +3880,31 @@
   .settings-sales-preset-column:last-child {
     grid-column: auto;
   }
+
+  /* The maintenance sheet is narrower beside the document list. Keep every
+     editable value proportional to the sheet instead of the viewport. */
+  .maintenance-statement-control.is-compact-value,
+  .maintenance-statement-combobox > input {
+    font-size: clamp(4px, 0.9cqw, 11px);
+  }
+
+  .maintenance-statement-control.is-compact-date {
+    font-size: clamp(4px, 0.75cqw, 9px);
+  }
+
+  .maintenance-statement-calendar-control > .date-calendar-picker {
+    width: clamp(7px, 1.7cqw, 18px);
+  }
 }
 
 /* Size-specific corrections requested after the first tablet pass. */
+/*
+   第一サイズ: 760px以下
+   第二サイズ: 761px〜900px
+   第三サイズ: 901px〜1399pxの切り替え表示
+   第四サイズ: 901px〜1399pxの一覧＋詳細併設表示
+   第五サイズ: 1400px以上
+*/
 @container tablet-page (max-width: 939px) {
   /* Once a document is open, the list controls are no longer useful and
      should not push the detail view down the page. */
@@ -3892,9 +3914,29 @@
   .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-toolbar,
   .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-toolbar,
   .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-toolbar,
+  .page-content:has(.customer-directory.mobile-workspace-detail) .customer-toolbar,
+  .page-content:has(.customer-directory.mobile-workspace-detail) .customer-page-header > .button,
   .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-document-filter-panel,
   .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-document-filter-panel,
   .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-filter-panel {
+    display: none;
+  }
+}
+
+/* The first-size page uses the mobile layout before the named container is
+   established, so apply the detail-only toolbar rule directly as well. */
+@media (max-width: 760px) {
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-page-header > .button,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-page-header > .button,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-page-header > .button,
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-toolbar,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-toolbar,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-toolbar,
+  .page-content:has(.sales-workspace.mobile-workspace-detail) .sales-document-filter-panel,
+  .page-content:has(.maintenance-workspace.mobile-workspace-detail) .maintenance-document-filter-panel,
+  .page-content:has(.payment-workspace.mobile-workspace-detail) .payment-filter-panel,
+  .page-content:has(.customer-directory.mobile-workspace-detail) .customer-toolbar,
+  .page-content:has(.customer-directory.mobile-workspace-detail) .customer-page-header > .button {
     display: none;
   }
 }

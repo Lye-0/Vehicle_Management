@@ -230,7 +230,6 @@ flowchart LR
 
 </details>
 
-### 設定
 
 <details>
 <summary><strong>設定</strong> — 店舗・帳票・データ・権限を管理する</summary>
