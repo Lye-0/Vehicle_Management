@@ -56,4 +56,9 @@ public sealed record LegacyHostMessage(
     string? Status = null,
     string? Message = null,
     int? ProcessId = null,
-    string? Architecture = null);
+    string? Architecture = null,
+    string? TargetPath = null,
+    string? TargetArchitecture = null,
+    long? WindowHandle = null,
+    string? WindowTitle = null,
+    int? AutomationElementCount = null);

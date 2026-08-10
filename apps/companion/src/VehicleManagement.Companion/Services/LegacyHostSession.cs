@@ -123,6 +123,68 @@ public sealed class LegacyHostSession : IAsyncDisposable
         }
     }
 
+    public async Task<AbacusRuntimeSnapshot> LaunchAndInspectAbacusAsync(
+        string executablePath,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnected();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(40));
+            var response = await SendAsync(
+                new LegacyHostMessage("launch-abacus", Guid.NewGuid().ToString("N"), TargetPath: executablePath),
+                timeout.Token);
+            return ToAbacusSnapshot(response);
+        }
+        finally
+        {
+            operationLock.Release();
+        }
+    }
+
+    public async Task<AbacusRuntimeSnapshot> InspectAbacusAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnected();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(35));
+            var response = await SendAsync(
+                new LegacyHostMessage("inspect-abacus", Guid.NewGuid().ToString("N")),
+                timeout.Token);
+            return ToAbacusSnapshot(response);
+        }
+        finally
+        {
+            operationLock.Release();
+        }
+    }
+
+    public async Task<AbacusRuntimeSnapshot> CloseAbacusAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnected();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            var response = await SendAsync(
+                new LegacyHostMessage("close-abacus", Guid.NewGuid().ToString("N")),
+                timeout.Token);
+            return ToAbacusSnapshot(response);
+        }
+        finally
+        {
+            operationLock.Release();
+        }
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await operationLock.WaitAsync(cancellationToken);
@@ -201,6 +263,31 @@ public sealed class LegacyHostSession : IAsyncDisposable
             throw new InvalidDataException("LegacyHostから予期しない応答を受信しました。");
         }
     }
+
+    private async Task<LegacyHostMessage> SendAsync(
+        LegacyHostMessage request,
+        CancellationToken cancellationToken)
+    {
+        await LegacyHostProtocol.WriteAsync(writer!, request, cancellationToken);
+        var response = await LegacyHostProtocol.ReadAsync(reader!, cancellationToken);
+        if (response.RequestId != request.RequestId)
+        {
+            throw new InvalidDataException("LegacyHostから別の要求に対する応答を受信しました。");
+        }
+
+        return response;
+    }
+
+    private static AbacusRuntimeSnapshot ToAbacusSnapshot(LegacyHostMessage response) => new(
+        response.Type == "abacus-inspected" && response.Status == "ui-automation-ready",
+        response.Status ?? "unknown",
+        response.Message ?? "LegacyHostから詳細メッセージが返されませんでした。",
+        response.ProcessId,
+        response.Architecture,
+        response.TargetArchitecture,
+        response.WindowHandle,
+        response.WindowTitle,
+        response.AutomationElementCount);
 
     private void EnsureConnected()
     {

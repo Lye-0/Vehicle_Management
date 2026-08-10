@@ -14,3 +14,14 @@ public sealed record LegacyHostSnapshot(
     int? ProcessId = null,
     string? Architecture = null,
     string? Detail = null);
+
+public sealed record AbacusRuntimeSnapshot(
+    bool IsRecognized,
+    string Status,
+    string Message,
+    int? ProcessId = null,
+    string? HostArchitecture = null,
+    string? TargetArchitecture = null,
+    long? WindowHandle = null,
+    string? WindowTitle = null,
+    int? AutomationElementCount = null);
