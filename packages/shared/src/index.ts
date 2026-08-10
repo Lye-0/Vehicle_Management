@@ -22,7 +22,12 @@ function parseIntegerWithOptionalUnit(value: unknown): number | null {
 function normalizeIntegerUnit(value: unknown, unit: '年' | 'cc' | 'km'): string {
   const text = normalizedString(value)
   if (!text) return ''
-  const parsed = parseIntegerWithOptionalUnit(value)
+  const completedText = unit === 'cc'
+    ? text.replace(/^(\d[\d,\s]*\s*)c$/i, '$1cc')
+    : unit === 'km'
+      ? text.replace(/^(\d[\d,\s]*\s*)k$/i, '$1km')
+      : text
+  const parsed = parseIntegerWithOptionalUnit(completedText)
   if (parsed === null) return text
   return unit === '年' ? `${parsed}年` : `${numberFormatter.format(parsed)} ${unit}`
 }
@@ -49,11 +54,14 @@ export function parseNormalizedInteger(value: unknown): number | null {
 
 /** 日本国内の一般的な電話番号にハイフンを補完する。 */
 export function normalizePhone(value: unknown): string {
-  const text = normalizedString(value)
+  const text = normalizedString(value).replace(/[‐‑‒–—―−ー]/gu, '-')
   if (!text) return ''
   if (!/^[0-9\s()\-]+$/.test(text)) return text
 
-  const digits = text.replace(/[\s()\-]/g, '')
+  const compact = text.replace(/[\s()]/g, '')
+  if (compact.includes('-')) return compact
+
+  const digits = compact
   if (/^0\d{10}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`
   if (/^(?:03|06)\d{8}$/.test(digits)) return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}`
   if (/^(?:0120|0570|0800)\d{6}$/.test(digits)) return `${digits.slice(0, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`

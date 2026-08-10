@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm'
 import { staffProfiles } from '@vehicle-management/database'
-import { requireAuthenticatedUser, UnauthorizedError, type FirebaseUser } from '../auth/firebase'
-import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession } from '../auth/organization'
+import { getBearerToken, requireAuthenticatedUser, UnauthorizedError, type FirebaseUser } from '../auth/firebase'
+import { completeInitialOrganizationSetup, completeInitialPasswordChange, loadAuthSession, requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { loadOrganizationPermissions, saveOrganizationPermissions } from '../organization-permissions'
 
 export async function handleOrganizationRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -11,12 +12,22 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
   const isSetupRoute = pathname === '/api/setup/organization'
   const isPasswordCompleteRoute = pathname === '/api/auth/password/complete'
   const isProfileRoute = pathname === '/api/auth/profile'
-  if (!isSessionRoute && !isSetupRoute && !isPasswordCompleteRoute && !isProfileRoute) return null
+  const isPermissionsRoute = pathname === '/api/organization/permissions'
+  if (!isSessionRoute && !isSetupRoute && !isPasswordCompleteRoute && !isProfileRoute && !isPermissionsRoute) return null
 
   try {
     const user = await requireAuthenticatedUser(request, env)
     const database = createDatabase(env.DB)
     if (isSessionRoute && request.method === 'GET') return jsonResponse(await loadAuthSession(database, env, user), 200, env)
+    if (isPermissionsRoute && request.method === 'GET') {
+      const context = await requireOrganizationContext(request, env, database)
+      return jsonResponse({ canManage: isAdministrator(context.organization.role), permissions: await loadOrganizationPermissions(database, context.organization.organizationId) }, 200, env)
+    }
+    if (isPermissionsRoute && request.method === 'PATCH') {
+      const context = await requireAdminOrganizationContext(request, env, database)
+      const body = await readJson(request)
+      return jsonResponse({ permissions: await saveOrganizationPermissions(database, context.organization.organizationId, body.permissions) }, 200, env)
+    }
     if (isProfileRoute && request.method === 'PATCH') return await updateProfile(request, database, user, env)
     if (isSetupRoute && request.method === 'POST') {
       const body = await readJson(request)
@@ -24,7 +35,8 @@ export async function handleOrganizationRoutes(request: Request, env: Env): Prom
       return jsonResponse({ session: await loadAuthSession(database, env, user), organizationId }, 201, env)
     }
     if (isPasswordCompleteRoute && request.method === 'POST') {
-      await completeInitialPasswordChange(database, user.uid)
+      const body = await readJson(request)
+      await completeInitialPasswordChange(database, env, user.uid, getBearerToken(request) ?? '', requiredInitialPassword(body.password))
       return jsonResponse({ session: await loadAuthSession(database, env, user) }, 200, env)
     }
     throw new HttpError(405, 'この操作には対応していません。')
@@ -41,7 +53,7 @@ async function updateProfile(request: Request, database: ReturnType<typeof creat
   const body = await readJson(request)
   const existing = await database.select().from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const displayName = body.displayName === undefined ? existing?.displayName ?? user.displayName ?? user.email ?? 'ログインユーザー' : requiredProfileDisplayName(body.displayName)
-  const email = body.email === undefined ? existing?.email ?? user.email : normalizedProfileEmail(body.email)
+  const email = body.email === undefined ? existing?.email ?? user.email : normalizedProfileEmail(body.email, user.email)
   const now = new Date().toISOString()
   if (existing) {
     await database.update(staffProfiles).set({ displayName, email, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
@@ -57,13 +69,23 @@ function requiredProfileDisplayName(value: unknown) {
   return displayName
 }
 
-function normalizedProfileEmail(value: unknown) {
+function normalizedProfileEmail(value: unknown, authenticatedEmail: string | null) {
   if (value === null) return null
   if (typeof value !== 'string') throw new HttpError(400, 'メールアドレスが不正です。')
   const email = value.trim().toLowerCase()
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, '有効なメールアドレスを入力してください。')
+  if (!authenticatedEmail || email !== authenticatedEmail.trim().toLowerCase()) throw new HttpError(400, '認証済みアカウントのメールアドレスのみ保存できます。')
   return email
 }
 function stringValue(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? body[key].trim() : ''
+}
+
+function isAdministrator(role: string) {
+  return role === 'owner' || role === 'admin'
+}
+
+function requiredInitialPassword(value: unknown) {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128) throw new HttpError(400, 'パスワードは8文字以上128文字以内で設定してください。')
+  return value
 }

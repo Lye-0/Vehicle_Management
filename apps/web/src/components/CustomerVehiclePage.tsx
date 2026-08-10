@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import {
   CarFront,
   CalendarDays,
+  ChevronLeft,
   ChevronRight,
   Download,
   Eye,
@@ -37,6 +39,8 @@ import {
   updateVehicle,
   uploadVehicleFile,
 } from '../lib/customerApi'
+import { DateCalendarButton } from './DateCalendarButton'
+import { NormalizedInput } from './NormalizedValueInput'
 
 const emptyCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '' }
 const emptyVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
@@ -81,6 +85,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedVehicleId, setSelectedVehicleId] = useState('')
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialCustomerId ? 'detail' : 'list')
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false)
   const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false)
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
@@ -105,6 +110,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       if (targetCustomer) {
         setSelectedCustomerId(targetCustomer.id)
         setSelectedVehicleId(targetCustomer.vehicles.some((vehicle) => vehicle.id === initialNavigationRef.current.vehicleId) ? initialNavigationRef.current.vehicleId ?? '' : targetCustomer.vehicles[0]?.id ?? '')
+        setMobileWorkspaceView('detail')
         onNavigationConsumedRef.current?.()
       }
       setError('')
@@ -137,9 +143,20 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
 
+  function openMobileDetail() {
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+  }
+
+  function openMobileList() {
+    setMobileWorkspaceView('list')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+  }
+
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(customer.vehicles[0]?.id ?? '')
+    openMobileDetail()
   }
 
   function selectVehicle(customer: Customer, vehicle: Vehicle) {
@@ -168,13 +185,15 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   async function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!customerForm.name.trim()) return
+    const normalizedForm = { ...customerForm, phone: normalizePhone(customerForm.phone), postalCode: normalizePostalCode(customerForm.postalCode ?? '') }
     setSaving(true)
     setError('')
     try {
-      const savedCustomer = editingCustomerId ? await updateCustomer(editingCustomerId, customerForm) : await createCustomer(customerForm)
+      const savedCustomer = editingCustomerId ? await updateCustomer(editingCustomerId, normalizedForm) : await createCustomer(normalizedForm)
       setCustomers((current) => editingCustomerId ? current.map((customer) => customer.id === savedCustomer.id ? savedCustomer : customer) : [...current, savedCustomer])
       setSelectedCustomerId(savedCustomer.id)
       setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
+      openMobileDetail()
       closeCustomerDialog()
     } catch (reason: unknown) {
       setError(getErrorMessage(reason))
@@ -204,19 +223,21 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   async function handleVehicleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedCustomer || !vehicleForm.maker.trim() || !vehicleForm.model.trim()) return
+    const normalizedForm = { ...vehicleForm, year: normalizeModelYear(vehicleForm.year), mileage: normalizeMileage(vehicleForm.mileage), displacement: normalizeDisplacement(vehicleForm.displacement) }
     setSaving(true)
     setError('')
     try {
       if (editingVehicleId) {
-        await updateVehicle(editingVehicleId, vehicleForm)
-        setCustomers((current) => current.map((customer) => customer.id !== selectedCustomer.id ? customer : { ...customer, vehicles: customer.vehicles.map((vehicle) => vehicle.id === editingVehicleId ? { ...vehicle, ...vehicleForm, attachments: vehicle.attachments } : vehicle) }))
+        await updateVehicle(editingVehicleId, normalizedForm)
+        setCustomers((current) => current.map((customer) => customer.id !== selectedCustomer.id ? customer : { ...customer, vehicles: customer.vehicles.map((vehicle) => vehicle.id === editingVehicleId ? { ...vehicle, ...normalizedForm, attachments: vehicle.attachments } : vehicle) }))
         setSelectedVehicleId(editingVehicleId)
       } else {
-        const result = await createVehicle(selectedCustomer.id, vehicleForm)
+        const result = await createVehicle(selectedCustomer.id, normalizedForm)
         setCustomers((current) => current.map((customer) => customer.id === result.customer.id ? result.customer : customer))
         setSelectedCustomerId(result.customer.id)
         setSelectedVehicleId(result.vehicleId)
       }
+      openMobileDetail()
       closeVehicleDialog()
     } catch (reason: unknown) {
       setError(getErrorMessage(reason))
@@ -308,9 +329,12 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as CustomerSearchField)}>{customerSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
       </div>
 
-      <div className="customer-directory">
-        <CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} />
-        <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
+      <div className={`customer-directory mobile-workspace mobile-workspace-${mobileWorkspaceView}`}>
+        <div className="mobile-workspace-list"><CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} /></div>
+        <div className="mobile-workspace-detail">
+          <button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />顧客一覧へ戻る</button>
+          <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
+        </div>
       </div>
 
       {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} onChange={setCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
@@ -327,7 +351,7 @@ function CustomerList({ customers, selectedCustomerId, onSelect }: { customers: 
 function CustomerProfile({ customer, vehicle, onSelectVehicle, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment, onNavigate }: { customer: Customer | null; vehicle: Vehicle | null; onSelectVehicle: (vehicle: Vehicle) => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
   if (!customer) return <section className="panel customer-profile-empty"><UserRound size={30} /><strong>顧客を登録してください</strong><span>登録した顧客の情報がここに表示されます。</span></section>
 
-  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={CalendarDays} label="生年月日" value={customer.birthDate || '未登録'} /><InfoItem icon={BriefcaseBusiness} label="勤務先等" value={customer.employer || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両</h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${item.inspectionDate.startsWith('2025') ? 'is-danger' : item.inspectionDate.startsWith('2026/08') ? 'is-warning' : ''}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onAttachmentDrop={onAttachmentDrop} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} onNavigate={onNavigate} /></>}</section>
+  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={CalendarDays} label="生年月日" value={customer.birthDate || '未登録'} /><InfoItem icon={BriefcaseBusiness} label="勤務先等" value={customer.employer || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両</h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${vehicleInspectionTone(item.inspectionDate)}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onAttachmentDrop={onAttachmentDrop} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} onNavigate={onNavigate} /></>}</section>
 }
 
 function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
@@ -434,6 +458,16 @@ function HistoryRow({ primary, secondary, onClick }: { primary: string; secondar
 
 function formatYen(amount: number) { return `¥${new Intl.NumberFormat('ja-JP').format(Math.round(amount))}` }
 function formatHistoryDate(value: string | null) { return value ? value.slice(0, 10).replaceAll('-', '/') : '日付未登録' }
+
+function vehicleInspectionTone(value: string) {
+  const normalized = value.trim().slice(0, 10).replaceAll('/', '-')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return ''
+  const dueDate = new Date(`${normalized}T00:00:00`)
+  const today = new Date()
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const diff = Math.ceil((dueDate.getTime() - todayDate.getTime()) / 86_400_000)
+  return diff < 0 ? 'is-danger' : diff <= 30 ? 'is-warning' : ''
+}
 
 function DetailField({ label, value }: { label: string; value: string }) {
   return <div className="detail-field"><span>{label}</span><strong>{value}</strong></div>
@@ -614,15 +648,19 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
 }
 
 function CustomerDialog({ form, title, submitLabel, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><input type="tel" value={form.phone} onChange={(event) => onChange({ ...form, phone: event.target.value })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><input value={form.birthDate} onChange={(event) => onChange({ ...form, birthDate: event.target.value })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><input value={form.postalCode ?? ''} onChange={(event) => onChange({ ...form, postalCode: event.target.value })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><NormalizedInput field="phone" type="tel" value={form.phone} onChange={(phone) => onChange({ ...form, phone })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><ModalDateInput ariaLabel="生年月日" value={form.birthDate} onChange={(birthDate) => onChange({ ...form, birthDate })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><NormalizedInput field="postalCode" value={form.postalCode ?? ''} onChange={(postalCode) => onChange({ ...form, postalCode })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
 }
 
 function VehicleDialog({ form, title, submitLabel, customerName, onChange, onClose, onSubmit }: { form: VehicleInput; title: string; submitLabel: string; customerName: string; onChange: (form: VehicleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><input value={form.year} onChange={(event) => onChange({ ...form, year: event.target.value })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><input value={form.mileage} onChange={(event) => onChange({ ...form, mileage: event.target.value })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><input inputMode="numeric" value={form.displacement} onChange={(event) => onChange({ ...form, displacement: event.target.value })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><NormalizedInput field="modelYear" value={form.year} onChange={(year) => onChange({ ...form, year })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><NormalizedInput field="mileage" value={form.mileage} onChange={(mileage) => onChange({ ...form, mileage })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><NormalizedInput field="displacement" inputMode="numeric" value={form.displacement} onChange={(displacement) => onChange({ ...form, displacement })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
+}
+
+function ModalDateInput({ ariaLabel, value, onChange, placeholder }: { ariaLabel: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return <div className="modal-date-input"><input aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /><DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} /></div>
 }
 
 function FormField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
-  return <label className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</label>
+  return <div className="form-field"><span>{label}{required && <em>必須</em>}</span>{children}</div>
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {

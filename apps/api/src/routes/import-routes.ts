@@ -1,11 +1,15 @@
 import { and, asc, eq } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import { customers, maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
-import { HttpError, corsHeaders, jsonResponse } from '../http'
+import { assertRequestContentLength, HttpError, corsHeaders, jsonResponse, readFormData } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
+import { maximumCsvDetailItemCount, pushD1BatchStatement } from '../lib/resource-limits'
 
 const importResources = ['customers', 'vehicles', 'sales', 'maintenance', 'payments'] as const
+const paymentMethods = new Set(['現金', '銀行振込', 'クレジットカード', 'その他'])
 type ImportResource = typeof importResources[number]
 type ImportOutcome = 'imported' | 'updated'
 
@@ -20,8 +24,8 @@ const expectedHeaders: Record<ImportResource, string[]> = {
 const requiredHeaders: Record<ImportResource, string[]> = {
   customers: ['顧客名'],
   vehicles: ['車名'],
-  sales: ['書類番号', '書類種別', '顧客名', '発行日'],
-  maintenance: ['書類番号', '書類種別', '入庫区分', '顧客名', '発行日'],
+  sales: ['書類番号', '書類種別', '顧客名', '発行日', '消費税'],
+  maintenance: ['書類番号', '書類種別', '入庫区分', '顧客名', '発行日', '消費税'],
   payments: ['請求書ID', '請求書種別'],
 }
 
@@ -50,7 +54,14 @@ export async function handleImportRoutes(request: Request, env: Env): Promise<Re
 }
 
 async function readCsvUpload(request: Request, resource: ImportResource) {
-  const formData = await request.formData().catch(() => null)
+  assertRequestContentLength(request, 6 * 1024 * 1024, { required: true })
+  let formData: FormData | null
+  try {
+    formData = await readFormData(request, 6 * 1024 * 1024)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) formData = null
+    else throw error
+  }
   const file = formData?.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'CSVファイルを選択してください。')
   if (file.size === 0) throw new HttpError(400, 'CSVファイルが空です。')
@@ -113,34 +124,69 @@ function validateRows(resource: ImportResource, rows: CsvRow[]) {
     if (resource === 'vehicles' && !value(row, '車名')) messages.push('車名がありません。')
     if ((resource === 'sales' || resource === 'maintenance') && !value(row, '顧客名')) messages.push('顧客名がありません。')
     if ((resource === 'sales' || resource === 'maintenance') && !parseDate(value(row, '発行日'))) messages.push('発行日が不正です。')
+    if ((resource === 'sales' || resource === 'maintenance') && !isNonNegativeIntegerText(value(row, '消費税'))) messages.push('消費税は0以上の整数で入力してください。')
     if (resource === 'payments' && !value(row, '請求書ID')) messages.push('請求書IDがありません。')
     return messages.length ? [{ row: index + 2, message: messages.join('') }] : []
   })
 }
 
 async function importRows(database: ReturnType<typeof createDatabase>, organizationId: string, resource: ImportResource, rows: CsvRow[]) {
+  const validationErrors = [...validateRows(resource, rows), ...findDuplicateImportKeys(resource, rows)]
+  if (validationErrors.length) {
+    const details = validationErrors.slice(0, 10).map((error) => `${error.row}行目: ${error.message}`).join(' ')
+    throw new HttpError(400, `CSVに不正な行があります。変更は反映されていません。${details}`)
+  }
   const result = { imported: 0, updated: 0, skipped: 0, errors: [] as Array<{ row: number; message: string }> }
+  const writes: BatchItem<'sqlite'>[] = []
   for (let index = 0; index < rows.length; index += 1) {
     try {
       const outcome = resource === 'customers'
-        ? await importCustomer(database, organizationId, rows[index])
+        ? await importCustomer(database, organizationId, rows[index], writes)
         : resource === 'vehicles'
-          ? await importVehicle(database, organizationId, rows[index])
+          ? await importVehicle(database, organizationId, rows[index], writes)
           : resource === 'sales'
-            ? await importSales(database, organizationId, rows[index])
+            ? await importSales(database, organizationId, rows[index], writes)
             : resource === 'maintenance'
-              ? await importMaintenance(database, organizationId, rows[index])
-              : await importPayment(database, organizationId, rows[index])
+              ? await importMaintenance(database, organizationId, rows[index], writes)
+              : await importPayment(database, organizationId, rows[index], writes)
       result[outcome] += 1
     } catch (error) {
-      if (result.errors.length < 100) result.errors.push({ row: index + 2, message: error instanceof Error ? error.message : '取込できない行です。' })
-      result.skipped += 1
+      if (error instanceof HttpError && error.status === 413) throw error
+      const message = error instanceof Error ? error.message : '取込できない行です。'
+      throw new HttpError(400, `CSV ${index + 2}行目の取込に失敗しました。変更は反映されていません。${message}`)
     }
+  }
+  if (!writes.length) throw new HttpError(400, 'CSVに反映できる行がありません。')
+  try {
+    await database.batch(writes as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'データベースへの反映に失敗しました。'
+    throw new HttpError(400, `CSVの取込に失敗しました。変更は反映されていません。${message}`)
   }
   return result
 }
 
-async function importCustomer(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
+function findDuplicateImportKeys(resource: ImportResource, rows: CsvRow[]) {
+  const seen = new Map<string, number>()
+  const errors: Array<{ row: number; message: string }> = []
+  rows.forEach((row, index) => {
+    const key = resource === 'customers'
+      ? value(row, '顧客ID') || value(row, '顧客番号')
+      : resource === 'vehicles'
+        ? value(row, '車両ID') || (value(row, '登録番号') ? `${value(row, '顧客ID')}:${value(row, '顧客番号')}:${value(row, '登録番号')}` : '')
+        : resource === 'payments'
+          ? `${value(row, '請求書種別')}:${value(row, '請求書ID')}`
+          : value(row, '書類ID') || value(row, '書類番号')
+    if (!key || !seen.has(key)) {
+      if (key) seen.set(key, index + 2)
+      return
+    }
+    errors.push({ row: index + 2, message: `同じ識別子が${seen.get(key)}行目にもあります。` })
+  })
+  return errors
+}
+
+async function importCustomer(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow, writes: BatchItem<'sqlite'>[]): Promise<ImportOutcome> {
   const name = requiredText(row, '顧客名')
   const customerNumber = value(row, '顧客番号') || `IMP-${crypto.randomUUID().slice(0, 8)}`
   const id = value(row, '顧客ID')
@@ -160,14 +206,14 @@ async function importCustomer(database: ReturnType<typeof createDatabase>, organ
     updatedAt: new Date().toISOString(),
   }
   if (existing) {
-    await database.update(customers).set(data).where(and(eq(customers.organizationId, organizationId), eq(customers.id, existing.id))).run()
+    pushD1BatchStatement(writes, database.update(customers).set(data).where(and(eq(customers.organizationId, organizationId), eq(customers.id, existing.id))))
     return 'updated'
   }
-  await database.insert(customers).values({ id: id || crypto.randomUUID(), ...data }).run()
+  pushD1BatchStatement(writes, database.insert(customers).values({ id: id || crypto.randomUUID(), ...data }))
   return 'imported'
 }
 
-async function importVehicle(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
+async function importVehicle(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow, writes: BatchItem<'sqlite'>[]): Promise<ImportOutcome> {
   const customer = await findCustomer(database, organizationId, row)
   if (!customer) throw new Error('紐づく顧客が見つかりません。顧客ID、顧客番号、顧客名のいずれかを指定してください。')
   const name = requiredText(row, '車名')
@@ -197,14 +243,14 @@ async function importVehicle(database: ReturnType<typeof createDatabase>, organi
     updatedAt: new Date().toISOString(),
   }
   if (existing) {
-    await database.update(vehicles).set(data).where(and(eq(vehicles.organizationId, organizationId), eq(vehicles.id, existing.id))).run()
+    pushD1BatchStatement(writes, database.update(vehicles).set(data).where(and(eq(vehicles.organizationId, organizationId), eq(vehicles.id, existing.id))))
     return 'updated'
   }
-  await database.insert(vehicles).values({ id: id || crypto.randomUUID(), ...data }).run()
+  pushD1BatchStatement(writes, database.insert(vehicles).values({ id: id || crypto.randomUUID(), ...data }))
   return 'imported'
 }
 
-async function importSales(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
+async function importSales(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow, writes: BatchItem<'sqlite'>[]): Promise<ImportOutcome> {
   const customer = await findCustomer(database, organizationId, row)
   if (!customer) throw new Error('紐づく顧客が見つかりません。')
   const vehicle = await findVehicle(database, organizationId, row, customer.id)
@@ -231,13 +277,13 @@ async function importSales(database: ReturnType<typeof createDatabase>, organiza
     updatedAt: new Date().toISOString(),
   }
   const documentId = existing?.id ?? id ?? crypto.randomUUID()
-  if (existing) await database.update(salesDocuments).set(data).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.id, existing.id))).run()
-  else await database.insert(salesDocuments).values({ id: documentId, ...data }).run()
-  await replaceSalesItems(database, organizationId, documentId, items)
+  if (existing) pushD1BatchStatement(writes, database.update(salesDocuments).set(data).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(salesDocuments).values({ id: documentId, ...data }))
+  replaceSalesItems(database, organizationId, documentId, items, writes)
   return existing ? 'updated' : 'imported'
 }
 
-async function importMaintenance(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
+async function importMaintenance(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow, writes: BatchItem<'sqlite'>[]): Promise<ImportOutcome> {
   const customer = await findCustomer(database, organizationId, row)
   if (!customer) throw new Error('紐づく顧客が見つかりません。')
   const vehicle = await findVehicle(database, organizationId, row, customer.id)
@@ -267,13 +313,13 @@ async function importMaintenance(database: ReturnType<typeof createDatabase>, or
     updatedAt: new Date().toISOString(),
   }
   const documentId = existing?.id ?? id ?? crypto.randomUUID()
-  if (existing) await database.update(maintenanceDocuments).set(data).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.id, existing.id))).run()
-  else await database.insert(maintenanceDocuments).values({ id: documentId, ...data }).run()
-  await replaceMaintenanceItems(database, organizationId, documentId, items)
+  if (existing) pushD1BatchStatement(writes, database.update(maintenanceDocuments).set(data).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(maintenanceDocuments).values({ id: documentId, ...data }))
+  replaceMaintenanceItems(database, organizationId, documentId, items, writes)
   return existing ? 'updated' : 'imported'
 }
 
-async function importPayment(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow): Promise<ImportOutcome> {
+async function importPayment(database: ReturnType<typeof createDatabase>, organizationId: string, row: CsvRow, writes: BatchItem<'sqlite'>[]): Promise<ImportOutcome> {
   const documentId = requiredText(row, '請求書ID')
   const documentType = requiredText(row, '請求書種別')
   const invoice = documentType === '販売請求書'
@@ -290,16 +336,16 @@ async function importPayment(database: ReturnType<typeof createDatabase>, organi
     invoiceAmount: invoice.total,
     paidAmount: Math.min(invoice.total, Math.max(0, integerValue(row, '入金済み'))),
     paymentDate: nullableDate(row, '入金日'),
-    method: nullableText(row, '入金方法'),
+    method: nullablePaymentMethod(row),
     note: nullableText(row, 'メモ'),
     updatedAt: new Date().toISOString(),
   }
-  if (existing) await database.update(paymentRecords).set(data).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.id, existing.id))).run()
-  else await database.insert(paymentRecords).values({ id: crypto.randomUUID(), ...data }).run()
-  await database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))).run()
+  if (existing) pushD1BatchStatement(writes, database.update(paymentRecords).set(data).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.id, existing.id))))
+  else pushD1BatchStatement(writes, database.insert(paymentRecords).values({ id: crypto.randomUUID(), ...data }))
+  pushD1BatchStatement(writes, database.delete(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))))
   if (data.paidAmount > 0 || data.paymentDate || data.method || data.note) {
     const now = new Date().toISOString()
-    await database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: data.paidAmount, paymentDate: data.paymentDate, method: data.method, note: data.note ?? '', createdAt: now, updatedAt: now }).run()
+    pushD1BatchStatement(writes, database.insert(paymentEntries).values({ id: crypto.randomUUID(), organizationId, documentType, documentId, amount: data.paidAmount, paymentDate: data.paymentDate, method: data.method, note: data.note ?? '', createdAt: now, updatedAt: now }))
   }
   return existing ? 'updated' : 'imported'
 }
@@ -344,33 +390,43 @@ async function findMaintenanceDocument(database: ReturnType<typeof createDatabas
   return database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.number, number))).get()
 }
 
-async function replaceSalesItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[]) {
-  await database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.organizationId, organizationId), eq(salesDocumentItems.documentId, documentId))).run()
-  for (const [index, item] of items.entries()) await database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? 'その他', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, taxCategory: item.taxCategory ?? '課税', otherAmount: item.otherAmount ?? 0, summary: item.summary ?? '', amount: item.amount, sortOrder: index }).run()
+function replaceSalesItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[], writes: BatchItem<'sqlite'>[]) {
+  pushD1BatchStatement(writes, database.delete(salesDocumentItems).where(and(eq(salesDocumentItems.organizationId, organizationId), eq(salesDocumentItems.documentId, documentId))))
+  for (const [index, item] of items.entries()) pushD1BatchStatement(writes, database.insert(salesDocumentItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? 'その他', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, taxCategory: item.taxCategory ?? '課税', otherAmount: item.otherAmount ?? 0, summary: item.summary ?? '', amount: item.amount, sortOrder: index }))
 }
 
-async function replaceMaintenanceItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[]) {
-  await database.delete(maintenanceItems).where(and(eq(maintenanceItems.organizationId, organizationId), eq(maintenanceItems.documentId, documentId))).run()
-  for (const [index, item] of items.entries()) await database.insert(maintenanceItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }).run()
+function replaceMaintenanceItems(database: ReturnType<typeof createDatabase>, organizationId: string, documentId: string, items: ImportItem[], writes: BatchItem<'sqlite'>[]) {
+  pushD1BatchStatement(writes, database.delete(maintenanceItems).where(and(eq(maintenanceItems.organizationId, organizationId), eq(maintenanceItems.documentId, documentId))))
+  for (const [index, item] of items.entries()) pushD1BatchStatement(writes, database.insert(maintenanceItems).values({ id: crypto.randomUUID(), organizationId, documentId, itemType: item.itemType ?? '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, amount: item.amount, sortOrder: index }))
 }
 
-function parseSalesItems(text: string, detailText: string): ImportItem[] {
+export function parseSalesItems(text: string, detailText: string): ImportItem[] {
   if (detailText) {
     try {
       const details = JSON.parse(detailText)
-      if (Array.isArray(details)) return details.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
-        const quantity = numberValue(item.quantity, 1)
-        const unitPrice = integerValueObject(item.unitPrice, 0)
-        const otherAmount = integerValueObject(item.otherAmount, 0)
-        return { itemType: stringObject(item.itemType) || 'その他', description: stringObject(item.description), quantity, unit: stringObject(item.unit) || '式', unitPrice, taxCategory: ['課税', '非課税', '対象外'].includes(stringObject(item.taxCategory)) ? stringObject(item.taxCategory) : '課税', otherAmount, summary: stringObject(item.summary), amount: Math.round(quantity * unitPrice) + otherAmount }
-      })
-    } catch { /* fall back to the legacy readable column */ }
+      if (Array.isArray(details)) {
+        if (details.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの販売明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+        return details.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
+          const quantity = numberValue(item.quantity, 1)
+          const unitPrice = integerValueObject(item.unitPrice, 0)
+          const otherAmount = integerValueObject(item.otherAmount, 0)
+          return { itemType: stringObject(item.itemType) || 'その他', description: stringObject(item.description), quantity, unit: stringObject(item.unit) || '式', unitPrice, taxCategory: ['課税', '非課税', '対象外'].includes(stringObject(item.taxCategory)) ? stringObject(item.taxCategory) : '課税', otherAmount, summary: stringObject(item.summary), amount: Math.round(quantity * unitPrice) + otherAmount }
+        })
+      }
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 413) throw error
+      /* fall back to the legacy readable column */
+    }
   }
-  return text ? text.split(/\s+\/\s+/).map((item) => parseItem(item)) : []
+  const items = text ? text.split(/\s+\/\s+/) : []
+  if (items.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの販売明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+  return items.map((item) => parseItem(item))
 }
 
-function parseMaintenanceItems(text: string): ImportItem[] {
-  return text ? text.split(/\s+\/\s+/).map((item) => { const match = item.match(/^(作業|部品):(.*)$/); const parsed = parseItem(match?.[2] ?? item); return { ...parsed, itemType: match?.[1] ?? '作業' } }) : []
+export function parseMaintenanceItems(text: string): ImportItem[] {
+  const items = text ? text.split(/\s+\/\s+/) : []
+  if (items.length > maximumCsvDetailItemCount) throw new HttpError(413, `CSVの整備明細は1行あたり${maximumCsvDetailItemCount}件以内で入力してください。`)
+  return items.map((item) => { const match = item.match(/^(作業|部品):(.*)$/); const parsed = parseItem(match?.[2] ?? item); return { ...parsed, itemType: match?.[1] ?? '作業' } })
 }
 
 function parseItem(text: string): ImportItem {
@@ -387,10 +443,10 @@ function parseDetailsJson(value: string) {
 }
 
 function documentTotals(row: CsvRow, items: ImportItem[]) {
-  const subtotal = integerValue(row, '小計') || items.reduce((sum, item) => sum + item.amount, 0)
-  const tax = integerValue(row, '消費税')
-  const total = integerValue(row, '合計') || subtotal + tax
-  return { taxRate: integerValue(row, '税率') || 10, subtotal, tax, total }
+  const subtotal = optionalIntegerValue(row, '小計') ?? items.reduce((sum, item) => sum + item.amount, 0)
+  const tax = requiredNonNegativeInteger(row, '消費税')
+  const total = optionalIntegerValue(row, '合計') ?? subtotal + tax
+  return { taxRate: optionalIntegerValue(row, '税率') ?? 10, subtotal, tax, total }
 }
 
 function requiredText(row: CsvRow, key: string) {
@@ -407,10 +463,33 @@ function requiredDate(row: CsvRow, key: string) {
 
 function nullableDate(row: CsvRow, key: string) { return parseDate(value(row, key)) }
 function nullableText(row: CsvRow, key: string) { const text = value(row, key); return text ? text.slice(0, 500) : null }
-function nullableInteger(row: CsvRow, key: string) { const number = integerValue(row, key); return number || null }
+function nullablePaymentMethod(row: CsvRow) {
+  const method = nullableText(row, '入金方法')
+  if (method && !paymentMethods.has(method)) throw new Error('入金方法が不正です。')
+  return method
+}
+function nullableInteger(row: CsvRow, key: string) {
+  const text = value(row, key)
+  if (!text) return null
+  const normalized = text.replace(/[,%¥円\s]/g, '')
+  const number = Number(normalized)
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${key}は0以上の整数で入力してください。`)
+  return Math.round(number)
+}
 function integerValue(row: CsvRow, key: string) { return integerText(value(row, key)) }
+function optionalIntegerValue(row: CsvRow, key: string) { return value(row, key) ? integerValue(row, key) : null }
 function integerText(text: string) { const normalized = text.replace(/[,%¥円\s]/g, ''); const number = Number(normalized); return Number.isFinite(number) ? Math.round(number) : 0 }
-function parseDate(text: string) { return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(text) ? text.replaceAll('/', '-').replace(/-(\d)(?=-|$)/g, '-0$1') : null }
+export function isNonNegativeIntegerText(text: string) {
+  if (!text) return false
+  const normalized = text.replace(/[,%¥円\s]/g, '')
+  return /^\d+$/u.test(normalized) && Number.isSafeInteger(Number(normalized))
+}
+function requiredNonNegativeInteger(row: CsvRow, key: string) {
+  const text = value(row, key)
+  if (!isNonNegativeIntegerText(text)) throw new Error(`${key}は0以上の整数で入力してください。`)
+  return Number(text.replace(/[,%¥円\s]/g, ''))
+}
+function parseDate(text: string) { return normalizeCalendarDate(text) }
 function value(row: CsvRow, key: string) { return typeof row[key] === 'string' ? row[key].trim() : '' }
 
 type CsvRow = Record<string, string>

@@ -3,12 +3,13 @@ import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories,
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
-import { corsHeaders, HttpError, jsonResponse, readJson } from '../http'
+import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readFormData, readJson } from '../http'
+import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
+import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
-const allowedContentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png'])
 
 export async function handleCustomerRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -185,11 +186,11 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
     model: nullableString(body, 'modelType'),
     registrationNumber: nullableString(body, 'registrationNumber'),
     chassisNumber: nullableString(body, 'chassisNumber'),
-    modelYear: nullableInteger(body, 'modelYear'),
-    inspectionDate: nullableString(body, 'inspectionDate'),
-    mileage: nullableInteger(body, 'mileage'),
+    modelYear: nonNegativeInteger(body, 'modelYear'),
+    inspectionDate: nullableCalendarDate(body, 'inspectionDate'),
+    mileage: nonNegativeInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
-    displacement: nullableInteger(body, 'displacement'),
+    displacement: nonNegativeInteger(body, 'displacement'),
     transmission: nullableString(body, 'transmission'),
     memo: nullableString(body, 'memo'),
     freeItem1: nullableString(body, 'freeItem1'),
@@ -211,11 +212,11 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
     model: nullableString(body, 'modelType'),
     registrationNumber: nullableString(body, 'registrationNumber'),
     chassisNumber: nullableString(body, 'chassisNumber'),
-    modelYear: nullableInteger(body, 'modelYear'),
-    inspectionDate: nullableString(body, 'inspectionDate'),
-    mileage: nullableInteger(body, 'mileage'),
+    modelYear: nonNegativeInteger(body, 'modelYear'),
+    inspectionDate: nullableCalendarDate(body, 'inspectionDate'),
+    mileage: nonNegativeInteger(body, 'mileage'),
     bodyColor: nullableString(body, 'bodyColor'),
-    displacement: nullableInteger(body, 'displacement'),
+    displacement: nonNegativeInteger(body, 'displacement'),
     transmission: nullableString(body, 'transmission'),
     memo: nullableString(body, 'memo'),
     freeItem1: nullableString(body, 'freeItem1'),
@@ -228,23 +229,25 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
 
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
   if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
-  const formData = await request.formData()
+  assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024, { required: true })
+  const formData = await readFormData(request, maximumAttachmentSize + 1024 * 1024)
   const file = formData.get('file')
   if (!(file instanceof File)) throw new HttpError(400, 'ファイルを選択してください。')
-  if (!allowedContentTypes.has(file.type)) throw new HttpError(415, 'JPEG・PNG・PDFのみ添付できます。')
+  const contentType = assertSupportedAttachmentContentType(file.type)
   if (file.size > maximumAttachmentSize) throw new HttpError(413, '添付ファイルは20MB以下にしてください。')
+  const fileBody = new Uint8Array(await file.arrayBuffer())
+  assertAttachmentSignature(fileBody, contentType)
 
   const fileId = crypto.randomUUID()
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  const objectKey = `organizations/${organizationId}/vehicles/${vehicleId}/${fileId}-${safeName}`
+  const objectKey = createVehicleFileObjectKey(organizationId, vehicleId, fileId, file.name)
   try {
-    await createB2Storage(env).putObject({ key: objectKey, body: await file.arrayBuffer(), contentType: file.type })
+    await createB2Storage(env).putObject({ key: objectKey, body: fileBody.buffer as ArrayBuffer, contentType })
   } catch {
     throw new HttpError(503, 'ファイル保存先を利用できません。B2の設定を確認してください。')
   }
 
   try {
-    await database.insert(vehicleFiles).values({ id: fileId, organizationId, vehicleId, objectKey, fileName: file.name, contentType: file.type, sizeBytes: file.size, fileKind: getFileKind(file.type) }).run()
+    await database.insert(vehicleFiles).values({ id: fileId, organizationId, vehicleId, objectKey, fileName: file.name.slice(0, 120), contentType, sizeBytes: fileBody.byteLength, fileKind: attachmentKind(contentType) }).run()
   } catch (error) {
     await createB2Storage(env).deleteObject(objectKey).catch(() => undefined)
     throw error
@@ -275,9 +278,11 @@ async function downloadVehicleFile(_request: Request, env: Env, database: Return
     throw new HttpError(503, 'ファイル保存先を利用できません。')
   }
   const headers = new Headers(corsHeaders(env))
-  headers.set('Content-Type', file.contentType)
+  const contentType = file.contentType === 'application/pdf' || file.contentType === 'image/jpeg' || file.contentType === 'image/png' ? file.contentType : 'application/octet-stream'
+  headers.set('Content-Type', contentType)
   headers.set('Content-Length', String(file.sizeBytes))
-  headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+  headers.set('Content-Disposition', contentType === 'application/octet-stream' ? `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}` : `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+  headers.set('X-Content-Type-Options', 'nosniff')
   headers.set('Cache-Control', 'private, max-age=300')
   return new Response(response.body, { status: 200, headers })
 }
@@ -406,15 +411,19 @@ function normalizeStoredEmployer(value: string | null | undefined) {
   return normalized && normalized !== 'employer' ? normalized : null
 }
 
-function nullableInteger(body: Record<string, unknown>, key: string) {
+function nonNegativeInteger(body: Record<string, unknown>, key: string) {
   const value = body[key]
   if (value === null || value === undefined || value === '') return null
   const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) ? Math.round(number) : null
+  if (!Number.isFinite(number) || number < 0) throw new HttpError(400, `${key}は0以上の整数で入力してください。`)
+  return Math.round(number)
 }
 
-function getFileKind(contentType: string): 'image' | 'pdf' | 'other' {
-  if (contentType === 'application/pdf') return 'pdf'
-  if (contentType.startsWith('image/')) return 'image'
-  return 'other'
+function nullableCalendarDate(body: Record<string, unknown>, key: string) {
+  const value = stringValue(body, key)
+  if (!value) return null
+  const normalized = normalizeCalendarDate(value)
+  if (!normalized) throw new HttpError(400, `${key}を正しい日付で入力してください。`)
+  return normalized
 }
+

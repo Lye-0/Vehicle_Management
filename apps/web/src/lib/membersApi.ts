@@ -18,14 +18,27 @@ export type MembersResponse = {
   members: MemberRecord[]
 }
 
+export type MemberInvitation = {
+  code: string
+  email: string
+  expiresAt: string
+}
+
 export async function fetchMembers() {
   return apiFetch<MembersResponse>('/api/organization/members')
 }
 
 export async function createMember(input: { displayName: string; email: string }) {
-  return apiFetch<{ member: MemberRecord; temporaryPassword?: string }>('/api/organization/members', {
+  return apiFetch<{ member: MemberRecord | null; temporaryPassword?: string; invitation?: MemberInvitation }>('/api/organization/members', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+export async function acceptOrganizationInvitation(code: string) {
+  return apiFetch<{ member: MemberRecord }>('/api/organization/invitations/accept', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
   })
 }
 

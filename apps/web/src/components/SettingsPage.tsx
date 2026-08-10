@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
+import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
-import { updateCurrentProfile } from '../lib/organizationApi'
+import { fetchOrganizationPermissions, updateCurrentProfile, updateOrganizationPermissions, type OrganizationPermissions } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
@@ -11,11 +12,13 @@ import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
 import { IconWithChain } from './IconWithChain'
+import { NormalizedInput } from './NormalizedValueInput'
 
-type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members'
+type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members' | 'permissions'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
 
 const initialBackupSettings: BackupSettings = { autoEnabled: false, frequency: 'daily', destination: 'b2', retentionDays: 30, archiveRetentionDays: 30, pcRetentionDays: 30 }
+const initialOrganizationPermissions: OrganizationPermissions = { employeeCanExportCsv: true, employeeCanEditShop: true, employeeCanEditTax: true, employeeCanCreateRestoreBackup: true, employeeCanManageBackupRetention: false, employeeCanManageArchiveRetention: false }
 
 const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: typeof Building2 }> = [
   { id: 'shop', label: '店舗情報', description: '店舗情報と帳票に表示する内容', icon: Building2 },
@@ -24,6 +27,7 @@ const tabs: Array<{ id: SettingsTab; label: string; description: string; icon: t
   { id: 'archive', label: 'アーカイブ', description: '削除した書類の復元と整理', icon: Archive },
   { id: 'data', label: 'データ', description: 'データの入出力とバックアップ', icon: Table2 },
   { id: 'members', label: '管理者・従業員', description: 'ユーザーとログイン情報', icon: UsersRound },
+  { id: 'permissions', label: '権限管理', description: '従業員に許可する操作', icon: ShieldCheck },
 ]
 
 const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; description: string }> = [
@@ -35,7 +39,9 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
 export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
-  const [canManageBackupSettings, setCanManageBackupSettings] = useState(false)
+  const [backupPermissions, setBackupPermissions] = useState({ canManageCreateRestore: false, canManageRetention: false })
+  const [permissions, setPermissions] = useState<OrganizationPermissions>(initialOrganizationPermissions)
+  const [canManagePermissions, setCanManagePermissions] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('shop')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -45,12 +51,14 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([fetchSettings(), fetchBackupSettings()])
-      .then(([nextSettings, backupResponse]) => {
+    Promise.all([fetchSettings(), fetchBackupSettings(), fetchOrganizationPermissions()])
+      .then(([nextSettings, backupResponse, permissionsResponse]) => {
         if (!cancelled) {
           setSettings(nextSettings)
           setBackupSettings(backupResponse.settings)
-          setCanManageBackupSettings(backupResponse.canManage)
+          setBackupPermissions({ canManageCreateRestore: backupResponse.canManageCreateRestore, canManageRetention: backupResponse.canManageRetention })
+          setPermissions(permissionsResponse.permissions)
+          setCanManagePermissions(permissionsResponse.canManage)
           setError('')
         }
       })
@@ -75,6 +83,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   function updateTax(field: keyof TaxSettings, value: string | number) {
     setSettings((current) => ({ ...current, tax: { ...current.tax, [field]: value } as TaxSettings }))
+    setSaved(false)
+  }
+
+  function updatePermission(field: keyof OrganizationPermissions, value: boolean) {
+    setPermissions((current) => ({ ...current, [field]: value }))
     setSaved(false)
   }
 
@@ -121,13 +134,24 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     if (saving) return
     setSaving(true)
     setSaved(false)
+    const normalizedSettings = {
+      ...settings,
+      shop: {
+        ...settings.shop,
+        postalCode: normalizePostalCode(settings.shop.postalCode),
+        phone: normalizePhone(settings.shop.phone),
+        fax: normalizePhone(settings.shop.fax),
+      },
+    }
     try {
-      const [nextSettings, nextBackupSettings] = await Promise.all([
-        updateSettings(settings),
-        canManageBackupSettings ? updateBackupSettings({ ...backupSettings, destination: 'b2' }) : Promise.resolve(backupSettings),
+      const [nextSettings, nextBackupSettings, nextPermissions] = await Promise.all([
+        updateSettings(normalizedSettings),
+        backupPermissions.canManageCreateRestore || backupPermissions.canManageRetention ? updateBackupSettings(backupSettings) : Promise.resolve(backupSettings),
+        canManagePermissions ? updateOrganizationPermissions(permissions).then((response) => response.permissions) : Promise.resolve(permissions),
       ])
       setSettings(nextSettings)
       setBackupSettings(nextBackupSettings)
+      setPermissions(nextPermissions)
       setSaved(true)
       setError('')
       onReloadSession?.()
@@ -142,6 +166,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setBackupSettings(nextSettings)
     setSaved(false)
   }, [])
+
+  const visibleTabs = tabs.filter((tab) => tab.id !== 'permissions' || canManagePermissions)
 
   async function exportCsv(resource: CsvResource) {
     setExporting(resource)
@@ -168,8 +194,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
-        <nav className="panel settings-nav" aria-label="設定メニュー">{tabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
-        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
+        <nav className="panel settings-nav" aria-label="設定メニュー">{visibleTabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
+        <section className="settings-content" aria-live="polite">{loading ? <div className="panel settings-empty"><Settings2 size={28} /><strong>設定を読み込んでいます</strong><span>しばらくお待ちください。</span></div> : activeTab === 'shop' ? <ShopSettingsPanel settings={settings} editable={permissions.employeeCanEditShop} onUpdate={updateShop} /> : activeTab === 'tax' ? <TaxSettingsPanel settings={settings} editable={permissions.employeeCanEditTax} onUpdateTax={updateTax} onUpdateDocument={updateDocument} /> : activeTab === 'masters' ? <MasterSettingsPanel settings={settings} onUpdateSales={updateSalesPreset} onAddSales={addSalesPreset} onRemoveSales={removeSalesPreset} onUpdateMaintenance={updateMaintenancePreset} onAddMaintenance={addMaintenancePreset} onRemoveMaintenance={removeMaintenancePreset} /> : activeTab === 'archive' ? <ArchiveSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'data' ? <DataSettingsPanel exporting={exporting} onExport={exportCsv} backupSettings={backupSettings} onBackupSettingsChange={updateBackupSettingsDraft} /> : activeTab === 'permissions' ? <PermissionsPanel permissions={permissions} onUpdate={updatePermission} /> : <MemberSettingsPanel user={user} onUserUpdated={onUserUpdated} />}</section>
       </div>
     </>
   )
@@ -184,12 +210,21 @@ function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetG
 }
 
 function DataSettingsPanel({ exporting, onExport, backupSettings, onBackupSettingsChange }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void; backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
-  return <><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></>
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Table2} title="データ" description="データの入出力とバックアップを管理します。" /><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></div>
+}
+
+function PermissionsPanel({ permissions, onUpdate }: { permissions: OrganizationPermissions; onUpdate: (field: keyof OrganizationPermissions, value: boolean) => void }) {
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={ShieldCheck} title="権限管理" description="従業員が設定・出力・バックアップ・アーカイブで実行できる操作を管理します。" /><section className="panel settings-panel"><div className="settings-section-heading"><ShieldCheck size={18} /><div><h2>従業員に許可する操作</h2><p>管理者・オーナーは常にすべての操作を実行できます。変更後は画面上部の「設定を保存」で反映します。</p></div></div><div className="settings-permission-list"><PermissionToggle label="CSV出力" description="顧客・車両・販売・整備・入金のCSV出力" checked={permissions.employeeCanExportCsv} onChange={(value) => onUpdate('employeeCanExportCsv', value)} /><PermissionToggle label="店舗情報の変更" description="店舗名、連絡先、振込先、帳票ロゴなど" checked={permissions.employeeCanEditShop} onChange={(value) => onUpdate('employeeCanEditShop', value)} /><PermissionToggle label="税率情報の変更" description="消費税率、表示方法、端数処理" checked={permissions.employeeCanEditTax} onChange={(value) => onUpdate('employeeCanEditTax', value)} /><PermissionToggle label="バックアップの作成・PC出力・インポート復元・B2復元" description="バックアップ作成、PCへの出力、PCインポート復元、B2復元" checked={permissions.employeeCanCreateRestoreBackup} onChange={(value) => onUpdate('employeeCanCreateRestoreBackup', value)} /><PermissionToggle label="バックアップの削除・永久保存・保持期限変更" description="B2/PCバックアップの削除、永久保存切替、保持期間の変更" checked={permissions.employeeCanManageBackupRetention} onChange={(value) => onUpdate('employeeCanManageBackupRetention', value)} /><PermissionToggle label="アーカイブの永久保存・保持期限変更" description="アーカイブ書類の永久保存切替、保管期間の変更" checked={permissions.employeeCanManageArchiveRetention} onChange={(value) => onUpdate('employeeCanManageArchiveRetention', value)} /></div></section></div>
+}
+
+function PermissionToggle({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <label className="backup-toggle settings-permission-toggle"><span><strong>{label}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="backup-toggle-track" aria-hidden="true"><span /></span></label>
 }
 
 function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
   const [archives, setArchives] = useState<ArchiveRecord[]>([])
   const [canManage, setCanManage] = useState(false)
+  const [canManageRetention, setCanManageRetention] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState('')
   const [error, setError] = useState('')
@@ -200,6 +235,7 @@ function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { back
       const response = await fetchArchives(query)
       setArchives(response.archives)
       setCanManage(response.canManage)
+      setCanManageRetention(response.canManageRetention)
       setError('')
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'アーカイブ一覧を読み込めませんでした。')
@@ -242,6 +278,7 @@ function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { back
   }
 
   async function runKeepForever(record: ArchiveRecord) {
+    if (!canManageRetention) return
     setLoading(`keep-${record.kind}-${record.id}`)
     setError('')
     setMessage('')
@@ -256,7 +293,7 @@ function ArchiveSettingsPanel({ backupSettings, onBackupSettingsChange }: { back
     }
   }
 
-  return <div className="settings-panel-stack"><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManage || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, archiveRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></section>{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} className="archive-icon-chain" chainWidth="88%" chainTop="-2%" chainDepth={18} linkThickness={2} linkSize={5}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small>{!record.keepForever && getArchiveExpiration(record, backupSettings.archiveRetentionDays) && <small className="archive-expiration-text">期限：{formatBackupDate(getArchiveExpiration(record, backupSettings.archiveRetentionDays) ?? '')}</small>}</div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />自動削除予定</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button><button className="button button-secondary archive-retention-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button>{canManage && <button className="button button-danger archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Archive} title="アーカイブ" description="削除した書類の復元と整理" /><section className="panel settings-panel archive-settings-panel"><div className="settings-section-heading"><Archive size={18} /><div><h2>アーカイブ</h2><p>削除した書類を一定期間保管し、必要に応じて復元します。</p></div><button className="button button-secondary settings-add-button" type="button" onClick={() => void load()} disabled={Boolean(loading)}><RotateCcw size={14} />更新</button></div><div className="archive-toolbar"><label className="archive-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号・顧客名・車両名で検索" /></label><span className="archive-count">{archives.length}件</span></div>{error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="settings-success" role="status">{message}</div>}<section className="archive-retention-settings"><div className="archive-retention-copy"><strong>アーカイブ保管期間</strong><span>永久保存に設定していない書類は、指定期間を過ぎると自動削除されます。</span></div><label className="archive-retention-field"><span className="sr-only">アーカイブ保管期間（日）</span><span className="settings-number-input"><input type="number" min={1} max={3650} value={backupSettings.archiveRetentionDays} disabled={!canManageRetention || Boolean(loading)} onChange={(event) => onBackupSettingsChange({ ...backupSettings, archiveRetentionDays: Number(event.target.value) })} /><span>日</span></span></label></section>{archives.length === 0 ? <div className="settings-empty archive-empty"><Archive size={26} /><strong>アーカイブ済み書類はありません</strong><span>販売・整備画面でアーカイブした書類がここに表示されます。</span></div> : <div className="archive-list">{archives.map((record) => <div className="archive-row" key={`${record.kind}-${record.id}`}><IconWithChain visible={record.keepForever} className="archive-icon-chain" chainWidth="88%" chainTop="-2%" chainDepth={18} linkThickness={2} linkSize={5}><span className={`archive-kind archive-kind-${record.kind}`}>{record.kind === 'sales' ? '販売' : '整備'}</span></IconWithChain><div className="archive-copy"><strong>{record.number}</strong><span>{record.customerName || '顧客未設定'}{record.vehicle ? ` ・ ${record.vehicle}` : ''}</span><small>{record.type}{record.category ? ` ・ ${record.category}` : ''} ・ アーカイブ {formatBackupDate(record.archivedAt ?? '')}</small>{!record.keepForever && getArchiveExpiration(record, backupSettings.archiveRetentionDays) && <small className="archive-expiration-text">期限：{formatBackupDate(getArchiveExpiration(record, backupSettings.archiveRetentionDays) ?? '')}</small>}</div><div className="archive-meta">{record.keepForever ? <span className="archive-retention is-forever"><ShieldCheck size={13} />永久保存</span> : <span className="archive-retention"><Clock3 size={13} />自動削除予定</span>}<div className="archive-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void runRestore(record)}>{loading === `restore-${record.kind}-${record.id}` ? '復元中…' : <><RotateCcw size={14} />復元</>}</button>{canManageRetention && <button className="button button-secondary archive-retention-button" type="button" disabled={Boolean(loading)} onClick={() => void runKeepForever(record)}>{loading === `keep-${record.kind}-${record.id}` ? '更新中…' : record.keepForever ? <><ShieldCheck size={13} />保存解除</> : <><ShieldCheck size={13} />永久保存</>}</button>}{canManage && <button className="button button-danger archive-delete-button" type="button" disabled={Boolean(loading)} onClick={() => void runPermanentDelete(record)}>{loading === `delete-${record.kind}-${record.id}` ? '削除中…' : <><Trash2 size={13} />完全削除</>}</button>}</div></div></div>)}</div>}</section></div>
 }
 
 function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdated?: (user: User) => void }) {
@@ -283,10 +320,11 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
 
   const [memberError, setMemberError] = useState('')
   const [memberMessage, setMemberMessage] = useState('')
-  const [memberModal, setMemberModal] = useState<'add' | 'temporaryPassword' | null>(null)
+  const [memberModal, setMemberModal] = useState<'add' | 'temporaryPassword' | 'invitation' | null>(null)
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [invitation, setInvitation] = useState<{ code: string; email: string; expiresAt: string } | null>(null)
   const [accountModal, setAccountModal] = useState<'displayName' | 'password' | 'google' | null>(null)
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
@@ -308,6 +346,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       if (event.key === 'Escape' && !memberLoading) {
         setMemberModal(null)
         setTemporaryPassword('')
+        setInvitation(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -318,6 +357,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     if (memberLoading) return
     setMemberModal(null)
     setTemporaryPassword('')
+    setInvitation(null)
   }
 
   useEffect(() => {
@@ -458,16 +498,21 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setMemberMessage('')
     try {
       const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
-      if (response.member) setMembers((current) => current.some((member) => member.uid === response.member.uid) ? current.map((member) => member.uid === response.member.uid ? response.member : member) : [...current, response.member])
+      const createdMember = response.member
+      if (createdMember) setMembers((current) => current.some((member) => member.uid === createdMember.uid) ? current.map((member) => member.uid === createdMember.uid ? createdMember : member) : [...current, createdMember])
       setTemporaryPassword(response.temporaryPassword ?? '')
+      setInvitation(response.invitation ?? null)
       setNewMemberName('')
       setNewMemberEmail('')
       if (response.temporaryPassword) {
         setMemberModal('temporaryPassword')
         setMemberMessage('従業員を登録しました。')
+      } else if (response.invitation) {
+        setMemberModal('invitation')
+        setMemberMessage('既存のアカウントへ招待を作成しました。招待コードを本人へ安全に伝えてください。')
       } else {
         setMemberModal(null)
-        setMemberMessage('既存のアカウントを組織に再追加し、初期パスワードを再発行しました。')
+        setMemberMessage('従業員を登録しました。')
       }
     } catch (reason: unknown) {
       setMemberError(getMemberError(reason))
@@ -516,6 +561,16 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     }
     await navigator.clipboard.writeText(temporaryPassword)
     setMemberMessage('初期パスワードをコピーしました。')
+  }
+
+  async function copyInvitationCode() {
+    if (!invitation?.code) return
+    if (!navigator.clipboard) {
+      setMemberMessage('この環境では自動コピーできません。招待コードを安全に控えてください。')
+      return
+    }
+    await navigator.clipboard.writeText(invitation.code)
+    setMemberMessage('招待コードをコピーしました。')
   }
 
   return (
@@ -581,17 +636,22 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       {memberModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMemberModal() }}>
         <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="account-modal-header">
-            <div><span className="page-eyebrow">組織ユーザー</span><h2 id="member-modal-title">{memberModal === 'add' ? '従業員を追加' : '初期パスワード'}</h2></div>
+            <div><span className="page-eyebrow">組織ユーザー</span><h2 id="member-modal-title">{memberModal === 'add' ? '従業員を追加' : memberModal === 'temporaryPassword' ? '初期パスワード' : '組織への招待'}</h2></div>
             <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>×</button>
           </div>
           {memberError && <div className="auth-error" role="alert">{memberError}</div>}
           {memberModal === 'add' ? <form className="account-modal-content" onSubmit={(event) => void addMember(event)}>
-            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。新規追加でも、過去に削除したアカウントの再追加でも、新しい初期パスワードが表示されます。</p>
+            <p className="account-modal-note">従業員の表示名とメールアドレスを入力します。既存アカウントにはパスワードを上書きせず、本人受け入れ用の招待コードを発行します。</p>
             <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
-          </form> : <div className="account-modal-content">
+          </form> : memberModal === 'temporaryPassword' ? <div className="account-modal-content">
             <p className="account-modal-note">従業員へ安全な方法で伝えてください。このパスワードはこの画面を閉じると再表示できません。</p>
             <div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button></div>
+            {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
+            <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
+          </div> : <div className="account-modal-content">
+            <p className="account-modal-note">{invitation?.email} の本人がログイン後、このワンタイム招待コードを入力して組織へ参加します。有効期限は {invitation ? formatBackupDate(invitation.expiresAt) : '7日間'} です。</p>
+            <div className="temporary-password-value"><code>{invitation?.code}</code><button className="button button-secondary" type="button" onClick={() => void copyInvitationCode()}><Copy size={15} />コピー</button></div>
             {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
             <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
           </div>}
@@ -721,8 +781,9 @@ function addRetentionDays(value: string, days: number) {
   return date.toISOString()
 }
 
-function ShopSettingsPanel({ settings, onUpdate }: { settings: AppSettings; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
+function ShopSettingsPanel({ settings, editable, onUpdate: saveUpdate }: { settings: AppSettings; editable: boolean; onUpdate: (field: keyof ShopSettings, value: string) => void }) {
+  const onUpdate = editable ? saveUpdate : () => undefined
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Building2} title="店舗情報" description="見積書、請求書に表示する基本情報です。" /><section className="panel settings-panel"><div className="settings-section-heading"><Building2 size={18} /><div><h2>店舗情報</h2><p>店舗名や連絡先は帳票の発行元として利用します。</p></div></div><div className="settings-form-grid"><SettingsField label="店舗名" value={settings.shop.name} onChange={(value) => onUpdate('name', value)} required /><SettingsField label="郵便番号" normalization="postalCode" value={settings.shop.postalCode} onChange={(value) => onUpdate('postalCode', value)} placeholder="例：100-0001" /><SettingsField label="電話番号" normalization="phone" value={settings.shop.phone} onChange={(value) => onUpdate('phone', value)} placeholder="例：03-0000-0000" /><SettingsField label="FAX番号" normalization="phone" value={settings.shop.fax} onChange={(value) => onUpdate('fax', value)} placeholder="例：03-0000-0001" /><SettingsField label="適格請求書発行事業者番号" value={settings.shop.registrationNumber} onChange={(value) => onUpdate('registrationNumber', value)} placeholder="例：T1234567890123" /><SettingsField label="住所" value={settings.shop.address} onChange={(value) => onUpdate('address', value)} wide /><ShopLogoField value={settings.shop.logoDataUrl} onChange={(value) => onUpdate('logoDataUrl', value)} /></div></section><section className="panel settings-panel"><div className="settings-section-heading"><Banknote size={18} /><div><h2>振込先情報</h2><p>請求書などに表示する振込先を設定します。</p></div></div><div className="settings-form-grid"><SettingsField label="振込口座" value={settings.shop.bankName} onChange={(value) => onUpdate('bankName', value)} /><SettingsField label="口座名義" value={settings.shop.bankAccount} onChange={(value) => onUpdate('bankAccount', value)} /></div></section></div>
 }
 
 function ShopLogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -758,7 +819,8 @@ function ShopLogoField({ value, onChange }: { value: string; onChange: (value: s
   return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone"><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
 }
 
-function TaxSettingsPanel({ settings, onUpdateTax, onUpdateDocument }: { settings: AppSettings; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+function TaxSettingsPanel({ settings, editable, onUpdateTax: saveTaxUpdate, onUpdateDocument }: { settings: AppSettings; editable: boolean; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
+  const onUpdateTax = editable ? saveTaxUpdate : () => undefined
   return <div className="settings-panel-stack"><SettingsPanelHeader icon={ReceiptText} title="税・端数処理" description="販売書類・整備書類の金額計算に使う初期値です。" /><section className="panel settings-panel"><div className="settings-section-heading"><ReceiptText size={18} /><div><h2>消費税</h2><p>書類作成時の税率と端数処理を設定します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>消費税率</span><div className="settings-number-input"><input type="number" min="0" max="100" value={settings.tax.consumptionTaxRate} onChange={(event) => onUpdateTax('consumptionTaxRate', Number(event.target.value))} /><span>%</span></div></label><label className="form-field"><span>端数処理</span><select value={settings.tax.rounding} onChange={(event) => onUpdateTax('rounding', event.target.value)}><option value="切り捨て">切り捨て</option><option value="四捨五入">四捨五入</option></select></label></div></section><section className="panel settings-panel"><div className="settings-section-heading"><FileText size={18} /><div><h2>帳票の初期値</h2><p>新しい販売書類を作成するときに適用します。</p></div></div><div className="settings-form-grid"><label className="form-field"><span>支払期限の初期日数</span><div className="settings-number-input"><input type="number" min="0" max="365" value={settings.document.defaultDueDays} onChange={(event) => onUpdateDocument('defaultDueDays', Number(event.target.value))} /><span>日後</span></div></label></div></section></div>
 }
 
@@ -770,8 +832,8 @@ function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof 
   return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
 }
 
-function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean }) {
-  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span><input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; normalization?: NormalizableField }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
 }
 
 function SalesPresetPanel({ groups, onUpdate, onAdd, onRemove }: { groups: SalesItemPresetGroups; onUpdate: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAdd: (group: SalesItemPresetGroupKey) => void; onRemove: (group: SalesItemPresetGroupKey, index: number) => void }) {

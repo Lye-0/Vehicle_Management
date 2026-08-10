@@ -23,7 +23,8 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
-import { changeCurrentPassword, createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
+import { acceptOrganizationInvitation } from './lib/membersApi'
 import { setActiveOrganizationId } from './lib/api'
 import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
@@ -105,7 +106,7 @@ function AuthenticatedApp({ user, onUserUpdated }: { user: User; onUserUpdated: 
   if (!session) return <SessionError message="認証情報を読み込めませんでした。" onRetry={() => void loadSession()} />
   if (session.mustChangePassword) return <InitialPasswordChangePage onCompleted={(nextSession) => { setSession(nextSession); const nextOrganizationId = nextSession.organizations[0]?.organizationId ?? ''; setLocalActiveOrganizationId(nextOrganizationId); setActiveOrganizationId(nextOrganizationId || null) }} onSignOut={() => void signOutCurrentUser()} />
   if (!session.organizations.length && session.setupAvailable) return <OrganizationSetupPage user={user} onCompleted={(nextSession) => { setSession(nextSession); setLocalActiveOrganizationId(nextSession.organizations[0]?.organizationId ?? '') }} />
-  if (!session.organizations.length) return <NoOrganizationPage onSignOut={() => void signOutCurrentUser()} />
+  if (!session.organizations.length) return <NoOrganizationPage onAccepted={() => void loadSession()} onSignOut={() => void signOutCurrentUser()} />
 
   const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
   return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} />
@@ -130,8 +131,7 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
     }
     setLoading(true)
     try {
-      await changeCurrentPassword(password)
-      onCompleted(await completeInitialPasswordChange())
+      onCompleted(await completeInitialPasswordChange(password))
     } catch (reason) {
       setError(getAuthErrorMessage(reason))
     } finally {
@@ -183,8 +183,31 @@ function SessionError({ message, onRetry }: { message: string; onRetry: () => vo
   return <div className="auth-page"><section className="auth-card"><span className="page-eyebrow">SESSION ERROR</span><h1>利用情報を読み込めません</h1><div className="auth-error" role="alert">{message}</div><button className="button button-primary auth-signin-button" type="button" onClick={onRetry}>再読み込み</button></section></div>
 }
 
-function NoOrganizationPage({ onSignOut }: { onSignOut: () => void }) {
-  return <div className="auth-page"><section className="auth-card"><span className="page-eyebrow">NO ORGANIZATION</span><h1>利用組織がありません</h1><p>管理者にアカウント登録を依頼してください。</p><button className="button button-secondary auth-signin-button" type="button" onClick={onSignOut}>ログアウト</button></section></div>
+function NoOrganizationPage({ onAccepted, onSignOut }: { onAccepted: () => void; onSignOut: () => void }) {
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    const normalizedCode = code.trim()
+    if (!normalizedCode) {
+      setError('招待コードを入力してください。')
+      return
+    }
+    setLoading(true)
+    try {
+      await acceptOrganizationInvitation(normalizedCode)
+      onAccepted()
+    } catch (reason) {
+      setError(getAuthErrorMessage(reason))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="auth-page"><section className="auth-card"><span className="page-eyebrow">NO ORGANIZATION</span><h1>利用組織がありません</h1><p>管理者から受け取った招待コードで組織に参加できます。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>招待コード</span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="招待コードを入力" autoComplete="one-time-code" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '参加しています…' : '組織に参加'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
 }
 
 function OrganizationSetupPage({ user, onCompleted }: { user: User; onCompleted: (session: AuthSession) => void }) {
@@ -366,12 +389,19 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
         <span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span>
         <span className="brand-copy"><strong>車両管理</strong></span>
       </div>
+      <div className="sidebar-mobile-context">
+        <div className="sidebar-mobile-organization">
+          <span>組織</span>
+          {organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}
+        </div>
+        <button className="sidebar-mobile-signout" type="button" onClick={onSignOut}><LogOut size={16} /><span>ログアウト</span></button>
+      </div>
       <div className="branch-card"><span>組織</span>{organizations.length > 1 ? <select aria-label="利用組織を選択" value={activeOrganization.organizationId} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>)}</select> : <strong>{activeOrganization.name}</strong>}</div>
       <nav className="sidebar-nav" aria-label="メインメニュー">
         {navItems.map(({ id, label, icon: Icon }) => {
           const isActive = activeSection === id
           return (
-            <button className={`nav-item${isActive ? ' is-active' : ''}`} key={id} type="button" aria-current={isActive ? 'page' : undefined} onClick={() => onSelect(id)}>
+            <button className={`nav-item${isActive ? ' is-active' : ''}`} key={id} type="button" aria-label={label} title={label} aria-current={isActive ? 'page' : undefined} onClick={() => onSelect(id)}>
               <Icon size={22} strokeWidth={2} /><span>{label}</span>
             </button>
           )

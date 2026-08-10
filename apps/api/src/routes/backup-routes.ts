@@ -1,14 +1,20 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
-import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
-import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
+import type { BatchItem } from 'drizzle-orm/batch'
+import { appSettings, backupRecords, customers, inspectionSchedules, maintenanceDocuments, maintenanceItems, mileageHistories, organizations, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, sharedSchedules, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { requireOrganizationContext, requireOrganizationPermission } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
-import { addDays, loadBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
+import { addDays, loadBackupSettings, normalizeBackupSettings, saveBackupSettings, type BackupSettings } from '../backup-settings'
 import { purgeExpiredArchivedDocuments } from '../document-archive'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { loadOrganizationPermissions } from '../organization-permissions'
+import { attachmentKind, assertAttachmentSignature, assertSupportedAttachmentContentType, createVehicleFileObjectKey, isSafePathSegment, isSupportedAttachmentContentType, type SupportedAttachmentContentType } from '../lib/file-validation'
 import { createB2Storage } from '../storage/b2'
 
 const preRestoreProtectionDays = 30
+const maximumBackupFileBytes = 20 * 1024 * 1024
+const maximumBackupTotalFileBytes = 50 * 1024 * 1024
+const maximumBackupRequestBytes = 80 * 1024 * 1024
 
 export async function handleBackupRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
@@ -42,45 +48,65 @@ export async function handleBackupRoutes(request: Request, env: Env): Promise<Re
 
 async function getSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationContext(request, env, database)
-  return jsonResponse({ canManage: isAdmin(context.organization.role), settings: await loadBackupSettings(database, context.organization.organizationId) }, 200, env)
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
+  const canManageCreateRestore = isAdmin(context.organization.role) || permissions.employeeCanCreateRestoreBackup
+  const canManageRetention = isAdmin(context.organization.role) || permissions.employeeCanManageBackupRetention
+  return jsonResponse({ canManage: canManageCreateRestore || canManageRetention, canManageCreateRestore, canManageRetention, settings: await loadBackupSettings(database, context.organization.organizationId) }, 200, env)
 }
 
 async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationContext(request, env, database)
   const body = await readJson(request)
-  return jsonResponse({ settings: await saveBackupSettings(database, context.organization.organizationId, body.settings) }, 200, env)
+  const organizationId = context.organization.organizationId
+  const current = await loadBackupSettings(database, organizationId)
+  const next = normalizeBackupSettings(body.settings)
+  if (!isAdmin(context.organization.role)) {
+    const permissions = await loadOrganizationPermissions(database, organizationId)
+    const canManageCreateRestore = permissions.employeeCanCreateRestoreBackup
+    const canManageRetention = permissions.employeeCanManageBackupRetention
+    if (!canManageCreateRestore && hasBackupCreationSettingChange(current, next)) throw new HttpError(403, 'バックアップ作成設定の変更は組織の権限設定で許可されていません。')
+    if (!canManageRetention && hasBackupRetentionSettingChange(current, next)) throw new HttpError(403, 'バックアップ保持設定の変更は組織の権限設定で許可されていません。')
+  }
+  return jsonResponse({ settings: await saveBackupSettings(database, organizationId, next) }, 200, env)
 }
 
 async function listBackups(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const context = await requireOrganizationContext(request, env, database)
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
   const records = await database.select().from(backupRecords).where(eq(backupRecords.organizationId, context.organization.organizationId)).orderBy(desc(backupRecords.createdAt)).all()
-  return jsonResponse({ canManage: isAdmin(context.organization.role), backups: records.map(serializeBackup) }, 200, env)
+  const canManageCreateRestore = isAdmin(context.organization.role) || permissions.employeeCanCreateRestoreBackup
+  const canManageRetention = isAdmin(context.organization.role) || permissions.employeeCanManageBackupRetention
+  return jsonResponse({ canManage: canManageCreateRestore || canManageRetention, canManageCreateRestore, canManageRetention, backups: records.map(serializeBackup) }, 200, env)
 }
 
 async function createBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
-  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
+  const body = await readOptionalJson(request)
   const note = normalizeBackupNote(body.note)
   const backup = await createBackupForOrganization(env, database, context.organization.organizationId, context.organization.name, { trigger: 'manual', note })
   return jsonResponse({ backup }, 201, env)
 }
 
 async function exportBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
   const storage = getStorage(env)
   const snapshot = await loadSnapshot(database, context.organization.organizationId, crypto.randomUUID(), context.organization.name)
   snapshot.note = normalizeBackupNote(new URL(request.url).searchParams.get('note'))
   const files: BackupExportFile[] = []
+  let totalFileBytes = 0
   for (const file of snapshot.tables.vehicleFiles) {
+    if (file.sizeBytes > maximumBackupFileBytes || totalFileBytes + file.sizeBytes > maximumBackupTotalFileBytes) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
     const response = await storage.getObject(file.objectKey)
-    files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(await response.arrayBuffer()) })
+    const bytes = await readResponseBytes(response, maximumBackupFileBytes, maximumBackupTotalFileBytes - totalFileBytes)
+    totalFileBytes += bytes.byteLength
+    files.push({ id: file.id, fileName: file.fileName, contentType: file.contentType, data: arrayBufferToBase64(bytes) })
   }
   return jsonResponse({ backup: { ...snapshot, files } }, 200, env)
 }
 
 async function importBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
-  const context = await requireAdminOrganizationContext(request, env, database)
-  const body = await readJson(request)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
+  const body = await readJson(request, maximumBackupRequestBytes)
   const source = assertExportManifest(body.backup, context.organization.organizationId)
   const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
   const storage = getStorage(env)
@@ -93,15 +119,20 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
       const sourceFile = filesById.get(file.id)
       if (!sourceFile) throw new HttpError(400, `添付ファイルが見つかりません: ${file.fileName}`)
       const backupObjectKey = `imports/${context.organization.organizationId}/${restoreId}/files/${file.id}`
-      await storage.putObject({ key: backupObjectKey, body: base64ToArrayBuffer(sourceFile.data), contentType: sourceFile.contentType })
+      const contentType = assertSupportedAttachmentContentType(sourceFile.contentType)
+      const fileBody = base64ToArrayBuffer(sourceFile.data, contentType)
+      const objectKey = createVehicleFileObjectKey(context.organization.organizationId, file.vehicleId, file.id, file.fileName)
+      const fileName = file.fileName.trim().slice(0, 120) || 'file'
+      await storage.putObject({ key: backupObjectKey, body: fileBody, contentType })
       stagedKeys.push(backupObjectKey)
-      vehicleFilesWithKeys.push({ ...file, backupObjectKey })
+      vehicleFilesWithKeys.push({ ...file, objectKey, fileName, contentType, fileKind: attachmentKind(contentType), sizeBytes: fileBody.byteLength, backupObjectKey })
     }
     const manifest: BackupManifest = { ...source, tables: { ...source.tables, vehicleFiles: vehicleFilesWithKeys } }
     await restoreManifest(env, database, context.organization.organizationId, manifest)
     return jsonResponse({ restored: true, backupId: source.id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
   } catch (error) {
-    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    const rolledBack = await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    if (!rolledBack) throw new HttpError(503, 'PCバックアップの復元に失敗し、復元前の状態にも戻せませんでした。管理者による手動復旧が必要です。')
     throw error instanceof HttpError ? error : new HttpError(500, 'PCバックアップからの復元に失敗しました。復元前の状態へ戻しました。')
   } finally {
     await deleteObjects(storage, stagedKeys)
@@ -109,25 +140,26 @@ async function importBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function restoreBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
-  const body = await readJson(request).catch(() => ({} as Record<string, unknown>))
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanCreateRestoreBackup')
+  const body = await readOptionalJson(request)
   if (body.confirmId !== id) throw new HttpError(400, '復元確認が一致しません。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
+  const manifest = await readManifest(getStorage(env), record.manifestKey, context.organization.organizationId)
   const safetyBackup = await createSafetyBackup(env, database, context.organization.organizationId, context.organization.name)
   try {
-    const manifest = await readManifest(getStorage(env), record.manifestKey, context.organization.organizationId)
     await restoreManifest(env, database, context.organization.organizationId, manifest)
     return jsonResponse({ restored: true, backupId: id, safetyBackupId: safetyBackup.id, rowCount: countRows(manifest.tables) }, 200, env)
   } catch (error) {
-    await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    const rolledBack = await rollbackToSafetyBackup(env, database, context.organization.organizationId, safetyBackup.id)
+    if (!rolledBack) throw new HttpError(503, 'バックアップの復元に失敗し、復元前の状態にも戻せませんでした。管理者による手動復旧が必要です。')
     if (error instanceof HttpError) throw error
     throw new HttpError(500, 'バックアップの復元に失敗しました。復元前の状態へ戻しました。')
   }
 }
 
 async function deleteBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanManageBackupRetention')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
   if (!record) throw new HttpError(404, 'バックアップが見つかりません。')
   await deleteBackupRecord(database, env, record)
@@ -135,7 +167,7 @@ async function deleteBackup(request: Request, env: Env, database: ReturnType<typ
 }
 
 async function updateBackup(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string) {
-  const context = await requireAdminOrganizationContext(request, env, database)
+  const context = await requireOrganizationPermission(request, env, database, 'employeeCanManageBackupRetention')
   const body = await readJson(request)
   if (typeof body.keepForever !== 'boolean') throw new HttpError(400, '永久保存の指定が不正です。')
   const record = await database.select().from(backupRecords).where(and(eq(backupRecords.id, id), eq(backupRecords.organizationId, context.organization.organizationId))).get()
@@ -182,11 +214,13 @@ async function createSafetyBackup(env: Env, database: ReturnType<typeof createDa
 async function rollbackToSafetyBackup(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string, safetyBackupId: string) {
   try {
     const safety = await database.select().from(backupRecords).where(and(eq(backupRecords.id, safetyBackupId), eq(backupRecords.organizationId, organizationId))).get()
-    if (!safety) return
+    if (!safety) return false
     const manifest = await readManifest(getStorage(env), safety.manifestKey, organizationId)
     await restoreManifest(env, database, organizationId, manifest)
+    return true
   } catch (rollbackError) {
     console.error(`[backup] rollback failed for ${organizationId}`, rollbackError)
+    return false
   }
 }
 
@@ -222,8 +256,8 @@ async function restoreManifest(env: Env, database: ReturnType<typeof createDatab
     await storage.copyObject(file.backupObjectKey, file.objectKey)
   }
   const currentFiles = await database.select({ objectKey: vehicleFiles.objectKey }).from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).all()
-  await clearOrganizationData(database, organizationId)
-  await insertSnapshot(database, manifest)
+  const writes = buildRestoreStatements(database, organizationId, manifest)
+  await database.batch(writes as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   const backupObjectKeys = new Set(manifest.tables.vehicleFiles.map((file) => file.objectKey))
   await deleteObjects(storage, currentFiles.map((file) => file.objectKey).filter((key) => !backupObjectKeys.has(key)))
 }
@@ -247,7 +281,7 @@ async function deleteBackupRecord(database: ReturnType<typeof createDatabase>, e
 }
 
 async function loadSnapshot(database: ReturnType<typeof createDatabase>, organizationId: string, id: string, organizationName: string): Promise<BackupManifest> {
-  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, scheduleRows, sharedScheduleRows, settingsRows] = await Promise.all([
+  const [customerRows, vehicleRows, fileRows, salesRows, salesItemRows, maintenanceRows, maintenanceItemRows, paymentRows, paymentEntryRows, mileageHistoryRows, scheduleRows, sharedScheduleRows, settingsRows] = await Promise.all([
     database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.createdAt)).all(),
     database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.createdAt)).all(),
     database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
@@ -257,6 +291,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(asc(paymentRecords.createdAt)).all(),
     database.select().from(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).orderBy(asc(paymentEntries.createdAt)).all(),
+    database.select().from(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)).orderBy(asc(mileageHistories.createdAt)).all(),
     database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(asc(inspectionSchedules.createdAt)).all(),
     database.select().from(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).orderBy(asc(sharedSchedules.createdAt)).all(),
     database.select().from(appSettings).where(eq(appSettings.organizationId, organizationId)).orderBy(asc(appSettings.key)).all(),
@@ -278,6 +313,7 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
       maintenanceItems: maintenanceItemRows,
       paymentRecords: paymentRows,
       paymentEntries: paymentEntryRows,
+      mileageHistories: mileageHistoryRows,
       inspectionSchedules: scheduleRows,
       sharedSchedules: sharedScheduleRows,
       appSettings: settingsRows,
@@ -285,68 +321,198 @@ async function loadSnapshot(database: ReturnType<typeof createDatabase>, organiz
   }
 }
 
-async function clearOrganizationData(database: ReturnType<typeof createDatabase>, organizationId: string) {
-  await database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)).run()
-  await database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).run()
-  await database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).run()
-  await database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).run()
-  await database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).run()
-  await database.delete(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).run()
-  await database.delete(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).run()
-  await database.delete(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).run()
-  await database.delete(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).run()
-  await database.delete(vehicles).where(eq(vehicles.organizationId, organizationId)).run()
-  await database.delete(customers).where(eq(customers.organizationId, organizationId)).run()
-  await database.delete(appSettings).where(eq(appSettings.organizationId, organizationId)).run()
-}
-
-async function insertSnapshot(database: ReturnType<typeof createDatabase>, manifest: BackupManifest) {
-  for (const row of manifest.tables.customers) await database.insert(customers).values(row).run()
-  for (const row of manifest.tables.vehicles) await database.insert(vehicles).values(row).run()
+function buildRestoreStatements(database: ReturnType<typeof createDatabase>, organizationId: string, manifest: BackupManifest) {
+  const writes: BatchItem<'sqlite'>[] = [
+    database.delete(mileageHistories).where(eq(mileageHistories.organizationId, organizationId)),
+    database.delete(paymentEntries).where(eq(paymentEntries.organizationId, organizationId)),
+    database.delete(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)),
+    database.delete(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)),
+    database.delete(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)),
+    database.delete(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)),
+    database.delete(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)),
+    database.delete(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)),
+    database.delete(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)),
+    database.delete(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)),
+    database.delete(vehicles).where(eq(vehicles.organizationId, organizationId)),
+    database.delete(customers).where(eq(customers.organizationId, organizationId)),
+    database.delete(appSettings).where(eq(appSettings.organizationId, organizationId)),
+  ]
+  for (const row of manifest.tables.customers) writes.push(database.insert(customers).values(row))
+  for (const row of manifest.tables.vehicles) writes.push(database.insert(vehicles).values(row))
   for (const row of manifest.tables.vehicleFiles) {
     const { backupObjectKey: _backupObjectKey, ...file } = row
-    await database.insert(vehicleFiles).values(file).run()
+    writes.push(database.insert(vehicleFiles).values(file))
   }
-  for (const row of manifest.tables.salesDocuments) await database.insert(salesDocuments).values(row).run()
-  for (const row of manifest.tables.salesDocumentItems) await database.insert(salesDocumentItems).values(row).run()
-  for (const row of manifest.tables.maintenanceDocuments) await database.insert(maintenanceDocuments).values(row).run()
-  for (const row of manifest.tables.maintenanceItems) await database.insert(maintenanceItems).values(row).run()
-  for (const row of manifest.tables.paymentRecords) await database.insert(paymentRecords).values(row).run()
-  for (const row of manifest.tables.paymentEntries ?? []) await database.insert(paymentEntries).values(row).run()
-  for (const row of manifest.tables.inspectionSchedules) await database.insert(inspectionSchedules).values(row).run()
-  for (const row of manifest.tables.sharedSchedules ?? []) await database.insert(sharedSchedules).values(row).run()
-  for (const row of manifest.tables.appSettings) await database.insert(appSettings).values(row).run()
+  for (const row of manifest.tables.salesDocuments) writes.push(database.insert(salesDocuments).values(row))
+  for (const row of manifest.tables.salesDocumentItems) writes.push(database.insert(salesDocumentItems).values(row))
+  for (const row of manifest.tables.maintenanceDocuments) writes.push(database.insert(maintenanceDocuments).values(row))
+  for (const row of manifest.tables.maintenanceItems) writes.push(database.insert(maintenanceItems).values(row))
+  for (const row of manifest.tables.paymentRecords) writes.push(database.insert(paymentRecords).values(row))
+  for (const row of manifest.tables.paymentEntries ?? []) writes.push(database.insert(paymentEntries).values(row))
+  for (const row of manifest.tables.mileageHistories ?? []) writes.push(database.insert(mileageHistories).values(row))
+  for (const row of manifest.tables.inspectionSchedules) writes.push(database.insert(inspectionSchedules).values(row))
+  for (const row of manifest.tables.sharedSchedules ?? []) writes.push(database.insert(sharedSchedules).values(row))
+  for (const row of manifest.tables.appSettings) writes.push(database.insert(appSettings).values(row))
+  return writes
 }
 
 async function readManifest(storage: ReturnType<typeof createB2Storage>, key: string, organizationId: string) {
   const response = await storage.getObject(key)
   const value: unknown = await response.json().catch(() => null)
-  return assertManifest(value, organizationId)
+  return assertManifest(value, organizationId, { requireBackupObjectKeys: true })
 }
 
-function assertManifest(value: unknown, organizationId: string): BackupManifest {
+function assertManifest(value: unknown, organizationId: string, options: { requireBackupObjectKeys: boolean } = { requireBackupObjectKeys: true }): BackupManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'バックアップマニフェストが不正です。')
   const manifest = value as Partial<BackupManifest>
   if (manifest.version !== 1 || typeof manifest.id !== 'string' || manifest.organizationId !== organizationId || !manifest.tables || !Array.isArray(manifest.tables.customers) || !Array.isArray(manifest.tables.vehicles) || !Array.isArray(manifest.tables.vehicleFiles) || !Array.isArray(manifest.tables.salesDocuments) || !Array.isArray(manifest.tables.salesDocumentItems) || !Array.isArray(manifest.tables.maintenanceDocuments) || !Array.isArray(manifest.tables.maintenanceItems) || !Array.isArray(manifest.tables.paymentRecords) || !Array.isArray(manifest.tables.inspectionSchedules) || !Array.isArray(manifest.tables.appSettings)) {
     throw new HttpError(400, 'このバックアップは現在の組織へ復元できません。')
   }
   const tables = manifest.tables as BackupManifest['tables']
-  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
-  if (organizationRows.some((rows) => rows.some((row) => !row || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
-  const expectedObjectKeyPrefix = `organizations/${organizationId}/`
-  if (tables.vehicleFiles.some((file) => typeof file.objectKey !== 'string' || !file.objectKey.startsWith(expectedObjectKeyPrefix))) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
+  const organizationRows = [tables.customers, tables.vehicles, tables.vehicleFiles, tables.salesDocuments, tables.salesDocumentItems, tables.maintenanceDocuments, tables.maintenanceItems, tables.paymentRecords, tables.paymentEntries ?? [], tables.mileageHistories ?? [], tables.inspectionSchedules, tables.sharedSchedules ?? [], tables.appSettings]
+  if (organizationRows.some((rows) => rows.some((row) => !row || typeof row !== 'object' || row.organizationId !== organizationId))) throw new HttpError(400, 'バックアップ内の組織情報が不正です。')
+  assertManifestReferences(tables)
+  for (const file of tables.vehicleFiles) {
+    if (!file || typeof file !== 'object' || typeof file.id !== 'string' || !isSafePathSegment(file.id) || typeof file.vehicleId !== 'string' || !isSafePathSegment(file.vehicleId) || typeof file.fileName !== 'string' || !file.fileName.trim() || file.fileName.length > 120 || !isSupportedAttachmentContentType(file.contentType) || file.fileKind !== attachmentKind(file.contentType) || !Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 0 || file.sizeBytes > maximumBackupFileBytes || !isVehicleFileObjectKey(file.objectKey, organizationId, file.vehicleId, file.id)) throw new HttpError(400, 'バックアップ内の添付ファイル情報が不正です。')
+    if (options.requireBackupObjectKeys && (typeof file.backupObjectKey !== 'string' || !isBackupObjectKey(file.backupObjectKey, organizationId, file.id))) throw new HttpError(400, 'バックアップ内の添付ファイル保存先が不正です。')
+  }
   return manifest as BackupManifest
 }
 
+export function assertManifestReferences(tables: BackupManifest['tables']) {
+  const customerIds = manifestIds(tables.customers, '顧客')
+  const vehicleIds = manifestIds(tables.vehicles, '車両')
+  manifestIds(tables.vehicleFiles, '添付ファイル')
+  const salesDocumentIds = manifestIds(tables.salesDocuments, '販売書類')
+  manifestIds(tables.salesDocumentItems, '販売明細')
+  const maintenanceDocumentIds = manifestIds(tables.maintenanceDocuments, '整備書類')
+  manifestIds(tables.maintenanceItems, '整備明細')
+  manifestIds(tables.paymentRecords, '入金記録')
+  manifestIds(tables.paymentEntries ?? [], '入金明細')
+  manifestIds(tables.mileageHistories ?? [], '走行履歴')
+  manifestIds(tables.inspectionSchedules, '点検予定')
+  manifestIds(tables.sharedSchedules ?? [], '共有予定')
+
+  for (const row of tables.vehicles) assertManifestReference(customerIds, row.customerId, '車両の顧客')
+  for (const row of tables.vehicleFiles) assertManifestReference(vehicleIds, row.vehicleId, '添付ファイルの車両')
+  for (const row of tables.salesDocuments) {
+    assertManifestReference(customerIds, row.customerId, '販売書類の顧客')
+    if (row.vehicleId !== null) assertManifestReference(vehicleIds, row.vehicleId, '販売書類の車両')
+  }
+  for (const row of tables.salesDocumentItems) assertManifestReference(salesDocumentIds, row.documentId, '販売明細の販売書類')
+  for (const row of tables.maintenanceDocuments) {
+    assertManifestReference(customerIds, row.customerId, '整備書類の顧客')
+    assertManifestReference(vehicleIds, row.vehicleId, '整備書類の車両')
+  }
+  for (const row of tables.maintenanceItems) assertManifestReference(maintenanceDocumentIds, row.documentId, '整備明細の整備書類')
+  for (const row of tables.paymentRecords) assertPaymentReference(row.documentType, row.documentId, salesDocumentIds, maintenanceDocumentIds, '入金記録')
+  for (const row of tables.paymentEntries ?? []) assertPaymentReference(row.documentType, row.documentId, salesDocumentIds, maintenanceDocumentIds, '入金明細')
+  for (const row of tables.inspectionSchedules) {
+    assertManifestReference(customerIds, row.customerId, '点検予定の顧客')
+    assertManifestReference(vehicleIds, row.vehicleId, '点検予定の車両')
+  }
+  for (const row of tables.mileageHistories ?? []) {
+    assertManifestReference(vehicleIds, row.vehicleId, '走行履歴の車両')
+    assertManifestReference(maintenanceDocumentIds, row.maintenanceDocumentId, '走行履歴の整備書類')
+  }
+
+}
+
+function manifestIds(rows: Array<{ id: string }>, label: string) {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    if (typeof row.id !== 'string' || !row.id || ids.has(row.id)) throw new HttpError(400, `バックアップ内の${label}IDが不正または重複しています。`)
+    ids.add(row.id)
+  }
+  return ids
+}
+
+function assertManifestReference(ids: Set<string>, id: unknown, label: string) {
+  if (typeof id !== 'string' || !ids.has(id)) throw new HttpError(400, `バックアップ内の${label}参照が不正です。`)
+}
+
+function assertPaymentReference(documentType: string, documentId: string, salesDocumentIds: Set<string>, maintenanceDocumentIds: Set<string>, label: string) {
+  if (documentType === '販売請求書') {
+    assertManifestReference(salesDocumentIds, documentId, `${label}の販売請求書`)
+    return
+  }
+  if (documentType === '整備請求書') {
+    assertManifestReference(maintenanceDocumentIds, documentId, `${label}の整備請求書`)
+    return
+  }
+  throw new HttpError(400, `バックアップ内の${label}の請求書種別が不正です。`)
+}
+
 function assertExportManifest(value: unknown, organizationId: string): BackupExport {
-  const manifest = assertManifest(value, organizationId)
+  const manifest = assertManifest(value, organizationId, { requireBackupObjectKeys: false })
   const files = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray((value as { files?: unknown }).files) ? (value as { files: unknown[] }).files : []
+  let totalFileBytes = 0
   if (files.length !== manifest.tables.vehicleFiles.length || files.some((file) => !file || typeof file !== 'object' || typeof (file as BackupExportFile).id !== 'string' || typeof (file as BackupExportFile).data !== 'string' || typeof (file as BackupExportFile).contentType !== 'string' || typeof (file as BackupExportFile).fileName !== 'string')) throw new HttpError(400, 'PCバックアップの添付ファイル情報が不正です。')
+  const fileIds = new Set<string>()
+  for (const file of files as BackupExportFile[]) {
+    if (fileIds.has(file.id)) throw new HttpError(400, 'PCバックアップの添付ファイルIDが重複しています。')
+    fileIds.add(file.id)
+    const row = manifest.tables.vehicleFiles.find((vehicleFile) => vehicleFile.id === file.id)
+    if (!row || row.contentType !== file.contentType) throw new HttpError(400, 'PCバックアップの添付ファイル種別が一致しません。')
+    if (!isSupportedAttachmentContentType(file.contentType)) throw new HttpError(400, 'PCバックアップの添付ファイル種別が不正です。')
+    const byteLength = base64ByteLength(file.data)
+    if (byteLength > maximumBackupFileBytes || totalFileBytes + byteLength > maximumBackupTotalFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイル合計が上限を超えています。')
+    const bytes = base64ToArrayBuffer(file.data, file.contentType)
+    if (bytes.byteLength !== byteLength) throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。')
+    totalFileBytes += byteLength
+  }
   return { ...manifest, files: files as BackupExportFile[] }
 }
 
 function getStorage(env: Env) {
   try { return createB2Storage(env) } catch { throw new HttpError(503, 'B2のバックアップ設定がありません。') }
+}
+
+function isVehicleFileObjectKey(objectKey: string, organizationId: string, vehicleId: string, fileId: string) {
+  const prefix = `organizations/${organizationId}/vehicles/${vehicleId}/${fileId}-`
+  if (!objectKey.startsWith(prefix) || objectKey.length > prefix.length + 120) return false
+  const fileName = objectKey.slice(prefix.length)
+  return Boolean(fileName) && !fileName.includes('/') && !fileName.includes('\\') && !fileName.includes('..')
+}
+
+function isBackupObjectKey(objectKey: string, organizationId: string, fileId: string) {
+  const match = objectKey.match(/^(backups|imports)\/([^/]+)\/([^/]+)\/files\/([^/]+)$/u)
+  return Boolean(match && match[2] === organizationId && match[4] === fileId && isSafePathSegment(match[3]))
+}
+
+async function readResponseBytes(response: Response, maximumBytes: number, remainingTotalBytes: number) {
+  const limit = Math.min(maximumBytes, remainingTotalBytes)
+  const contentLengthHeader = response.headers.get('Content-Length')
+  if (contentLengthHeader !== null) {
+    if (!/^\d+$/u.test(contentLengthHeader)) throw new HttpError(502, 'B2のファイルサイズが不正です。')
+    const contentLength = Number(contentLengthHeader)
+    if (!Number.isSafeInteger(contentLength) || contentLength > limit) throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+  }
+  if (!response.body) throw new HttpError(502, 'B2のファイル本文を取得できません。')
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      totalBytes += next.value.byteLength
+      if (totalBytes > limit) {
+        await reader.cancel()
+        throw new HttpError(413, 'バックアップ対象の添付ファイル合計が上限を超えています。')
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
 async function deleteObjects(storage: ReturnType<typeof createB2Storage>, keys: string[]) {
@@ -367,22 +533,48 @@ function isAdmin(role: string) {
   return role === 'owner' || role === 'admin'
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer)
+async function readOptionalJson(request: Request) {
+  if (!request.body) return {} as Record<string, unknown>
+  try {
+    return await readJson(request)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) return {} as Record<string, unknown>
+    throw error
+  }
+}
+
+function hasBackupCreationSettingChange(current: BackupSettings, next: BackupSettings) {
+  return current.autoEnabled !== next.autoEnabled || current.frequency !== next.frequency || current.destination !== next.destination
+}
+
+function hasBackupRetentionSettingChange(current: BackupSettings, next: BackupSettings) {
+  return current.retentionDays !== next.retentionDays || current.archiveRetentionDays !== next.archiveRetentionDays || current.pcRetentionDays !== next.pcRetentionDays
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   let binary = ''
   const chunkSize = 0x8000
   for (let index = 0; index < bytes.length; index += chunkSize) binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
   return btoa(binary)
 }
 
-function base64ToArrayBuffer(value: string) {
+function base64ToArrayBuffer(value: string, contentType?: SupportedAttachmentContentType) {
   let binary: string
   try { binary = atob(value) } catch { throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。') }
+  if (binary.length > maximumBackupFileBytes) throw new HttpError(413, 'PCバックアップの添付ファイルが上限を超えています。')
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  if (contentType) assertAttachmentSignature(bytes, contentType)
   return bytes.buffer
 }
 
-type BackupManifest = {
+function base64ByteLength(value: string) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) throw new HttpError(400, 'PCバックアップの添付ファイルが不正です。')
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  return Math.max(0, (value.length * 3) / 4 - padding)
+}
+
+export type BackupManifest = {
   version: 1
   id: string
   organizationId: string
@@ -399,6 +591,7 @@ type BackupManifest = {
     maintenanceItems: Array<typeof maintenanceItems.$inferSelect>
     paymentRecords: Array<typeof paymentRecords.$inferSelect>
     paymentEntries: Array<typeof paymentEntries.$inferSelect>
+    mileageHistories: Array<typeof mileageHistories.$inferSelect>
     inspectionSchedules: Array<typeof inspectionSchedules.$inferSelect>
     sharedSchedules?: Array<typeof sharedSchedules.$inferSelect>
     appSettings: Array<typeof appSettings.$inferSelect>

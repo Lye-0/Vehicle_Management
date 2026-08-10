@@ -46,6 +46,23 @@ export const organizationMemberships = sqliteTable('organization_memberships', {
   index('organization_memberships_uid_idx').on(table.uid),
 ])
 
+export const organizationInvites = sqliteTable('organization_invites', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  email: text('email').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  role: text('role').notNull().default('employee'),
+  status: text('status').notNull().default('pending'),
+  expiresAt: text('expires_at').notNull(),
+  createdByUid: text('created_by_uid').notNull(),
+  acceptedUid: text('accepted_uid'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('organization_invites_token_hash_uq').on(table.tokenHash),
+  index('organization_invites_organization_email_idx').on(table.organizationId, table.email),
+  index('organization_invites_status_expires_idx').on(table.status, table.expiresAt),
+])
+
 export const authAccounts = sqliteTable('auth_accounts', {
   uid: text('uid').primaryKey(),
   mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull().default(false),
@@ -285,6 +302,17 @@ export const sharedSchedules = sqliteTable('shared_schedules', {
   index('shared_schedules_created_by_uid_idx').on(table.createdByUid),
 ])
 
+export const organizationPermissions = sqliteTable('organization_permissions', {
+  organizationId: text('organization_id').primaryKey(),
+  employeeCanExportCsv: integer('employee_can_export_csv', { mode: 'boolean' }).notNull().default(true),
+  employeeCanEditShop: integer('employee_can_edit_shop', { mode: 'boolean' }).notNull().default(true),
+  employeeCanEditTax: integer('employee_can_edit_tax', { mode: 'boolean' }).notNull().default(true),
+  employeeCanCreateRestoreBackup: integer('employee_can_create_restore_backup', { mode: 'boolean' }).notNull().default(true),
+  employeeCanManageBackupRetention: integer('employee_can_manage_backup_retention', { mode: 'boolean' }).notNull().default(false),
+  employeeCanManageArchiveRetention: integer('employee_can_manage_archive_retention', { mode: 'boolean' }).notNull().default(false),
+  ...timestamps,
+})
+
 export const appSettings = sqliteTable('app_settings', {
   organizationId: text('organization_id').notNull().default('org-default'),
   key: text('key').notNull(),
@@ -333,6 +361,7 @@ export const databaseSchema = {
   organizations,
   documentNumberSequences,
   organizationMemberships,
+  organizationInvites,
   authAccounts,
   customers,
   vehicles,
@@ -345,6 +374,7 @@ export const databaseSchema = {
   paymentEntries,
   inspectionSchedules,
   sharedSchedules,
+  organizationPermissions,
   appSettings,
   backupRecords,
   mileageHistories,

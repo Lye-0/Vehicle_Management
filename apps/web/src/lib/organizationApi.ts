@@ -10,6 +10,15 @@ export type OrganizationMembership = {
   status: string
 }
 
+export type OrganizationPermissions = {
+  employeeCanExportCsv: boolean
+  employeeCanEditShop: boolean
+  employeeCanEditTax: boolean
+  employeeCanCreateRestoreBackup: boolean
+  employeeCanManageBackupRetention: boolean
+  employeeCanManageArchiveRetention: boolean
+}
+
 export type AuthSession = {
   user: {
     uid: string
@@ -33,6 +42,17 @@ export async function updateCurrentProfile(input: { displayName?: string; email?
   })
 }
 
+export async function fetchOrganizationPermissions() {
+  return apiFetch<{ canManage: boolean; permissions: OrganizationPermissions }>('/api/organization/permissions')
+}
+
+export async function updateOrganizationPermissions(permissions: OrganizationPermissions) {
+  return apiFetch<{ permissions: OrganizationPermissions }>('/api/organization/permissions', {
+    method: 'PATCH',
+    body: JSON.stringify({ permissions }),
+  })
+}
+
 
 export async function fetchAuthSession() {
   return apiFetch<AuthSession>('/api/auth/me')
@@ -46,7 +66,7 @@ export async function completeOrganizationSetup(name: string, setupKey: string) 
   return response.session
 }
 
-export async function completeInitialPasswordChange() {
-  const response = await apiFetch<{ session: AuthSession }>('/api/auth/password/complete', { method: 'POST' })
+export async function completeInitialPasswordChange(password: string) {
+  const response = await apiFetch<{ session: AuthSession }>('/api/auth/password/complete', { method: 'POST', body: JSON.stringify({ password }) })
   return response.session
 }

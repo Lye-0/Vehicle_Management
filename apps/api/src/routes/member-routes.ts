@@ -1,8 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm'
-import { authAccounts, organizationMemberships, staffProfiles } from '@vehicle-management/database'
-import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser, resetEmailPasswordUser } from '../auth/identity-toolkit'
+import { authAccounts, organizationInvites, organizationMemberships, staffProfiles } from '@vehicle-management/database'
+import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser } from '../auth/identity-toolkit'
 import { requireAdminOrganizationContext, requireOrganizationContext, type OrganizationRole } from '../auth/organization'
-import { UnauthorizedError } from '../auth/firebase'
+import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
 
@@ -14,11 +14,13 @@ type MemberStatus = typeof memberStatuses[number]
 export async function handleMemberRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const collectionPath = pathname === '/api/organization/members'
+  const invitationAcceptPath = pathname === '/api/organization/invitations/accept'
   const memberMatch = pathname.match(/^\/api\/organization\/members\/([^/]+)$/)
-  if (!collectionPath && !memberMatch) return null
+  if (!collectionPath && !memberMatch && !invitationAcceptPath) return null
 
   try {
     const database = createDatabase(env.DB)
+    if (invitationAcceptPath && request.method === 'POST') return await acceptInvitation(request, env, database)
     if (collectionPath && request.method === 'GET') {
       const context = await requireOrganizationContext(request, env, database)
       return jsonResponse({ currentRole: context.organization.role, members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
@@ -40,49 +42,36 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
   const body = await readJson(request)
   const displayName = requiredDisplayName(body.displayName)
   const email = requiredEmail(body.email)
-  const existingProfile = await findStaffProfileByEmail(database, email)
-  const existingMembership = existingProfile
-    ? await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, existingProfile.uid))).get()
-    : undefined
-  if (existingMembership) throw new HttpError(409, 'そのユーザーはすでにこの組織に所属しています。')
-
   const temporaryPassword = createTemporaryPassword()
   const membershipId = crypto.randomUUID()
-  let createdUser: { uid: string; idToken: string } | null = null
-  let memberUid = existingProfile?.uid
+  let createdUser: { uid: string; idToken: string }
+  try {
+    createdUser = await createEmailPasswordUser(env, email, temporaryPassword)
+  } catch (error) {
+    if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
+      const invitation = await createOrganizationInvitation(database, context.organization.organizationId, email, context.user.uid)
+      return jsonResponse({ member: null, invitation }, 201, env)
+    }
+    throw error
+  }
+
+  const memberUid = createdUser.uid
   let membershipCreated = false
   try {
     const now = new Date().toISOString()
-    if (existingProfile) {
-      await resetEmailPasswordUser(env, existingProfile.uid, email, temporaryPassword)
-      await database.insert(organizationMemberships).values({
-        id: membershipId,
-        organizationId: context.organization.organizationId,
-        uid: existingProfile.uid,
-        role: 'employee',
-        status: 'active',
-        updatedAt: now,
-      }).run()
-      membershipCreated = true
-      await database.update(staffProfiles).set({ displayName, email, updatedAt: now }).where(eq(staffProfiles.uid, existingProfile.uid)).run()
-      await markInitialPasswordIssued(database, existingProfile.uid, now)
-    } else {
-      createdUser = await createEmailPasswordUser(env, email, temporaryPassword!)
-      memberUid = createdUser.uid
-      await database.insert(organizationMemberships).values({
-        id: membershipId,
-        organizationId: context.organization.organizationId,
-        uid: createdUser.uid,
-        role: 'employee',
-        status: 'active',
-        updatedAt: now,
-      }).run()
-      membershipCreated = true
-      await database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }).run()
-      await database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, updatedAt: now }).run()
-    }
+    await database.insert(organizationMemberships).values({
+      id: membershipId,
+      organizationId: context.organization.organizationId,
+      uid: createdUser.uid,
+      role: 'employee',
+      status: 'active',
+      updatedAt: now,
+    }).run()
+    membershipCreated = true
+    await database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }).run()
+    await database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, updatedAt: now }).run()
   } catch (error) {
-    if (membershipCreated && memberUid) {
+    if (membershipCreated) {
       try {
         await database.delete(organizationMemberships).where(eq(organizationMemberships.id, membershipId)).run()
       } catch (databaseCleanupError) {
@@ -102,21 +91,59 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
         console.error(cleanupError)
       }
     }
-    if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
-      throw new HttpError(409, 'そのメールアドレスの認証アカウントは既に存在します。既存ユーザーの情報を確認してから再登録してください。')
-    }
-    if (existingProfile && error instanceof IdentityToolkitError) {
-      if (error.code === 'USER_NOT_FOUND' || error.code === 'EMAIL_NOT_FOUND') {
-        throw new HttpError(409, 'このメールアドレスに対応するFirebase認証アカウントが見つかりません。認証アカウントを確認してから再追加してください。')
-      }
-      throw new HttpError(503, '既存アカウントのパスワードを再設定できませんでした。Firebaseの設定と認証アカウントを確認してください。')
-    }
     throw error
   }
 
   const members = await listMembers(database, context.organization.organizationId, context.user.uid)
   const member = members.find((item) => item.uid === memberUid)
   return jsonResponse({ member, ...(temporaryPassword ? { temporaryPassword } : {}) }, 201, env)
+}
+
+async function acceptInvitation(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
+  const user = await requireAuthenticatedUser(request, env)
+  if (user.isAnonymous || !user.email || !user.emailVerified) throw new HttpError(403, '招待を受け入れるには、招待先メールアドレスでログインし、メール確認を完了してください。')
+  const body = await readJson(request)
+  const token = typeof body.code === 'string' ? body.code.trim() : ''
+  if (!token || token.length > 200) throw new HttpError(400, '招待コードが不正です。')
+  const tokenHash = await hashInvitationToken(token)
+  const invite = await database.select().from(organizationInvites).where(and(eq(organizationInvites.tokenHash, tokenHash), eq(organizationInvites.status, 'pending'))).get()
+  if (!invite) throw new HttpError(400, '招待コードが無効、使用済み、または期限切れです。')
+  const now = new Date().toISOString()
+  if (invite.expiresAt <= now) {
+    await database.update(organizationInvites).set({ status: 'expired', updatedAt: now }).where(eq(organizationInvites.id, invite.id)).run()
+    throw new HttpError(400, '招待コードの有効期限が切れています。')
+  }
+  if (normalizeEmail(user.email) !== invite.email) throw new HttpError(403, 'この招待コードは現在のログインアカウントには使用できません。')
+  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, invite.organizationId), eq(organizationMemberships.uid, user.uid))).get()
+  if (existingMembership) throw new HttpError(409, 'このユーザーはすでに組織に所属しています。')
+  const claimed = await database.update(organizationInvites).set({ status: 'accepted', acceptedUid: user.uid, updatedAt: now }).where(and(eq(organizationInvites.id, invite.id), eq(organizationInvites.status, 'pending'), eq(organizationInvites.expiresAt, invite.expiresAt))).run()
+  if (!claimed.meta.changes) throw new HttpError(409, '招待コードはすでに使用されています。')
+  try {
+    await database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId: invite.organizationId, uid: user.uid, role: 'employee', status: 'active', updatedAt: now }).run()
+    const existingProfile = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
+    const displayName = existingProfile?.displayName || user.displayName || user.email
+    if (existingProfile) {
+      await database.update(staffProfiles).set({ displayName, email: normalizeEmail(user.email), role: 'employee', updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
+    } else {
+      await database.insert(staffProfiles).values({ uid: user.uid, displayName, email: normalizeEmail(user.email), role: 'employee', updatedAt: now }).run()
+    }
+    const authAccount = await database.select({ uid: authAccounts.uid }).from(authAccounts).where(eq(authAccounts.uid, user.uid)).get()
+    if (!authAccount) await database.insert(authAccounts).values({ uid: user.uid, mustChangePassword: false, updatedAt: now }).run()
+  } catch (error) {
+    console.error(error)
+    throw new HttpError(409, '招待の受け入れに失敗しました。管理者へ再招待を依頼してください。')
+  }
+  const members = await listMembers(database, invite.organizationId, user.uid)
+  return jsonResponse({ member: members.find((member) => member.uid === user.uid) }, 201, env)
+}
+
+async function createOrganizationInvitation(database: ReturnType<typeof createDatabase>, organizationId: string, email: string, createdByUid: string) {
+  const now = new Date().toISOString()
+  const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString()
+  await database.update(organizationInvites).set({ status: 'revoked', updatedAt: now }).where(and(eq(organizationInvites.organizationId, organizationId), eq(organizationInvites.email, email), eq(organizationInvites.status, 'pending'))).run()
+  const code = createInvitationToken()
+  await database.insert(organizationInvites).values({ id: crypto.randomUUID(), organizationId, email, tokenHash: await hashInvitationToken(code), role: 'employee', status: 'pending', expiresAt, createdByUid, updatedAt: now }).run()
+  return { code, email, expiresAt }
 }
 
 async function updateMember(request: Request, env: Env, database: ReturnType<typeof createDatabase>, uid: string) {
@@ -157,21 +184,6 @@ async function removeMember(request: Request, env: Env, database: ReturnType<typ
 
   await database.delete(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).run()
   return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
-}
-
-async function markInitialPasswordIssued(database: ReturnType<typeof createDatabase>, uid: string, issuedAt: string) {
-  const existingAccount = await database.select({ uid: authAccounts.uid }).from(authAccounts).where(eq(authAccounts.uid, uid)).get()
-  const values = { mustChangePassword: true, initialPasswordIssuedAt: issuedAt, initialPasswordChangedAt: null, updatedAt: issuedAt }
-  if (existingAccount) {
-    await database.update(authAccounts).set(values).where(eq(authAccounts.uid, uid)).run()
-  } else {
-    await database.insert(authAccounts).values({ uid, ...values }).run()
-  }
-}
-
-async function findStaffProfileByEmail(database: ReturnType<typeof createDatabase>, email: string) {
-  const profiles = await database.select().from(staffProfiles).all()
-  return profiles.find((profile) => profile.email?.trim().toLowerCase() === email)
 }
 
 async function listMembers(database: ReturnType<typeof createDatabase>, organizationId: string, currentUid: string) {
@@ -251,4 +263,24 @@ function randomNumber(maximum: number) {
   const values = new Uint32Array(1)
   crypto.getRandomValues(values)
   return values[0] % maximum
+}
+
+function createInvitationToken() {
+  const bytes = new Uint8Array(24)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+}
+
+async function hashInvitationToken(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  const bytes = new Uint8Array(digest)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase()
 }

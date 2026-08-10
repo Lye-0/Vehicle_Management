@@ -32,9 +32,9 @@ describe("CLI authenticated workflow", () => {
 		let salesDocumentId: string | undefined;
 		let maintenanceDocumentId: string | undefined;
 		let inspectionScheduleId: string | undefined;
-		let attachmentId: string | undefined;
-		let backupId: string | undefined;
-		let safetyBackupId: string | undefined;
+			let attachmentId: string | undefined;
+			let backupId: string | undefined;
+			let safetyBackupId: string | undefined;
 
 		await prepareTestOrganizations();
 
@@ -46,20 +46,57 @@ describe("CLI authenticated workflow", () => {
 				expect.objectContaining({ organizationId, role: "owner", status: "active" }),
 		]));
 
+			const defaultPermissions = await requestJson<JsonObject>("/api/organization/permissions");
+			expect(defaultPermissions.response.status).toBe(200);
+			expect(defaultPermissions.body.permissions).toEqual({
+				employeeCanExportCsv: true,
+				employeeCanEditShop: true,
+				employeeCanEditTax: true,
+				employeeCanCreateRestoreBackup: true,
+				employeeCanManageBackupRetention: false,
+				employeeCanManageArchiveRetention: false,
+			});
+			const disabledEmployeePermissions = await requestJson<JsonObject>("/api/organization/permissions", "PATCH", {
+				permissions: {
+					employeeCanExportCsv: false,
+					employeeCanEditShop: false,
+					employeeCanEditTax: false,
+					employeeCanCreateRestoreBackup: false,
+					employeeCanManageBackupRetention: false,
+					employeeCanManageArchiveRetention: false,
+				},
+			});
+			expect(disabledEmployeePermissions.response.status).toBe(200);
+			const employeeDeniedExport = await requestRaw("/api/export/customers", employeeUid);
+			expect(employeeDeniedExport.status).toBe(403);
+			const employeeDeniedShopUpdate = await requestJson<JsonObject>("/api/settings", "PATCH", { settings: { shop: { name: `${marker} 従業員変更` } } }, employeeUid);
+			expect(employeeDeniedShopUpdate.response.status).toBe(403);
+			const restoredEmployeePermissions = await requestJson<JsonObject>("/api/organization/permissions", "PATCH", {
+				permissions: {
+					employeeCanExportCsv: true,
+					employeeCanEditShop: true,
+					employeeCanEditTax: true,
+					employeeCanCreateRestoreBackup: true,
+					employeeCanManageBackupRetention: false,
+					employeeCanManageArchiveRetention: false,
+				},
+			});
+			expect(restoredEmployeePermissions.response.status).toBe(200);
+
 			const updatedProfile = await requestJson<JsonObject>("/api/auth/profile", "PATCH", {
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			});
 			expect(updatedProfile.response.status).toBe(200);
 			expect(updatedProfile.body.profile).toEqual({
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			});
 
 			const refreshedSession = await requestJson<JsonObject>("/api/auth/me");
 			expect(refreshedSession.body.profile).toEqual(expect.objectContaining({
 				displayName: `${marker} 表示名変更`,
-				email: `${marker.toLowerCase()}-profile@example.com`,
+				email: `${ownerUid}@example.com`,
 			}));
 
 			const members = await requestJson<JsonObject>("/api/organization/members");
@@ -67,7 +104,7 @@ describe("CLI authenticated workflow", () => {
 			expect(members.body.currentRole).toBe("owner");
 			expect(members.body.members).toEqual(expect.arrayContaining([
 				expect.objectContaining({ uid: employeeUid, role: "employee", status: "active" }),
-				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${marker.toLowerCase()}-profile@example.com` }),
+				expect.objectContaining({ uid: ownerUid, displayName: `${marker} 表示名変更`, email: `${ownerUid}@example.com` }),
 		]));
 
 			const createdCustomer = await requestJson<JsonObject>("/api/customers", "POST", {
@@ -477,10 +514,8 @@ describe("CLI authenticated workflow", () => {
 			const invalidRowCommitFile = new FormData();
 			invalidRowCommitFile.append("file", new File([invalidRowCsv], "invalid-row.csv", { type: "text/csv" }));
 			const invalidRowCommit = await requestForm<JsonObject>("/api/import/customers/commit", invalidRowCommitFile);
-			expect(invalidRowCommit.response.status).toBe(200);
-			expect(invalidRowCommit.body.imported).toBe(0);
-			expect(invalidRowCommit.body.skipped).toBe(1);
-			expect(arrayValue(invalidRowCommit.body.errors)).toHaveLength(1);
+			expect(invalidRowCommit.response.status).toBe(400);
+			expect(stringValue(invalidRowCommit.body.error)).toContain("変更は反映されていません");
 
 			const employeeCannotManageMembers = await requestJson<JsonObject>(`/api/organization/members/${ownerUid}`, "PATCH", { status: "suspended" }, employeeUid);
 			expect(employeeCannotManageMembers.response.status).toBe(403);
@@ -488,8 +523,8 @@ describe("CLI authenticated workflow", () => {
 			employeeImportAttemptFile.append("file", new File([csv], "customers.csv", { type: "text/csv" }));
 			const employeeCannotImport = await requestForm<JsonObject>("/api/import/customers/preview", employeeImportAttemptFile, employeeUid);
 			expect(employeeCannotImport.response.status).toBe(403);
-			const employeeCannotBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
-			expect(employeeCannotBackup.response.status).toBe(403);
+			const employeeBackup = await requestJson<JsonObject>("/api/backups", "POST", undefined, employeeUid);
+			expect(employeeBackup.response.status).toBe(b2Configured ? 201 : 503);
 
 			const suspended = await requestJson<JsonObject>(`/api/organization/members/${employeeUid}`, "PATCH", { status: "suspended" });
 			expect(suspended.response.status).toBe(200);
@@ -508,11 +543,14 @@ describe("CLI authenticated workflow", () => {
 
 			const removedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(removedEmployeeAccess.response.status).toBe(400);
-            const readdedEmployee = await requestJson<JsonObject>("/api/organization/members", "POST", { displayName: marker + " 再追加従業員", email: employeeUid + "@example.com" });
-            expect(readdedEmployee.response.status).toBe(201);
-            expect(readdedEmployee.body.temporaryPassword).toEqual(expect.any(String));
-            expect(stringValue(readdedEmployee.body.temporaryPassword).length).toBeGreaterThanOrEqual(16);
-            expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, displayName: marker + " 再追加従業員", role: "employee", status: "active", mustChangePassword: true }));
+			const invitationCode = `${marker}-invite-code`;
+			const invitationHash = await hashInvitationToken(invitationCode);
+			await env.DB.prepare("INSERT INTO organization_invites (id, organization_id, email, token_hash, role, status, expires_at, created_by_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+				.bind(`invite-${marker.toLowerCase()}`, organizationId, `${employeeUid}@example.com`, invitationHash, "employee", "pending", new Date(Date.now() + 86_400_000).toISOString(), ownerUid)
+				.run();
+			const readdedEmployee = await requestJson<JsonObject>("/api/organization/invitations/accept", "POST", { code: invitationCode }, employeeUid);
+			expect(readdedEmployee.response.status).toBe(201);
+			expect(objectValue(readdedEmployee.body.member)).toEqual(expect.objectContaining({ uid: employeeUid, role: "employee", status: "active", mustChangePassword: false }));
 			const readdedEmployeeAccess = await requestJson<JsonObject>("/api/customers", "GET", undefined, employeeUid);
 			expect(readdedEmployeeAccess.response.status).toBe(200);
 
@@ -547,7 +585,7 @@ describe("CLI authenticated workflow", () => {
 			expect(listedSharedSchedules.response.status).toBe(200);
 			expect(arrayValue(listedSharedSchedules.body.schedules)).toEqual(expect.arrayContaining([
 				expect.objectContaining({ title: `${marker} オーナー予定 更新`, authorName: `${marker} 表示名変更` }),
-				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 再追加従業員` }),
+				expect.objectContaining({ title: `${marker} 従業員予定`, authorName: `${marker} 従業員` }),
 			]));
 			const dashboardWithSharedSchedules = await requestJson<JsonObject>("/api/dashboard", "GET", undefined, employeeUid);
 			expect(dashboardWithSharedSchedules.response.status).toBe(200);
@@ -675,6 +713,7 @@ async function cleanupTestData(state: { attachmentId?: string; backupId?: string
 		"inspection_schedules",
 		"shared_schedules",
 		"app_settings",
+		"organization_invites",
 		"backup_records",
 	]) {
 		await env.DB.prepare(`DELETE FROM ${table} WHERE organization_id = ?`).bind(organizationId).run();
@@ -743,6 +782,14 @@ function authHeaders(uid: string, selectedOrganizationId: string) {
 		Authorization: `Bearer ${emulatorToken(uid)}`,
 		"X-Organization-Id": selectedOrganizationId,
 	});
+}
+
+async function hashInvitationToken(value: string) {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+	const bytes = new Uint8Array(digest);
+	let binary = "";
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary);
 }
 
 function emulatorToken(uid: string) {

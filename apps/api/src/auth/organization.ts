@@ -1,8 +1,10 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { authAccounts, organizationMemberships, organizations, staffProfiles } from '@vehicle-management/database'
 import { requireAuthenticatedUser, type FirebaseUser } from './firebase'
+import { IdentityToolkitError, updatePasswordWithIdToken } from './identity-toolkit'
 import { HttpError } from '../http'
 import type { Database } from '../db/client'
+import { loadOrganizationPermissions, type OrganizationPermissions } from '../organization-permissions'
 
 export const defaultOrganizationId = 'org-default'
 export const organizationRoles = ['owner', 'admin', 'employee'] as const
@@ -34,6 +36,8 @@ export async function requireOrganizationContext(request: Request, env: Env, dat
     throw new HttpError(400, '利用する組織を選択してください。')
   }
   if (organization.status !== 'active') throw new HttpError(403, 'この組織の利用権限が無効です。')
+  const account = await database.select({ mustChangePassword: authAccounts.mustChangePassword }).from(authAccounts).where(eq(authAccounts.uid, user.uid)).get()
+  if (account?.mustChangePassword) throw new HttpError(403, '初期パスワードの変更が必要です。')
   return { user, organization }
 }
 
@@ -42,6 +46,14 @@ export async function requireAdminOrganizationContext(request: Request, env: Env
   if (context.organization.role !== 'owner' && context.organization.role !== 'admin') {
     throw new HttpError(403, 'この操作には管理者権限が必要です。')
   }
+  return context
+}
+
+export async function requireOrganizationPermission(request: Request, env: Env, database: Database, permission: keyof OrganizationPermissions): Promise<OrganizationContext> {
+  const context = await requireOrganizationContext(request, env, database)
+  if (context.organization.role === 'owner' || context.organization.role === 'admin') return context
+  const permissions = await loadOrganizationPermissions(database, context.organization.organizationId)
+  if (!permissions[permission]) throw new HttpError(403, 'この操作は組織の権限設定で許可されていません。')
   return context
 }
 
@@ -108,22 +120,53 @@ export async function completeInitialOrganizationSetup(database: Database, env: 
   const target = await database.select().from(organizations).where(eq(organizations.setupCompleted, false)).orderBy(asc(organizations.createdAt)).get()
   if (!target) throw new HttpError(409, '初回セットアップはすでに完了しています。')
 
-  const existingMembership = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, target.id), eq(organizationMemberships.uid, user.uid))).get()
   const now = new Date().toISOString()
-  await database.update(organizations).set({ name: normalizedName, ownerUid: user.uid, setupCompleted: true, updatedAt: now }).where(and(eq(organizations.id, target.id), eq(organizations.setupCompleted, false))).run()
-  if (!existingMembership) {
-    await database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId: target.id, uid: user.uid, role: 'owner', status: 'active', updatedAt: now }).run()
-  }
-  await upsertProfile(database, user, 'owner')
-  await ensureAuthAccount(database, user.uid)
+  const databaseClient = database.$client
+  const setupGate = 'id = ? AND setup_completed = 1 AND owner_uid = ? AND updated_at = ?'
+  const statements = [
+    databaseClient.prepare('UPDATE organizations SET name = ?, owner_uid = ?, setup_completed = 1, updated_at = ? WHERE id = ? AND setup_completed = 0').bind(normalizedName, user.uid, now, target.id),
+    databaseClient.prepare(`
+      INSERT INTO organization_memberships (id, organization_id, uid, role, status, updated_at)
+      SELECT ?, ?, ?, 'owner', 'active', ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (organization_id, uid) DO UPDATE SET role = excluded.role, status = excluded.status, updated_at = excluded.updated_at
+    `).bind(crypto.randomUUID(), target.id, user.uid, now, target.id, user.uid, now),
+    databaseClient.prepare(`
+      INSERT INTO staff_profiles (uid, display_name, email, role, updated_at)
+      SELECT ?, ?, ?, 'owner', ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (uid) DO UPDATE SET
+        display_name = CASE WHEN staff_profiles.display_name = '' THEN excluded.display_name ELSE staff_profiles.display_name END,
+        email = COALESCE(excluded.email, staff_profiles.email),
+        role = excluded.role,
+        updated_at = excluded.updated_at
+    `).bind(user.uid, user.displayName || user.email || 'ログインユーザー', user.email?.trim().toLowerCase() ?? null, now, target.id, user.uid, now),
+    databaseClient.prepare(`
+      INSERT INTO auth_accounts (uid)
+      SELECT ?
+      WHERE EXISTS (SELECT 1 FROM organizations WHERE ${setupGate})
+      ON CONFLICT (uid) DO NOTHING
+    `).bind(user.uid, target.id, user.uid, now),
+  ]
+  const results = await databaseClient.batch(statements as [D1PreparedStatement, ...D1PreparedStatement[]])
+  if (results[0].meta.changes !== 1) throw new HttpError(409, '初回セットアップは別のユーザーによって完了しました。')
   return target.id
 }
 
-export async function completeInitialPasswordChange(database: Database, uid: string) {
+export async function completeInitialPasswordChange(database: Database, env: Env, uid: string, idToken: string, password: string) {
   const account = await database.select({ uid: authAccounts.uid, mustChangePassword: authAccounts.mustChangePassword }).from(authAccounts).where(eq(authAccounts.uid, uid)).get()
   if (!account) throw new HttpError(404, '認証アカウント情報が見つかりません。')
   if (!account.mustChangePassword) return
-  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(eq(authAccounts.uid, uid)).run()
+  if (!idToken) throw new HttpError(401, '認証トークンが見つかりません。')
+  try {
+    await updatePasswordWithIdToken(env, idToken, password)
+  } catch (error) {
+    if (error instanceof IdentityToolkitError && error.code === 'WEAK_PASSWORD') throw new HttpError(400, 'パスワードは8文字以上で設定してください。')
+    if (error instanceof IdentityToolkitError && ['INVALID_ID_TOKEN', 'TOKEN_EXPIRED', 'USER_NOT_FOUND'].includes(error.code)) throw new HttpError(401, '認証情報を確認できません。')
+    throw new HttpError(503, 'パスワードを変更できませんでした。Firebaseの設定を確認してください。')
+  }
+  const now = new Date().toISOString()
+  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: now, updatedAt: now }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.mustChangePassword, true))).run()
 }
 
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {
@@ -144,8 +187,9 @@ async function upsertProfile(database: Database, user: FirebaseUser, role: Organ
   const existing = await database.select({ uid: staffProfiles.uid, displayName: staffProfiles.displayName, email: staffProfiles.email }).from(staffProfiles).where(eq(staffProfiles.uid, user.uid)).get()
   const now = new Date().toISOString()
   const displayName = user.displayName || user.email || 'ログインユーザー'
+  const authenticatedEmail = user.email?.trim().toLowerCase() ?? null
   if (existing) {
-    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: existing.email ?? user.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
+    await database.update(staffProfiles).set({ displayName: existing.displayName || displayName, email: authenticatedEmail ?? existing.email, role, updatedAt: now }).where(eq(staffProfiles.uid, user.uid)).run()
   } else {
     await database.insert(staffProfiles).values({ uid: user.uid, displayName, email: user.email, role, updatedAt: now }).run()
   }

@@ -4,6 +4,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { loadOrganizationPermissions } from '../organization-permissions'
 
 type SalesItemPresetGroupKey = 'vehiclePrice' | 'fees' | 'accessories'
 type SalesItemPresetGroups = Record<SalesItemPresetGroupKey, string[]>
@@ -53,7 +54,7 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     const context = await requireOrganizationContext(request, env, database)
     const organizationId = context.organization.organizationId
     if (request.method === 'GET') return jsonResponse({ settings: await loadSettings(database, organizationId) }, 200, env)
-    if (request.method === 'PATCH') return await updateSettings(request, env, database, organizationId)
+    if (request.method === 'PATCH') return await updateSettings(request, env, database, context)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
     if (error instanceof UnauthorizedError) return jsonResponse({ error: error.message }, 401, env)
@@ -63,7 +64,8 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
   }
 }
 
-async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+async function updateSettings(request: Request, env: Env, database: ReturnType<typeof createDatabase>, context: Awaited<ReturnType<typeof requireOrganizationContext>>) {
+  const organizationId = context.organization.organizationId
   const body = await readJson(request)
   const incoming = recordValue(body.settings)
   if (!incoming) throw new HttpError(400, '設定内容が不正です。')
@@ -77,6 +79,15 @@ async function updateSettings(request: Request, env: Env, database: ReturnType<t
     salesItemPresetGroups: incoming.salesItemPresetGroups ?? (hasIncomingLegacySalesPresets ? undefined : current.salesItemPresetGroups),
     maintenanceItemPresets: incoming.maintenanceItemPresets ?? current.maintenanceItemPresets,
   })
+  if (context.organization.role === 'employee') {
+    const permissions = await loadOrganizationPermissions(database, organizationId)
+    if (incoming.shop !== undefined && !permissions.employeeCanEditShop && JSON.stringify(next.shop) !== JSON.stringify(current.shop)) {
+      throw new HttpError(403, '店舗情報の変更は組織の権限設定で許可されていません。')
+    }
+    if (incoming.tax !== undefined && !permissions.employeeCanEditTax && JSON.stringify(next.tax) !== JSON.stringify(current.tax)) {
+      throw new HttpError(403, '税率情報の変更は組織の権限設定で許可されていません。')
+    }
+  }
 
   const serializedSettings: Record<string, unknown> = {
     shop: next.shop,

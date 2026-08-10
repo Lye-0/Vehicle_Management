@@ -34,6 +34,7 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   const [searchField, setSearchField] = useState<VehicleSearchField>('すべて')
   const [selectedInspectionYear, setSelectedInspectionYear] = useState('')
   const [selectedInspectionMonth, setSelectedInspectionMonth] = useState('')
+  const [mobileInspectionView, setMobileInspectionView] = useState<'calendar' | 'list'>('calendar')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -100,23 +101,36 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
     onSelectVehicle?.(event.navigation)
   }
 
+  function openMobileInspectionView(view: 'calendar' | 'list') {
+    setMobileInspectionView(view)
+    if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0)
+  }
+
   return <>
     <div className="page-header inspection-page-header"><div><span className="page-eyebrow">点検予定</span><h1>車検予定</h1><p>顧客・車両に登録されている車検満了日を確認・管理します。</p></div></div>
     {error && <div className="customer-sync-status is-error" role="alert"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status" role="status"><span>車検予定を読み込んでいます。</span></div>}
-    <DashboardCalendar events={vehicleInspectionEvents} loading={loading} onSelectEvent={selectCalendarVehicle} eyebrow="車検期限を確認" title="車検満了カレンダー" description="顧客・車両に登録されている車検満了日のみを表示しています。" legendCategories={vehicleInspectionLegendCategories} titleId="inspection-calendar-title" detailTitleId="inspection-calendar-detail-title" />
-    <div className="customer-toolbar inspection-vehicle-toolbar">
-      <label className="customer-search"><Search size={19} /><span className="sr-only">車検予定を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={vehicleSearchPlaceholders[searchField]} /></label>
-      <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as VehicleSearchField)}>{vehicleSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
-      <span className="inspection-result-summary"><strong>{filteredVehicles.length}件</strong><span>車検</span></span>
+    <div className="mobile-inspection-switch" role="tablist" aria-label="点検予定の表示">
+      <button type="button" role="tab" aria-selected={mobileInspectionView === 'calendar'} onClick={() => openMobileInspectionView('calendar')}>カレンダー</button>
+      <button type="button" role="tab" aria-selected={mobileInspectionView === 'list'} onClick={() => openMobileInspectionView('list')}>予定一覧</button>
     </div>
-    <div className="inspection-date-filter-row" aria-label="車検満了日で絞り込み">
-      <span className="inspection-date-filter-label">満了日</span>
-      <label className="inspection-date-filter"><span className="sr-only">満了年</span><select value={selectedInspectionYear} onChange={(event) => { setSelectedInspectionYear(event.target.value); setSelectedInspectionMonth('') }}><option value="">すべての年</option>{inspectionYears.map((year) => <option key={year} value={year}>{year}年</option>)}</select></label>
-      <label className="inspection-date-filter"><span className="sr-only">満了月</span><select value={selectedInspectionMonth} disabled={!selectedInspectionYear} onChange={(event) => setSelectedInspectionMonth(event.target.value)}><option value="">{selectedInspectionYear ? 'すべての月' : '満了年を先に選択'}</option>{inspectionMonths.map((month) => <option key={month} value={month}>{month}月</option>)}</select></label>
-      {hasActiveFilters && <button className="text-button inspection-date-filter-reset" type="button" onClick={() => { setQuery(''); setSearchField('すべて'); setSelectedInspectionYear(''); setSelectedInspectionMonth('') }}>条件をリセット</button>}
+    <div className={`inspection-mobile-view inspection-mobile-view-${mobileInspectionView}`}>
+      <div className="inspection-calendar-view"><DashboardCalendar events={vehicleInspectionEvents} loading={loading} onSelectEvent={selectCalendarVehicle} eyebrow="車検期限を確認" title="車検満了カレンダー" description="顧客・車両に登録されている車検満了日のみを表示しています。" legendCategories={vehicleInspectionLegendCategories} titleId="inspection-calendar-title" detailTitleId="inspection-calendar-detail-title" /></div>
+      <div className="inspection-list-view">
+        <div className="customer-toolbar inspection-vehicle-toolbar">
+          <label className="customer-search"><Search size={19} /><span className="sr-only">車検予定を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={vehicleSearchPlaceholders[searchField]} /></label>
+          <label className="customer-search-filter"><span className="sr-only">検索項目</span><select value={searchField} onChange={(event) => setSearchField(event.target.value as VehicleSearchField)}>{vehicleSearchFields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>
+          <span className="inspection-result-summary"><strong>{filteredVehicles.length}件</strong><span>車検</span></span>
+        </div>
+        <div className="inspection-date-filter-row" aria-label="車検満了日で絞り込み">
+          <span className="inspection-date-filter-label">満了日</span>
+          <label className="inspection-date-filter"><span className="sr-only">満了年</span><select value={selectedInspectionYear} onChange={(event) => { setSelectedInspectionYear(event.target.value); setSelectedInspectionMonth('') }}><option value="">すべての年</option>{inspectionYears.map((year) => <option key={year} value={year}>{year}年</option>)}</select></label>
+          <label className="inspection-date-filter"><span className="sr-only">満了月</span><select value={selectedInspectionMonth} disabled={!selectedInspectionYear} onChange={(event) => setSelectedInspectionMonth(event.target.value)}><option value="">{selectedInspectionYear ? 'すべての月' : '満了年を先に選択'}</option>{inspectionMonths.map((month) => <option key={month} value={month}>{month}月</option>)}</select></label>
+          {hasActiveFilters && <button className="text-button inspection-date-filter-reset" type="button" onClick={() => { setQuery(''); setSearchField('すべて'); setSelectedInspectionYear(''); setSelectedInspectionMonth('') }}>条件をリセット</button>}
+        </div>
+        <section className="inspection-schedule-grid">{filteredVehicles.map((vehicle) => <article className="panel inspection-schedule-card inspection-vehicle-card" key={vehicle.id}><button className="inspection-vehicle-card-button" type="button" onClick={() => onSelectVehicle?.({ section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })} aria-label={`${vehicle.customerName}の${vehicle.vehicleName}の車検詳細を開く`}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />車検</span><span className="inspection-state">車検</span></div><h2>{vehicle.customerName}</h2><p>{vehicle.vehicleName}</p><div className="inspection-card-date"><span>車検満了日</span><strong className={dateTone(vehicle.inspectionDate)}>{formatDate(vehicle.inspectionDate)}</strong></div><div className="inspection-card-note">登録番号：{vehicle.plate || '未登録'}<br />車台番号：{vehicle.vin || '未登録'}</div></button></article>)}{!filteredVehicles.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>車検満了日が登録された車両がありません</strong><span>{loading ? '読み込み中です。' : hasActiveFilters ? '検索条件を変更してください。' : '顧客・車両タブで車検満了日を登録してください。'}</span></div>}</section>
+      </div>
     </div>
-    <section className="inspection-schedule-grid">{filteredVehicles.map((vehicle) => <article className="panel inspection-schedule-card inspection-vehicle-card" key={vehicle.id}><button className="inspection-vehicle-card-button" type="button" onClick={() => onSelectVehicle?.({ section: 'customers', customerId: vehicle.customerId, vehicleId: vehicle.id })} aria-label={`${vehicle.customerName}の${vehicle.vehicleName}の車検詳細を開く`}><div className="inspection-card-header"><span className="inspection-type-badge"><CalendarClock size={15} />車検</span><span className="inspection-state">車検</span></div><h2>{vehicle.customerName}</h2><p>{vehicle.vehicleName}</p><div className="inspection-card-date"><span>車検満了日</span><strong className={dateTone(vehicle.inspectionDate)}>{formatDate(vehicle.inspectionDate)}</strong></div><div className="inspection-card-note">登録番号：{vehicle.plate || '未登録'}<br />車台番号：{vehicle.vin || '未登録'}</div></button></article>)}{!filteredVehicles.length && <div className="panel inspection-empty"><CalendarClock size={30} /><strong>車検満了日が登録された車両がありません</strong><span>{loading ? '読み込み中です。' : hasActiveFilters ? '検索条件を変更してください。' : '顧客・車両タブで車検満了日を登録してください。'}</span></div>}</section>
   </>
 }
 

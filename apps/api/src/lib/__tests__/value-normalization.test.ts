@@ -22,7 +22,9 @@ describe('入力値の正規化', () => {
   it('年式・排気量・走行距離へ単位と桁区切りを補完する', () => {
     expect(normalizeModelYear('2')).toBe('2年')
     expect(normalizeDisplacement('2000')).toBe('2,000 cc')
+    expect(normalizeDisplacement('2000c')).toBe('2,000 cc')
     expect(normalizeMileage('10000')).toBe('10,000 km')
+    expect(normalizeMileage('10000k')).toBe('10,000 km')
     expect(normalizeValueForComparison('modelYear', '2')).toBe('2')
     expect(normalizeValueForComparison('displacement', '2,000 cc')).toBe('2000')
     expect(normalizeValueForComparison('mileage', '10,000 km')).toBe('10000')
@@ -31,6 +33,9 @@ describe('入力値の正規化', () => {
   it('電話番号と郵便番号へハイフンを補完する', () => {
     expect(normalizePhone('09012345678')).toBe('090-1234-5678')
     expect(normalizePhone('0312345678')).toBe('03-1234-5678')
+    expect(normalizePhone('04-1234-5678')).toBe('04-1234-5678')
+    expect(normalizePhone('0120-123-456')).toBe('0120-123-456')
+    expect(normalizePhone('03-1234-5678')).toBe('03-1234-5678')
     expect(normalizePostalCode('〒1000001')).toBe('100-0001')
     expect(normalizePostalCode('100-0001')).toBe('100-0001')
     expect(normalizeValueForComparison('phone', '09012345678')).toBe('09012345678')

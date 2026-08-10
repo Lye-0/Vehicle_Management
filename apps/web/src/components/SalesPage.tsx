@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
-import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
+import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import {
   Archive,
   CarFront,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -44,6 +45,8 @@ import { compareSortableDocuments, type DocumentSortDirection, type DocumentSort
 import { DocumentSortControls } from './DocumentSortControls'
 import { DocumentTaxSettings } from './DocumentTaxSettings'
 import { DateCalendarButton } from './DateCalendarButton'
+import { sanitizeNormalizedDraft, toEditableNormalizedValue } from './normalizedInput'
+import { toNativeDateValue } from './dateInput'
 import { MasterSyncConfirmationDialog, type MasterSyncConfirmationResult } from './MasterSyncConfirmationDialog'
 import { OptionalDateField } from './OptionalDateField'
 import { SalesDuplicateConfirmationDialog, type SalesDuplicateDialogState } from './SalesDuplicateConfirmationDialog'
@@ -130,6 +133,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [filterType, setFilterType] = useState<DocumentFilter>('すべて')
   const [statusFilter, setStatusFilter] = useState<SalesStatusFilter>('すべて')
   const [selectedDocumentId, setSelectedDocumentId] = useState(initialDocumentId ?? '')
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialDocumentId ? 'detail' : 'list')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<SalesCreateForm>(emptyCreateForm())
   const [draftDocument, setDraftDocument] = useState<SalesDraftState>(null)
@@ -166,7 +170,9 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         setDocuments(nextDocuments)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        setSelectedDocumentId(initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : '')
+        const nextSelectedDocumentId = initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : ''
+        setSelectedDocumentId(nextSelectedDocumentId)
+        if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setSyncError('')
       })
       .catch((error: unknown) => {
@@ -218,6 +224,16 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     replaceDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as SalesDocument : document))
   }
 
+  function openMobileDetail() {
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+  }
+
+  function openMobileList() {
+    setMobileWorkspaceView('list')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+  }
+
   function discardDraftIfConfirmed(action: string) {
     if (!draftDocument) return true
     if (dirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
@@ -237,6 +253,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     if (!discardDraftIfConfirmed('別の書類を表示')) return
     setSelectedDocumentId(documentId)
     setDocumentView('edit')
+    openMobileDetail()
   }
 
   // Initialize openedMasterSnapshot when document changes
@@ -540,6 +557,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     setPendingDraftDuplicateConfirmation(undefined)
     setSyncError('')
     setDocumentView('edit')
+    openMobileDetail()
     setCreateDialogOpen(false)
   }
 
@@ -867,8 +885,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {syncError && <div className="customer-sync-status is-error"><span>{syncError}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
-      <div className="document-filter-panel sales-document-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className="sales-workspace"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} />{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div>
+      <div className="document-filter-panel sales-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
+      <div className={`sales-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />販売書類一覧へ戻る</button>{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
       {salesDuplicateDialog && <SalesDuplicateConfirmationDialog state={salesDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleSalesDuplicateCancel} />}
       {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={undefined} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMasterSyncCancel} />}
@@ -1124,14 +1142,14 @@ function SalesSheetCustomerEditor({ document, hasImage, customer, onUpdateCustom
   return <>
     <SheetTextControl variant="customer-name" ariaLabel="お客様名" value={customer.name} x={left.name[0]} y={left.name[1]} width={left.name[2]} height={left.name[3]} onChange={(value) => onUpdateCustomer('name', value)} />
     <SalesSheetCustomerHonorific hasImage={hasImage} value={document.details.customerHonorific || '様'} y={left.name[1]} height={left.name[3]} />
-    <SheetTextControl variant="customer-value" displayPrefix="〒" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} normalizeOnBlur={normalizePostalCode} onChange={(value) => onUpdateCustomer('postalCode', value)} />
+    <SheetTextControl variant="customer-value" normalization="postalCode" displayPrefix="〒" ariaLabel="郵便番号" value={customer.postalCode} x={left.postalCode[0]} y={left.postalCode[1]} width={left.postalCode[2]} height={left.postalCode[3]} normalizeOnBlur={normalizePostalCode} onChange={(value) => onUpdateCustomer('postalCode', value)} />
     <SheetTextControl variant="customer-value" ariaLabel="住所" value={customer.address} x={left.address[0]} y={left.address[1]} width={left.address[2]} height={left.address[3]} onChange={(value) => onUpdateCustomer('address', value)} />
-    {hasImage && left.phone ? <SheetTextControl variant="customer-value" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
+    {hasImage && left.phone ? <SheetTextControl variant="customer-value" normalization="phone" displayPrefix="TEL：" ariaLabel="電話番号" value={customer.phone} x={left.phone[0]} y={left.phone[1]} width={left.phone[2]} height={left.phone[3]} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} /> : null}
     {!hasImage ? <>
       <SheetTextControl grid calendar ariaLabel="生年月日" value={customer.birthDate} x={478} y={customerLayout.y + 1} width={207} height={41} normalizeOnBlur={normalizeSalesCustomerBirthDateOnBlur} onChange={(value) => onUpdateCustomer('birthDate', value)} />
-      <SheetTextControl grid ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} />
+      <SheetTextControl grid normalization="phone" ariaLabel="お客様電話番号" value={customer.phone} x={478} y={customerLayout.y + 42} width={207} height={41} normalizeOnBlur={normalizePhone} onChange={(value) => onUpdateCustomer('phone', value)} />
       <SheetTextControl grid ariaLabel="勤務先等" value={customer.employer} x={478} y={customerLayout.y + 83} width={207} height={41} onChange={(value) => onUpdateCustomer('employer', value)} />
-      <SheetTextControl grid ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
+      <SheetTextControl grid normalization="phone" ariaLabel="連絡先電話番号" value={document.details.customerContactPhone} x={478} y={customerLayout.y + 124} width={207} height={43} normalizeOnBlur={normalizePhone} onChange={(customerContactPhone) => onUpdateDetails({ customerContactPhone })} />
     </> : null}
   </>
 }
@@ -1158,7 +1176,7 @@ function SalesSheetVehicleEditor({ hasImage, vehicle, onUpdate }: { hasImage: bo
     { field: 'inspectionDate', x: 116, y: y + 150, width: 277, height: 37 },
   ]
   return <>
-    {fields.map(({ field, ...position }) => <SheetTextControl grid calendar={field === 'inspectionDate'} key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
+    {fields.map(({ field, ...position }) => <SheetTextControl grid calendar={field === 'inspectionDate'} normalization={field === 'year' ? 'modelYear' : field === 'displacement' ? 'displacement' : field === 'mileage' ? 'mileage' : undefined} key={field} ariaLabel={`車両${field}`} value={String(vehicle[field] ?? '')} {...position} normalizeOnBlur={field === 'year' ? normalizeModelYear : field === 'displacement' ? normalizeDisplacement : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}
     <SheetRecordControl value={vehicle.inspectionRecordAvailable} x={483} y={y + 150} width={202} height={37} onChange={(value) => onUpdate('inspectionRecordAvailable', value)} />
   </>
 }
@@ -1172,7 +1190,7 @@ function SalesSheetTradeInEditor({ hasImage, tradeIn, onUpdate }: { hasImage: bo
     { field: 'mileage', x: 427, width: 137 },
     { field: 'color', x: 564, width: 121 },
   ]
-  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid calendar={field === 'inspectionDate'} key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered normalizeOnBlur={field === 'modelYear' ? normalizeModelYear : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}</>
+  return <>{fields.map(({ field, x, width }) => <SheetTextControl grid calendar={field === 'inspectionDate'} normalization={field === 'modelYear' ? 'modelYear' : field === 'mileage' ? 'mileage' : undefined} calendarControlClassName={field === 'inspectionDate' ? 'is-trade-in-inspection-date' : undefined} key={field} ariaLabel={`下取車${field}`} value={tradeIn[field]} x={x} y={y} width={width} height={32} centered normalizeOnBlur={field === 'modelYear' ? normalizeModelYear : field === 'mileage' ? normalizeMileage : undefined} onChange={(value) => onUpdate(field, value)} />)}</>
 }
 
 function SalesSheetRequiredDocumentsEditor({ requiredDocuments, onUpdate }: { requiredDocuments: SalesDocumentDetails['requiredDocuments']; onUpdate: (field: keyof SalesDocumentDetails['requiredDocuments'], checked: boolean) => void }) {
@@ -1222,17 +1240,46 @@ function SheetCreditInput({ ariaLabel, value, x, width, currency = false, decima
   />
 }
 
-function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, calendar = false, variant, displayPrefix = '', normalizeOnBlur, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; calendar?: boolean; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; onChange: (value: string) => void }) {
+function SheetTextControl({ ariaLabel, value, x, y, width, height, centered = false, multiline = false, grid = false, calendar = false, calendarControlClassName = '', normalization, variant, displayPrefix = '', normalizeOnBlur, onChange }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; centered?: boolean; multiline?: boolean; grid?: boolean; calendar?: boolean; calendarControlClassName?: string; normalization?: NormalizableField; variant?: 'customer-name' | 'customer-value'; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; onChange: (value: string) => void }) {
+  const [draft, setDraft] = useState(() => normalization ? toEditableNormalizedValue(normalization, value) : value)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    if (!focused) setDraft(normalization ? toEditableNormalizedValue(normalization, value) : value)
+  }, [focused, normalization, value])
+
   const className = `sales-estimate-sheet-field-control${centered ? ' is-centered' : ''}${multiline ? ' is-multiline' : ''}${grid ? ' has-grid' : ''}${variant ? ` is-${variant}` : ''}`
-  const displayValue = value ? `${displayPrefix}${value}` : value
+  const editableValue = normalization && focused ? draft : value
+  const displayValue = editableValue ? `${displayPrefix}${editableValue}` : editableValue
   function handleChange(nextValue: string) {
     const withoutPrefix = displayPrefix && nextValue.startsWith(displayPrefix) ? nextValue.slice(displayPrefix.length) : nextValue
-    onChange(withoutPrefix)
+    if (!normalization) {
+      onChange(withoutPrefix)
+      return
+    }
+    const sanitized = sanitizeNormalizedDraft(normalization, withoutPrefix)
+    if (sanitized === null) return
+    setDraft(sanitized)
   }
-  const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value), onBlur: () => { if (!normalizeOnBlur) return; const normalized = normalizeOnBlur(value); if (normalized !== value) onChange(normalized) } }
+  function beginEdit() {
+    if (!normalization) return
+    setFocused(true)
+    setDraft(toEditableNormalizedValue(normalization, value))
+  }
+  function finish() {
+    setFocused(false)
+    if (!normalizeOnBlur) return
+    if (!normalization) {
+      const normalized = normalizeOnBlur(value)
+      if (normalized !== value) onChange(normalized)
+      return
+    }
+    const normalized = normalizeOnBlur(draft)
+    if (normalized !== value) onChange(normalized)
+  }
+  const props = { className, 'aria-label': ariaLabel, spellCheck: false, value: displayValue, onFocus: normalization ? beginEdit : undefined, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => handleChange(event.target.value), onBlur: finish }
   if (!calendar || multiline) return multiline ? <textarea {...props} style={sheetPositionStyle(x, y, width, height)} /> : <input {...props} style={sheetPositionStyle(x, y, width, height)} />
-  return <div className="sales-estimate-sheet-calendar-control" style={sheetPositionStyle(x, y, width, height)}>
-    <input {...props} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
+  return <div className={`sales-estimate-sheet-calendar-control${calendarControlClassName ? ` ${calendarControlClassName}` : ''}`} style={sheetPositionStyle(x, y, width, height)}>
+    <input {...props} type="date" value={toNativeDateValue(value)} onChange={(event) => onChange(event.target.value.replaceAll('-', '/'))} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
     <DateCalendarButton ariaLabel={ariaLabel} value={value} onChange={onChange} />
   </div>
 }
