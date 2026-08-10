@@ -306,7 +306,7 @@
                         <TextBox x:Name="LinkageFilterTextBox" MinHeight="36" Padding="9,6"
                                  TextChanged="LinkageFilterTextBox_TextChanged" />
 
-                        <TextBlock Margin="0,22,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                        <TextBlock Margin="0,22,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#A61B1B"
                                    Text="同姓同名・情報不一致" />
                         <DataGrid x:Name="SameNameConflictsGrid" Height="220" IsReadOnly="True"
                                   AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
@@ -319,8 +319,10 @@
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <TextBlock Margin="0,22,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                        <TextBlock Margin="0,22,0,4" FontSize="17" FontWeight="SemiBold" Foreground="#1D4ED8"
                                    Text="同一顧客候補に複数車両" />
+                        <TextBlock Margin="0,0,0,8" Foreground="#1E40AF" TextWrapping="Wrap"
+                                   Text="これはエラーではありません。同じ顧客へ複数の車両を紐付ける予定の正常な候補です。車両内容だけ確認してください。" />
                         <DataGrid x:Name="MultipleVehicleCustomersGrid" Height="220" IsReadOnly="True"
                                   AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
                             <DataGrid.Columns>
@@ -331,7 +333,7 @@
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <TextBlock Margin="0,22,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                        <TextBlock Margin="0,22,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#A61B1B"
                                    Text="車両識別子・所有者の競合" />
                         <DataGrid x:Name="VehicleConflictsGrid" Height="240" IsReadOnly="True"
                                   AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
