@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private string? verifiedWorkspacePath;
     private AbacusLinkagePlan? linkagePlan;
     private bool allowClose;
+    private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
 
     public MainWindow()
@@ -320,7 +321,6 @@ public partial class MainWindow : Window
 
             var executablePath = Path.Combine(activeWorkspacePath, AbacusConstants.ExecutableFileName);
             var result = await session.LaunchAndInspectAbacusAsync(executablePath);
-            abacusMayBeRunning = result.ProcessId.HasValue;
             RenderAbacusResult(result);
             ImageDiagnosticStatusText.Text = result.Message;
         }
@@ -419,6 +419,7 @@ public partial class MainWindow : Window
         try
         {
             var result = await session.InspectAbacusUiAsync();
+            abacusMayBeRunning = result.IsRunning;
             ImageDiagnosticStatusText.Text = result.Message;
             ImageUiElementsGrid.ItemsSource = result.AutomationElements ?? [];
         }
@@ -429,7 +430,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            InspectImageUiButton.IsEnabled = abacusMayBeRunning;
+            SetAbacusButtonsBusy(false);
         }
     }
 
@@ -501,7 +502,7 @@ public partial class MainWindow : Window
         {
             var result = await session.CloseAbacusAsync();
             AutomationResultText.Text = result.Message;
-            abacusMayBeRunning = result.Status == "manual-close-required";
+            abacusMayBeRunning = result.IsRunning;
         }
         catch (Exception exception)
         {
@@ -681,7 +682,7 @@ public partial class MainWindow : Window
         ProcessArchitectureText.Text = $"LegacyHost {result.HostArchitecture ?? "不明"} → ABACUS {result.TargetArchitecture ?? "不明"}";
         AbacusWindowTitleText.Text = string.IsNullOrWhiteSpace(result.WindowTitle) ? "（タイトルなし）" : result.WindowTitle;
         AutomationElementCountText.Text = result.AutomationElementCount?.ToString("N0") ?? "-";
-        abacusMayBeRunning = result.ProcessId.HasValue && result.Status != "not-running" && result.Status != "closed";
+        abacusMayBeRunning = result.IsRunning;
     }
 
     private void BeginOperation(string status)
@@ -778,19 +779,63 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (closeVerificationInProgress)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (abacusMayBeRunning)
         {
             e.Cancel = true;
-            MessageBox.Show(
-                this,
-                "コピー側ABACUSが起動中です。先に「ABACUSを閉じる」で終了してから補助ソフトを閉じてください。",
-                "ABACUSが起動中です",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            closeVerificationInProgress = true;
+            IsEnabled = false;
+            try
+            {
+                var result = await session.InspectAbacusAsync();
+                RenderAbacusResult(result);
+                if (result.IsRunning)
+                {
+                    MessageBox.Show(
+                        this,
+                        "コピー側ABACUSが起動中です。先に「ABACUSを閉じる」で終了してから補助ソフトを閉じてください。",
+                        "ABACUSが起動中です",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+                else
+                {
+                    await FinishCloseAsync();
+                }
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(
+                    this,
+                    $"ABACUSの終了状態を確認できませんでした。LegacyHostの接続状態を確認して再試行してください。\n\n{exception.Message}",
+                    "終了状態を確認できません",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            finally
+            {
+                if (!allowClose)
+                {
+                    IsEnabled = true;
+                    closeVerificationInProgress = false;
+                    SetAbacusButtonsBusy(false);
+                }
+            }
             return;
         }
 
         e.Cancel = true;
+        closeVerificationInProgress = true;
+        await FinishCloseAsync();
+    }
+
+    private async Task FinishCloseAsync()
+    {
         operationCancellation?.Cancel();
         IsEnabled = false;
         await session.DisposeAsync();

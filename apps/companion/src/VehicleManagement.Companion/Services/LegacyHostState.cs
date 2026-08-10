@@ -27,4 +27,9 @@ public sealed record AbacusRuntimeSnapshot(
     long? WindowHandle = null,
     string? WindowTitle = null,
     int? AutomationElementCount = null,
-    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null);
+    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null)
+{
+    public bool IsRunning =>
+        ProcessId.HasValue &&
+        Status is not ("not-running" or "closed" or "abacus-exited" or "abacus-not-running");
+}

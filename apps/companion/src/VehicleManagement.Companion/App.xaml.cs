@@ -38,6 +38,21 @@ public partial class App : Application
                 return 2;
             }
 
+            var externallyExited = new AbacusRuntimeSnapshot(
+                false,
+                "abacus-exited",
+                "self-test",
+                ProcessId: 1234);
+            var recognizedRunning = new AbacusRuntimeSnapshot(
+                true,
+                "ui-automation-ready",
+                "self-test",
+                ProcessId: 1234);
+            if (externallyExited.IsRunning || !recognizedRunning.IsRunning)
+            {
+                return 4;
+            }
+
             return await RunFolderSelfTestAsync() ? 0 : 3;
         }
         catch
