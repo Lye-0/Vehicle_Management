@@ -13,15 +13,18 @@ public sealed record AbacusTabSpecification(
     int MakerColumn,
     int RegistrationNumberColumn,
     int ChassisNumberColumn,
-    int DocumentNumberColumn);
+    int DocumentNumberColumn,
+    int AddressColumn,
+    int? PostalCodeColumn,
+    IReadOnlyList<int> PhoneColumns);
 
 public static class AbacusTabSpecifications
 {
     public static readonly AbacusTabSpecification Sales = new(
-        "BackUp-2.tab", "販売書類", 102, 0, 6, 8, 12, 13, 22, 51);
+        "BackUp-2.tab", "販売書類", 102, 0, 6, 8, 12, 13, 22, 51, 1, null, [4, 5]);
 
     public static readonly AbacusTabSpecification Maintenance = new(
-        "BackUp-3.tab", "整備書類", 158, 0, 6, 8, 10, 11, 14, 77);
+        "BackUp-3.tab", "整備書類", 158, 0, 6, 8, 10, 11, 14, 77, 1, 31, [4, 5]);
 }
 
 public sealed record AbacusParsedRecord(int RowNumber, IReadOnlyList<string> Fields);

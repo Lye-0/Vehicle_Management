@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Media;
 using Microsoft.Win32;
 using VehicleManagement.AbacusImport;
@@ -14,9 +15,11 @@ public partial class MainWindow : Window
     private readonly AbacusFolderInspector folderInspector = new();
     private readonly AbacusWorkspaceService workspaceService;
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
+    private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
+    private AbacusLinkagePlan? linkagePlan;
     private bool allowClose;
     private bool abacusMayBeRunning;
 
@@ -87,6 +90,7 @@ public partial class MainWindow : Window
         {
             SourcePathTextBox.Text = dialog.FolderName;
             AnalysisPathTextBox.Text = dialog.FolderName;
+            LinkagePathTextBox.Text = dialog.FolderName;
         }
     }
 
@@ -133,6 +137,52 @@ public partial class MainWindow : Window
             AnalysisPathTextBox.IsEnabled = true;
         }
     }
+
+    private void SelectLinkageFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "紐付け候補を作成するABACUSフォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            LinkagePathTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private void LinkagePathTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ResetLinkagePreview();
+
+    private async void BuildLinkageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LinkagePathTextBox.Text))
+        {
+            MessageBox.Show(this, "ABACUSフォルダーを指定してください。", "フォルダー未選択");
+            return;
+        }
+
+        BuildLinkageButton.IsEnabled = false;
+        LinkagePathTextBox.IsEnabled = false;
+        LinkageStatusText.Text = "顧客・車両・書類の候補と競合を分析しています…";
+        try
+        {
+            linkagePlan = await linkagePlanner.PlanAsync(LinkagePathTextBox.Text.Trim());
+            RenderLinkagePlan(linkagePlan);
+        }
+        catch (Exception exception)
+        {
+            LinkageStatusText.Text = $"候補作成に失敗しました: {exception.Message}";
+        }
+        finally
+        {
+            BuildLinkageButton.IsEnabled = true;
+            LinkagePathTextBox.IsEnabled = true;
+        }
+    }
+
+    private void LinkageFilterTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ApplyLinkageFilter();
 
     private void SourcePathTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
@@ -363,6 +413,10 @@ public partial class MainWindow : Window
         {
             AnalysisPathTextBox.Text = report.SourcePath;
         }
+        if (string.IsNullOrWhiteSpace(LinkagePathTextBox.Text))
+        {
+            LinkagePathTextBox.Text = report.SourcePath;
+        }
     }
 
     private void RenderDataAnalysis(AbacusDataAnalysis analysis)
@@ -403,6 +457,67 @@ public partial class MainWindow : Window
         SalesAnalysisText.Text = "未分析";
         MaintenanceAnalysisText.Text = "未分析";
         AnalysisErrorsText.Text = "";
+    }
+
+    private void RenderLinkagePlan(AbacusLinkagePlan plan)
+    {
+        LinkageResultText.Text = plan.IsValid ? "紐付け候補を安全側で作成しました" : "構造エラーがあります";
+        LinkageResultText.Foreground = (Brush)new BrushConverter().ConvertFromString(plan.IsValid ? "#17643A" : "#A61B1B")!;
+        LinkageSummaryText.Text =
+            $"取込候補書類: {plan.ImportCandidateDocuments:N0} / 顧客名空欄で除外: {plan.SkippedBlankCustomerDocuments:N0}\n" +
+            $"顧客候補: {plan.CustomerCandidates:N0} / 車両候補: {plan.VehicleCandidates:N0} / 複数車両の顧客候補: {plan.CustomersWithMultipleVehicles:N0}\n" +
+            $"同姓同名・情報不一致: {plan.SameNameConflictGroups:N0}グループ（{plan.SameNameConflictDocuments:N0}書類）\n" +
+            $"登録番号と車台番号の競合: {plan.VehicleIdentifierConflictGroups:N0} / 複数顧客に現れる車両: {plan.VehiclesLinkedToMultipleCustomers:N0}\n" +
+            $"車両情報なし: {plan.DocumentsWithoutVehicleInformation:N0} / 強い車両識別子なし: {plan.DocumentsWithVehicleButWithoutStrongIdentifier:N0}";
+        SameNameConflictsGrid.ItemsSource = plan.SameNameConflicts;
+        MultipleVehicleCustomersGrid.ItemsSource = plan.MultipleVehicleCustomers;
+        VehicleConflictsGrid.ItemsSource = plan.VehicleConflicts;
+        LinkageErrorsText.Text = string.Join("\n", plan.Errors.Take(20)
+            .Select(error => $"{error.RowNumber?.ToString() ?? "ファイル"}: {error.Message}"));
+        LinkageStatusText.Text = plan.IsValid
+            ? "プレビューを作成しました。データの登録・更新は行っていません。"
+            : "構造エラーのため紐付け候補を使用できません。";
+        ApplyLinkageFilter();
+    }
+
+    private void ApplyLinkageFilter()
+    {
+        var filter = LinkageFilterTextBox.Text.Trim();
+        ApplyFilter(SameNameConflictsGrid.ItemsSource, item => item is AbacusSameNameConflictPreview preview &&
+            (preview.CustomerName.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
+             preview.EvidenceSummary.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
+             preview.Reason.Contains(filter, StringComparison.CurrentCultureIgnoreCase)));
+        ApplyFilter(MultipleVehicleCustomersGrid.ItemsSource, item => item is AbacusMultipleVehiclePreview preview &&
+            (preview.CustomerName.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
+             preview.VehicleSummary.Contains(filter, StringComparison.CurrentCultureIgnoreCase)));
+        ApplyFilter(VehicleConflictsGrid.ItemsSource, item => item is AbacusVehicleConflictPreview preview &&
+            (preview.Identifier.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
+             preview.CustomerNames.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
+             preview.Reason.Contains(filter, StringComparison.CurrentCultureIgnoreCase)));
+
+        void ApplyFilter(System.Collections.IEnumerable? source, Predicate<object> predicate)
+        {
+            if (source is null)
+            {
+                return;
+            }
+
+            var view = CollectionViewSource.GetDefaultView(source);
+            view.Filter = string.IsNullOrEmpty(filter) ? null : predicate;
+            view.Refresh();
+        }
+    }
+
+    private void ResetLinkagePreview()
+    {
+        linkagePlan = null;
+        LinkageStatusText.Text = "未作成";
+        LinkageResultText.Text = "プレビューはまだありません。";
+        LinkageSummaryText.Text = "";
+        SameNameConflictsGrid.ItemsSource = null;
+        MultipleVehicleCustomersGrid.ItemsSource = null;
+        VehicleConflictsGrid.ItemsSource = null;
+        LinkageErrorsText.Text = "";
     }
 
     private void RenderAbacusResult(AbacusRuntimeSnapshot result)

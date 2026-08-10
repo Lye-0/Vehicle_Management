@@ -8,10 +8,28 @@ if (args.Length != 1)
     return 2;
 }
 
-var analysis = await new AbacusDataAnalyzer(new AbacusTabParser()).AnalyzeAsync(args[0]);
-Console.WriteLine(JsonSerializer.Serialize(analysis, new JsonSerializerOptions
+var parser = new AbacusTabParser();
+var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(args[0]);
+var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(args[0]);
+var sanitizedLinkage = new
+{
+    linkage.ImportCandidateDocuments,
+    linkage.SkippedBlankCustomerDocuments,
+    linkage.CustomerCandidates,
+    linkage.VehicleCandidates,
+    linkage.CustomersWithMultipleVehicles,
+    linkage.SameNameConflictGroups,
+    linkage.SameNameConflictDocuments,
+    linkage.VehicleIdentifierConflictGroups,
+    linkage.VehiclesLinkedToMultipleCustomers,
+    linkage.DocumentsWithoutVehicleInformation,
+    linkage.DocumentsWithVehicleButWithoutStrongIdentifier,
+    linkage.Errors,
+    linkage.IsValid,
+};
+Console.WriteLine(JsonSerializer.Serialize(new { Analysis = analysis, Linkage = sanitizedLinkage }, new JsonSerializerOptions
 {
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     WriteIndented = true,
 }));
-return analysis.IsStructurallyValid ? 0 : 1;
+return analysis.IsStructurallyValid && linkage.IsValid ? 0 : 1;

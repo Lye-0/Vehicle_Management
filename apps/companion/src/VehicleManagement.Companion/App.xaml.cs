@@ -77,6 +77,7 @@ public partial class App : Application
             var workspace = await new AbacusWorkspaceService(inspector).CreateAsync(before, destination);
             var parser = new AbacusTabParser();
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
+            var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
             var invalidFolder = Path.Combine(testRoot, "invalid");
             Directory.CreateDirectory(invalidFolder);
             await File.WriteAllTextAsync(
@@ -92,9 +93,14 @@ public partial class App : Application
                 workspace.SourceAfterCopyReport.FolderFingerprint == before.FolderFingerprint &&
                 File.Exists(workspace.ManifestPath) &&
                 analysis.IsStructurallyValid &&
-                analysis.TotalImportCandidateRows == 2 &&
+                analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&
-                analysis.ConservativeVehicleCandidates == 1 &&
+                linkage.IsValid &&
+                linkage.CustomerCandidates == 5 &&
+                linkage.VehicleCandidates == 6 &&
+                linkage.CustomersWithMultipleVehicles == 1 &&
+                linkage.SameNameConflictGroups == 1 &&
+                linkage.VehicleIdentifierConflictGroups == 1 &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
         }
@@ -116,6 +122,8 @@ public partial class App : Application
         var valid = new string[specification.ExpectedColumns];
         Array.Fill(valid, string.Empty);
         valid[specification.CustomerNameColumn] = "顧客A";
+        valid[specification.AddressColumn] = "住所A";
+        valid[specification.PhoneColumns[0]] = "090-1111-1111";
         valid[specification.VehicleNameColumn] = "車両A";
         valid[specification.ModelColumn] = "MODEL-A";
         valid[specification.MakerColumn] = "メーカーA";
@@ -124,9 +132,40 @@ public partial class App : Application
         valid[specification.DocumentNumberColumn] = specification == AbacusTabSpecifications.Sales ? "S-1" : "M-1";
         valid[1] = "住所\u000B続き";
 
+        var rows = new List<string[]> { valid };
         var blankCustomer = (string[])valid.Clone();
         blankCustomer[specification.CustomerNameColumn] = string.Empty;
-        var contents = $"{string.Join('\t', valid)}\r\n{string.Join('\t', blankCustomer)}\r\n";
+        rows.Add(blankCustomer);
+
+        if (specification == AbacusTabSpecifications.Sales)
+        {
+            rows.Add(Clone(valid, "顧客A", "住所A", "090-1111-1111", "大阪100あ2", "DEF-456", "S-2"));
+            rows.Add(Clone(valid, "同姓同名", "住所B", "090-2222-2222", "大阪100あ3", "SAME-1", "S-3"));
+            rows.Add(Clone(valid, "同姓同名", "住所C", "090-3333-3333", "大阪100あ4", "SAME-2", "S-4"));
+            rows.Add(Clone(valid, "顧客B", "住所D", "090-4444-4444", "大阪100あ9", "CONFLICT-1", "S-5"));
+            rows.Add(Clone(valid, "顧客C", "住所E", "090-5555-5555", "大阪100あ9", "CONFLICT-2", "S-6"));
+        }
+
+        var contents = string.Concat(rows.Select(row => $"{string.Join('\t', row)}\r\n"));
         await File.WriteAllTextAsync(Path.Combine(folder, specification.FileName), contents, encoding);
+
+        string[] Clone(
+            string[] source,
+            string customer,
+            string address,
+            string phone,
+            string registration,
+            string chassis,
+            string document)
+        {
+            var clone = (string[])source.Clone();
+            clone[specification.CustomerNameColumn] = customer;
+            clone[specification.AddressColumn] = address;
+            clone[specification.PhoneColumns[0]] = phone;
+            clone[specification.RegistrationNumberColumn] = registration;
+            clone[specification.ChassisNumberColumn] = chassis;
+            clone[specification.DocumentNumberColumn] = document;
+            return clone;
+        }
     }
 }
