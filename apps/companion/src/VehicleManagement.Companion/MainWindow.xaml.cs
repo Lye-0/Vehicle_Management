@@ -236,6 +236,32 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void InspectAbacusMenuButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectAbacusMenuButton.IsEnabled = false;
+        AbacusMenuItemsGrid.ItemsSource = null;
+        AbacusMenuStatusText.Text = "コピー側ABACUSの標準Windowsメニューを読み取り診断しています…";
+        AbacusMenuStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await session.InspectAbacusMenuAsync();
+            abacusMayBeRunning = result.IsRunning;
+            AbacusMenuItemsGrid.ItemsSource = result.MenuItems ?? [];
+            AbacusMenuStatusText.Text = result.Message;
+            AbacusMenuStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+                result.Status == "standard-menu-ready" ? "#17643A" : "#805B10")!;
+        }
+        catch (Exception exception)
+        {
+            AbacusMenuStatusText.Text = $"メニュー診断に失敗しました: {exception.Message}";
+            AbacusMenuStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            SetAbacusButtonsBusy(false);
+        }
+    }
+
     private void SelectAnalysisFolderButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
@@ -1050,6 +1076,7 @@ public partial class MainWindow : Window
         CloseAbacusButton.IsEnabled = !busy && abacusMayBeRunning;
         ImageLaunchAbacusButton.IsEnabled = !busy && canLaunch;
         InspectImageUiButton.IsEnabled = !busy && abacusMayBeRunning;
+        InspectAbacusMenuButton.IsEnabled = !busy && abacusMayBeRunning;
     }
 
     private void ResetInspection(bool clearPath = true)

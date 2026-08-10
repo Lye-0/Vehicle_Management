@@ -34,6 +34,13 @@ public partial class App : Application
         {
             await session.StartAsync();
             await session.PingAsync();
+            var menuWithoutAbacus = await session.InspectAbacusMenuAsync();
+            if (menuWithoutAbacus.Status != "abacus-not-running" ||
+                menuWithoutAbacus.IsRunning ||
+                menuWithoutAbacus.MenuItems is { Count: > 0 })
+            {
+                return 6;
+            }
             await session.StopAsync();
             if (session.Snapshot.State != LegacyHostState.Stopped)
             {

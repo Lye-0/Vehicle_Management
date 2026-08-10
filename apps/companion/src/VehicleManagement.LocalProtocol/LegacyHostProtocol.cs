@@ -62,7 +62,8 @@ public sealed record LegacyHostMessage(
     long? WindowHandle = null,
     string? WindowTitle = null,
     int? AutomationElementCount = null,
-    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null);
+    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null,
+    IReadOnlyList<LegacyMenuItemInfo>? MenuItems = null);
 
 public sealed record LegacyAutomationElementInfo(
     int Index,
@@ -79,3 +80,12 @@ public sealed record LegacyAutomationElementInfo(
     bool IsEnabled,
     bool IsKeyboardFocusable,
     bool HasKeyboardFocus);
+
+public sealed record LegacyMenuItemInfo(
+    int Index,
+    int Depth,
+    string Text,
+    uint? CommandId,
+    bool IsEnabled,
+    bool IsSeparator,
+    bool HasSubmenu);

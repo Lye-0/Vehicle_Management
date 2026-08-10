@@ -525,6 +525,31 @@
                             <TextBlock x:Name="TransformationReadinessText" Foreground="#805B10"
                                        TextWrapping="Wrap" LineHeight="24" />
                         </Border>
+
+                        <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="6C. 全車両一覧エクスポート導線の診断" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="コピー側ABACUSの標準Windowsメニューを読み取り、全車両一覧を出力できる導線があるか確認します。メニューのクリック、データの編集、保存、エクスポートは行いません。" />
+                        <Button x:Name="InspectAbacusMenuButton" HorizontalAlignment="Left"
+                                Content="ABACUSメニューを診断" IsEnabled="False"
+                                Click="InspectAbacusMenuButton_Click" />
+                        <TextBlock x:Name="AbacusMenuStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                   Text="コピー側ABACUSを起動してから診断してください。" TextWrapping="Wrap" />
+                        <DataGrid x:Name="AbacusMenuItemsGrid" Height="260" Margin="0,14,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
+                                <DataGridTextColumn Header="階層" Binding="{Binding Depth}" Width="65" />
+                                <DataGridTextColumn Header="表示名" Binding="{Binding Text}" Width="3*" />
+                                <DataGridTextColumn Header="Command ID" Binding="{Binding CommandId}" Width="110" />
+                                <DataGridCheckBoxColumn Header="有効" Binding="{Binding IsEnabled, Mode=OneWay}" Width="65" />
+                                <DataGridCheckBoxColumn Header="サブメニュー" Binding="{Binding HasSubmenu, Mode=OneWay}" Width="100" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Border Margin="0,14,0,0" Padding="14" Background="#EAF2FF" CornerRadius="8">
+                            <TextBlock Foreground="#1E40AF" TextWrapping="Wrap"
+                                       Text="この診断結果から、標準メニューのコマンドを安全に呼び出せるか、別の画面認識方式が必要かを次の段階で決定します。" />
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

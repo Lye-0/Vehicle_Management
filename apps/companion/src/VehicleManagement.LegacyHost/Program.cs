@@ -13,6 +13,11 @@ namespace VehicleManagement.LegacyHost;
 internal static partial class Program
 {
     private const string AbacusExecutableFileName = "ABACUS カーショップPRO④.EXE";
+    private const uint MenuByPosition = 0x00000400;
+    private const uint MenuDisabled = 0x00000002;
+    private const uint MenuGrayed = 0x00000001;
+    private const uint MenuSeparator = 0x00000800;
+    private const uint NoMenuCommand = uint.MaxValue;
     private static Process? abacusProcess;
     private static string? abacusExecutablePath;
 
@@ -86,6 +91,7 @@ internal static partial class Program
                         "launch-abacus" => await LaunchAndInspectAbacusAsync(request),
                         "inspect-abacus" => await InspectAbacusAsync(request.RequestId),
                         "inspect-abacus-ui" => await InspectAbacusUiAsync(request.RequestId),
+                        "inspect-abacus-menu" => InspectAbacusMenu(request.RequestId),
                         "close-abacus" => await CloseAbacusAsync(request.RequestId),
                         "shutdown" => new LegacyHostMessage("stopping", request.RequestId, Status: "stopping"),
                         _ => new LegacyHostMessage(
@@ -252,6 +258,109 @@ internal static partial class Program
             WindowTitle: root.Current.Name,
             AutomationElementCount: descendants.Count,
             AutomationElements: elements));
+    }
+
+    private static LegacyHostMessage InspectAbacusMenu(string requestId)
+    {
+        if (abacusProcess is null || abacusProcess.HasExited)
+        {
+            return new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-not-running",
+                Message: "コピー側ABACUSを起動してから診断してください。",
+                Architecture: HostArchitecture);
+        }
+
+        abacusProcess.Refresh();
+        var windowHandle = abacusProcess.MainWindowHandle;
+        if (windowHandle == IntPtr.Zero ||
+            GetWindowThreadProcessId(windowHandle, out var ownerProcessId) == 0 ||
+            ownerProcessId != (uint)abacusProcess.Id)
+        {
+            return new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-window-unavailable",
+                Message: "コピー側ABACUSのメインウィンドウを安全に確認できませんでした。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture);
+        }
+
+        var menuHandle = GetMenu(windowHandle);
+        if (menuHandle == IntPtr.Zero)
+        {
+            return new LegacyHostMessage(
+                "abacus-menu-inspected",
+                requestId,
+                Status: "standard-menu-unavailable",
+                Message: "標準Windowsメニューは取得できませんでした。操作・エクスポートは行っていません。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture,
+                TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+                WindowHandle: windowHandle.ToInt64(),
+                WindowTitle: NormalizeAutomationText(abacusProcess.MainWindowTitle, 80),
+                MenuItems: []);
+        }
+
+        var items = new List<LegacyMenuItemInfo>();
+        EnumerateMenu(menuHandle, 0, items);
+        return new LegacyHostMessage(
+            "abacus-menu-inspected",
+            requestId,
+            Status: items.Count == 0 ? "standard-menu-empty" : "standard-menu-ready",
+            Message: items.Count == 0
+                ? "標準Windowsメニューに項目がありませんでした。操作・エクスポートは行っていません。"
+                : $"標準Windowsメニューを{items.Count:N0}件取得しました。操作・エクスポートは行っていません。",
+            ProcessId: abacusProcess.Id,
+            Architecture: HostArchitecture,
+            TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+            WindowHandle: windowHandle.ToInt64(),
+            WindowTitle: NormalizeAutomationText(abacusProcess.MainWindowTitle, 80),
+            MenuItems: items);
+    }
+
+    private static void EnumerateMenu(IntPtr menuHandle, int depth, List<LegacyMenuItemInfo> items)
+    {
+        if (depth > 7 || items.Count >= 40)
+        {
+            return;
+        }
+
+        var itemCount = Math.Clamp(GetMenuItemCount(menuHandle), 0, 40);
+        for (var position = 0; position < itemCount && items.Count < 40; position++)
+        {
+            var state = GetMenuState(menuHandle, (uint)position, MenuByPosition);
+            var submenu = GetSubMenu(menuHandle, position);
+            var commandId = GetMenuItemID(menuHandle, position);
+            var buffer = new StringBuilder(257);
+            _ = GetMenuString(menuHandle, (uint)position, buffer, buffer.Capacity, MenuByPosition);
+            var isSeparator = state != NoMenuCommand && (state & MenuSeparator) != 0;
+            items.Add(new LegacyMenuItemInfo(
+                items.Count + 1,
+                depth,
+                NormalizeMenuText(buffer.ToString()),
+                commandId == NoMenuCommand ? null : commandId,
+                state != NoMenuCommand && (state & (MenuDisabled | MenuGrayed)) == 0,
+                isSeparator,
+                submenu != IntPtr.Zero));
+
+            if (submenu != IntPtr.Zero)
+            {
+                EnumerateMenu(submenu, depth + 1, items);
+            }
+        }
+    }
+
+    private static string NormalizeMenuText(string value)
+    {
+        var shortcutStart = value.IndexOf('\t');
+        if (shortcutStart >= 0)
+        {
+            value = value[..shortcutStart];
+        }
+
+        return NormalizeAutomationText(value.Replace("&", string.Empty, StringComparison.Ordinal), 80);
     }
 
     private static int GetAutomationDepth(AutomationElement element, AutomationElement root)
@@ -461,6 +570,32 @@ internal static partial class Program
     }
 
     private static string HostArchitecture => RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetMenu(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMenuItemCount(IntPtr menuHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetSubMenu(IntPtr menuHandle, int position);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetMenuItemID(IntPtr menuHandle, int position);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
+    private static extern int GetMenuString(
+        IntPtr menuHandle,
+        uint item,
+        StringBuilder text,
+        int maximumCharacters,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetMenuState(IntPtr menuHandle, uint item, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
 
     [GeneratedRegex("^[A-Za-z0-9.-]{1,120}$", RegexOptions.CultureInvariant)]
     private static partial Regex ValidPipeName();

@@ -27,7 +27,8 @@ public sealed record AbacusRuntimeSnapshot(
     long? WindowHandle = null,
     string? WindowTitle = null,
     int? AutomationElementCount = null,
-    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null)
+    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null,
+    IReadOnlyList<LegacyMenuItemInfo>? MenuItems = null)
 {
     public bool IsRunning =>
         ProcessId.HasValue &&
