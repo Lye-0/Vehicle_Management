@@ -94,14 +94,7 @@ public sealed class AbacusMigrationPreviewStore(
         }
 
         var verifiedBytes = await File.ReadAllBytesAsync(manifestPath, cancellationToken);
-        var verified = JsonSerializer.Deserialize<MigrationPreviewManifest>(verifiedBytes)
-            ?? throw new InvalidDataException("作成した移行準備マニフェストを再読込できません。");
-        if (verified.Version != manifest.Version || verified.Kind != manifest.Kind ||
-            verified.Status != manifest.Status || !verified.SourceFiles.SequenceEqual(manifest.SourceFiles) ||
-            verified.Summary != manifest.Summary || verified.DataFiles.Count != 0 || verified.ImageFiles.Count != 0)
-        {
-            throw new InvalidDataException("作成した移行準備マニフェストの再検証に失敗しました。");
-        }
+        VerifyManifest(verifiedBytes, manifest);
 
         return new AbacusMigrationPreviewResult(
             packagePath,
@@ -113,6 +106,50 @@ public sealed class AbacusMigrationPreviewStore(
             linkage.SkippedBlankCustomerDocuments,
             linkage.SameNameConflictGroups + linkage.VehicleIdentifierConflictGroups +
             linkage.VehiclesLinkedToMultipleCustomers);
+    }
+
+    private static void VerifyManifest(byte[] bytes, MigrationPreviewManifest expected)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            var root = document.RootElement;
+            var sourceFiles = root.GetProperty("sourceFiles");
+            var summary = root.GetProperty("summary");
+            var isValid =
+                root.GetProperty("version").GetInt32() == expected.Version &&
+                root.GetProperty("kind").GetString() == expected.Kind &&
+                root.GetProperty("status").GetString() == expected.Status &&
+                sourceFiles.GetArrayLength() == expected.SourceFiles.Count &&
+                root.GetProperty("dataFiles").GetArrayLength() == 0 &&
+                root.GetProperty("imageFiles").GetArrayLength() == 0 &&
+                summary.GetProperty("customerCandidates").GetInt32() == expected.Summary.CustomerCandidates &&
+                summary.GetProperty("vehicleCandidates").GetInt32() == expected.Summary.VehicleCandidates &&
+                summary.GetProperty("documentCandidates").GetInt32() == expected.Summary.DocumentCandidates &&
+                summary.GetProperty("salesDocumentCandidates").GetInt32() == expected.Summary.SalesDocumentCandidates &&
+                summary.GetProperty("maintenanceDocumentCandidates").GetInt32() == expected.Summary.MaintenanceDocumentCandidates &&
+                summary.GetProperty("skippedBlankCustomerDocuments").GetInt32() == expected.Summary.SkippedBlankCustomerDocuments &&
+                summary.GetProperty("sameNameConflictGroups").GetInt32() == expected.Summary.SameNameConflictGroups &&
+                summary.GetProperty("vehicleConflictGroups").GetInt32() == expected.Summary.VehicleConflictGroups;
+
+            for (var index = 0; isValid && index < expected.SourceFiles.Count; index++)
+            {
+                var actual = sourceFiles[index];
+                var expectedFile = expected.SourceFiles[index];
+                isValid = actual.GetProperty("fileName").GetString() == expectedFile.FileName &&
+                          actual.GetProperty("sizeBytes").GetInt64() == expectedFile.SizeBytes &&
+                          actual.GetProperty("sha256").GetString() == expectedFile.Sha256;
+            }
+
+            if (!isValid)
+            {
+                throw new InvalidDataException("作成した移行準備マニフェストの内容が書込前と一致しません。");
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new InvalidDataException("作成した移行準備マニフェストの形式が不正です。", exception);
+        }
     }
 
     private static void ValidateDestination(string sourceRoot, string destinationRoot)
