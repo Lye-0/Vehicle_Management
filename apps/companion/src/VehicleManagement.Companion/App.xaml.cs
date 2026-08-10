@@ -147,6 +147,43 @@ public partial class App : Application
                 cropPixels,
                 140 * 4);
             var cropResult = new AbacusCaptureCropper().Crop(cropSource);
+            var toolbarCropPixels = Enumerable.Repeat((byte)255, 160 * 140 * 4).ToArray();
+            for (var y = 10; y <= 119; y++)
+            {
+                for (var x = 10; x <= 129; x++)
+                {
+                    var isToolbar = y <= 29 && x <= 80;
+                    var isDocument = y >= 45;
+                    var isConnector = x is 10 or 70 or 129;
+                    if (isToolbar || isDocument || isConnector)
+                    {
+                        var offset = (y * 160 + x) * 4;
+                        toolbarCropPixels[offset] = 100;
+                        toolbarCropPixels[offset + 1] = 100;
+                        toolbarCropPixels[offset + 2] = 100;
+                    }
+                }
+            }
+            for (var y = 45; y <= 100; y++)
+            {
+                for (var x = 145; x <= 148; x++)
+                {
+                    var offset = (y * 160 + x) * 4;
+                    toolbarCropPixels[offset] = 100;
+                    toolbarCropPixels[offset + 1] = 100;
+                    toolbarCropPixels[offset + 2] = 100;
+                }
+            }
+            var toolbarCropSource = BitmapSource.Create(
+                160,
+                140,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null,
+                toolbarCropPixels,
+                160 * 4);
+            var toolbarCropResult = new AbacusCaptureCropper().Crop(toolbarCropSource);
             var mutablePath = Path.Combine(workspace.WorkspacePath, "abx-cs-mn.ucs");
             var mutableBytes = await File.ReadAllBytesAsync(mutablePath);
             mutableBytes[^1] ^= 0x01;
@@ -197,6 +234,9 @@ public partial class App : Application
                 cropResult.WasCropped &&
                 cropResult.Image.PixelWidth == 88 &&
                 cropResult.Image.PixelHeight == 88 &&
+                toolbarCropResult.WasCropped &&
+                toolbarCropResult.Image.PixelWidth == 132 &&
+                toolbarCropResult.Image.PixelHeight == 96 &&
                 verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 2 &&
                 rejectedUnallowedChange &&
                 analysis.IsStructurallyValid &&

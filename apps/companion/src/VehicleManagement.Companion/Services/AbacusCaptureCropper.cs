@@ -51,57 +51,49 @@ public sealed class AbacusCaptureCropper
         var scanHeight = Math.Max(1, paintedHeight - OuterFrameIgnore);
         var minimumColumnInk = Math.Max(3, (int)Math.Ceiling(scanHeight * 0.005));
         var minimumRowInk = Math.Max(3, (int)Math.Ceiling(scanWidth * 0.005));
-        var left = scanWidth;
-        var top = scanHeight;
-        var right = -1;
-        var bottom = -1;
+        var columnInk = new int[scanWidth];
+        var rowInk = new int[scanHeight];
         for (var x = 0; x < scanWidth; x++)
         {
-            var ink = 0;
-            for (var y = 0; y < scanHeight; y++)
+            for (var y = OuterFrameIgnore; y < scanHeight; y++)
             {
                 var offset = y * stride + x * BytesPerPixel;
                 if (!IsWhite(pixels, offset))
                 {
-                    ink++;
+                    columnInk[x]++;
                 }
-            }
-
-            if (ink >= minimumColumnInk)
-            {
-                left = Math.Min(left, x);
-                right = Math.Max(right, x);
             }
         }
 
         for (var y = 0; y < scanHeight; y++)
         {
-            var ink = 0;
-            for (var x = 0; x < scanWidth; x++)
+            for (var x = OuterFrameIgnore; x < scanWidth; x++)
             {
                 var offset = y * stride + x * BytesPerPixel;
                 if (!IsWhite(pixels, offset))
                 {
-                    ink++;
+                    rowInk[y]++;
                 }
-            }
-
-            if (ink >= minimumRowInk)
-            {
-                top = Math.Min(top, y);
-                bottom = Math.Max(bottom, y);
             }
         }
 
-        if (right < left || bottom < top)
+        var horizontalRun = FindLargestRun(columnInk, minimumColumnInk);
+        var verticalRun = FindLargestRun(rowInk, minimumRowInk);
+        if (horizontalRun is null || verticalRun is null)
         {
             return new AbacusCaptureCropResult(source, false, width, height);
         }
 
-        left = Math.Max(0, left - Margin);
-        top = Math.Max(0, top - Margin);
-        right = Math.Min(scanWidth - 1, right + Margin);
-        bottom = Math.Min(scanHeight - 1, bottom + Margin);
+        var left = Math.Max(0, horizontalRun.Value.Start - Margin);
+        var top = Math.Max(0, verticalRun.Value.Start - Margin);
+        var right = Math.Min(scanWidth - 1, horizontalRun.Value.End + Margin);
+        var bottom = Math.Min(scanHeight - 1, verticalRun.Value.End + Margin);
+        var contentStartAfterToolbar = FindContentStartAfterTopToolbar(rowInk, scanWidth);
+        if (contentStartAfterToolbar is not null)
+        {
+            top = Math.Max(top, contentStartAfterToolbar.Value);
+        }
+
         var cropWidth = right - left + 1;
         var cropHeight = bottom - top + 1;
         var cropPixels = (long)cropWidth * cropHeight;
@@ -119,6 +111,94 @@ public sealed class AbacusCaptureCropper
         var cropped = new CroppedBitmap(converted, new Int32Rect(left, top, cropWidth, cropHeight));
         cropped.Freeze();
         return new AbacusCaptureCropResult(cropped, true, width, height);
+    }
+
+    private static (int Start, int End)? FindLargestRun(int[] ink, int minimumInk)
+    {
+        (int Start, int End)? largest = null;
+        var runStart = -1;
+        for (var index = 0; index <= ink.Length; index++)
+        {
+            var isSignificant = index < ink.Length && ink[index] >= minimumInk;
+            if (isSignificant && runStart < 0)
+            {
+                runStart = index;
+            }
+
+            if (isSignificant || runStart < 0)
+            {
+                continue;
+            }
+
+            var candidate = (Start: runStart, End: index - 1);
+            if (largest is null || candidate.End - candidate.Start > largest.Value.End - largest.Value.Start)
+            {
+                largest = candidate;
+            }
+
+            runStart = -1;
+        }
+
+        return largest;
+    }
+
+    private static int? FindContentStartAfterTopToolbar(int[] rowInk, int scanWidth)
+    {
+        const int minimumToolbarHeight = 12;
+        const int requiredSparseRows = 3;
+        var searchLimit = Math.Min(rowInk.Length, Math.Max(64, rowInk.Length / 8));
+        var denseThreshold = Math.Max(24, (int)Math.Ceiling(scanWidth * 0.12));
+        var sparseThreshold = Math.Max(12, (int)Math.Floor(scanWidth * 0.08));
+        var latestAllowedStart = Math.Max(32, rowInk.Length / 20);
+        var denseStart = -1;
+        var lastDense = -1;
+        var sparseRows = 0;
+
+        for (var y = 0; y < searchLimit; y++)
+        {
+            if (rowInk[y] >= denseThreshold)
+            {
+                if (denseStart < 0)
+                {
+                    denseStart = y;
+                }
+
+                lastDense = y;
+                sparseRows = 0;
+                continue;
+            }
+
+            if (denseStart < 0)
+            {
+                continue;
+            }
+
+            if (rowInk[y] <= sparseThreshold)
+            {
+                sparseRows++;
+            }
+            else
+            {
+                sparseRows = 0;
+            }
+
+            if (sparseRows < requiredSparseRows)
+            {
+                continue;
+            }
+
+            var denseHeight = lastDense - denseStart + 1;
+            if (denseHeight >= minimumToolbarHeight && denseStart <= latestAllowedStart)
+            {
+                return lastDense + 1;
+            }
+
+            denseStart = -1;
+            lastDense = -1;
+            sparseRows = 0;
+        }
+
+        return null;
     }
 
     private static bool IsMostlyBlackRow(byte[] pixels, int stride, int width, int y)
