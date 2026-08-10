@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using VehicleManagement.AbacusImport;
 using VehicleManagement.Companion.Services;
@@ -17,6 +18,7 @@ public partial class MainWindow : Window
     private readonly AbacusWorkspaceService workspaceService;
     private readonly AbacusClipboardInspector clipboardInspector = new();
     private readonly AbacusClipboardImageExporter clipboardImageExporter = new();
+    private readonly AbacusWindowCaptureService windowCaptureService = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
@@ -25,6 +27,8 @@ public partial class MainWindow : Window
     private string? verifiedWorkspacePath;
     private string? verifiedSourcePath;
     private uint? inspectedClipboardSequenceNumber;
+    private long? diagnosedImageWindowHandle;
+    private int? diagnosedAbacusProcessId;
     private AbacusLinkagePlan? linkagePlan;
     private bool allowClose;
     private bool closeVerificationInProgress;
@@ -315,6 +319,7 @@ public partial class MainWindow : Window
         }
 
         SetAbacusButtonsBusy(true);
+        ClearDiagnosedImageWindow();
         AutomationResultText.Text = "コピー側ABACUSを起動し、ウィンドウを認識しています…";
         try
         {
@@ -421,6 +426,7 @@ public partial class MainWindow : Window
     private async void InspectImageUiButton_Click(object sender, RoutedEventArgs e)
     {
         InspectImageUiButton.IsEnabled = false;
+        ClearDiagnosedImageWindow();
         ImageDiagnosticStatusText.Text = "表示中のABACUS画面を読み取り診断しています…";
         try
         {
@@ -428,6 +434,24 @@ public partial class MainWindow : Window
             abacusMayBeRunning = result.IsRunning;
             ImageDiagnosticStatusText.Text = result.Message;
             ImageUiElementsGrid.ItemsSource = result.AutomationElements ?? [];
+            var imageWindow = result.AutomationElements?.FirstOrDefault(element =>
+                element.NativeWindowHandle != 0 &&
+                string.Equals(element.ControlType, "Window", StringComparison.Ordinal) &&
+                element.Name.StartsWith("abx-cs-sk.", StringComparison.OrdinalIgnoreCase));
+            if (imageWindow is not null && result.ProcessId.HasValue)
+            {
+                diagnosedImageWindowHandle = imageWindow.NativeWindowHandle;
+                diagnosedAbacusProcessId = result.ProcessId;
+                CaptureImageWindowButton.IsEnabled = true;
+                ImageWindowCaptureStatusText.Text =
+                    $"画像表示ウィンドウを特定しました（{imageWindow.Width:N0} × {imageWindow.Height:N0}px）。拡大表示後にキャプチャできます。";
+                ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            }
+            else
+            {
+                ImageWindowCaptureStatusText.Text = "画像表示ウィンドウを特定できませんでした。画像画面を表示して再診断してください。";
+                ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
         }
         catch (Exception exception)
         {
@@ -437,6 +461,83 @@ public partial class MainWindow : Window
         finally
         {
             SetAbacusButtonsBusy(false);
+        }
+    }
+
+    private async void CaptureImageWindowButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!diagnosedImageWindowHandle.HasValue || !diagnosedAbacusProcessId.HasValue)
+        {
+            return;
+        }
+
+        BitmapSource capturedImage;
+        try
+        {
+            capturedImage = windowCaptureService.Capture(
+                diagnosedImageWindowHandle.Value,
+                diagnosedAbacusProcessId.Value);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            ImageWindowCaptureStatusText.Text = $"画像ウィンドウを取得できません: {exception.Message}";
+            ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            ClearDiagnosedImageWindow();
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "ABACUS画像ウィンドウ1件の保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dialog.FolderName));
+        if (IsSameOrSubPath(destination, verifiedSourcePath) ||
+            IsSameOrSubPath(destination, GetActiveWorkspacePath()))
+        {
+            MessageBox.Show(
+                this,
+                "保存用原本または作業用コピーの内部には画像を保存できません。別のフォルダーを選択してください。",
+                "保存先を変更してください",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            $"ABACUSの画像表示ウィンドウだけをPNGとして新規保存します。\n\n" +
+            $"キャプチャ寸法: {capturedImage.PixelWidth:N0} × {capturedImage.PixelHeight:N0}px\n" +
+            $"保存先: {destination}\n\n画面表示のキャプチャであり、元画像ファイルそのものではありません。続行しますか？",
+            "画像表示ウィンドウを保存",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        CaptureImageWindowButton.IsEnabled = false;
+        ImageWindowCaptureStatusText.Text = "画像表示ウィンドウをPNGへ変換し、保存前検証を行っています…";
+        try
+        {
+            var result = await clipboardImageExporter.ExportAsync(capturedImage, destination);
+            ImageWindowCaptureStatusText.Text =
+                $"画像表示ウィンドウを保存しました。\n{result.FilePath}\n" +
+                $"{result.PixelWidth:N0} × {result.PixelHeight:N0}px / {FormatFileSize(result.FileSize)} / SHA-256: {result.Sha256}";
+            ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidOperationException or NotSupportedException or ArgumentException)
+        {
+            ImageWindowCaptureStatusText.Text = $"画像ウィンドウの保存に失敗しました: {exception.Message}";
+            ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            CaptureImageWindowButton.IsEnabled = true;
         }
     }
 
@@ -771,6 +872,10 @@ public partial class MainWindow : Window
         AbacusWindowTitleText.Text = string.IsNullOrWhiteSpace(result.WindowTitle) ? "（タイトルなし）" : result.WindowTitle;
         AutomationElementCountText.Text = result.AutomationElementCount?.ToString("N0") ?? "-";
         abacusMayBeRunning = result.IsRunning;
+        if (!abacusMayBeRunning)
+        {
+            ClearDiagnosedImageWindow();
+        }
     }
 
     private void BeginOperation(string status)
@@ -834,6 +939,14 @@ public partial class MainWindow : Window
         CreateWorkspaceButton.IsEnabled = false;
         LaunchAbacusButton.IsEnabled = false;
         ImageLaunchAbacusButton.IsEnabled = false;
+        ClearDiagnosedImageWindow();
+    }
+
+    private void ClearDiagnosedImageWindow()
+    {
+        diagnosedImageWindowHandle = null;
+        diagnosedAbacusProcessId = null;
+        CaptureImageWindowButton.IsEnabled = false;
     }
 
     private string? GetActiveWorkspacePath() =>

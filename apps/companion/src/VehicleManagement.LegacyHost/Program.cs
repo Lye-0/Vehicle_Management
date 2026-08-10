@@ -222,6 +222,11 @@ internal static partial class Program
                     name,
                     automationId,
                     className,
+                    element.Current.NativeWindowHandle,
+                    ToBoundedInt(element.Current.BoundingRectangle.Left),
+                    ToBoundedInt(element.Current.BoundingRectangle.Top),
+                    ToBoundedInt(element.Current.BoundingRectangle.Width),
+                    ToBoundedInt(element.Current.BoundingRectangle.Height),
                     element.Current.IsEnabled,
                     element.Current.IsKeyboardFocusable,
                     element.Current.HasKeyboardFocus));
@@ -280,6 +285,11 @@ internal static partial class Program
             .Trim();
         return normalized.Length <= maximumLength ? normalized : $"{normalized[..maximumLength]}…";
     }
+
+    private static int ToBoundedInt(double value) =>
+        double.IsNaN(value) || double.IsInfinity(value)
+            ? 0
+            : (int)Math.Clamp(Math.Round(value), int.MinValue, int.MaxValue);
 
     private static async Task<LegacyHostMessage> WaitForAbacusWindowAsync(string requestId, string? executablePath)
     {

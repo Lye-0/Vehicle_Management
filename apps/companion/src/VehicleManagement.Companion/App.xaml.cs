@@ -55,6 +55,20 @@ public partial class App : Application
                 return 4;
             }
 
+            var rejectedInvalidWindow = false;
+            try
+            {
+                _ = new AbacusWindowCaptureService().Capture(0, Environment.ProcessId);
+            }
+            catch (InvalidOperationException)
+            {
+                rejectedInvalidWindow = true;
+            }
+            if (!rejectedInvalidWindow)
+            {
+                return 5;
+            }
+
             return await RunFolderSelfTestAsync() ? 0 : 3;
         }
         catch

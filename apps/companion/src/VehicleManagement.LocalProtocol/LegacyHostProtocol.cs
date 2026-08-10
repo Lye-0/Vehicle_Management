@@ -71,6 +71,11 @@ public sealed record LegacyAutomationElementInfo(
     string Name,
     string AutomationId,
     string ClassName,
+    long NativeWindowHandle,
+    int Left,
+    int Top,
+    int Width,
+    int Height,
     bool IsEnabled,
     bool IsKeyboardFocusable,
     bool HasKeyboardFocus);
