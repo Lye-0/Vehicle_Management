@@ -3885,15 +3885,145 @@
      editable value proportional to the sheet instead of the viewport. */
   .maintenance-statement-control.is-compact-value,
   .maintenance-statement-combobox > input {
-    font-size: clamp(4px, 0.9cqw, 11px);
+    font-size: clamp(5px, 1.15cqw, 11px);
   }
 
   .maintenance-statement-control.is-compact-date {
-    font-size: clamp(4px, 0.75cqw, 9px);
+    font-size: clamp(5px, 0.85cqw, 9px);
+  }
+
+  .maintenance-statement-control.is-large {
+    font-size: clamp(8px, 2.05cqw, 22px);
+  }
+
+  .maintenance-statement-control.is-contact-value {
+    font-size: clamp(5px, 1.15cqw, 13px);
+  }
+
+  .maintenance-statement-control.is-document-number {
+    font-size: clamp(5px, 1.05cqw, 10px);
+  }
+
+  /* Date inputs inside the sales preview are wrapped by a calendar control.
+     Make the native input fill that wrapper so its inline baseline cannot
+     push the border and text below the sheet cell. */
+  .sales-estimate-sheet-calendar-control > input[type="date"] {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    line-height: 1;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"] {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 0 clamp(1px, 0.45cqw, 5px);
+    padding-right: 1.15em;
+    line-height: 1;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit,
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
   }
 
   .maintenance-statement-calendar-control > .date-calendar-picker {
-    width: clamp(7px, 1.7cqw, 18px);
+    width: clamp(7px, 1.3cqw, 14px);
+  }
+
+  .maintenance-statement-calendar-control.is-vehicle-inspection-date > .date-calendar-picker {
+    right: clamp(1px, 0.4cqw, 4px);
+  }
+}
+
+/* Fifth size: the 1988px viewport is the reference for document typography.
+   Scale overlay text from the rendered sheet width so it follows the sheet
+   when the desktop viewport becomes narrower or wider. */
+@media (min-width: 1400px) {
+  .sales-estimate-sheet-frame,
+  .maintenance-statement-frame {
+    container-type: inline-size;
+  }
+
+  .sales-estimate-sheet-field-control,
+  .sales-estimate-sheet-line-control {
+    font-size: 1.389cqw;
+  }
+
+  .sales-estimate-sheet-field-control.is-customer-name,
+  .sales-estimate-sheet-customer-honorific {
+    font-size: 1.706cqw;
+  }
+
+  .sales-estimate-sheet-field-control.is-customer-value {
+    font-size: 1.232cqw;
+  }
+
+  .sales-sheet-candidate-menu button {
+    font-size: 1.282cqw;
+  }
+
+  .maintenance-statement-control {
+    font-size: 1.389cqw;
+  }
+
+  .maintenance-statement-control.is-title {
+    font-size: 2.671cqw;
+  }
+
+  .maintenance-statement-control.is-large {
+    font-size: 2.350cqw;
+  }
+
+  .maintenance-statement-control.is-compact-value,
+  .maintenance-statement-combobox > input {
+    font-size: 1.175cqw;
+  }
+
+  .maintenance-statement-control.is-compact-date {
+    font-size: 0.962cqw;
+  }
+
+  .maintenance-statement-control.is-header-label {
+    font-size: 1.923cqw;
+  }
+
+  .maintenance-statement-control.is-section-label {
+    font-size: 2.564cqw;
+  }
+
+  .maintenance-statement-control.is-bank-value {
+    font-size: 1.816cqw;
+  }
+
+  .maintenance-statement-control.is-contact-value {
+    font-size: 1.389cqw;
+  }
+
+  .maintenance-statement-control.is-document-number {
+    font-size: 1.068cqw;
+  }
+
+  .maintenance-statement-candidates button {
+    font-size: 1.175cqw;
+  }
+
+  .maintenance-statement-candidates span {
+    font-size: 1.068cqw;
   }
 }
 
