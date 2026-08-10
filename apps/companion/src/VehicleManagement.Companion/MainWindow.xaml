@@ -440,7 +440,7 @@
                                    Text="5D. 画像表示ウィンドウを1件保存" />
                         <Border Padding="14" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock Foreground="#805B10" TextWrapping="Wrap"
-                                       Text="画像をコピーできない場合の代替方式です。ABACUSで「拡大表示」を押した後に「表示画面を診断」を実行し、認識したabx-cs-sk画像表示ウィンドウだけをキャプチャします。これは画面表示の保存であり、元の画像データそのものではありません。" />
+                                       Text="画像をコピーできない場合の代替方式です。ABACUSで「拡大表示」を押した後に「表示画面を診断」を実行し、認識したabx-cs-sk画像表示ウィンドウだけをキャプチャします。未描画の黒領域と白い余白は自動検出して除去します。これは画面表示の保存であり、元の画像データそのものではありません。" />
                         </Border>
                         <Button x:Name="CaptureImageWindowButton" Margin="0,12,0,0" HorizontalAlignment="Left"
                                 Content="画像ウィンドウ1件を保存" IsEnabled="False" Click="CaptureImageWindowButton_Click" />

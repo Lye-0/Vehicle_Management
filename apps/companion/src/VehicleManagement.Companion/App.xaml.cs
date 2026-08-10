@@ -124,6 +124,29 @@ public partial class App : Application
                 },
                 8);
             var imageExport = await new AbacusClipboardImageExporter().ExportAsync(testImage, destination);
+            var cropPixels = new byte[140 * 120 * 4];
+            for (var y = 0; y < 100; y++)
+            {
+                for (var x = 0; x < 100; x++)
+                {
+                    var offset = (y * 140 + x) * 4;
+                    var shade = x is >= 10 and <= 89 && y is >= 10 and <= 89 ? (byte)100 : (byte)255;
+                    cropPixels[offset] = shade;
+                    cropPixels[offset + 1] = shade;
+                    cropPixels[offset + 2] = shade;
+                    cropPixels[offset + 3] = 255;
+                }
+            }
+            var cropSource = BitmapSource.Create(
+                140,
+                120,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null,
+                cropPixels,
+                140 * 4);
+            var cropResult = new AbacusCaptureCropper().Crop(cropSource);
             var mutablePath = Path.Combine(workspace.WorkspacePath, "abx-cs-mn.ucs");
             var mutableBytes = await File.ReadAllBytesAsync(mutablePath);
             mutableBytes[^1] ^= 0x01;
@@ -171,6 +194,9 @@ public partial class App : Application
                 imageExport.PixelWidth == 2 &&
                 imageExport.PixelHeight == 2 &&
                 imageExport.Sha256.Length == 64 &&
+                cropResult.WasCropped &&
+                cropResult.Image.PixelWidth == 88 &&
+                cropResult.Image.PixelHeight == 88 &&
                 verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 2 &&
                 rejectedUnallowedChange &&
                 analysis.IsStructurallyValid &&

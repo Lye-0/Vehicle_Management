@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly AbacusClipboardInspector clipboardInspector = new();
     private readonly AbacusClipboardImageExporter clipboardImageExporter = new();
     private readonly AbacusWindowCaptureService windowCaptureService = new();
+    private readonly AbacusCaptureCropper captureCropper = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
@@ -471,12 +472,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        BitmapSource capturedImage;
+        AbacusCaptureCropResult cropResult;
         try
         {
-            capturedImage = windowCaptureService.Capture(
+            var rawCapture = windowCaptureService.Capture(
                 diagnosedImageWindowHandle.Value,
                 diagnosedAbacusProcessId.Value);
+            cropResult = captureCropper.Crop(rawCapture);
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
@@ -512,7 +514,9 @@ public partial class MainWindow : Window
         var confirmation = MessageBox.Show(
             this,
             $"ABACUSの画像表示ウィンドウだけをPNGとして新規保存します。\n\n" +
-            $"キャプチャ寸法: {capturedImage.PixelWidth:N0} × {capturedImage.PixelHeight:N0}px\n" +
+            $"元のキャプチャ: {cropResult.OriginalWidth:N0} × {cropResult.OriginalHeight:N0}px\n" +
+            $"保存する領域: {cropResult.Image.PixelWidth:N0} × {cropResult.Image.PixelHeight:N0}px\n" +
+            $"余白の自動除去: {(cropResult.WasCropped ? "適用" : "未適用")}\n" +
             $"保存先: {destination}\n\n画面表示のキャプチャであり、元画像ファイルそのものではありません。続行しますか？",
             "画像表示ウィンドウを保存",
             MessageBoxButton.YesNo,
@@ -526,7 +530,7 @@ public partial class MainWindow : Window
         ImageWindowCaptureStatusText.Text = "画像表示ウィンドウをPNGへ変換し、保存前検証を行っています…";
         try
         {
-            var result = await clipboardImageExporter.ExportAsync(capturedImage, destination);
+            var result = await clipboardImageExporter.ExportAsync(cropResult.Image, destination);
             ImageWindowCaptureStatusText.Text =
                 $"画像表示ウィンドウを保存しました。\n{result.FilePath}\n" +
                 $"{result.PixelWidth:N0} × {result.PixelHeight:N0}px / {FormatFileSize(result.FileSize)} / SHA-256: {result.Sha256}";
