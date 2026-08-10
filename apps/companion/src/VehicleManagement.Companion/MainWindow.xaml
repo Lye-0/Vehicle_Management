@@ -449,6 +449,48 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <TabItem Header="移行パッケージ">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="6A. 永続ローカル移行パッケージの準備" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="ABACUSバックアップを厳格に再分析し、候補件数・競合件数・入力ファイルのSHA-256だけをmanifest.jsonへ保存します。この段階では顧客・車両・書類の実データ、画像、個人情報をパッケージへ出力せず、データベース登録やAPIへのアップロードも行いません。" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="MigrationSourcePathTextBox" MinHeight="38" Padding="9,7"
+                                     VerticalContentAlignment="Center" />
+                            <Button Grid.Column="1" Margin="10,0,0,0" Content="ABACUSフォルダー選択"
+                                    Click="SelectMigrationSourceButton_Click" />
+                        </Grid>
+
+                        <Border Margin="0,16,0,0" Padding="14" Background="#EAF2FF" CornerRadius="8">
+                            <TextBlock Foreground="#1E40AF" TextWrapping="Wrap"
+                                       Text="保存先には利用者が選んだ通常フォルダーを使用します。Workersの一時ファイルシステムは永続保存先として扱いません。作成するフォルダーとファイルは毎回新規で、既存内容を上書きしません。将来は同じ境界から開発用・本番用ObjectStorageへ接続します。" />
+                        </Border>
+
+                        <Button x:Name="CreateMigrationPreviewButton" Margin="0,14,0,0" HorizontalAlignment="Left"
+                                Content="保存先を選んで準備情報を作成" Click="CreateMigrationPreviewButton_Click" />
+                        <TextBlock x:Name="MigrationPreviewStatusText" Margin="0,12,0,0" Foreground="#52647A"
+                                   Text="未作成" TextWrapping="Wrap" />
+
+                        <Border Margin="0,16,0,0" Padding="16" Background="#F4F7FB" CornerRadius="8">
+                            <TextBlock x:Name="MigrationPreviewResultText" Foreground="#36465A"
+                                       LineHeight="25" TextWrapping="Wrap" />
+                        </Border>
+
+                        <Border Margin="0,16,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
+                            <TextBlock Foreground="#805B10" TextWrapping="Wrap"
+                                       Text="Gate 6Aの確認対象は、パッケージがアプリ終了後も残ること、manifest.json以外が作られていないこと、画面の候補件数が紐付けプレビューと一致することです。実データ変換は次のGateで追加します。" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

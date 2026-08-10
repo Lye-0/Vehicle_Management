@@ -209,6 +209,13 @@ public partial class App : Application
             var parser = new AbacusTabParser();
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
             var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
+            var packageParent = Path.Combine(testRoot, "migration-packages");
+            Directory.CreateDirectory(packageParent);
+            var migrationPreview = await new AbacusMigrationPreviewStore(
+                new AbacusDataAnalyzer(new AbacusTabParser()),
+                new AbacusLinkagePlanner(new AbacusTabParser()))
+                .CreateAsync(source, packageParent);
+            var migrationManifestText = await File.ReadAllTextAsync(migrationPreview.ManifestPath);
             var invalidFolder = Path.Combine(testRoot, "invalid");
             Directory.CreateDirectory(invalidFolder);
             await File.WriteAllTextAsync(
@@ -248,6 +255,14 @@ public partial class App : Application
                 linkage.CustomersWithMultipleVehicles == 1 &&
                 linkage.SameNameConflictGroups == 1 &&
                 linkage.VehicleIdentifierConflictGroups == 1 &&
+                Directory.GetFiles(migrationPreview.PackagePath).Length == 1 &&
+                migrationPreview.ManifestSha256.Length == 64 &&
+                migrationPreview.CustomerCandidates == linkage.CustomerCandidates &&
+                migrationPreview.VehicleCandidates == linkage.VehicleCandidates &&
+                migrationPreview.DocumentCandidates == linkage.ImportCandidateDocuments &&
+                migrationManifestText.Contains("\"status\": \"preview-only\"", StringComparison.OrdinalIgnoreCase) &&
+                migrationManifestText.Contains("\"dataFiles\": []", StringComparison.OrdinalIgnoreCase) &&
+                migrationManifestText.Contains("\"imageFiles\": []", StringComparison.OrdinalIgnoreCase) &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
         }

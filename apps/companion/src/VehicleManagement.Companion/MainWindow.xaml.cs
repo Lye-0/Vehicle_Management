@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly AbacusCaptureCropper captureCropper = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
+    private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         workspaceService = new AbacusWorkspaceService(folderInspector);
+        migrationPreviewStore = new AbacusMigrationPreviewStore(dataAnalyzer, linkagePlanner);
         session.StateChanged += Session_StateChanged;
         Closing += MainWindow_Closing;
         Render(session.Snapshot);
@@ -103,6 +105,71 @@ public partial class MainWindow : Window
             SourcePathTextBox.Text = dialog.FolderName;
             AnalysisPathTextBox.Text = dialog.FolderName;
             LinkagePathTextBox.Text = dialog.FolderName;
+            MigrationSourcePathTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private void SelectMigrationSourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "移行準備情報を作成するABACUSフォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            MigrationSourcePathTextBox.Text = dialog.FolderName;
+            MigrationPreviewStatusText.Text = "未作成";
+            MigrationPreviewResultText.Text = "";
+        }
+    }
+
+    private async void CreateMigrationPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(MigrationSourcePathTextBox.Text))
+        {
+            MessageBox.Show(this, "ABACUSフォルダーを指定してください。", "フォルダー未選択");
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "永続保存する移行準備パッケージの親フォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        CreateMigrationPreviewButton.IsEnabled = false;
+        MigrationSourcePathTextBox.IsEnabled = false;
+        MigrationPreviewStatusText.Text = "ABACUSファイルを再検証し、移行準備情報を作成しています…";
+        MigrationPreviewResultText.Text = "";
+        try
+        {
+            var result = await migrationPreviewStore.CreateAsync(
+                MigrationSourcePathTextBox.Text.Trim(),
+                dialog.FolderName);
+            MigrationPreviewStatusText.Text = "作成後の再読込検証に合格しました。顧客・車両・書類の登録やアップロードは行っていません。";
+            MigrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            MigrationPreviewResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"マニフェスト: {result.ManifestPath}\n" +
+                $"顧客候補: {result.CustomerCandidates:N0} / 車両候補: {result.VehicleCandidates:N0} / 書類候補: {result.DocumentCandidates:N0}\n" +
+                $"顧客名空欄で除外: {result.SkippedBlankCustomerDocuments:N0} / 要確認の競合: {result.ConflictGroups:N0}\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            MigrationPreviewStatusText.Text = $"移行準備情報を作成できません: {exception.Message}";
+            MigrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            CreateMigrationPreviewButton.IsEnabled = true;
+            MigrationSourcePathTextBox.IsEnabled = true;
         }
     }
 
