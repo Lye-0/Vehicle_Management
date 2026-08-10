@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using VehicleManagement.AbacusImport;
 using VehicleManagement.Companion.Services;
 
@@ -94,6 +96,20 @@ public partial class App : Application
             var workspaceService = new AbacusWorkspaceService(inspector);
             var workspace = await workspaceService.CreateAsync(before, destination);
             var verifiedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
+            var testImage = BitmapSource.Create(
+                2,
+                2,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null,
+                new byte[]
+                {
+                    0, 0, 255, 255, 0, 255, 0, 255,
+                    255, 0, 0, 255, 255, 255, 255, 255,
+                },
+                8);
+            var imageExport = await new AbacusClipboardImageExporter().ExportAsync(testImage, destination);
             var mutablePath = Path.Combine(workspace.WorkspacePath, "abx-cs-mn.ucs");
             var mutableBytes = await File.ReadAllBytesAsync(mutablePath);
             mutableBytes[^1] ^= 0x01;
@@ -136,6 +152,11 @@ public partial class App : Application
                 verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 verifiedWorkspace.WorkspacePath == workspace.WorkspacePath &&
                 verifiedWorkspace.AllowedRuntimeChanges.Count == 0 &&
+                File.Exists(imageExport.FilePath) &&
+                imageExport.FileSize > 8 &&
+                imageExport.PixelWidth == 2 &&
+                imageExport.PixelHeight == 2 &&
+                imageExport.Sha256.Length == 64 &&
                 verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 2 &&
                 rejectedUnallowedChange &&
                 analysis.IsStructurallyValid &&

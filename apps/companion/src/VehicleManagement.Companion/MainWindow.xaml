@@ -424,6 +424,17 @@
                                    Text="形式: -" TextWrapping="Wrap" />
                         <TextBlock x:Name="ClipboardFileDropText" Margin="0,5,0,18" Foreground="#52647A"
                                    Text="ファイル参照: -" TextWrapping="Wrap" />
+
+                        <TextBlock Margin="0,10,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="5C. 診断済み画像を1件保存" />
+                        <Border Padding="14" Background="#EAF7EF" CornerRadius="8">
+                            <TextBlock Foreground="#17643A" TextWrapping="Wrap"
+                                       Text="標準画像として診断できた同じクリップボード内容だけをPNGへ変換します。保存先は原本・作業用コピーの外側に限定し、新しいファイル名を作成して既存ファイルを上書きしません。これは表示画像1件の抽出実験です。" />
+                        </Border>
+                        <Button x:Name="SaveClipboardImageButton" Margin="0,12,0,0" HorizontalAlignment="Left"
+                                Content="画像1件を保存" IsEnabled="False" Click="SaveClipboardImageButton_Click" />
+                        <TextBlock x:Name="ImageExportStatusText" Margin="0,10,0,20" Foreground="#36465A"
+                                   Text="クリップボード診断で標準画像を確認すると保存できます。" TextWrapping="Wrap" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

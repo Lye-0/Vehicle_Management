@@ -16,12 +16,15 @@ public partial class MainWindow : Window
     private readonly AbacusFolderInspector folderInspector = new();
     private readonly AbacusWorkspaceService workspaceService;
     private readonly AbacusClipboardInspector clipboardInspector = new();
+    private readonly AbacusClipboardImageExporter clipboardImageExporter = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
     private string? verifiedWorkspacePath;
+    private string? verifiedSourcePath;
+    private uint? inspectedClipboardSequenceNumber;
     private AbacusLinkagePlan? linkagePlan;
     private bool allowClose;
     private bool closeVerificationInProgress;
@@ -277,6 +280,7 @@ public partial class MainWindow : Window
                 progress,
                 operationCancellation!.Token);
             verifiedWorkspacePath = workspaceResult.WorkspacePath;
+            verifiedSourcePath = sourceReport.SourcePath;
             WorkspacePathText.Text = $"検証済み作業用コピー:\n{workspaceResult.WorkspacePath}\n原本の再検証: 一致";
             OperationStatusText.Text = "作業用コピーと保存用原本のハッシュが一致しました。";
             LaunchAbacusButton.IsEnabled = true;
@@ -347,6 +351,7 @@ public partial class MainWindow : Window
             ExistingWorkspacePathTextBox.Text = dialog.FolderName;
             workspaceResult = null;
             verifiedWorkspacePath = null;
+            verifiedSourcePath = null;
             VerifyExistingWorkspaceButton.IsEnabled = true;
             ImageLaunchAbacusButton.IsEnabled = false;
             ImageDiagnosticStatusText.Text = "未検証です。「コピーを再検証」を押してください。";
@@ -380,6 +385,7 @@ public partial class MainWindow : Window
                 progress,
                 operationCancellation!.Token);
             verifiedWorkspacePath = result.WorkspacePath;
+            verifiedSourcePath = result.SourcePath;
             workspaceResult = null;
             var runtimeChangeDetail = result.AllowedRuntimeChanges.Count == 0
                 ? "作成時から変更なし"
@@ -437,6 +443,10 @@ public partial class MainWindow : Window
     private async void InspectClipboardButton_Click(object sender, RoutedEventArgs e)
     {
         InspectClipboardButton.IsEnabled = false;
+        SaveClipboardImageButton.IsEnabled = false;
+        inspectedClipboardSequenceNumber = null;
+        ImageExportStatusText.Text = "クリップボード診断で標準画像を確認すると保存できます。";
+        ImageExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         ClipboardInspectionStatusText.Text = "クリップボードの形式と画像寸法を読み取り診断しています…";
         try
         {
@@ -450,6 +460,8 @@ public partial class MainWindow : Window
 
             if (result.HasBitmapImage)
             {
+                inspectedClipboardSequenceNumber = result.SequenceNumber;
+                SaveClipboardImageButton.IsEnabled = true;
                 ClipboardInspectionStatusText.Text =
                     $"標準画像として取得できます（{result.PixelWidth:N0} × {result.PixelHeight:N0}px）。次段階で1件だけ保存する検証へ進めます。";
                 ClipboardInspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
@@ -475,6 +487,82 @@ public partial class MainWindow : Window
         finally
         {
             InspectClipboardButton.IsEnabled = true;
+        }
+    }
+
+    private async void SaveClipboardImageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!inspectedClipboardSequenceNumber.HasValue)
+        {
+            return;
+        }
+
+        AbacusClipboardImage clipboardImage;
+        try
+        {
+            clipboardImage = await clipboardInspector.ReadImageAsync(inspectedClipboardSequenceNumber.Value);
+        }
+        catch (Exception exception) when (exception is COMException or InvalidOperationException)
+        {
+            ImageExportStatusText.Text = $"画像を保存できません: {exception.Message}";
+            ImageExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            SaveClipboardImageButton.IsEnabled = false;
+            inspectedClipboardSequenceNumber = null;
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "ABACUS画像1件の保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dialog.FolderName));
+        if (IsSameOrSubPath(destination, verifiedSourcePath) ||
+            IsSameOrSubPath(destination, GetActiveWorkspacePath()))
+        {
+            MessageBox.Show(
+                this,
+                "保存用原本または作業用コピーの内部には画像を保存できません。別のフォルダーを選択してください。",
+                "保存先を変更してください",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            $"クリップボードで診断した画像1件をPNGとして新規保存します。\n\n" +
+            $"画像寸法: {clipboardImage.Image.PixelWidth:N0} × {clipboardImage.Image.PixelHeight:N0}px\n" +
+            $"保存先: {destination}\n\n既存ファイルは上書きしません。続行しますか？",
+            "ABACUS画像を1件保存",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        SaveClipboardImageButton.IsEnabled = false;
+        ImageExportStatusText.Text = "画像をPNGへ変換し、保存前検証を行っています…";
+        try
+        {
+            var result = await clipboardImageExporter.ExportAsync(clipboardImage.Image, destination);
+            ImageExportStatusText.Text =
+                $"画像1件を保存しました。\n{result.FilePath}\n" +
+                $"{result.PixelWidth:N0} × {result.PixelHeight:N0}px / {FormatFileSize(result.FileSize)} / SHA-256: {result.Sha256}";
+            ImageExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidOperationException or NotSupportedException or ArgumentException)
+        {
+            ImageExportStatusText.Text = $"画像の保存に失敗しました: {exception.Message}";
+            ImageExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            SaveClipboardImageButton.IsEnabled = true;
         }
     }
 
@@ -735,6 +823,7 @@ public partial class MainWindow : Window
         sourceReport = null;
         workspaceResult = null;
         verifiedWorkspacePath = null;
+        verifiedSourcePath = null;
         ValidationResultText.Text = "未検査";
         FileCountText.Text = "-";
         TotalSizeText.Text = "-";
@@ -749,6 +838,19 @@ public partial class MainWindow : Window
 
     private string? GetActiveWorkspacePath() =>
         workspaceResult?.WorkspacePath ?? verifiedWorkspacePath;
+
+    private static bool IsSameOrSubPath(string candidate, string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return false;
+        }
+
+        var normalizedCandidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+            normalizedCandidate.StartsWith($"{normalizedRoot}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string FormatFileSize(long bytes)
     {

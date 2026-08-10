@@ -18,6 +18,7 @@ public sealed record AbacusWorkspaceResult(
     AbacusFolderReport SourceAfterCopyReport);
 
 public sealed record AbacusWorkspaceVerificationResult(
+    string SourcePath,
     string WorkspacePath,
     string ManifestPath,
     AbacusFolderReport WorkspaceReport,
@@ -261,6 +262,7 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
         }
 
         return new AbacusWorkspaceVerificationResult(
+            sourceRoot,
             root,
             manifestPath,
             report,
