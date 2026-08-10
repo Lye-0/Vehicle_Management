@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>VehicleManagement.LegacyHost</AssemblyName>
+    <RootNamespace>VehicleManagement.LegacyHost</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VehicleManagement.LocalProtocol\VehicleManagement.LocalProtocol.csproj" />
+  </ItemGroup>
+</Project>
