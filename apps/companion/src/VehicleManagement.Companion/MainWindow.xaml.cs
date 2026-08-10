@@ -84,8 +84,15 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             SourcePathTextBox.Text = dialog.FolderName;
-            ResetInspection();
         }
+    }
+
+    private void SourcePathTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        ResetInspection(clearPath: false);
+        OperationStatusText.Text = string.IsNullOrWhiteSpace(SourcePathTextBox.Text)
+            ? "未検査"
+            : "パスが指定されました。「読取検査」を押してください。";
     }
 
     private async void InspectFolderButton_Click(object sender, RoutedEventArgs e)

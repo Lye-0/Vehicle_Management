@@ -101,8 +101,9 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SourcePathTextBox" MinHeight="38" Padding="9,7" IsReadOnly="True"
-                                     VerticalContentAlignment="Center" />
+                            <TextBox x:Name="SourcePathTextBox" MinHeight="38" Padding="9,7"
+                                     VerticalContentAlignment="Center"
+                                     TextChanged="SourcePathTextBox_TextChanged" />
                             <Button x:Name="SelectSourceButton" Grid.Column="1" Margin="10,0,0,0" Content="フォルダー選択"
                                     Click="SelectSourceButton_Click" />
                             <Button x:Name="InspectFolderButton" Grid.Column="2" Margin="10,0,0,0"
