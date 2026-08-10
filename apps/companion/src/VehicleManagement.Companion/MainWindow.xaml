@@ -351,6 +351,67 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <TabItem Header="画像抽出準備">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="5A. 車両画像画面の読み取り診断" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="既存の検証済み作業用コピーを再検証して起動します。この段階では画像の出力、ABACUSレコードの変更、保存用原本の起動は行いません。" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="ExistingWorkspacePathTextBox" MinHeight="38" Padding="9,7"
+                                     VerticalContentAlignment="Center" IsReadOnly="True" />
+                            <Button Grid.Column="1" Margin="10,0,0,0" Content="作業用コピーを選択"
+                                    Click="SelectExistingWorkspaceButton_Click" />
+                            <Button x:Name="VerifyExistingWorkspaceButton" Grid.Column="2" Margin="10,0,0,0"
+                                    Content="コピーを再検証" IsEnabled="False"
+                                    Click="VerifyExistingWorkspaceButton_Click" />
+                        </Grid>
+                        <ProgressBar x:Name="ImageVerificationProgressBar" Height="8" Margin="0,12,0,0"
+                                     Minimum="0" Maximum="1" />
+                        <Button x:Name="ImageCancelButton" Margin="0,8,0,0" HorizontalAlignment="Right"
+                                Content="再検証をキャンセル" IsEnabled="False" Click="ImageCancelButton_Click" />
+
+                        <Border Margin="0,16,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
+                            <TextBlock Foreground="#805B10" TextWrapping="Wrap"
+                                       Text="再検証後にコピー側ABACUSを起動し、ABACUS上で画像が見える車両画面まで手動で移動してください。その状態で下の「表示画面を診断」を押します。データを編集・保存しないでください。" />
+                        </Border>
+
+                        <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
+                            <Button x:Name="ImageLaunchAbacusButton" Content="コピー側を起動"
+                                    IsEnabled="False" Click="ImageLaunchAbacusButton_Click" />
+                            <Button x:Name="InspectImageUiButton" Margin="10,0,0,0" Content="表示画面を診断"
+                                    IsEnabled="False" Click="InspectImageUiButton_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="ImageDiagnosticStatusText" Margin="0,12,0,0" Foreground="#36465A"
+                                   Text="作業用コピーを選択してください。" TextWrapping="Wrap" />
+
+                        <TextBlock Margin="0,20,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="認識できたUI要素（最大30件）" />
+                        <DataGrid x:Name="ImageUiElementsGrid" Height="360" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
+                                <DataGridTextColumn Header="階層" Binding="{Binding Depth}" Width="55" />
+                                <DataGridTextColumn Header="種類" Binding="{Binding ControlType}" Width="110" />
+                                <DataGridTextColumn Header="表示名" Binding="{Binding Name}" Width="2*" />
+                                <DataGridTextColumn Header="AutomationId" Binding="{Binding AutomationId}" Width="140" />
+                                <DataGridTextColumn Header="クラス" Binding="{Binding ClassName}" Width="140" />
+                                <DataGridCheckBoxColumn Header="操作可" Binding="{Binding IsEnabled}" Width="65" />
+                                <DataGridCheckBoxColumn Header="入力可" Binding="{Binding IsKeyboardFocusable}" Width="65" />
+                                <DataGridCheckBoxColumn Header="選択中" Binding="{Binding HasKeyboardFocus}" Width="65" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

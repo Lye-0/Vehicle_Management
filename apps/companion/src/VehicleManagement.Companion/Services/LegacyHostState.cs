@@ -1,3 +1,5 @@
+using VehicleManagement.LocalProtocol;
+
 namespace VehicleManagement.Companion.Services;
 
 public enum LegacyHostState
@@ -24,4 +26,5 @@ public sealed record AbacusRuntimeSnapshot(
     string? TargetArchitecture = null,
     long? WindowHandle = null,
     string? WindowTitle = null,
-    int? AutomationElementCount = null);
+    int? AutomationElementCount = null,
+    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null);

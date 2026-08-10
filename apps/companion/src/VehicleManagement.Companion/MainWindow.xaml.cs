@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
+    private string? verifiedWorkspacePath;
     private AbacusLinkagePlan? linkagePlan;
     private bool allowClose;
     private bool abacusMayBeRunning;
@@ -272,6 +273,7 @@ public partial class MainWindow : Window
                 dialog.FolderName,
                 progress,
                 operationCancellation!.Token);
+            verifiedWorkspacePath = workspaceResult.WorkspacePath;
             WorkspacePathText.Text = $"検証済み作業用コピー:\n{workspaceResult.WorkspacePath}\n原本の再検証: 一致";
             OperationStatusText.Text = "作業用コピーと保存用原本のハッシュが一致しました。";
             LaunchAbacusButton.IsEnabled = true;
@@ -294,7 +296,13 @@ public partial class MainWindow : Window
 
     private async void LaunchAbacusButton_Click(object sender, RoutedEventArgs e)
     {
-        if (workspaceResult is null)
+        await LaunchVerifiedAbacusAsync();
+    }
+
+    private async Task LaunchVerifiedAbacusAsync()
+    {
+        var activeWorkspacePath = GetActiveWorkspacePath();
+        if (activeWorkspacePath is null)
         {
             return;
         }
@@ -308,18 +316,115 @@ public partial class MainWindow : Window
                 await session.StartAsync();
             }
 
-            var executablePath = Path.Combine(workspaceResult.WorkspacePath, AbacusConstants.ExecutableFileName);
+            var executablePath = Path.Combine(activeWorkspacePath, AbacusConstants.ExecutableFileName);
             var result = await session.LaunchAndInspectAbacusAsync(executablePath);
             abacusMayBeRunning = result.ProcessId.HasValue;
             RenderAbacusResult(result);
+            ImageDiagnosticStatusText.Text = result.Message;
         }
         catch (Exception exception)
         {
             AutomationResultText.Text = $"起動または認識に失敗しました: {exception.Message}";
+            ImageDiagnosticStatusText.Text = $"起動または認識に失敗しました: {exception.Message}";
         }
         finally
         {
             SetAbacusButtonsBusy(false);
+        }
+    }
+
+    private void SelectExistingWorkspaceButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "検証済みABACUS作業用コピーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            ExistingWorkspacePathTextBox.Text = dialog.FolderName;
+            workspaceResult = null;
+            verifiedWorkspacePath = null;
+            VerifyExistingWorkspaceButton.IsEnabled = true;
+            ImageLaunchAbacusButton.IsEnabled = false;
+            ImageDiagnosticStatusText.Text = "未検証です。「コピーを再検証」を押してください。";
+            ImageUiElementsGrid.ItemsSource = null;
+        }
+    }
+
+    private async void VerifyExistingWorkspaceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(ExistingWorkspacePathTextBox.Text))
+        {
+            return;
+        }
+
+        BeginOperation("検証済み作業用コピーを再検証しています…");
+        VerifyExistingWorkspaceButton.IsEnabled = false;
+        ImageCancelButton.IsEnabled = true;
+        verifiedWorkspacePath = null;
+        ImageUiElementsGrid.ItemsSource = null;
+        try
+        {
+            var progress = new Progress<AbacusWorkspaceProgress>(item =>
+            {
+                SetProgress(item.CompletedFiles, item.TotalFiles);
+                ImageVerificationProgressBar.Maximum = Math.Max(item.TotalFiles, 1);
+                ImageVerificationProgressBar.Value = Math.Min(item.CompletedFiles, Math.Max(item.TotalFiles, 1));
+                ImageDiagnosticStatusText.Text = $"{item.Phase}: {item.CurrentFile}";
+            });
+            var result = await workspaceService.VerifyExistingAsync(
+                ExistingWorkspacePathTextBox.Text.Trim(),
+                progress,
+                operationCancellation!.Token);
+            verifiedWorkspacePath = result.WorkspacePath;
+            workspaceResult = null;
+            ImageDiagnosticStatusText.Text =
+                $"再検証に合格しました（{result.WorkspaceReport.FileCount:N0}ファイル）。コピー側ABACUSを起動できます。";
+            ImageLaunchAbacusButton.IsEnabled = !abacusMayBeRunning;
+            LaunchAbacusButton.IsEnabled = !abacusMayBeRunning;
+        }
+        catch (OperationCanceledException)
+        {
+            ImageDiagnosticStatusText.Text = "再検証をキャンセルしました。作業用コピーは起動対象にしていません。";
+        }
+        catch (Exception exception)
+        {
+            ImageDiagnosticStatusText.Text = $"再検証に失敗しました: {exception.Message}";
+        }
+        finally
+        {
+            ImageCancelButton.IsEnabled = false;
+            EndOperation();
+            VerifyExistingWorkspaceButton.IsEnabled = true;
+        }
+    }
+
+    private void ImageCancelButton_Click(object sender, RoutedEventArgs e) => operationCancellation?.Cancel();
+
+    private async void ImageLaunchAbacusButton_Click(object sender, RoutedEventArgs e)
+    {
+        await LaunchVerifiedAbacusAsync();
+    }
+
+    private async void InspectImageUiButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectImageUiButton.IsEnabled = false;
+        ImageDiagnosticStatusText.Text = "表示中のABACUS画面を読み取り診断しています…";
+        try
+        {
+            var result = await session.InspectAbacusUiAsync();
+            ImageDiagnosticStatusText.Text = result.Message;
+            ImageUiElementsGrid.ItemsSource = result.AutomationElements ?? [];
+        }
+        catch (Exception exception)
+        {
+            ImageDiagnosticStatusText.Text = $"画面診断に失敗しました: {exception.Message}";
+            ImageUiElementsGrid.ItemsSource = null;
+        }
+        finally
+        {
+            InspectImageUiButton.IsEnabled = abacusMayBeRunning;
         }
     }
 
@@ -562,9 +667,12 @@ public partial class MainWindow : Window
 
     private void SetAbacusButtonsBusy(bool busy)
     {
-        LaunchAbacusButton.IsEnabled = !busy && workspaceResult is not null && !abacusMayBeRunning;
+        var canLaunch = GetActiveWorkspacePath() is not null && !abacusMayBeRunning;
+        LaunchAbacusButton.IsEnabled = !busy && canLaunch;
         InspectAbacusButton.IsEnabled = !busy && abacusMayBeRunning;
         CloseAbacusButton.IsEnabled = !busy && abacusMayBeRunning;
+        ImageLaunchAbacusButton.IsEnabled = !busy && canLaunch;
+        InspectImageUiButton.IsEnabled = !busy && abacusMayBeRunning;
     }
 
     private void ResetInspection(bool clearPath = true)
@@ -576,6 +684,7 @@ public partial class MainWindow : Window
 
         sourceReport = null;
         workspaceResult = null;
+        verifiedWorkspacePath = null;
         ValidationResultText.Text = "未検査";
         FileCountText.Text = "-";
         TotalSizeText.Text = "-";
@@ -585,7 +694,11 @@ public partial class MainWindow : Window
         WorkspacePathText.Text = "作業用コピーはまだありません。";
         CreateWorkspaceButton.IsEnabled = false;
         LaunchAbacusButton.IsEnabled = false;
+        ImageLaunchAbacusButton.IsEnabled = false;
     }
+
+    private string? GetActiveWorkspacePath() =>
+        workspaceResult?.WorkspacePath ?? verifiedWorkspacePath;
 
     private static string FormatFileSize(long bytes)
     {

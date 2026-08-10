@@ -74,7 +74,9 @@ public partial class App : Application
                 return false;
             }
 
-            var workspace = await new AbacusWorkspaceService(inspector).CreateAsync(before, destination);
+            var workspaceService = new AbacusWorkspaceService(inspector);
+            var workspace = await workspaceService.CreateAsync(before, destination);
+            var verifiedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
             var parser = new AbacusTabParser();
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
             var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
@@ -92,6 +94,8 @@ public partial class App : Application
             return workspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 workspace.SourceAfterCopyReport.FolderFingerprint == before.FolderFingerprint &&
                 File.Exists(workspace.ManifestPath) &&
+                verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
+                verifiedWorkspace.WorkspacePath == workspace.WorkspacePath &&
                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&

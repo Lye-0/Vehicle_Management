@@ -16,8 +16,23 @@ public sealed record AbacusWorkspaceResult(
     AbacusFolderReport WorkspaceReport,
     AbacusFolderReport SourceAfterCopyReport);
 
+public sealed record AbacusWorkspaceVerificationResult(
+    string WorkspacePath,
+    string ManifestPath,
+    AbacusFolderReport WorkspaceReport,
+    string OriginalFingerprint);
+
 public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
 {
+    private sealed record WorkspaceManifest(
+        int Version,
+        DateTime CreatedAtUtc,
+        string SourcePath,
+        string WorkspacePath,
+        int FileCount,
+        long TotalBytes,
+        string FolderFingerprint);
+
     public async Task<AbacusWorkspaceResult> CreateAsync(
         AbacusFolderReport sourceReport,
         string destinationParent,
@@ -128,6 +143,56 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
 
         progress?.Report(new AbacusWorkspaceProgress("完了", sourceReport.FileCount, sourceReport.FileCount, "完了"));
         return new AbacusWorkspaceResult(workspacePath, manifestPath, workspaceReport, sourceAfterCopyReport);
+    }
+
+    public async Task<AbacusWorkspaceVerificationResult> VerifyExistingAsync(
+        string workspacePath,
+        IProgress<AbacusWorkspaceProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspacePath));
+        var manifestPath = $"{root}.manifest.json";
+        if (!Directory.Exists(root) || !File.Exists(manifestPath))
+        {
+            throw new InvalidDataException("作業用コピーまたは隣接する検証マニフェストが見つかりません。");
+        }
+
+        var manifestInfo = new FileInfo(manifestPath);
+        if (manifestInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) || manifestInfo.Length > 64 * 1024)
+        {
+            throw new InvalidDataException("検証マニフェストの形式が不正です。");
+        }
+
+        await using var manifestStream = new FileStream(
+            manifestPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var manifest = await JsonSerializer.DeserializeAsync<WorkspaceManifest>(
+            manifestStream,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+            cancellationToken) ?? throw new InvalidDataException("検証マニフェストを読み取れません。");
+
+        if (manifest.Version != 1 || string.IsNullOrWhiteSpace(manifest.WorkspacePath) ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifest.WorkspacePath)), root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("検証マニフェストが選択した作業用コピーと一致しません。");
+        }
+
+        var report = await inspector.InspectAsync(
+            root,
+            new Progress<AbacusInspectionProgress>(item =>
+                progress?.Report(new AbacusWorkspaceProgress("作業用コピー再検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
+            cancellationToken);
+        if (!report.IsValid || report.FileCount != manifest.FileCount || report.TotalBytes != manifest.TotalBytes ||
+            !string.Equals(report.FolderFingerprint, manifest.FolderFingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("作業用コピーが作成時の検証結果と一致しません。起動対象にできません。");
+        }
+
+        return new AbacusWorkspaceVerificationResult(root, manifestPath, report, manifest.FolderFingerprint);
     }
 
     private static async Task VerifyFileHashAsync(string path, string expectedHash, CancellationToken cancellationToken)

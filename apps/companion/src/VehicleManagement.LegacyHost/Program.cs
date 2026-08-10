@@ -85,6 +85,7 @@ internal static partial class Program
                             Architecture: HostArchitecture),
                         "launch-abacus" => await LaunchAndInspectAbacusAsync(request),
                         "inspect-abacus" => await InspectAbacusAsync(request.RequestId),
+                        "inspect-abacus-ui" => await InspectAbacusUiAsync(request.RequestId),
                         "close-abacus" => await CloseAbacusAsync(request.RequestId),
                         "shutdown" => new LegacyHostMessage("stopping", request.RequestId, Status: "stopping"),
                         _ => new LegacyHostMessage(
@@ -181,6 +182,103 @@ internal static partial class Program
         }
 
         return await WaitForAbacusWindowAsync(requestId, abacusExecutablePath);
+    }
+
+    private static Task<LegacyHostMessage> InspectAbacusUiAsync(string requestId)
+    {
+        if (abacusProcess is null || abacusProcess.HasExited || abacusProcess.MainWindowHandle == IntPtr.Zero)
+        {
+            return Task.FromResult(new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-not-running",
+                Message: "コピー側ABACUSを起動し、画像を表示してから診断してください。",
+                Architecture: HostArchitecture));
+        }
+
+        var root = AutomationElement.FromHandle(abacusProcess.MainWindowHandle);
+        var descendants = root.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+        var elements = new List<LegacyAutomationElementInfo>();
+        for (var index = 0; index < descendants.Count && elements.Count < 30; index++)
+        {
+            var element = descendants[index];
+            try
+            {
+                var controlType = element.Current.ControlType?.ProgrammaticName
+                    .Replace("ControlType.", string.Empty, StringComparison.Ordinal) ?? "Unknown";
+                var name = NormalizeAutomationText(element.Current.Name, 60);
+                var automationId = NormalizeAutomationText(element.Current.AutomationId, 40);
+                var className = NormalizeAutomationText(element.Current.ClassName, 40);
+                if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(automationId) &&
+                    controlType is not ("Image" or "Document" or "Edit" or "Button" or "MenuItem" or "Custom"))
+                {
+                    continue;
+                }
+
+                elements.Add(new LegacyAutomationElementInfo(
+                    elements.Count + 1,
+                    GetAutomationDepth(element, root),
+                    controlType,
+                    name,
+                    automationId,
+                    className,
+                    element.Current.IsEnabled,
+                    element.Current.IsKeyboardFocusable,
+                    element.Current.HasKeyboardFocus));
+            }
+            catch (ElementNotAvailableException)
+            {
+                // FileMaker may rebuild controls while moving between layouts; skip stale entries.
+            }
+        }
+
+        return Task.FromResult(new LegacyHostMessage(
+            "abacus-ui-inspected",
+            requestId,
+            Status: "ui-structure-ready",
+            Message: elements.Count == 0
+                ? "標準UI Automationで詳細要素を取得できませんでした。次段階では画面キャプチャ方式を検討します。"
+                : $"UI要素を{elements.Count:N0}件取得しました（全子孫要素: {descendants.Count:N0}件、表示上限: 30件）。",
+            ProcessId: abacusProcess.Id,
+            Architecture: HostArchitecture,
+            TargetPath: abacusExecutablePath,
+            TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+            WindowHandle: abacusProcess.MainWindowHandle.ToInt64(),
+            WindowTitle: root.Current.Name,
+            AutomationElementCount: descendants.Count,
+            AutomationElements: elements));
+    }
+
+    private static int GetAutomationDepth(AutomationElement element, AutomationElement root)
+    {
+        var depth = 0;
+        var current = element;
+        while (depth < 12)
+        {
+            current = TreeWalker.ControlViewWalker.GetParent(current);
+            if (current is null || current.Equals(root))
+            {
+                break;
+            }
+
+            depth++;
+        }
+
+        return depth;
+    }
+
+    private static string NormalizeAutomationText(string? value, int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = new string(value
+            .Where(character => !char.IsControl(character))
+            .ToArray())
+            .Trim();
+        return normalized.Length <= maximumLength ? normalized : $"{normalized[..maximumLength]}…";
     }
 
     private static async Task<LegacyHostMessage> WaitForAbacusWindowAsync(string requestId, string? executablePath)

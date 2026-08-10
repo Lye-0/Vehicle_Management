@@ -61,4 +61,16 @@ public sealed record LegacyHostMessage(
     string? TargetArchitecture = null,
     long? WindowHandle = null,
     string? WindowTitle = null,
-    int? AutomationElementCount = null);
+    int? AutomationElementCount = null,
+    IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null);
+
+public sealed record LegacyAutomationElementInfo(
+    int Index,
+    int Depth,
+    string ControlType,
+    string Name,
+    string AutomationId,
+    string ClassName,
+    bool IsEnabled,
+    bool IsKeyboardFocusable,
+    bool HasKeyboardFocus);
