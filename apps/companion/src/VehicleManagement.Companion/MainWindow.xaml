@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Vehicle Management ローカル補助ソフト"
         Width="720"
-        Height="470"
+        Height="520"
         MinWidth="620"
-        MinHeight="420"
+        MinHeight="460"
         WindowStartupLocation="CenterScreen"
         Background="#F4F7FB">
     <Window.Resources>
@@ -33,9 +33,12 @@
                        Text="ABACUS連携など、Windows上でのみ実行できる処理を安全に担当します。現在は接続基盤の確認段階です。" />
         </StackPanel>
 
-        <Border Grid.Row="2" Padding="24" Background="White" CornerRadius="12"
-                BorderBrush="#D8E1EC" BorderThickness="1">
-            <StackPanel>
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <Border Padding="24" Background="White" CornerRadius="12"
+                    BorderBrush="#D8E1EC" BorderThickness="1">
+                <StackPanel>
                 <DockPanel LastChildFill="False">
                     <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                Text="LegacyHost" />
@@ -68,8 +71,9 @@
                     <TextBlock x:Name="DetailText" Foreground="#36465A" TextWrapping="Wrap"
                                Text="LegacyHostは停止しています。" />
                 </Border>
-            </StackPanel>
-        </Border>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal">
             <Button x:Name="StartButton" Content="起動" Click="StartButton_Click" />
