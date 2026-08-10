@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace VehicleManagement.Companion.Services;
 
@@ -25,8 +26,11 @@ public sealed record AbacusWorkspaceVerificationResult(
 
 public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
 {
-    private const string RuntimeMutableFile = "abx-cs-mn.ucs";
-    private const int MaximumRuntimeChangedBytes = 4096;
+    private const int MaximumRuntimeChangedBytesPerFile = 4096;
+    private const int MaximumRuntimeChangedBytesTotal = 16 * 1024;
+    private static readonly Regex RuntimeMutableFilePattern = new(
+        "^abx-cs-[a-z0-9]{2}\\.ucs$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private sealed record WorkspaceManifest(
         int Version,
@@ -222,6 +226,7 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
         }
 
         var allowedRuntimeChanges = new List<string>();
+        var totalRuntimeChangedBytes = 0;
         foreach (var (relativePath, sourceFile) in sourceFiles)
         {
             var workspaceFile = workspaceFiles[relativePath];
@@ -230,7 +235,7 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
                 continue;
             }
 
-            if (!string.Equals(relativePath, RuntimeMutableFile, StringComparison.OrdinalIgnoreCase) ||
+            if (!RuntimeMutableFilePattern.IsMatch(relativePath) ||
                 sourceFile.Length != workspaceFile.Length)
             {
                 throw new InvalidDataException($"許可されていない変更があります: {relativePath}");
@@ -239,11 +244,17 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
             var changedBytes = await CountChangedBytesAsync(
                 SafeCombine(sourceRoot, relativePath),
                 SafeCombine(root, relativePath),
-                MaximumRuntimeChangedBytes,
+                MaximumRuntimeChangedBytesPerFile,
                 cancellationToken);
-            if (changedBytes > MaximumRuntimeChangedBytes)
+            if (changedBytes > MaximumRuntimeChangedBytesPerFile)
             {
-                throw new InvalidDataException($"{RuntimeMutableFile}の変更量が起動時管理情報の上限を超えています。");
+                throw new InvalidDataException($"{relativePath}の変更量が起動時管理情報の上限を超えています。");
+            }
+
+            totalRuntimeChangedBytes += changedBytes;
+            if (totalRuntimeChangedBytes > MaximumRuntimeChangedBytesTotal)
+            {
+                throw new InvalidDataException("FileMakerデータファイルの合計変更量が起動時管理情報の上限を超えています。");
             }
 
             allowedRuntimeChanges.Add($"{relativePath}（{changedBytes:N0}バイト差分）");

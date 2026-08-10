@@ -76,6 +76,8 @@ public partial class App : Application
             {
                 await File.WriteAllTextAsync(Path.Combine(source, fileName), $"self-test:{fileName}");
             }
+            await File.WriteAllTextAsync(Path.Combine(source, "abx-cs-hb.ucs"), "self-test:active-runtime");
+            await File.WriteAllTextAsync(Path.Combine(source, "sbx-cs-hb.ucs"), "self-test:standby-runtime");
 
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             var shiftJis = Encoding.GetEncoding(932);
@@ -96,8 +98,12 @@ public partial class App : Application
             var mutableBytes = await File.ReadAllBytesAsync(mutablePath);
             mutableBytes[^1] ^= 0x01;
             await File.WriteAllBytesAsync(mutablePath, mutableBytes);
+            var secondMutablePath = Path.Combine(workspace.WorkspacePath, "abx-cs-hb.ucs");
+            var secondMutableBytes = await File.ReadAllBytesAsync(secondMutablePath);
+            secondMutableBytes[^1] ^= 0x01;
+            await File.WriteAllBytesAsync(secondMutablePath, secondMutableBytes);
             var verifiedUsedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
-            var forbiddenPath = Path.Combine(workspace.WorkspacePath, "BackUp-5.fp5");
+            var forbiddenPath = Path.Combine(workspace.WorkspacePath, "sbx-cs-hb.ucs");
             var forbiddenBytes = await File.ReadAllBytesAsync(forbiddenPath);
             forbiddenBytes[^1] ^= 0x01;
             await File.WriteAllBytesAsync(forbiddenPath, forbiddenBytes);
@@ -130,7 +136,7 @@ public partial class App : Application
                 verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 verifiedWorkspace.WorkspacePath == workspace.WorkspacePath &&
                 verifiedWorkspace.AllowedRuntimeChanges.Count == 0 &&
-                verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 1 &&
+                verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 2 &&
                 rejectedUnallowedChange &&
                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
