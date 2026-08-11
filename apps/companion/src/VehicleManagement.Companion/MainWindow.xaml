@@ -964,7 +964,7 @@
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="126" />
+                                            <ColumnDefinition x:Name="LegacyGraphCustomerUngroupDropColumn" Width="0" />
                                         </Grid.ColumnDefinitions>
                                         <ListBox x:Name="LegacyGraphCustomersList" Height="685"
                                                  Padding="0,0,14,0"
@@ -1014,8 +1014,8 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                         </ListBox>
-                                        <Border x:Name="LegacyGraphCustomerUngroupDropZone" Grid.Column="1" Margin="8,8,0,0" Padding="8"
-                                                MinHeight="96" VerticalAlignment="Top"
+                                        <Border x:Name="LegacyGraphCustomerUngroupDropZone" Grid.Column="1" Margin="8,0,0,0" Padding="8"
+                                                VerticalAlignment="Stretch"
                                                 Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
                                                 CornerRadius="5" AllowDrop="True" Visibility="Collapsed" Opacity="0.62"
                                                 DragOver="LegacyGraphCustomerUngroupDropZone_DragOver"
