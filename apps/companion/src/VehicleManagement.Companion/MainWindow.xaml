@@ -524,11 +524,13 @@
                         </Border>
                         <DataGrid x:Name="ImageLinkMatchesGrid" Height="320" Margin="0,12,0,20"
                                   IsReadOnly="True" AutoGenerateColumns="False" CanUserAddRows="False"
+                                  SelectionChanged="ImageLinkMatchesGrid_SelectionChanged"
                                   HeadersVisibility="Column">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="マニフェスト" Binding="{Binding ManifestFileName}" Width="2*" />
                                 <DataGridTextColumn Header="画像" Binding="{Binding ImageFileName}" Width="2*" />
                                 <DataGridTextColumn Header="判定" Binding="{Binding StatusLabel}" Width="125" />
+                                <DataGridTextColumn Header="確認" Binding="{Binding ApprovalStatus}" Width="95" />
                                 <DataGridTextColumn Header="識別子" Binding="{Binding Identifier}" Width="2*" />
                                 <DataGridTextColumn Header="顧客名" Binding="{Binding CustomerName}" Width="1.5*" />
                                 <DataGridTextColumn Header="候補数" Binding="{Binding CandidateCount}" Width="70" />
@@ -537,6 +539,15 @@
                                 <DataGridTextColumn Header="理由" Binding="{Binding Reason}" Width="4*" />
                             </DataGrid.Columns>
                         </DataGrid>
+                        <Border Padding="14" Background="#FFF7E0" CornerRadius="8">
+                            <TextBlock Foreground="#805B10" TextWrapping="Wrap"
+                                       Text="『要確認』はエラーではありません。画像と候補車両が同一であることを目視確認できた場合だけ、下のボタンで確認済み証跡を作成してください。確認済み証跡は画像・マニフェスト・CSV行のSHA-256を記録しますが、顧客・車両の登録やアップロードは行いません。" />
+                        </Border>
+                        <Button x:Name="ApproveImageLinkButton" Margin="0,12,0,0" HorizontalAlignment="Left"
+                                Content="選択候補を確認済みにする" IsEnabled="False"
+                                Click="ApproveImageLinkButton_Click" />
+                        <TextBlock x:Name="ImageLinkApprovalStatusText" Margin="0,10,0,20" Foreground="#36465A"
+                                   Text="照合結果から一意の候補を選択すると、目視確認済みとして記録できます。" TextWrapping="Wrap" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

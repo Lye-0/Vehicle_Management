@@ -17,7 +17,16 @@ public sealed record AbacusImageLinkMatchRow(
     int CandidateCount,
     string Vehicle,
     string CsvLocation,
-    string Reason);
+    string Reason)
+{
+    /// <summary>
+    /// 照合に使用した候補行です。画面表示用の要約だけで承認しないよう、
+    /// 手動確認段階で再検証するために保持します。
+    /// </summary>
+    public IReadOnlyList<AbacusVehicleExportRow> Candidates { get; init; } = [];
+
+    public string ApprovalStatus { get; init; } = "未確認";
+}
 
 public sealed record AbacusImageLinkMatchReport(
     string ImageFolderPath,
@@ -410,7 +419,10 @@ public sealed class AbacusImageLinkMatcher
             first is null
                 ? string.Empty
                 : string.Join(" / ", candidates.Take(5).Select(candidate => $"{candidate.FileName} {candidate.RowNumber}行")),
-            reason);
+            reason)
+        {
+            Candidates = candidates.ToArray(),
+        };
     }
 
     private static List<AbacusVehicleExportRow> IntersectByReference(

@@ -363,6 +363,22 @@ public partial class App : Application
             var imageLinkMatch = await new AbacusImageLinkMatcher().MatchAsync(
                 destination,
                 matchingExportFolder);
+            var imageLinkApproval = await new AbacusImageLinkApprovalStore().CreateAsync(
+                destination,
+                matchingExportFolder,
+                Path.GetFileName(imageLinkManifest.FilePath));
+            var rejectedDuplicateImageLinkApproval = false;
+            try
+            {
+                await new AbacusImageLinkApprovalStore().CreateAsync(
+                    destination,
+                    matchingExportFolder,
+                    Path.GetFileName(imageLinkManifest.FilePath));
+            }
+            catch (InvalidDataException)
+            {
+                rejectedDuplicateImageLinkApproval = true;
+            }
             var duplicateImageLinkMatch = await new AbacusImageLinkMatcher().MatchAsync(
                 destination,
                 legacyExportFolder);
@@ -397,6 +413,11 @@ public partial class App : Application
                 imageLinkMatch.IsValid &&
                 imageLinkMatch.MatchedCount == 1 &&
                 imageLinkMatch.Rows is [{ Status: "matched" }] &&
+                File.Exists(imageLinkApproval.FilePath) &&
+                imageLinkApproval.Sha256.Length == 64 &&
+                imageLinkApproval.VehicleCsvFileName == "syaryou.csv" &&
+                imageLinkApproval.VehicleCsvRowNumber == 1 &&
+                rejectedDuplicateImageLinkApproval &&
                 !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&
                 cropResult.WasCropped &&

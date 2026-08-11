@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
     private readonly AbacusImageLinkMatcher imageLinkMatcher = new();
+    private readonly AbacusImageLinkApprovalStore imageLinkApprovalStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -51,6 +52,7 @@ public partial class MainWindow : Window
     private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
     private bool imageLinkMatchBusy;
+    private bool imageLinkApprovalBusy;
 
     public MainWindow()
     {
@@ -1071,6 +1073,7 @@ public partial class MainWindow : Window
         {
             var report = await imageLinkMatcher.MatchAsync(imageFolder, vehicleFolder);
             ImageLinkMatchesGrid.ItemsSource = report.Rows;
+            ImageLinkMatchesGrid.SelectedIndex = -1;
             ImageLinkMatchSummaryText.Text =
                 $"マニフェスト: {report.ManifestCount:N0}件 / " +
                 $"一致: {report.MatchedCount:N0}件 / " +
@@ -1093,15 +1096,21 @@ public partial class MainWindow : Window
                 : "照合が完了しました。要確認・競合・未一致・不正は自動登録候補として扱いません。";
             ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
                 report.ConflictCount > 0 || report.InvalidCount > 0 ? "#A61B1B" : hasConcerns ? "#805B10" : "#17643A")!;
+            ImageLinkApprovalStatusText.Text =
+                "照合結果から一意の候補を選択すると、目視確認済みとして記録できます。";
+            ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or JsonException or ArgumentException or
                                            NotSupportedException)
         {
             ImageLinkMatchesGrid.ItemsSource = null;
+            ImageLinkMatchesGrid.SelectedIndex = -1;
             ImageLinkMatchSummaryText.Text = "";
             ImageLinkMatchStatusText.Text = $"画像マニフェストと車両一覧CSVの照合に失敗しました: {exception.Message}";
             ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            ImageLinkApprovalStatusText.Text = "照合に失敗したため、確認済み証跡は作成できません。";
+            ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
         }
         finally
         {
@@ -1117,6 +1126,14 @@ public partial class MainWindow : Window
         MatchImageLinksButton.IsEnabled = !busy &&
             !string.IsNullOrWhiteSpace(ImageLinkManifestFolderTextBox.Text) &&
             !string.IsNullOrWhiteSpace(ImageLinkVehicleExportFolderTextBox.Text);
+        if (busy)
+        {
+            ApproveImageLinkButton.IsEnabled = false;
+        }
+        else
+        {
+            UpdateImageLinkApprovalButtonState();
+        }
     }
 
     private void UpdateImageLinkMatchButtonState()
@@ -1124,6 +1141,100 @@ public partial class MainWindow : Window
         if (!imageLinkMatchBusy)
         {
             SetImageLinkMatchControlsBusy(false);
+        }
+    }
+
+    private void ImageLinkMatchesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateImageLinkApprovalButtonState();
+    }
+
+    private void UpdateImageLinkApprovalButtonState()
+    {
+        if (imageLinkMatchBusy || imageLinkApprovalBusy)
+        {
+            ApproveImageLinkButton.IsEnabled = false;
+            return;
+        }
+
+        var row = ImageLinkMatchesGrid.SelectedItem as AbacusImageLinkMatchRow;
+        ApproveImageLinkButton.IsEnabled =
+            row is not null &&
+            row.Status is "matched" or "review" &&
+            row.CandidateCount == 1 &&
+            row.Candidates.Count == 1 &&
+            !string.Equals(row.ApprovalStatus, "確認済み", StringComparison.Ordinal);
+    }
+
+    private async void ApproveImageLinkButton_Click(object sender, RoutedEventArgs e)
+    {
+        var row = ImageLinkMatchesGrid.SelectedItem as AbacusImageLinkMatchRow;
+        var imageFolder = ImageLinkManifestFolderTextBox.Text.Trim();
+        var vehicleFolder = ImageLinkVehicleExportFolderTextBox.Text.Trim();
+        if (row is null || row.CandidateCount != 1 || row.Candidates.Count != 1 ||
+            row.Status is not ("matched" or "review") ||
+            string.IsNullOrWhiteSpace(imageFolder) || string.IsNullOrWhiteSpace(vehicleFolder))
+        {
+            MessageBox.Show(
+                this,
+                "確認済みにできる一意の候補を選択してください。",
+                "候補を選択してください",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var candidate = row.Candidates[0];
+        var confirmation = MessageBox.Show(
+            this,
+            $"次の画像と車両を同一車両として確認済みにしますか？\n\n" +
+            $"画像: {row.ImageFileName}\n" +
+            $"判定: {row.StatusLabel}\n" +
+            $"識別子: {row.Identifier}\n" +
+            $"顧客: {candidate.CustomerName}\n" +
+            $"車両: {candidate.Maker} {candidate.VehicleName} {candidate.Model}\n" +
+            $"CSV: {candidate.FileName} {candidate.RowNumber}行\n\n" +
+            "この操作は確認済み証跡JSONを作成するだけで、顧客・車両の登録やアップロードは行いません。",
+            "画像と車両の目視確認",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        imageLinkApprovalBusy = true;
+        UpdateImageLinkApprovalButtonState();
+        ImageLinkApprovalStatusText.Text = "承認直前の再照合とSHA-256検証を行い、確認済み証跡を作成しています…";
+        ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await imageLinkApprovalStore.CreateAsync(
+                imageFolder,
+                vehicleFolder,
+                row.ManifestFileName);
+            var updatedRows = ImageLinkMatchesGrid.Items
+                .OfType<AbacusImageLinkMatchRow>()
+                .Select(item => string.Equals(item.ManifestFileName, row.ManifestFileName, StringComparison.Ordinal)
+                    ? item with { ApprovalStatus = "確認済み" }
+                    : item)
+                .ToList();
+            ImageLinkMatchesGrid.ItemsSource = updatedRows;
+            ImageLinkApprovalStatusText.Text =
+                $"確認済み証跡を作成しました: {result.FilePath}\nSHA-256: {result.Sha256}";
+            ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            ImageLinkApprovalStatusText.Text = $"確認済み証跡の作成に失敗しました: {exception.Message}";
+            ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            imageLinkApprovalBusy = false;
+            UpdateImageLinkApprovalButtonState();
         }
     }
 
@@ -1573,9 +1684,12 @@ public partial class MainWindow : Window
         }
 
         ImageLinkMatchesGrid.ItemsSource = null;
+        ImageLinkMatchesGrid.SelectedIndex = -1;
         ImageLinkMatchSummaryText.Text = "";
         ImageLinkMatchStatusText.Text = "画像保存先と車両一覧CSVフォルダーを選択してください。";
         ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        ImageLinkApprovalStatusText.Text = "照合結果から一意の候補を選択すると、目視確認済みとして記録できます。";
+        ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         UpdateImageLinkMatchButtonState();
     }
 
