@@ -266,10 +266,7 @@
             </TabItem>
 
             <TabItem Header="紐付けプレビュー">
-                <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Background="Transparent"
-                              PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="顧客・複数車両・書類の紐付けプレビュー" />
@@ -765,7 +762,10 @@
             </TabItem>
 
             <TabItem Header="移行パッケージ">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Background="Transparent"
+                              PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6A. 永続ローカル移行パッケージの準備" />

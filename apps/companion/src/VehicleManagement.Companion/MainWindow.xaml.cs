@@ -681,6 +681,13 @@ public partial class MainWindow : Window
     private void LegacyGraphPageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         var source = e.OriginalSource as DependencyObject;
+        if (FindVisualAncestor<DataGrid>(source) is not null ||
+            FindVisualAncestor<ListBox>(source) is not null)
+        {
+            // 一覧上のホイールはDataGrid/ListBox自身へ渡します。
+            return;
+        }
+
         var inspector = FindVisualAncestor<ScrollViewer>(source);
         if (ReferenceEquals(inspector, LegacyGraphInspectorScrollViewer))
         {
