@@ -98,6 +98,7 @@ public sealed class AbacusFp5CandidateExporter
                 sha256 = Convert.ToHexString(hash.GetHashAndReset());
             }
 
+            ValidateStandaloneJpeg(temporaryPath);
             var dimensions = ValidateDecodedJpeg(temporaryPath);
             if ((long)dimensions.Width * dimensions.Height > MaximumPixels)
             {
@@ -121,6 +122,185 @@ public sealed class AbacusFp5CandidateExporter
 
             throw;
         }
+    }
+
+    private static void ValidateStandaloneJpeg(string path)
+    {
+        try
+        {
+            ValidateStandaloneJpegCore(path);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new InvalidDataException(
+                "JPEG候補を標準JPEGとして検証できません。FileMaker内部の分割ブロックの可能性があるため保存しません。",
+                exception);
+        }
+    }
+
+    private static void ValidateStandaloneJpegCore(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length < 4 || ReadByte(stream) != 0xFF || ReadByte(stream) != 0xD8)
+        {
+            throw new InvalidDataException("JPEG候補のSOIマーカーを確認できません。");
+        }
+
+        var sawStartOfFrame = false;
+        var sawStartOfScan = false;
+        int? pendingMarker = null;
+        while (true)
+        {
+            var marker = pendingMarker ?? ReadMarker(stream);
+            pendingMarker = null;
+
+            if (marker == 0xD9)
+            {
+                if (!sawStartOfFrame || !sawStartOfScan)
+                {
+                    throw new InvalidDataException("JPEG候補に必要なフレームまたはスキャンがありません。");
+                }
+
+                if (stream.Position != stream.Length)
+                {
+                    throw new InvalidDataException("JPEG終了マーカーの後ろに余分なデータがあります。");
+                }
+
+                return;
+            }
+
+            if (marker == 0xD8 || marker is >= 0xD0 and <= 0xD7 || marker == 0x01)
+            {
+                throw new InvalidDataException("JPEG候補内に独立したSOIまたは不正なマーカーがあります。FileMaker内部ブロックの可能性があります。");
+            }
+
+            var segmentLength = ReadSegmentLength(stream);
+            if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or
+                >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF)
+            {
+                if (sawStartOfFrame)
+                {
+                    throw new InvalidDataException("JPEG候補内に複数の画像フレームがあります。FileMaker内部の分割ブロックと判定したため保存しません。");
+                }
+
+                if (segmentLength < 8)
+                {
+                    throw new InvalidDataException("JPEGフレーム情報の長さが不正です。");
+                }
+
+                sawStartOfFrame = true;
+            }
+
+            SkipSegment(stream, segmentLength - 2);
+            if (marker != 0xDA)
+            {
+                continue;
+            }
+
+            if (!sawStartOfFrame)
+            {
+                throw new InvalidDataException("JPEGフレームより前にスキャンが現れました。");
+            }
+
+            sawStartOfScan = true;
+            var markerAfterScan = ReadEntropyMarker(stream);
+            if (markerAfterScan == 0xD9)
+            {
+                if (stream.Position != stream.Length)
+                {
+                    throw new InvalidDataException("JPEG終了マーカーの後ろに余分なデータがあります。");
+                }
+
+                return;
+            }
+
+            pendingMarker = markerAfterScan;
+        }
+    }
+
+    private static int ReadMarker(FileStream stream)
+    {
+        if (ReadByte(stream) != 0xFF)
+        {
+            throw new InvalidDataException("JPEG候補のマーカー位置に予期しないデータがあります。");
+        }
+
+        var marker = ReadByte(stream);
+        while (marker == 0xFF)
+        {
+            marker = ReadByte(stream);
+        }
+
+        if (marker <= 0 || marker == 0x00)
+        {
+            throw new InvalidDataException("JPEG候補のマーカーが不正です。");
+        }
+
+        return marker;
+    }
+
+    private static int ReadEntropyMarker(FileStream stream)
+    {
+        while (true)
+        {
+            var value = ReadByte(stream);
+            if (value != 0xFF)
+            {
+                continue;
+            }
+
+            var marker = ReadByte(stream);
+            while (marker == 0xFF)
+            {
+                marker = ReadByte(stream);
+            }
+
+            if (marker == 0x00 || marker is >= 0xD0 and <= 0xD7)
+            {
+                continue;
+            }
+
+            return marker;
+        }
+    }
+
+    private static int ReadSegmentLength(FileStream stream)
+    {
+        var high = ReadByte(stream);
+        var low = ReadByte(stream);
+        var length = high << 8 | low;
+        if (length < 2)
+        {
+            throw new InvalidDataException("JPEGセグメント長が不正です。");
+        }
+
+        if (length - 2 > stream.Length - stream.Position)
+        {
+            throw new InvalidDataException("JPEGセグメントがファイル範囲を超えています。");
+        }
+
+        return length;
+    }
+
+    private static void SkipSegment(FileStream stream, int bytes)
+    {
+        if (bytes < 0 || bytes > stream.Length - stream.Position)
+        {
+            throw new InvalidDataException("JPEGセグメントの範囲が不正です。");
+        }
+
+        stream.Position += bytes;
+    }
+
+    private static int ReadByte(FileStream stream)
+    {
+        var value = stream.ReadByte();
+        if (value < 0)
+        {
+            throw new InvalidDataException("JPEG候補が途中で終了しました。");
+        }
+
+        return value;
     }
 
     private static async Task CopySegmentAsync(

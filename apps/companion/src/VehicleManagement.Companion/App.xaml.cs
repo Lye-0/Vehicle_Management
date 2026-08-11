@@ -271,6 +271,34 @@ public partial class App : Application
             {
                 rejectedInternalFp5Export = true;
             }
+            var malformedFp5Source = Path.Combine(testRoot, "malformed-fp5-source");
+            var malformedFp5Destination = Path.Combine(testRoot, "malformed-fp5-destination");
+            Directory.CreateDirectory(malformedFp5Source);
+            Directory.CreateDirectory(malformedFp5Destination);
+            var malformedJpeg = new byte[fakeJpeg.Length + 6];
+            Buffer.BlockCopy(fakeJpeg, 0, malformedJpeg, 0, fakeJpeg.Length - 2);
+            malformedJpeg[^6] = 0xFF;
+            malformedJpeg[^5] = 0xC0;
+            malformedJpeg[^4] = 0x00;
+            malformedJpeg[^3] = 0x00;
+            malformedJpeg[^2] = 0xFF;
+            malformedJpeg[^1] = 0xD9;
+            await File.WriteAllBytesAsync(
+                Path.Combine(malformedFp5Source, "BackUp-5.fp5"),
+                [.. fakeFp5Header, .. malformedJpeg]);
+            var malformedFp5Inspection = await new AbacusFp5Inspector().InspectAsync(malformedFp5Source);
+            var rejectedMalformedFp5Export = false;
+            try
+            {
+                await new AbacusFp5CandidateExporter().ExportAsync(
+                    malformedFp5Source,
+                    malformedFp5Inspection.Candidates[0],
+                    malformedFp5Destination);
+            }
+            catch (InvalidDataException)
+            {
+                rejectedMalformedFp5Export = true;
+            }
             var packageParent = Path.Combine(testRoot, "migration-packages");
             Directory.CreateDirectory(packageParent);
             var migrationPreview = await new AbacusMigrationPreviewStore(
@@ -347,6 +375,7 @@ public partial class App : Application
                 fp5Export.PixelHeight == 2 &&
                 fp5Export.Sha256.Length == 64 &&
                 rejectedInternalFp5Export &&
+                rejectedMalformedFp5Export &&
                 Directory.GetFiles(migrationPreview.PackagePath).Length == 1 &&
                 migrationPreview.ManifestSha256.Length == 64 &&
                 migrationPreview.CustomerCandidates == linkage.CustomerCandidates &&

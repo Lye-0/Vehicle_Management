@@ -577,7 +577,7 @@
                         <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6D. BackUp-5.fp5の格納画像候補を診断" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="ActiveXを利用できないRuntimeでも、保存用原本のBackUp-5.fp5を読み取り専用で調査します。FileMaker Pro 5.0のヘッダーとJPEG開始・終了マーカーだけを確認し、候補の位置・サイズ・画像寸法を集計します。顧客情報の表示、画像の保存、ABACUSの起動・編集・保存は行いません。診断中はABACUSを終了してください。" />
+                                   Text="ActiveXを利用できないRuntimeでも、保存用原本のBackUp-5.fp5を読み取り専用で調査します。FileMaker Pro 5.0のヘッダーとJPEG開始・終了マーカーを候補として集計しますが、候補が元画像とは限りません。顧客情報の表示、画像の保存、ABACUSの起動・編集・保存は行いません。診断中はABACUSを終了してください。" />
                         <Button x:Name="InspectFp5Button" HorizontalAlignment="Left"
                                 Content="BackUp-5.fp5を診断" Click="InspectFp5Button_Click" />
                         <TextBlock x:Name="Fp5InspectionStatusText" Margin="0,10,0,0" Foreground="#52647A"
@@ -597,7 +597,7 @@
                                 Content="選択したJPEG候補を1件検証出力" IsEnabled="False"
                                 Click="ExtractFp5CandidateButton_Click" />
                         <TextBlock x:Name="Fp5CandidateExportStatusText" Margin="0,10,0,0" Foreground="#52647A"
-                                   Text="候補を選択すると1件検証出力できます。" TextWrapping="Wrap" />
+                                   Text="候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。" TextWrapping="Wrap" />
                         <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
                                        TextWrapping="Wrap" LineHeight="24" />

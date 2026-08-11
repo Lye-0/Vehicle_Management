@@ -116,7 +116,7 @@ public partial class MainWindow : Window
             Fp5CandidatesGrid.ItemsSource = null;
             fp5Inspection = null;
             ExtractFp5CandidateButton.IsEnabled = false;
-            Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
+            Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
         }
     }
 
@@ -137,7 +137,7 @@ public partial class MainWindow : Window
             Fp5CandidatesGrid.ItemsSource = null;
             fp5Inspection = null;
             ExtractFp5CandidateButton.IsEnabled = false;
-            Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
+            Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
         }
     }
 
@@ -156,7 +156,7 @@ public partial class MainWindow : Window
         Fp5CandidatesGrid.ItemsSource = null;
         fp5Inspection = null;
         ExtractFp5CandidateButton.IsEnabled = false;
-        Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
+        Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
         try
         {
             var result = await fp5Inspector.InspectAsync(MigrationSourcePathTextBox.Text.Trim());
@@ -164,10 +164,10 @@ public partial class MainWindow : Window
             Fp5CandidatesGrid.ItemsSource = result.Candidates;
             ExtractFp5CandidateButton.IsEnabled = result.IsValid && result.Candidates.Count > 0;
             Fp5InspectionStatusText.Text = result.IsValid
-                ? "FileMaker Pro 5.0のヘッダーとJPEG候補を確認しました。ファイルの書き込みは行っていません。"
+                ? "FileMaker Pro 5.0のヘッダーとJPEGマーカー候補を確認しました（画像としては未確定）。ファイルの書き込みは行っていません。"
                 : $"fp5診断を完了しました。エラー{result.Errors.Count:N0}件、警告{result.Warnings.Count:N0}件。";
             Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
-                result.IsValid ? "#17643A" : result.Errors.Count > 0 ? "#A61B1B" : "#805B10")!;
+                result.IsValid ? "#805B10" : result.Errors.Count > 0 ? "#A61B1B" : "#805B10")!;
 
             var details = new List<string>
             {
@@ -175,6 +175,7 @@ public partial class MainWindow : Window
                 $"ファイルサイズ: {result.FileSize:N0} bytes",
                 $"JPEG候補: {result.JpegCandidateCount:N0}件 / 合計{result.JpegCandidateBytes:N0} bytes",
                 $"候補一覧表示: {result.Candidates.Count:N0}件（最大100件）",
+                "注意: これは開始・終了マーカーの候補一覧です。標準JPEG構造として確認できない候補は保存しません。",
             };
             if (result.OversizeCandidateCount > 0)
             {
