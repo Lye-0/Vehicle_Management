@@ -573,6 +573,29 @@
                             <TextBlock Foreground="#1E40AF" TextWrapping="Wrap"
                                        Text="この診断結果から、標準メニューのコマンドを安全に呼び出せるか、別の画面認識方式が必要かを次の段階で決定します。" />
                         </Border>
+
+                        <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="6D. BackUp-5.fp5の格納画像候補を診断" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="ActiveXを利用できないRuntimeでも、保存用原本のBackUp-5.fp5を読み取り専用で調査します。FileMaker Pro 5.0のヘッダーとJPEG開始・終了マーカーだけを確認し、候補の位置・サイズ・画像寸法を集計します。顧客情報の表示、画像の保存、ABACUSの起動・編集・保存は行いません。診断中はABACUSを終了してください。" />
+                        <Button x:Name="InspectFp5Button" HorizontalAlignment="Left"
+                                Content="BackUp-5.fp5を診断" Click="InspectFp5Button_Click" />
+                        <TextBlock x:Name="Fp5InspectionStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                   Text="未診断" TextWrapping="Wrap" />
+                        <DataGrid x:Name="Fp5CandidatesGrid" Height="220" Margin="0,14,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
+                                <DataGridTextColumn Header="位置" Binding="{Binding Offset}" Width="120" />
+                                <DataGridTextColumn Header="サイズ" Binding="{Binding Length}" Width="120" />
+                                <DataGridTextColumn Header="幅" Binding="{Binding PixelWidth}" Width="75" />
+                                <DataGridTextColumn Header="高さ" Binding="{Binding PixelHeight}" Width="75" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
+                            <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
+                                       TextWrapping="Wrap" LineHeight="24" />
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

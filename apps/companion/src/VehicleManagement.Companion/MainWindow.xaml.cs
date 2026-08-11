@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportInspector legacyExportInspector = new();
+    private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -107,6 +108,9 @@ public partial class MainWindow : Window
             AnalysisPathTextBox.Text = dialog.FolderName;
             LinkagePathTextBox.Text = dialog.FolderName;
             MigrationSourcePathTextBox.Text = dialog.FolderName;
+            Fp5InspectionStatusText.Text = "未診断";
+            Fp5InspectionResultText.Text = "";
+            Fp5CandidatesGrid.ItemsSource = null;
         }
     }
 
@@ -122,6 +126,68 @@ public partial class MainWindow : Window
             MigrationSourcePathTextBox.Text = dialog.FolderName;
             MigrationPreviewStatusText.Text = "未作成";
             MigrationPreviewResultText.Text = "";
+            Fp5InspectionStatusText.Text = "未診断";
+            Fp5InspectionResultText.Text = "";
+            Fp5CandidatesGrid.ItemsSource = null;
+        }
+    }
+
+    private async void InspectFp5Button_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(MigrationSourcePathTextBox.Text))
+        {
+            MessageBox.Show(this, "ABACUSフォルダーを指定してください。", "フォルダー未選択");
+            return;
+        }
+
+        InspectFp5Button.IsEnabled = false;
+        Fp5InspectionStatusText.Text = "BackUp-5.fp5を読み取り専用で診断しています…";
+        Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        Fp5InspectionResultText.Text = "";
+        Fp5CandidatesGrid.ItemsSource = null;
+        try
+        {
+            var result = await fp5Inspector.InspectAsync(MigrationSourcePathTextBox.Text.Trim());
+            Fp5CandidatesGrid.ItemsSource = result.Candidates;
+            Fp5InspectionStatusText.Text = result.IsValid
+                ? "FileMaker Pro 5.0のヘッダーとJPEG候補を確認しました。ファイルの書き込みは行っていません。"
+                : $"fp5診断を完了しました。エラー{result.Errors.Count:N0}件、警告{result.Warnings.Count:N0}件。";
+            Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+                result.IsValid ? "#17643A" : result.Errors.Count > 0 ? "#A61B1B" : "#805B10")!;
+
+            var details = new List<string>
+            {
+                $"形式: {result.FormatLabel}",
+                $"ファイルサイズ: {result.FileSize:N0} bytes",
+                $"JPEG候補: {result.JpegCandidateCount:N0}件 / 合計{result.JpegCandidateBytes:N0} bytes",
+                $"候補一覧表示: {result.Candidates.Count:N0}件（最大100件）",
+            };
+            if (result.OversizeCandidateCount > 0)
+            {
+                details.Add($"上限超過候補: {result.OversizeCandidateCount:N0}件");
+            }
+
+            if (result.Errors.Count > 0)
+            {
+                details.Add($"エラー: {string.Join(" / ", result.Errors)}");
+            }
+
+            if (result.Warnings.Count > 0)
+            {
+                details.Add($"警告: {string.Join(" / ", result.Warnings)}");
+            }
+
+            Fp5InspectionResultText.Text = string.Join("\n", details);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            Fp5InspectionStatusText.Text = $"fp5診断に失敗しました: {exception.Message}";
+            Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            InspectFp5Button.IsEnabled = true;
         }
     }
 

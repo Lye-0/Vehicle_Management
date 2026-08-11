@@ -111,6 +111,19 @@ public partial class App : Application
             {
                 await File.WriteAllTextAsync(Path.Combine(source, fileName), $"self-test:{fileName}");
             }
+            var fakeFp5Header = new byte[1024];
+            var fakeFp5HeaderText = Encoding.ASCII.GetBytes("Copyright 1984-1999 FileMaker, Inc. Pro 5.0");
+            fakeFp5HeaderText.CopyTo(fakeFp5Header, 480);
+            var fakeJpeg = new byte[]
+            {
+                0xFF, 0xD8,
+                0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46,
+                0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x02, 0x00, 0x03, 0x01, 0x01, 0x11, 0x00,
+                0xFF, 0xD9,
+            };
+            await File.WriteAllBytesAsync(
+                Path.Combine(source, "BackUp-5.fp5"),
+                [.. fakeFp5Header, .. fakeJpeg]);
             await File.WriteAllTextAsync(Path.Combine(source, "abx-cs-hb.ucs"), "self-test:active-runtime");
             await File.WriteAllTextAsync(Path.Combine(source, "sbx-cs-hb.ucs"), "self-test:standby-runtime");
 
@@ -228,6 +241,7 @@ public partial class App : Application
             var parser = new AbacusTabParser();
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
             var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
+            var fp5Inspection = await new AbacusFp5Inspector().InspectAsync(source);
             var packageParent = Path.Combine(testRoot, "migration-packages");
             Directory.CreateDirectory(packageParent);
             var migrationPreview = await new AbacusMigrationPreviewStore(
@@ -293,6 +307,11 @@ public partial class App : Application
                 linkage.CustomersWithMultipleVehicles == 1 &&
                 linkage.SameNameConflictGroups == 1 &&
                 linkage.VehicleIdentifierConflictGroups == 1 &&
+                fp5Inspection.IsValid &&
+                fp5Inspection.JpegCandidateCount == 1 &&
+                fp5Inspection.Candidates.Count == 1 &&
+                fp5Inspection.Candidates[0].PixelWidth == 3 &&
+                fp5Inspection.Candidates[0].PixelHeight == 2 &&
                 Directory.GetFiles(migrationPreview.PackagePath).Length == 1 &&
                 migrationPreview.ManifestSha256.Length == 64 &&
                 migrationPreview.CustomerCandidates == linkage.CustomerCandidates &&
