@@ -262,6 +262,32 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void InspectAbacusNativeWindowsButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectAbacusNativeWindowsButton.IsEnabled = false;
+        AbacusNativeWindowsGrid.ItemsSource = null;
+        AbacusNativeWindowsStatusText.Text = "ABACUSのネイティブ子ウィンドウを読み取り診断しています…";
+        AbacusNativeWindowsStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await session.InspectAbacusNativeWindowsAsync();
+            abacusMayBeRunning = result.IsRunning;
+            AbacusNativeWindowsGrid.ItemsSource = result.NativeWindows ?? [];
+            AbacusNativeWindowsStatusText.Text = result.Message;
+            AbacusNativeWindowsStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+                result.Status == "native-windows-ready" ? "#17643A" : "#805B10")!;
+        }
+        catch (Exception exception)
+        {
+            AbacusNativeWindowsStatusText.Text = $"内部ウィンドウ診断に失敗しました: {exception.Message}";
+            AbacusNativeWindowsStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            SetAbacusButtonsBusy(false);
+        }
+    }
+
     private void SelectAnalysisFolderButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
@@ -1077,6 +1103,7 @@ public partial class MainWindow : Window
         ImageLaunchAbacusButton.IsEnabled = !busy && canLaunch;
         InspectImageUiButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusMenuButton.IsEnabled = !busy && abacusMayBeRunning;
+        InspectAbacusNativeWindowsButton.IsEnabled = !busy && abacusMayBeRunning;
     }
 
     private void ResetInspection(bool clearPath = true)

@@ -533,6 +533,9 @@
                         <Button x:Name="InspectAbacusMenuButton" HorizontalAlignment="Left"
                                 Content="ABACUSメニューを診断" IsEnabled="False"
                                 Click="InspectAbacusMenuButton_Click" />
+                        <Button x:Name="InspectAbacusNativeWindowsButton" Margin="10,0,0,0" HorizontalAlignment="Left"
+                                Content="内部ウィンドウを診断" IsEnabled="False"
+                                Click="InspectAbacusNativeWindowsButton_Click" />
                         <TextBlock x:Name="AbacusMenuStatusText" Margin="0,10,0,0" Foreground="#52647A"
                                    Text="コピー側ABACUSを起動してから診断してください。" TextWrapping="Wrap" />
                         <DataGrid x:Name="AbacusMenuItemsGrid" Height="260" Margin="0,14,0,0" IsReadOnly="True"
@@ -544,6 +547,21 @@
                                 <DataGridTextColumn Header="Command ID" Binding="{Binding CommandId}" Width="110" />
                                 <DataGridCheckBoxColumn Header="有効" Binding="{Binding IsEnabled, Mode=OneWay}" Width="65" />
                                 <DataGridCheckBoxColumn Header="サブメニュー" Binding="{Binding HasSubmenu, Mode=OneWay}" Width="100" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock x:Name="AbacusNativeWindowsStatusText" Margin="0,14,0,0" Foreground="#52647A"
+                                   Text="内部ウィンドウ診断は未実行です。" TextWrapping="Wrap" />
+                        <DataGrid x:Name="AbacusNativeWindowsGrid" Height="260" Margin="0,10,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
+                                <DataGridTextColumn Header="階層" Binding="{Binding Depth}" Width="55" />
+                                <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="2*" />
+                                <DataGridTextColumn Header="表示名" Binding="{Binding Title}" Width="2*" />
+                                <DataGridTextColumn Header="Control ID" Binding="{Binding ControlId}" Width="90" />
+                                <DataGridCheckBoxColumn Header="表示" Binding="{Binding IsVisible, Mode=OneWay}" Width="60" />
+                                <DataGridCheckBoxColumn Header="有効" Binding="{Binding IsEnabled, Mode=OneWay}" Width="60" />
+                                <DataGridTextColumn Header="Style" Binding="{Binding Style}" Width="110" />
                             </DataGrid.Columns>
                         </DataGrid>
                         <Border Margin="0,14,0,0" Padding="14" Background="#EAF2FF" CornerRadius="8">

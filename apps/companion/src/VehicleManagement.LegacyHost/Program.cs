@@ -92,6 +92,7 @@ internal static partial class Program
                         "inspect-abacus" => await InspectAbacusAsync(request.RequestId),
                         "inspect-abacus-ui" => await InspectAbacusUiAsync(request.RequestId),
                         "inspect-abacus-menu" => InspectAbacusMenu(request.RequestId),
+                        "inspect-abacus-native-windows" => InspectAbacusNativeWindows(request.RequestId),
                         "close-abacus" => await CloseAbacusAsync(request.RequestId),
                         "shutdown" => new LegacyHostMessage("stopping", request.RequestId, Status: "stopping"),
                         _ => new LegacyHostMessage(
@@ -363,6 +364,98 @@ internal static partial class Program
         return NormalizeAutomationText(value.Replace("&", string.Empty, StringComparison.Ordinal), 80);
     }
 
+    private static LegacyHostMessage InspectAbacusNativeWindows(string requestId)
+    {
+        if (abacusProcess is null || abacusProcess.HasExited)
+        {
+            return new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-not-running",
+                Message: "コピー側ABACUSを起動してから診断してください。",
+                Architecture: HostArchitecture);
+        }
+
+        abacusProcess.Refresh();
+        var rootHandle = abacusProcess.MainWindowHandle;
+        if (rootHandle == IntPtr.Zero ||
+            GetWindowThreadProcessId(rootHandle, out var ownerProcessId) == 0 ||
+            ownerProcessId != (uint)abacusProcess.Id)
+        {
+            return new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-window-unavailable",
+                Message: "コピー側ABACUSのメインウィンドウを安全に確認できませんでした。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture);
+        }
+
+        var windows = new List<LegacyNativeWindowInfo>();
+        EnumChildWindows(rootHandle, (windowHandle, _) =>
+        {
+            if (windows.Count >= 100 ||
+                GetWindowThreadProcessId(windowHandle, out var childProcessId) == 0 ||
+                childProcessId != (uint)abacusProcess.Id)
+            {
+                return windows.Count < 100;
+            }
+
+            windows.Add(new LegacyNativeWindowInfo(
+                windows.Count + 1,
+                GetNativeWindowDepth(windowHandle, rootHandle),
+                windowHandle.ToInt64(),
+                ReadClassName(windowHandle),
+                ReadWindowTitle(windowHandle),
+                GetDlgCtrlID(windowHandle),
+                IsWindowVisible(windowHandle),
+                IsWindowEnabled(windowHandle),
+                GetWindowLongPtr(windowHandle, -16)));
+            return windows.Count < 100;
+        }, IntPtr.Zero);
+
+        return new LegacyHostMessage(
+            "abacus-native-windows-inspected",
+            requestId,
+            Status: windows.Count == 0 ? "native-windows-empty" : "native-windows-ready",
+            Message: windows.Count == 0
+                ? "ネイティブ子ウィンドウは取得できませんでした。操作・エクスポートは行っていません。"
+                : $"ネイティブ子ウィンドウを{windows.Count:N0}件取得しました。操作・エクスポートは行っていません。",
+            ProcessId: abacusProcess.Id,
+            Architecture: HostArchitecture,
+            TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+            WindowHandle: rootHandle.ToInt64(),
+            WindowTitle: NormalizeAutomationText(abacusProcess.MainWindowTitle, 80),
+            NativeWindows: windows);
+    }
+
+    private static int GetNativeWindowDepth(IntPtr windowHandle, IntPtr rootHandle)
+    {
+        var depth = 1;
+        var parent = GetParent(windowHandle);
+        while (parent != IntPtr.Zero && parent != rootHandle && depth < 8)
+        {
+            depth++;
+            parent = GetParent(parent);
+        }
+
+        return depth;
+    }
+
+    private static string ReadClassName(IntPtr windowHandle)
+    {
+        var buffer = new StringBuilder(81);
+        _ = GetClassName(windowHandle, buffer, buffer.Capacity);
+        return NormalizeAutomationText(buffer.ToString(), 80);
+    }
+
+    private static string ReadWindowTitle(IntPtr windowHandle)
+    {
+        var buffer = new StringBuilder(81);
+        _ = GetWindowText(windowHandle, buffer, buffer.Capacity);
+        return NormalizeAutomationText(buffer.ToString(), 80);
+    }
+
     private static int GetAutomationDepth(AutomationElement element, AutomationElement root)
     {
         var depth = 0;
@@ -596,6 +689,41 @@ internal static partial class Program
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
+
+    private delegate bool EnumWindowsCallback(IntPtr windowHandle, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(
+        IntPtr parentWindowHandle,
+        EnumWindowsCallback callback,
+        IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(
+        IntPtr windowHandle,
+        StringBuilder className,
+        int maximumCharacters);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")]
+    private static extern int GetWindowText(
+        IntPtr windowHandle,
+        StringBuilder title,
+        int maximumCharacters);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern int GetDlgCtrlID(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr windowHandle);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr windowHandle, int index);
 
     [GeneratedRegex("^[A-Za-z0-9.-]{1,120}$", RegexOptions.CultureInvariant)]
     private static partial Regex ValidPipeName();

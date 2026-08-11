@@ -63,7 +63,8 @@ public sealed record LegacyHostMessage(
     string? WindowTitle = null,
     int? AutomationElementCount = null,
     IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null,
-    IReadOnlyList<LegacyMenuItemInfo>? MenuItems = null);
+    IReadOnlyList<LegacyMenuItemInfo>? MenuItems = null,
+    IReadOnlyList<LegacyNativeWindowInfo>? NativeWindows = null);
 
 public sealed record LegacyAutomationElementInfo(
     int Index,
@@ -89,3 +90,14 @@ public sealed record LegacyMenuItemInfo(
     bool IsEnabled,
     bool IsSeparator,
     bool HasSubmenu);
+
+public sealed record LegacyNativeWindowInfo(
+    int Index,
+    int Depth,
+    long NativeWindowHandle,
+    string ClassName,
+    string Title,
+    int ControlId,
+    bool IsVisible,
+    bool IsEnabled,
+    long Style);

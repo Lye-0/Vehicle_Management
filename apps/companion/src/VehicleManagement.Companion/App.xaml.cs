@@ -41,6 +41,13 @@ public partial class App : Application
             {
                 return 6;
             }
+            var nativeWindowsWithoutAbacus = await session.InspectAbacusNativeWindowsAsync();
+            if (nativeWindowsWithoutAbacus.Status != "abacus-not-running" ||
+                nativeWindowsWithoutAbacus.IsRunning ||
+                nativeWindowsWithoutAbacus.NativeWindows is { Count: > 0 })
+            {
+                return 7;
+            }
             await session.StopAsync();
             if (session.Snapshot.State != LegacyHostState.Stopped)
             {

@@ -205,6 +205,26 @@ public sealed class LegacyHostSession : IAsyncDisposable
         }
     }
 
+    public async Task<AbacusRuntimeSnapshot> InspectAbacusNativeWindowsAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnected();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            var response = await SendAsync(
+                new LegacyHostMessage("inspect-abacus-native-windows", Guid.NewGuid().ToString("N")),
+                timeout.Token);
+            return ToAbacusSnapshot(response);
+        }
+        finally
+        {
+            operationLock.Release();
+        }
+    }
+
     public async Task<AbacusRuntimeSnapshot> CloseAbacusAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -329,7 +349,8 @@ public sealed class LegacyHostSession : IAsyncDisposable
         response.WindowTitle,
         response.AutomationElementCount,
         response.AutomationElements,
-        response.MenuItems);
+        response.MenuItems,
+        response.NativeWindows);
 
     private void EnsureConnected()
     {
