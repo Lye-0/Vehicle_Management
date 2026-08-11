@@ -1001,8 +1001,11 @@
                                         <TextBlock Margin="0,14,0,4" FontWeight="SemiBold" Foreground="#10233F" Text="判定の根拠" />
                                         <TextBlock x:Name="LegacyGraphInspectorEvidenceText" Foreground="#52647A"
                                                    TextWrapping="Wrap" LineHeight="20" />
+                                        <TextBlock x:Name="LegacyGraphCustomerMergeStatusText" Margin="0,14,0,0"
+                                                   Foreground="#805B10" FontSize="12" TextWrapping="Wrap" />
                                         <Button x:Name="LegacyGraphMergeButton" Margin="0,16,0,0"
-                                                Content="類似顧客を比較して統合（次段階）" IsEnabled="False" />
+                                                Content="同名顧客を比較・統合プレビュー" IsEnabled="False"
+                                                Click="LegacyGraphMergeButton_Click" />
                                         <Button x:Name="LegacyGraphReassignButton" Content="仮紐付けを解除"
                                                 IsEnabled="False" Click="LegacyGraphClearManualLinkButton_Click" />
                                     </StackPanel>

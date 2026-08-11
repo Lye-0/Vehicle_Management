@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
     private List<WebImportMappingRow> webImportMappingRows = [];
     private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
     private readonly Dictionary<string, string> legacyGraphManualDocumentLinks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LegacyGraphCustomerMergeDraft> legacyGraphCustomerMergeDrafts = new(StringComparer.Ordinal);
     private object? legacyGraphSelectedItem;
     private UIElement? legacyGraphDraggingElement;
     private Point legacyGraphDragOffset;
@@ -596,6 +598,7 @@ public partial class MainWindow : Window
                 var graph = await legacyExportCandidateGraphService.BuildAsync(result);
                 legacyExportCandidateGraphResult = graph;
                 legacyGraphManualDocumentLinks.Clear();
+                legacyGraphCustomerMergeDrafts.Clear();
                 legacyGraphSelectedItem = null;
                 LegacyGraphCustomersList.ItemsSource = graph.Customers;
                 LegacyGraphUnresolvedVehicleList.ItemsSource = graph.UnresolvedVehicleRows;
@@ -1074,11 +1077,19 @@ public partial class MainWindow : Window
     {
         legacyGraphSelectedItem = selected;
         LegacyGraphMergeButton.IsEnabled = false;
+        LegacyGraphMergeButton.Content = "同名顧客を比較・統合プレビュー";
+        LegacyGraphCustomerMergeStatusText.Text = "";
         LegacyGraphReassignButton.IsEnabled = selected is AbacusLegacyExportCandidateGraphDocument documentForButton &&
             FindManualLinkedVehicle(documentForButton) is not null;
         switch (selected)
         {
             case AbacusLegacyExportCandidateGraphCustomer customer:
+                var mergeCandidates = GetLegacyGraphCustomerMergeCandidates(customer);
+                var mergeKey = GetLegacyCustomerMergeKey(customer);
+                LegacyGraphMergeButton.IsEnabled = mergeCandidates.Count > 1;
+                LegacyGraphMergeButton.Content = mergeCandidates.Count > 1
+                    ? $"同名顧客を比較・統合プレビュー（{mergeCandidates.Count}件）"
+                    : "同名顧客を比較・統合プレビュー";
                 LegacyGraphInspectorTitleText.Text = $"顧客: {customer.DisplayName}";
                 LegacyGraphInspectorStatusText.Text =
                     $"顧客ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件";
@@ -1091,9 +1102,15 @@ public partial class MainWindow : Window
                     $"住所: {Fallback(customer.Address)}\n" +
                     $"メモ: {Fallback(customer.Memo)}";
                 LegacyGraphInspectorEvidenceText.Text =
-                    "顧客CSVの1行を表示しています。顧客名だけが一致する候補は自動統合せず、次段階で比較して項目ごとに採用値を選択します。";
+                    "顧客CSVの1行を表示しています。顧客名だけが一致する候補は自動統合せず、比較画面で項目ごとに採用値を選択します。統合プレビューは画面上だけに保存されます。";
+                LegacyGraphCustomerMergeStatusText.Text = mergeCandidates.Count > 1
+                    ? legacyGraphCustomerMergeDrafts.ContainsKey(mergeKey)
+                        ? $"同名候補 {mergeCandidates.Count}件。統合プレビューを保存済みです（実データは未変更）。"
+                        : $"同名候補 {mergeCandidates.Count}件。顧客IDが異なるため自動統合していません。比較ボタンから項目ごとの採用値を選択できます。"
+                    : "同名の統合候補はありません。顧客IDが異なる顧客を名前だけで統合しません。";
                 break;
             case AbacusLegacyExportCandidateGraphVehicle vehicle:
+                LegacyGraphCustomerMergeStatusText.Text = "顧客ブロックを選択すると、同名顧客の比較候補を表示します。";
                 LegacyGraphInspectorTitleText.Text = $"車両: {Fallback(vehicle.Maker)} {vehicle.DisplayName}";
                 LegacyGraphInspectorStatusText.Text =
                     $"車両ID: {vehicle.VehicleId}\n書類 {vehicle.Documents.Count:N0}件";
@@ -1109,6 +1126,7 @@ public partial class MainWindow : Window
                     "車両CSVの顧客IDで顧客へ結び付けています。登録番号・車台番号は書類の候補判定にも使用します。";
                 break;
             case AbacusLegacyExportCandidateGraphDocument document:
+                LegacyGraphCustomerMergeStatusText.Text = "顧客ブロックを選択すると、同名顧客の比較候補を表示します。";
                 LegacyGraphInspectorTitleText.Text = $"{document.Kind}: {Fallback(document.DocumentNumber)}";
                 var manualVehicle = FindManualLinkedVehicle(document);
                 LegacyGraphReassignButton.IsEnabled = manualVehicle is not null;
@@ -1130,6 +1148,7 @@ public partial class MainWindow : Window
                     manualEvidence;
                 break;
             case AbacusLegacyExportPreviewRow vehicleRow:
+                LegacyGraphCustomerMergeStatusText.Text = "顧客ブロックを選択すると、同名顧客の比較候補を表示します。";
                 LegacyGraphInspectorTitleText.Text = $"未確定車両: {Fallback(vehicleRow.VehicleName)}";
                 LegacyGraphInspectorStatusText.Text = $"判定: {vehicleRow.MatchStatus}";
                 LegacyGraphInspectorDetailsText.Text =
@@ -1138,6 +1157,7 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorEvidenceText.Text = vehicleRow.Warning;
                 break;
             default:
+                LegacyGraphCustomerMergeStatusText.Text = "";
                 LegacyGraphInspectorTitleText.Text = "顧客を選択してください";
                 LegacyGraphInspectorStatusText.Text = "";
                 LegacyGraphInspectorDetailsText.Text = "";
@@ -1158,6 +1178,291 @@ public partial class MainWindow : Window
         return legacyExportCandidateGraphResult.Customers
             .SelectMany(customer => customer.Vehicles)
             .FirstOrDefault(vehicle => string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphCustomer> GetLegacyGraphCustomerMergeCandidates(
+        AbacusLegacyExportCandidateGraphCustomer selectedCustomer)
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [selectedCustomer];
+        }
+
+        var mergeKey = GetLegacyCustomerMergeKey(selectedCustomer);
+        if (string.IsNullOrWhiteSpace(mergeKey))
+        {
+            return [selectedCustomer];
+        }
+
+        return legacyExportCandidateGraphResult.Customers
+            .Where(customer => string.Equals(GetLegacyCustomerMergeKey(customer), mergeKey, StringComparison.Ordinal))
+            .OrderBy(customer => string.Equals(customer.CustomerId, selectedCustomer.CustomerId, StringComparison.Ordinal) ? 0 : 1)
+            .ThenBy(customer => customer.CustomerId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string GetLegacyCustomerMergeKey(AbacusLegacyExportCandidateGraphCustomer customer) =>
+        NormalizeLegacyCustomerMergeText(customer.CustomerName);
+
+    private static string NormalizeLegacyCustomerMergeText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        var normalized = value.Normalize(NormalizationForm.FormKC);
+        return string.Concat(normalized.Where(character => !char.IsWhiteSpace(character))).ToUpperInvariant();
+    }
+
+    private static IReadOnlyList<LegacyGraphCustomerMergeField> GetLegacyGraphCustomerMergeFields() =>
+    [
+        new("customer-number", "顧客番号", customer => customer.CustomerNumber),
+        new("customer-name", "顧客名", customer => customer.CustomerName),
+        new("name-kana", "ふりがな", customer => customer.NameKana),
+        new("phone", "電話番号", customer => customer.PhoneNumber),
+        new("email", "メールアドレス", customer => customer.EmailAddress),
+        new("postal-code", "郵便番号", customer => customer.PostalCode),
+        new("address", "住所", customer => customer.Address),
+        new("memo", "メモ", customer => customer.Memo),
+    ];
+
+    private void LegacyGraphMergeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphSelectedItem is not AbacusLegacyExportCandidateGraphCustomer selectedCustomer)
+        {
+            return;
+        }
+
+        var candidates = GetLegacyGraphCustomerMergeCandidates(selectedCustomer);
+        if (candidates.Count < 2)
+        {
+            return;
+        }
+
+        var mergeKey = GetLegacyCustomerMergeKey(selectedCustomer);
+        legacyGraphCustomerMergeDrafts.TryGetValue(mergeKey, out var existingDraft);
+        var fields = GetLegacyGraphCustomerMergeFields();
+        var comboBoxes = new Dictionary<string, ComboBox>(StringComparer.Ordinal);
+
+        var dialog = new Window
+        {
+            Owner = this,
+            Title = $"同名顧客の比較・統合プレビュー（{candidates.Count}件）",
+            Width = 1080,
+            Height = 760,
+            MinWidth = 820,
+            MinHeight = 560,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = ToBrush("#F4F7FB"),
+        };
+        var root = new Grid { Margin = new Thickness(22) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        root.Children.Add(new TextBlock
+        {
+            Text = "同じ顧客名の候補を比較しています。自動統合はせず、項目ごとに採用する候補を選択してください。ここで保存するのは画面上の統合プレビューだけです。",
+            Foreground = ToBrush("#805B10"),
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 14,
+        });
+
+        var comparisonScroll = new ScrollViewer
+        {
+            Margin = new Thickness(0, 16, 0, 0),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            CanContentScroll = false,
+        };
+        var comparisonGrid = new Grid { MinWidth = 760 };
+        comparisonGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        foreach (var _ in candidates)
+        {
+            comparisonGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+        comparisonGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(265) });
+        comparisonGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        void AddComparisonElement(UIElement element, int row, int column)
+        {
+            Grid.SetRow(element, row);
+            Grid.SetColumn(element, column);
+            comparisonGrid.Children.Add(element);
+        }
+
+        AddComparisonElement(new TextBlock
+        {
+            Text = "項目",
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+            Margin = new Thickness(8),
+        }, 0, 0);
+        for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+        {
+            var candidate = candidates[candidateIndex];
+            AddComparisonElement(new Border
+            {
+                Margin = new Thickness(3),
+                Padding = new Thickness(8),
+                Background = ToBrush("#EAF2FF"),
+                BorderBrush = ToBrush("#B9D0F5"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Child = new TextBlock
+                {
+                    Text = $"{candidate.DisplayName}\nID: {candidate.CustomerId}\n車両 {candidate.Vehicles.Count:N0}台 / 書類 {candidate.Documents:N0}件",
+                    Foreground = ToBrush("#10233F"),
+                    FontWeight = FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+            }, 0, candidateIndex + 1);
+        }
+        AddComparisonElement(new TextBlock
+        {
+            Text = "採用する候補",
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+            Margin = new Thickness(8),
+        }, 0, candidates.Count + 1);
+
+        var rowIndex = 1;
+        foreach (var field in fields)
+        {
+            comparisonGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            AddComparisonElement(new TextBlock
+            {
+                Text = field.Label,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ToBrush("#36465A"),
+                Margin = new Thickness(8, 9, 8, 9),
+                VerticalAlignment = VerticalAlignment.Top,
+            }, rowIndex, 0);
+
+            var options = candidates
+                .Select(candidate => new LegacyGraphMergeFieldOption(
+                    candidate.CustomerId,
+                    candidate.DisplayName,
+                    field.ValueSelector(candidate)))
+                .ToArray();
+            for (var candidateIndex = 0; candidateIndex < options.Length; candidateIndex++)
+            {
+                var option = options[candidateIndex];
+                AddComparisonElement(new Border
+                {
+                    Margin = new Thickness(3),
+                    Padding = new Thickness(7),
+                    Background = Brushes.White,
+                    BorderBrush = ToBrush("#D8E1EC"),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
+                    {
+                        Text = Fallback(option.Value),
+                        Foreground = ToBrush("#52647A"),
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                }, rowIndex, candidateIndex + 1);
+            }
+
+            var comboBox = new ComboBox
+            {
+                Margin = new Thickness(3),
+                Padding = new Thickness(5, 3, 5, 3),
+                ItemsSource = options,
+                DisplayMemberPath = nameof(LegacyGraphMergeFieldOption.DisplayText),
+                SelectedValuePath = nameof(LegacyGraphMergeFieldOption.CustomerId),
+                MinHeight = 34,
+            };
+            var selectedCandidateId = existingDraft?.FieldSelections.TryGetValue(field.Key, out var savedCandidateId) == true
+                ? savedCandidateId
+                : options.FirstOrDefault(option => !string.IsNullOrWhiteSpace(option.Value))?.CustomerId ?? options[0].CustomerId;
+            comboBox.SelectedValue = selectedCandidateId;
+            if (comboBox.SelectedItem is null)
+            {
+                comboBox.SelectedIndex = 0;
+            }
+            comboBoxes[field.Key] = comboBox;
+            AddComparisonElement(comboBox, rowIndex, candidates.Count + 1);
+            rowIndex++;
+        }
+        comparisonScroll.Content = comparisonGrid;
+        Grid.SetRow(comparisonScroll, 1);
+        root.Children.Add(comparisonScroll);
+
+        var previewBorder = new Border
+        {
+            Margin = new Thickness(0, 14, 0, 0),
+            Padding = new Thickness(10),
+            Background = ToBrush("#EEF7F1"),
+            BorderBrush = ToBrush("#B8DFC5"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+        };
+        var previewText = new TextBlock
+        {
+            Foreground = ToBrush("#17643A"),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 20,
+        };
+        previewBorder.Child = previewText;
+        Grid.SetRow(previewBorder, 2);
+        root.Children.Add(previewBorder);
+
+        void RefreshMergePreview()
+        {
+            var previewLines = fields.Select(field =>
+            {
+                var option = comboBoxes[field.Key].SelectedItem as LegacyGraphMergeFieldOption;
+                return $"{field.Label}: {Fallback(option?.Value ?? "未設定")}（{Fallback(option?.CustomerName ?? "候補未選択")}）";
+            });
+            previewText.Text = "統合プレビュー（画面上のみ）\n" + string.Join("\n", previewLines);
+        }
+        foreach (var comboBox in comboBoxes.Values)
+        {
+            comboBox.SelectionChanged += (_, _) => RefreshMergePreview();
+        }
+        RefreshMergePreview();
+
+        var buttons = new StackPanel
+        {
+            Margin = new Thickness(0, 14, 0, 0),
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        var saveButton = new Button { Content = "統合プレビューを保存", MinWidth = 180, MinHeight = 36 };
+        var cancelButton = new Button { Content = "キャンセル", MinWidth = 110, MinHeight = 36 };
+        saveButton.Click += (_, _) =>
+        {
+            var fieldSelections = fields.ToDictionary(
+                field => field.Key,
+                field => (comboBoxes[field.Key].SelectedItem as LegacyGraphMergeFieldOption)?.CustomerId ?? candidates[0].CustomerId,
+                StringComparer.Ordinal);
+            var selectedValues = fields.ToDictionary(
+                field => field.Key,
+                field => field.ValueSelector(candidates.First(candidate =>
+                    string.Equals(candidate.CustomerId, fieldSelections[field.Key], StringComparison.Ordinal))),
+                StringComparer.Ordinal);
+            legacyGraphCustomerMergeDrafts[mergeKey] = new LegacyGraphCustomerMergeDraft(
+                mergeKey,
+                candidates.Select(candidate => candidate.CustomerId).ToArray(),
+                fieldSelections,
+                selectedValues,
+                DateTimeOffset.UtcNow);
+            dialog.DialogResult = true;
+        };
+        cancelButton.Click += (_, _) => dialog.DialogResult = false;
+        buttons.Children.Add(saveButton);
+        buttons.Children.Add(cancelButton);
+        Grid.SetRow(buttons, 3);
+        root.Children.Add(buttons);
+
+        dialog.Content = root;
+        if (dialog.ShowDialog() == true)
+        {
+            UpdateLegacyGraphInspector(selectedCustomer);
+        }
     }
 
     private void LegacyGraphClearManualLinkButton_Click(object sender, RoutedEventArgs e)
@@ -1924,6 +2229,7 @@ public partial class MainWindow : Window
     {
         legacyExportCandidateGraphResult = null;
         legacyGraphManualDocumentLinks.Clear();
+        legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphSelectedItem = null;
         legacyGraphPanning = false;
         legacyGraphInspectorPanning = false;
@@ -1946,6 +2252,7 @@ public partial class MainWindow : Window
         LegacyGraphInspectorStatusText.Text = "";
         LegacyGraphInspectorDetailsText.Text = "";
         LegacyGraphInspectorEvidenceText.Text = "";
+        LegacyGraphCustomerMergeStatusText.Text = "";
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
@@ -3889,6 +4196,26 @@ public partial class MainWindow : Window
         string SourceKind);
 
     private sealed record LegacyGraphLinkHandleMarker;
+
+    private sealed record LegacyGraphCustomerMergeField(
+        string Key,
+        string Label,
+        Func<AbacusLegacyExportCandidateGraphCustomer, string> ValueSelector);
+
+    private sealed record LegacyGraphMergeFieldOption(
+        string CustomerId,
+        string CustomerName,
+        string Value)
+    {
+        public string DisplayText => $"{CustomerName}: {Fallback(Value)}";
+    }
+
+    private sealed record LegacyGraphCustomerMergeDraft(
+        string GroupKey,
+        IReadOnlyList<string> CandidateCustomerIds,
+        IReadOnlyDictionary<string, string> FieldSelections,
+        IReadOnlyDictionary<string, string> SelectedValues,
+        DateTimeOffset SavedAtUtc);
 
     private sealed record LegacyGraphEdge(UIElement Source, UIElement Target, Line Line);
 
