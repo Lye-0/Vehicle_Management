@@ -1406,7 +1406,6 @@ public partial class MainWindow : Window
         const double documentX = 690;
         const double documentWidth = 390;
         const double documentHeight = 118;
-        const double vehicleGap = 180;
         const double documentSpacing = 24;
 
         var customerBlock = CreateLegacyGraphBlock(
@@ -1422,11 +1421,11 @@ public partial class MainWindow : Window
 
         // 書類は同じ列に縦積みします。固定間隔では長いカードが重なるため、
         // 実際にレイアウトされたカードの高さを使って次の位置を決めます。
-        var nextDocumentY = customerY;
-        for (var vehicleIndex = 0; vehicleIndex < customer.Vehicles.Count; vehicleIndex++)
+        var nextVehicleY = customerY;
+        foreach (var vehicle in customer.Vehicles)
         {
-            var vehicle = customer.Vehicles[vehicleIndex];
-            var vehicleY = customerY + vehicleIndex * vehicleGap;
+            // 車両と、その車両に属する最初の書類を同じ高さに揃えます。
+            var vehicleY = nextVehicleY;
             var vehicleTitle = string.IsNullOrWhiteSpace(vehicle.Maker)
                 ? vehicle.DisplayName
                 : $"{vehicle.Maker} {vehicle.DisplayName}";
@@ -1444,7 +1443,7 @@ public partial class MainWindow : Window
             AddGraphEdge(customerBlock, vehicleBlock, "#2563EB", dashed: false);
 
             var vehicleDocuments = GetDocumentsForVehicle(vehicle);
-            var documentY = Math.Max(vehicleY, nextDocumentY);
+            var documentY = vehicleY;
             foreach (var document in vehicleDocuments)
             {
                 var documentBlock = CreateLegacyDocumentBlock(
@@ -1457,12 +1456,18 @@ public partial class MainWindow : Window
                 var isManualLink = IsManualLinkForVehicle(document, vehicle.VehicleId);
                 AddGraphEdge(vehicleBlock, documentBlock, isManualLink ? "#2563EB" : "#166534", dashed: isManualLink);
                 LegacyGraphCanvas.UpdateLayout();
-                nextDocumentY = documentY + GetLegacyGraphElementHeight(documentBlock) + documentSpacing;
-                documentY = nextDocumentY;
+                documentY += GetLegacyGraphElementHeight(documentBlock) + documentSpacing;
             }
 
-            nextDocumentY = Math.Max(nextDocumentY, vehicleY + vehicleHeight + documentSpacing);
+            LegacyGraphCanvas.UpdateLayout();
+            var vehicleBottom = vehicleY + GetLegacyGraphElementHeight(vehicleBlock);
+            var documentBottom = vehicleDocuments.Count == 0
+                ? vehicleY
+                : documentY - documentSpacing;
+            nextVehicleY = Math.Max(vehicleBottom, documentBottom) + documentSpacing;
         }
+
+        var nextDocumentY = nextVehicleY;
 
         var unresolvedDocuments = customer.UnresolvedDocuments
             .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
