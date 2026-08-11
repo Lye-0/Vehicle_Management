@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly AbacusImageRegistrationPreviewStore imageRegistrationPreviewStore = new();
     private readonly AbacusWebImportPreviewStore webImportPreviewStore = new();
     private readonly AbacusWebImportMappingStore webImportMappingStore = new();
+    private readonly AbacusWebImportRegistrationPackageStore webImportRegistrationPackageStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
     private bool imageRegistrationPreviewBusy;
     private bool webImportPreviewBusy;
     private bool webImportMappingBusy;
+    private bool webImportRegistrationBusy;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
 
@@ -1145,14 +1147,17 @@ public partial class MainWindow : Window
         {
             UpdateImageLinkApprovalButtonState();
         }
-        SelectImageRegistrationDestinationButton.IsEnabled = !busy && !imageRegistrationPreviewBusy;
+        SelectImageRegistrationDestinationButton.IsEnabled = !busy && !imageRegistrationPreviewBusy && !webImportMappingBusy && !webImportRegistrationBusy;
         UpdateImageRegistrationPreviewButtonState();
-        SelectWebImportSourcePackageButton.IsEnabled = !busy && !webImportPreviewBusy;
-        SelectWebImportDestinationButton.IsEnabled = !busy && !webImportPreviewBusy;
+        SelectWebImportSourcePackageButton.IsEnabled = !busy && !webImportPreviewBusy && !webImportMappingBusy && !webImportRegistrationBusy;
+        SelectWebImportDestinationButton.IsEnabled = !busy && !webImportPreviewBusy && !webImportMappingBusy && !webImportRegistrationBusy;
         UpdateWebImportPreviewButtonState();
-        SelectWebImportMappingSourceButton.IsEnabled = !busy && !webImportMappingBusy;
-        SelectWebImportMappingDestinationButton.IsEnabled = !busy && !webImportMappingBusy;
+        SelectWebImportMappingSourceButton.IsEnabled = !busy && !webImportMappingBusy && !webImportRegistrationBusy;
+        SelectWebImportMappingDestinationButton.IsEnabled = !busy && !webImportMappingBusy && !webImportRegistrationBusy;
         UpdateWebImportMappingButtonState();
+        SelectWebImportRegistrationSourceButton.IsEnabled = !busy && !webImportMappingBusy && !webImportRegistrationBusy;
+        SelectWebImportRegistrationDestinationButton.IsEnabled = !busy && !webImportMappingBusy && !webImportRegistrationBusy;
+        UpdateWebImportRegistrationButtonState();
     }
 
     private void UpdateImageLinkMatchButtonState()
@@ -1818,6 +1823,7 @@ public partial class MainWindow : Window
 
         WebImportSourcePackageTextBox.Text = dialog.FolderName;
         ResetWebImportPreview(clearPaths: false);
+        ResetWebImportMapping(clearPaths: true);
         WebImportPreviewStatusText.Text =
             "入力候補パッケージを選択しました。候補保存先を選択してください。";
         UpdateWebImportPreviewButtonState();
@@ -1837,6 +1843,7 @@ public partial class MainWindow : Window
 
         WebImportDestinationTextBox.Text = dialog.FolderName;
         ResetWebImportPreview(clearPaths: false);
+        ResetWebImportMapping(clearPaths: true);
         WebImportPreviewStatusText.Text =
             "候補保存先を選択しました。入力パッケージを確認して作成できます。";
         UpdateWebImportPreviewButtonState();
@@ -1960,6 +1967,7 @@ public partial class MainWindow : Window
         }
 
         webImportMappingBusy = true;
+        SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
         UpdateWebImportMappingButtonState();
         SelectWebImportMappingSourceButton.IsEnabled = false;
         SelectWebImportMappingDestinationButton.IsEnabled = false;
@@ -1993,8 +2001,7 @@ public partial class MainWindow : Window
         finally
         {
             webImportMappingBusy = false;
-            SelectWebImportMappingSourceButton.IsEnabled = true;
-            SelectWebImportMappingDestinationButton.IsEnabled = true;
+            SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
             UpdateWebImportMappingButtonState();
         }
     }
@@ -2031,6 +2038,7 @@ public partial class MainWindow : Window
         }
 
         webImportMappingBusy = true;
+        SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
         UpdateWebImportMappingButtonState();
         SelectWebImportMappingSourceButton.IsEnabled = false;
         SelectWebImportMappingDestinationButton.IsEnabled = false;
@@ -2059,6 +2067,11 @@ public partial class MainWindow : Window
                 $"同じ顧客名の確認グループ: {result.SameNameGroupCount:N0}件\n" +
                 (result.Warnings.Count == 0 ? "警告: なし" : $"警告:\n{string.Join("\n", result.Warnings)}") +
                 $"\nマニフェスト SHA-256: {result.MappingManifestSha256}";
+            WebImportRegistrationSourceTextBox.Text = result.MappingPackagePath;
+            ResetWebImportRegistration(clearPaths: false);
+            WebImportRegistrationStatusText.Text =
+                "Gate5Lの対応付け証跡を入力に設定しました。保存先を選択して登録前パッケージを作成してください。";
+            UpdateWebImportRegistrationButtonState();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or JsonException or ArgumentException or
@@ -2072,9 +2085,122 @@ public partial class MainWindow : Window
         finally
         {
             webImportMappingBusy = false;
-            SelectWebImportMappingSourceButton.IsEnabled = true;
-            SelectWebImportMappingDestinationButton.IsEnabled = true;
+            SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
             UpdateWebImportMappingButtonState();
+        }
+    }
+
+    private void SelectWebImportRegistrationSourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Web登録前パッケージの対応付け証跡を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportRegistrationSourceTextBox.Text = dialog.FolderName;
+        ResetWebImportRegistration(clearPaths: false);
+        WebImportRegistrationStatusText.Text =
+            "対応付け証跡を選択しました。保存先を選択して登録前パッケージを作成してください。";
+        UpdateWebImportRegistrationButtonState();
+    }
+
+    private void SelectWebImportRegistrationDestinationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Web登録前パッケージの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportRegistrationDestinationTextBox.Text = dialog.FolderName;
+        ResetWebImportRegistration(clearPaths: false);
+        WebImportRegistrationStatusText.Text =
+            "登録前パッケージ保存先を選択しました。対応付け証跡を確認して作成できます。";
+        UpdateWebImportRegistrationButtonState();
+    }
+
+    private async void CreateWebImportRegistrationPackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var mappingPackage = WebImportRegistrationSourceTextBox.Text.Trim();
+        var destinationFolder = WebImportRegistrationDestinationTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(mappingPackage) || string.IsNullOrWhiteSpace(destinationFolder))
+        {
+            MessageBox.Show(
+                this,
+                "対応付け証跡と登録前パッケージ保存先を選択してください。",
+                "保存先がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            "Gate5Lで確認済みの顧客グループから、登録前パッケージを作成しますか？\n\n" +
+            "同じ顧客グループの複数車両は、顧客CSVを1行・車両CSVを複数行で出力します。\n" +
+            "この操作ではWeb API、DB、画像アップロードは行いません。",
+            "登録前パッケージの作成",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        webImportRegistrationBusy = true;
+        SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
+        UpdateWebImportRegistrationButtonState();
+        SelectWebImportRegistrationSourceButton.IsEnabled = false;
+        SelectWebImportRegistrationDestinationButton.IsEnabled = false;
+        WebImportRegistrationGrid.ItemsSource = null;
+        WebImportRegistrationResultText.Text = "";
+        WebImportRegistrationStatusText.Text =
+            "対応付け証跡・入力候補・画像のSHA-256を再検証し、登録前パッケージを作成しています…";
+        WebImportRegistrationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await webImportRegistrationPackageStore.CreateAsync(
+                mappingPackage,
+                destinationFolder);
+            WebImportRegistrationGrid.ItemsSource = result.Groups;
+            WebImportRegistrationStatusText.Text =
+                "Web登録前パッケージを作成しました。登録・API送信・画像アップロードはまだ行っていません。";
+            WebImportRegistrationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            WebImportRegistrationResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"マニフェスト: {result.ManifestPath}\n" +
+                $"顧客CSV: {result.CustomersCsvPath}\n" +
+                $"車両CSV: {result.VehiclesCsvPath}\n" +
+                $"画像対応表: {result.ImageAttachmentsPath}\n" +
+                $"候補: {result.CandidateCount:N0}件 / 顧客行: {result.CustomerRowCount:N0}行 / " +
+                $"車両行: {result.VehicleRowCount:N0}行 / 画像: {result.ImageCount:N0}件\n" +
+                $"複数車両としてまとめた車両: {result.MergedVehicleCount:N0}件\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            WebImportRegistrationGrid.ItemsSource = null;
+            WebImportRegistrationResultText.Text = "";
+            WebImportRegistrationStatusText.Text =
+                $"Web登録前パッケージを作成できません: {exception.Message}";
+            WebImportRegistrationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            webImportRegistrationBusy = false;
+            SetImageLinkMatchControlsBusy(imageLinkMatchBusy);
+            UpdateWebImportRegistrationButtonState();
         }
     }
 
@@ -2125,6 +2251,7 @@ public partial class MainWindow : Window
             "入力候補パッケージを選択して候補を読み込んでください。";
         WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         UpdateWebImportMappingButtonState();
+        ResetWebImportRegistration(clearPaths: true);
     }
 
     private void UpdateWebImportMappingButtonState()
@@ -2132,13 +2259,41 @@ public partial class MainWindow : Window
         ReadWebImportMappingCandidatesButton.IsEnabled =
             !webImportMappingBusy &&
             !imageLinkMatchBusy &&
+            !webImportRegistrationBusy &&
             !string.IsNullOrWhiteSpace(WebImportMappingSourceTextBox.Text);
         CreateWebImportMappingApprovalButton.IsEnabled =
             !webImportMappingBusy &&
             !imageLinkMatchBusy &&
+            !webImportRegistrationBusy &&
             loadedWebImportMappingPackage is not null &&
             webImportMappingRows.Count > 0 &&
             !string.IsNullOrWhiteSpace(WebImportMappingDestinationTextBox.Text);
+    }
+
+    private void ResetWebImportRegistration(bool clearPaths)
+    {
+        if (clearPaths)
+        {
+            WebImportRegistrationSourceTextBox.Clear();
+            WebImportRegistrationDestinationTextBox.Clear();
+        }
+
+        WebImportRegistrationGrid.ItemsSource = null;
+        WebImportRegistrationResultText.Text = "";
+        WebImportRegistrationStatusText.Text =
+            "対応付け証跡と保存先を選択してください。";
+        WebImportRegistrationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        UpdateWebImportRegistrationButtonState();
+    }
+
+    private void UpdateWebImportRegistrationButtonState()
+    {
+        CreateWebImportRegistrationPackageButton.IsEnabled =
+            !webImportRegistrationBusy &&
+            !imageLinkMatchBusy &&
+            !webImportMappingBusy &&
+            !string.IsNullOrWhiteSpace(WebImportRegistrationSourceTextBox.Text) &&
+            !string.IsNullOrWhiteSpace(WebImportRegistrationDestinationTextBox.Text);
     }
 
     private void UpdateWebImportPreviewButtonState()
@@ -2147,6 +2302,8 @@ public partial class MainWindow : Window
             !webImportPreviewBusy &&
             !imageLinkMatchBusy &&
             !imageRegistrationPreviewBusy &&
+            !webImportMappingBusy &&
+            !webImportRegistrationBusy &&
             !string.IsNullOrWhiteSpace(WebImportSourcePackageTextBox.Text) &&
             !string.IsNullOrWhiteSpace(WebImportDestinationTextBox.Text);
     }
@@ -2156,6 +2313,9 @@ public partial class MainWindow : Window
         CreateImageRegistrationPreviewButton.IsEnabled =
             !imageRegistrationPreviewBusy &&
             !imageLinkMatchBusy &&
+            !webImportPreviewBusy &&
+            !webImportMappingBusy &&
+            !webImportRegistrationBusy &&
             !string.IsNullOrWhiteSpace(ImageLinkManifestFolderTextBox.Text) &&
             !string.IsNullOrWhiteSpace(ImageLinkVehicleExportFolderTextBox.Text) &&
             !string.IsNullOrWhiteSpace(ImageRegistrationDestinationTextBox.Text);

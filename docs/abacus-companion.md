@@ -113,6 +113,8 @@ Gate 5Kでは、Gate 5Jの`ABACUS-Image-Registration-Preview-*`を入力とし�
 
 Gate 5Lでは、Gate 5Kの候補CSVを再検証して顧客・車両の一覧を表示し、顧客グループキーを人が確認・編集できるようにします。初期値は候補ごとに別顧客です。同じ顧客に複数車両があると確認した行だけ同じキーへ変更し、異なる顧客名を同じキーへ設定する操作は拒否します。確定時には`ABACUS-Web-Import-Mapping-*`フォルダーへ`mapping.json`（`human-reviewed`）を新規作成し、入力パッケージのSHA-256、候補ID、車両CSV行、画像、顧客グループキー、判断理由を記録します。この段階でもCSVの書換え、顧客・車両の登録、API送信、画像アップロードは行いません。
 
+Gate 5Mでは、Gate 5Lの`human-reviewed`対応付け証跡と入力候補パッケージを再検証し、`ABACUS-Web-Import-Registration-Preview-*`フォルダーへ登録前パッケージを作成します。顧客グループごとに決定的な顧客ID・顧客番号を発行し、同じ顧客に複数車両がある場合は顧客CSVを1行、車両CSVを複数行へ変換します。車両ID、画像、画像SHA-256、候補ID、対応付け判断、CSV行の出典は保持し、`image-attachments.json`の顧客ID・車両IDも出力後の値へ更新します。出力マニフェストは対応付け証跡と入力候補マニフェストのSHA-256を記録し、CSV・画像・JSONを再読込検証します。この段階でもWeb API、D1、Object Storage、ABACUSフォルダーへの接続・書込は行いません。
+
 ## 永続ローカル移行パッケージ
 
 Gate 6Aでは、利用者が選択した通常フォルダーへ`ABACUS-Migration-Preview-*`フォルダーを新規作成します。開発中のWorkersプロセスが持つ一時ファイルシステムは永続保存先として扱いません。将来、開発用または本番用ObjectStorageへ接続する前段として、補助ソフト側に永続成果物の境界を置きます。

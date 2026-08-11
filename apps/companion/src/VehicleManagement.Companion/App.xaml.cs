@@ -416,6 +416,24 @@ public partial class App : Application
                         candidate.DefaultCustomerGroupKey))
                     .ToArray());
             var mappingManifestText = await File.ReadAllTextAsync(mappingApproval.MappingManifestPath);
+            var webImportRegistrationPackageParent = Path.Combine(testRoot, "web-import-registration-packages");
+            Directory.CreateDirectory(webImportRegistrationPackageParent);
+            var webImportRegistrationPackage = await new AbacusWebImportRegistrationPackageStore().CreateAsync(
+                mappingApproval.MappingPackagePath,
+                webImportRegistrationPackageParent);
+            var webImportRegistrationManifestText = await File.ReadAllTextAsync(
+                webImportRegistrationPackage.ManifestPath);
+            var webImportRegistrationCustomersCsvText = await File.ReadAllTextAsync(
+                webImportRegistrationPackage.CustomersCsvPath);
+            var webImportRegistrationVehiclesCsvText = await File.ReadAllTextAsync(
+                webImportRegistrationPackage.VehiclesCsvPath);
+            var webImportRegistrationAttachmentsText = await File.ReadAllTextAsync(
+                webImportRegistrationPackage.ImageAttachmentsPath);
+            var copiedWebImportRegistrationImage = Path.Combine(
+                webImportRegistrationPackage.PackagePath,
+                webImportRegistrationPackage.Vehicles[0].PackageImageFileName.Replace('/', Path.DirectorySeparatorChar));
+            var copiedWebImportRegistrationImageSha256 = Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(copiedWebImportRegistrationImage)));
             var rejectedDuplicateImageLinkApproval = false;
             try
             {
@@ -505,6 +523,28 @@ public partial class App : Application
                 mappingApproval.MappingManifestSha256.Length == 64 &&
                 mappingManifestText.Contains("abacus-web-import-mapping", StringComparison.Ordinal) &&
                 mappingManifestText.Contains("\"status\": \"human-reviewed\"", StringComparison.Ordinal) &&
+                webImportRegistrationPackage.CandidateCount == 1 &&
+                webImportRegistrationPackage.CustomerRowCount == 1 &&
+                webImportRegistrationPackage.VehicleRowCount == 1 &&
+                webImportRegistrationPackage.ImageCount == 1 &&
+                webImportRegistrationPackage.MergedVehicleCount == 0 &&
+                webImportRegistrationPackage.ManifestSha256.Length == 64 &&
+                webImportRegistrationPackage.Groups.Count == 1 &&
+                webImportRegistrationPackage.Vehicles.Count == 1 &&
+                File.Exists(webImportRegistrationPackage.ManifestPath) &&
+                File.Exists(webImportRegistrationPackage.CustomersCsvPath) &&
+                File.Exists(webImportRegistrationPackage.VehiclesCsvPath) &&
+                File.Exists(webImportRegistrationPackage.ImageAttachmentsPath) &&
+                File.Exists(copiedWebImportRegistrationImage) &&
+                copiedWebImportRegistrationImageSha256 == webImportRegistrationPackage.Vehicles[0].ImageSha256 &&
+                webImportRegistrationCustomersCsvText.TrimStart('\uFEFF').StartsWith("顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数", StringComparison.Ordinal) &&
+                webImportRegistrationVehiclesCsvText.TrimStart('\uFEFF').StartsWith("車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考", StringComparison.Ordinal) &&
+                webImportRegistrationCustomersCsvText.Contains(",1\r\n", StringComparison.Ordinal) &&
+                webImportRegistrationVehiclesCsvText.Contains("大阪537む16", StringComparison.Ordinal) &&
+                webImportRegistrationVehiclesCsvText.Contains("CHASSIS1", StringComparison.Ordinal) &&
+                webImportRegistrationAttachmentsText.Contains("manual-upload-required", StringComparison.Ordinal) &&
+                webImportRegistrationManifestText.Contains("abacus-web-import-registration-package", StringComparison.Ordinal) &&
+                webImportRegistrationManifestText.Contains("\"status\": \"registration-preview\"", StringComparison.Ordinal) &&
                 rejectedDuplicateImageLinkApproval &&
                 !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&
