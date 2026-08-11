@@ -171,8 +171,10 @@ async function uploadRegistrationImage(request: Request, env: Env, database: Ret
   if (vehicle.customerId !== customerId) throw new HttpError(409, '画像の顧客IDと車両の所有者が一致しません。')
 
   const fileId = await stableFileId(`${organizationId}\u0000${vehicleId}\u0000${imagePath}\u0000${expectedSha256}`)
-  const fileName = imagePath.split('/').pop() || 'abacus-image.png'
-  const objectKey = createVehicleFileObjectKey(organizationId, vehicleId, fileId, fileName)
+  const sourceFileName = imagePath.split('/').pop() || 'abacus-image.png'
+  const fileName = `車検証_${sourceFileName}`.slice(0, 120)
+  // オブジェクトキーは既存の再試行と互換性を保つため、ABACUS由来の元ファイル名で固定します。
+  const objectKey = createVehicleFileObjectKey(organizationId, vehicleId, fileId, sourceFileName)
   const existing = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).get()
   if (existing && (existing.vehicleId !== vehicleId || existing.objectKey !== objectKey || existing.sizeBytes !== fileBody.byteLength || existing.contentType !== contentType)) {
     throw new HttpError(409, '同じ画像IDに異なる添付情報が存在します。')
@@ -190,8 +192,10 @@ async function uploadRegistrationImage(request: Request, env: Env, database: Ret
       await createB2Storage(env).deleteObject(objectKey).catch(() => undefined)
       throw error
     }
+  } else if (existing.fileName !== fileName) {
+    await database.update(vehicleFiles).set({ fileName, updatedAt: new Date().toISOString() }).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).run()
   }
-  const storedFile = existing ?? await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).get()
+  const storedFile = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).get()
   return jsonResponse({ status: existing ? 'already-uploaded' : 'uploaded', manifestSha256, file: storedFile ? serializeFile(storedFile) : null }, existing ? 200 : 201, env)
 }
 
