@@ -86,6 +86,7 @@ public partial class MainWindow : Window
     private object? legacyGraphSelectedItem;
     private UIElement? legacyGraphDraggingElement;
     private Point legacyGraphDragOffset;
+    private Point legacyGraphBlockDragStartPoint;
     private bool legacyGraphPanning;
     private Point legacyGraphPanStartPoint;
     private double legacyGraphPanStartHorizontalOffset;
@@ -101,6 +102,13 @@ public partial class MainWindow : Window
     private Point legacyGraphHandleDragStartPoint;
     private AbacusLegacyExportCandidateGraphDocument? legacyGraphDocumentCardDragDocument;
     private Point legacyGraphDocumentCardDragStartPoint;
+    private FrameworkElement? legacyGraphDocumentCardDragSourceElement;
+    private Border? legacyGraphBlockDragPreview;
+    private FrameworkElement? legacyGraphBlockDragPreviewSource;
+    private Line? legacyGraphActiveConnectionLine;
+    private FrameworkElement? legacyGraphActiveConnectionSource;
+    private AbacusLegacyExportCandidateGraphVehicle? legacyGraphNodeDragVehicle;
+    private Point legacyGraphNodeDragStartPoint;
     private AbacusLegacyExportCandidateGraphCustomer? legacyGraphCustomerDragSource;
     private Point legacyGraphCustomerDragStartPoint;
     private ListBoxItem? legacyGraphCustomerDragTargetItem;
@@ -756,12 +764,14 @@ public partial class MainWindow : Window
         data.SetData(
             typeof(LegacyGraphCustomerDragPayload),
             new LegacyGraphCustomerDragPayload(sourceCustomer.CustomerId));
+        SetLegacyGraphCustomerUngroupDropZoneVisible(true);
         try
         {
             DragDrop.DoDragDrop(list, data, DragDropEffects.Link);
         }
         finally
         {
+            SetLegacyGraphCustomerUngroupDropZoneVisible(false);
             ClearLegacyGraphCustomerDropHighlight();
         }
 
@@ -771,6 +781,7 @@ public partial class MainWindow : Window
     private void LegacyGraphCustomerList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         legacyGraphCustomerDragSource = null;
+        SetLegacyGraphCustomerUngroupDropZoneVisible(false);
         ClearLegacyGraphCustomerDropHighlight();
     }
 
@@ -921,7 +932,6 @@ public partial class MainWindow : Window
             }
         }
 
-        AutoScrollLegacyGraphCustomerList(LegacyGraphCustomersList, e.GetPosition(LegacyGraphCustomersList));
         e.Effects = DragDropEffects.Link;
         e.Handled = true;
     }
@@ -959,6 +969,17 @@ public partial class MainWindow : Window
         legacyGraphCustomerUngroupDropHighlight.Background = ToBrush("#FFF7ED");
         legacyGraphCustomerUngroupDropHighlight.BorderBrush = ToBrush("#D97706");
         legacyGraphCustomerUngroupDropHighlight = null;
+    }
+
+    private void SetLegacyGraphCustomerUngroupDropZoneVisible(bool visible)
+    {
+        LegacyGraphCustomerUngroupDropZone.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!visible)
+        {
+            ClearLegacyGraphCustomerUngroupDropHighlight();
+        }
     }
 
     private void RemoveLegacyGraphCustomerFromMergeGroup(
@@ -1563,7 +1584,7 @@ public partial class MainWindow : Window
             var (background, border, statusBrush, statusText) = isApplied
                 ? ("#EAF2FF", "#2563EB", "#1D4ED8", "承認済み")
                 : hasDraft
-                    ? ("#EFF6FF", "#60A5FA", "#1D4ED8", "統合プレビュー保存済み")
+                    ? ("#FFF7ED", "#D97706", "#9A3412", "顧客情報選択済み")
                     : ("#FFF7ED", "#D97706", "#9A3412", $"統合候補 {customers.Length}件");
             var groupDisplayName = hasDraft
                 ? representative.DisplayName
@@ -1579,7 +1600,7 @@ public partial class MainWindow : Window
                 isApplied
                     ? "統合後の顧客名・情報で承認済み"
                     : hasDraft
-                        ? "統合後の顧客情報を確認し、キャンバスを承認"
+                        ? "統合後の顧客情報を選択済み。キャンバスを確認して承認"
                         : "統合候補を展開して顧客情報をプレビュー",
                 groupKey,
                 expanded ? "▼" : "▶",
@@ -1692,14 +1713,14 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorStateText.Foreground = ToBrush(isAppliedMerge
                     ? "#1D4ED8"
                     : hasMergeDraft
-                        ? "#1D4ED8"
+                        ? "#9A3412"
                         : hasMergeGroup
                             ? "#9A3412"
                             : "#52647A");
                 LegacyGraphInspectorStateBorder.Background = ToBrush(isAppliedMerge
                     ? "#EAF2FF"
                     : hasMergeDraft
-                        ? "#EAF2FF"
+                        ? "#FFF7ED"
                         : hasMergeGroup
                             ? "#FFF7ED"
                             : "#F4F7FB");
@@ -1725,7 +1746,7 @@ public partial class MainWindow : Window
                     ? legacyGraphCustomerMergeDrafts.ContainsKey(mergeKey)
                         ? isAppliedMerge
                             ? $"統合候補 {mergeCandidates.Count}件。キャンバス承認済みです。"
-                            : $"統合候補 {mergeCandidates.Count}件。選択した顧客情報をキャンバスへ仮表示中です。"
+                            : $"統合候補 {mergeCandidates.Count}件。顧客情報を選択済みです。キャンバスを確認して承認してください。"
                         : $"統合候補 {mergeCandidates.Count}件。顧客情報をプレビューして採用値を決定してください。"
                     : "統合候補はありません。顧客カードを別の顧客カードへドラッグすると、任意の顧客を比較候補に追加できます。";
                 UpdateLegacyGraphCustomerInspectorTabs(customer, mergeCandidates, mergeDraft, isAppliedMerge);
@@ -1750,10 +1771,13 @@ public partial class MainWindow : Window
             case AbacusLegacyExportCandidateGraphDocument document:
                 var isUnconnectedDocument = IsLegacyGraphDocumentUnconnected(document);
                 var isTrayDocument = IsLegacyGraphDocumentInTray(document);
+                var isCustomerDirectDocument = IsLegacyGraphCustomerDirectDocument(document);
                 LegacyGraphInspectorStateText.Text = isUnconnectedDocument
                     ? "● 書類を選択中（未接続）"
                     : isTrayDocument
                         ? "● 未確定トレイの書類を選択中"
+                        : isCustomerDirectDocument
+                            ? "● 書類を選択中（車両未確定）"
                         : "● 書類を選択中";
                 LegacyGraphCustomerMergeStatusText.Text = "顧客ブロックを選択すると、同名顧客の比較候補を表示します。";
                 LegacyGraphInspectorTitleText.Text = $"{document.Kind}: {Fallback(document.DocumentNumber)}";
@@ -1763,6 +1787,8 @@ public partial class MainWindow : Window
                     ? "判定: 未接続（画面上の一時状態）\n車両ノードへ接続するか、書類カードを未確定トレイへ移動してください。"
                     : isTrayDocument
                         ? $"判定: 未確定トレイ\n候補車両: {document.CandidateSummary}"
+                        : isCustomerDirectDocument
+                            ? $"判定: 顧客に一意紐付け（車両未確定）\n候補車両: {document.CandidateSummary}\n車両ノードへ接続するか、未確定トレイへ移動してください。"
                         : manualVehicle is null
                             ? $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}"
                     : $"判定: 手動仮紐付け（未登録）\n紐付け先: {manualVehicle.DisplayName}";
@@ -1775,6 +1801,8 @@ public partial class MainWindow : Window
                     $"出典: {document.SourceLocation}";
                 var manualEvidence = isUnconnectedDocument
                     ? "\nこの書類はノード接続がありません。キャンバス承認前に車両へ接続するか、未確定トレイへ移動してください。"
+                    : isCustomerDirectDocument
+                        ? "\n顧客には一意に紐付いていますが、車両は未確定です。車両ノードへ接続するか、未確定トレイへ移動してください。"
                     : manualVehicle is null
                         ? ""
                     : $"\n手動で選択した車両ID: {manualVehicle.VehicleId}\nこの変更は画面上の仮紐付けです。元CSV・ABACUSフォルダーは変更していません。";
@@ -1858,13 +1886,13 @@ public partial class MainWindow : Window
                         ? "候補間に差異があります。比較画面で採用候補を選択してください。"
                         : "候補間で一致しています。";
                 var background = draft is not null
-                    ? isAppliedMerge ? "#EAF2FF" : "#EAF2FF"
+                    ? isAppliedMerge ? "#EAF2FF" : "#FFF7ED"
                     : hasDifference ? "#FFF7ED" : "#EEF7F1";
                 var border = draft is not null
-                    ? isAppliedMerge ? "#2563EB" : "#93C5FD"
+                    ? isAppliedMerge ? "#2563EB" : "#D97706"
                     : hasDifference ? "#F59E0B" : "#B8DFC5";
                 var statusBrush = draft is not null
-                    ? isAppliedMerge ? "#1D4ED8" : "#1D4ED8"
+                    ? isAppliedMerge ? "#1D4ED8" : "#9A3412"
                     : hasDifference ? "#9A3412" : "#17643A";
                 return new LegacyGraphCustomerDifferenceSummary(
                     field.Label,
@@ -2282,16 +2310,24 @@ public partial class MainWindow : Window
 
         var displayCustomer = GetLegacyGraphDisplayCustomer(customer);
         var unconnectedDocuments = GetLegacyGraphUnconnectedDocuments(displayCustomer).ToArray();
-        if (unconnectedDocuments.Length > 0)
+        var vehicleUnresolvedDocuments = GetLegacyGraphCustomerDirectDocuments(displayCustomer).ToArray();
+        if (unconnectedDocuments.Length > 0 || vehicleUnresolvedDocuments.Length > 0)
         {
+            var warningCount = unconnectedDocuments.Length + vehicleUnresolvedDocuments.Length;
             LegacyGraphStatusText.Text =
-                $"未接続書類が{unconnectedDocuments.Length:N0}件あります。書類ノードを車両へ接続するか、未確定トレイへ移動してから承認してください。";
+                $"車両未接続の書類が{warningCount:N0}件あります。書類ノードを車両へ接続するか、未確定トレイへ移動してから承認してください。";
             LegacyGraphStatusText.Foreground = ToBrush("#A61B1B");
             MessageBox.Show(
                 this,
-                $"この統合候補には未接続書類が{unconnectedDocuments.Length:N0}件あります。\n\n" +
-                "書類ブロックを車両へドラッグして接続するか、書類ブロックを未確定トレイへドラッグしてから、もう一度承認してください。",
-                "未接続書類があります",
+                $"この統合候補には車両へ接続されていない書類が{warningCount:N0}件あります。\n" +
+                (vehicleUnresolvedDocuments.Length > 0
+                    ? $"顧客には紐付いていますが車両未確定: {vehicleUnresolvedDocuments.Length:N0}件\n"
+                    : "") +
+                (unconnectedDocuments.Length > 0
+                    ? $"ノード未接続: {unconnectedDocuments.Length:N0}件\n"
+                    : "") +
+                "\n書類ブロックを車両へドラッグして接続するか、書類ブロックを未確定トレイへドラッグしてから、もう一度承認してください。",
+                "車両未接続の書類があります",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -2733,13 +2769,37 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphDocument document)
     {
         var key = GetLegacyDocumentKey(document);
+        if (legacyGraphTrayDocumentKeys.Contains(key))
+        {
+            return true;
+        }
+
         if (legacyGraphManualDocumentLinks.ContainsKey(key) ||
             legacyGraphUnconnectedDocumentKeys.Contains(key))
         {
-            return legacyGraphTrayDocumentKeys.Contains(key);
+            return false;
         }
 
-        return legacyGraphTrayDocumentKeys.Contains(key) || !document.IsLinked;
+        // 顧客候補が一意で車両だけ未確定の書類は、顧客ブロックから
+        // 書類ブロックを確認できるようにします。候補顧客も不明な書類だけを
+        // 初期状態の未確定トレイへ送ります。
+        return !document.IsLinked && !IsLegacyGraphCustomerDirectDocument(document);
+    }
+
+    private bool IsLegacyGraphCustomerDirectDocument(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        if (document.IsLinked || document.CandidateCustomerIds.Count != 1)
+        {
+            return false;
+        }
+
+        if (legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
+        {
+            return false;
+        }
+
+        return FindOriginalVehicleForDocument(document) is null;
     }
 
     private bool IsLegacyGraphDocumentUnconnected(
@@ -2761,6 +2821,17 @@ public partial class MainWindow : Window
             .Where(IsLegacyGraphDocumentUnconnected)
             .Where(document => FindOriginalCustomerForDocument(document) is { } original &&
                                sourceCustomerIds.Contains(original.CustomerId))
+            .ToArray();
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyGraphCustomerDirectDocuments(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        return customer.UnresolvedDocuments
+            .Where(IsLegacyGraphCustomerDirectDocument)
+            .Where(document => !IsLegacyGraphDocumentInTray(document))
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
             .ToArray();
     }
 
@@ -2797,8 +2868,11 @@ public partial class MainWindow : Window
 
     private void RenderLegacyGraphCustomer(AbacusLegacyExportCandidateGraphCustomer customer)
     {
+        ClearLegacyGraphBlockVisualDrag();
+        EndLegacyGraphConnectionPreview();
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
+        LegacyGraphDragPreviewCanvas.Children.Clear();
         LegacyGraphBoardGrid.Width = 1120;
         LegacyGraphBoardGrid.Height = 720;
         LegacyGraphCanvas.Width = 1120;
@@ -2818,14 +2892,29 @@ public partial class MainWindow : Window
         const double documentHeight = 118;
         const double documentSpacing = 24;
 
+        var customerMergeKey = GetLegacyCustomerMergeKey(customer);
+        var isCustomerMergeGroup = TryGetLegacyGraphMergeGroup(customerMergeKey, out var customerMergeGroup) &&
+                                    customerMergeGroup.CustomerIds.Count > 1;
+        var isCustomerMergeApproved = legacyGraphAppliedCustomerMergeKeys.Contains(customerMergeKey);
+        var customerStroke = isCustomerMergeGroup && !isCustomerMergeApproved ? "#D97706" : "#2563EB";
+        var customerFill = isCustomerMergeGroup && !isCustomerMergeApproved ? "#FFF7ED" : "#EAF2FF";
+        var customerBadge = isCustomerMergeGroup
+            ? isCustomerMergeApproved
+                ? "承認済み"
+                : legacyGraphCustomerMergeDrafts.ContainsKey(customerMergeKey)
+                    ? "仮反映中"
+                    : "統合候補"
+            : null;
+
         var customerBlock = CreateLegacyGraphBlock(
             $"顧客: {customer.DisplayName}",
             $"ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件",
-            "#2563EB",
-            "#EAF2FF",
+            customerStroke,
+            customerFill,
             dashed: false,
             customerWidth,
-            customerHeight);
+            customerHeight,
+            customerBadge);
         customerBlock.Tag = customer;
         AddGraphElement(customerBlock, customerX, customerY);
 
@@ -2884,6 +2973,7 @@ public partial class MainWindow : Window
         var unresolvedDocuments = customer.UnresolvedDocuments
             .Where(document => !IsLegacyGraphDocumentInTray(document))
             .Where(document => !IsLegacyGraphDocumentUnconnected(document))
+            .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
             .ToArray();
         if (unresolvedDocuments.Length > 0)
         {
@@ -2996,10 +3086,18 @@ public partial class MainWindow : Window
         bool unconnected)
     {
         var visual = GetDocumentVisual(document.MatchStatus);
-        var stroke = unconnected ? "#DC2626" : manual ? "#2563EB" : visual.Stroke;
-        var fill = unconnected ? "#FEF2F2" : manual ? "#EFF6FF" : visual.Fill;
+        var customerDirect = !unconnected && !manual && IsLegacyGraphCustomerDirectDocument(document);
+        var stroke = unconnected ? "#DC2626" : manual ? "#2563EB" : customerDirect ? "#D97706" : visual.Stroke;
+        var fill = unconnected ? "#FEF2F2" : manual ? "#EFF6FF" : customerDirect ? "#FFF7ED" : visual.Fill;
+        var statusLabel = unconnected
+            ? "未接続"
+            : manual
+                ? "仮紐付け済み"
+                : customerDirect
+                    ? "車両未確定"
+                    : visual.Dashed ? "要確認・未確定" : "自動確定";
         var subtitle =
-            $"判定: {(unconnected ? "未接続" : manual ? "手動仮紐付け" : document.MatchStatus)}\n" +
+            $"判定: {(unconnected ? "未接続" : manual ? "手動仮紐付け" : customerDirect ? "車両未確定" : document.MatchStatus)}\n" +
             $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)}\n" +
             $"日付: {Fallback(document.DocumentDate)} / 合計: {Fallback(document.TotalAmount)}\n" +
             $"出典: {document.SourceLocation}";
@@ -3008,14 +3106,14 @@ public partial class MainWindow : Window
             subtitle,
             stroke,
             fill,
-            unconnected || manual || visual.Dashed,
+            unconnected || manual || customerDirect || visual.Dashed,
             width,
             height,
-            unconnected ? "未接続" : manual ? "仮紐付け済み" : visual.Dashed ? "要確認・未確定" : "自動確定");
+            statusLabel);
         if (block.Children.OfType<StackPanel>().FirstOrDefault() is { } content)
         {
             // 左右のノード・切断ボタンと本文が重ならないように余白を確保します。
-            content.Margin = new Thickness(34, 8, 46, 8);
+            content.Margin = new Thickness(34, 8, 12, 8);
         }
         var documentNode = new Border
         {
@@ -3032,6 +3130,7 @@ public partial class MainWindow : Window
             ToolTip = "このノードを車両ノードへドラッグして紐付け",
             Tag = new LegacyGraphDocumentNodeMarker(),
             DataContext = document,
+            AllowDrop = true,
         };
         documentNode.Child = new TextBlock
         {
@@ -3045,15 +3144,19 @@ public partial class MainWindow : Window
         documentNode.PreviewMouseLeftButtonDown += LegacyGraphDocumentHandle_MouseLeftButtonDown;
         documentNode.PreviewMouseMove += LegacyGraphDocumentHandle_MouseMove;
         documentNode.PreviewMouseLeftButtonUp += LegacyGraphDocumentHandle_MouseLeftButtonUp;
+        documentNode.DragEnter += LegacyGraphDocumentNode_DragEnter;
+        documentNode.DragOver += LegacyGraphDocumentNode_DragOver;
+        documentNode.DragLeave += LegacyGraphDocumentNode_DragLeave;
+        documentNode.Drop += LegacyGraphDocumentNode_Drop;
         block.Children.Add(documentNode);
 
         var disconnectButton = new Button
         {
             Width = 30,
             Height = 24,
-            Margin = new Thickness(0, 7, 7, 0),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(13, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0),
             Content = "×",
             FontSize = 16,
@@ -3207,6 +3310,9 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        node.PreviewMouseLeftButtonDown += LegacyGraphVehicleNode_MouseLeftButtonDown;
+        node.PreviewMouseMove += LegacyGraphVehicleNode_MouseMove;
+        node.PreviewMouseLeftButtonUp += LegacyGraphVehicleNode_MouseLeftButtonUp;
         node.DragEnter += (_, e) => HandleLegacyGraphVehicleDragOver(vehicleBlock, vehicle, e);
         node.DragOver += (_, e) => HandleLegacyGraphVehicleDragOver(vehicleBlock, vehicle, e);
         node.DragLeave += (_, _) =>
@@ -3264,8 +3370,115 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void LegacyGraphDocumentNode_DragEnter(object sender, DragEventArgs e) =>
+        LegacyGraphDocumentNode_DragOver(sender, e);
+
+    private void LegacyGraphDocumentNode_DragOver(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement node ||
+            node.DataContext is not AbacusLegacyExportCandidateGraphDocument document)
+        {
+            e.Effects = DragDropEffects.None;
+            return;
+        }
+
+        if (GetLegacyGraphVehicleNodeDragPayload(e.Data) is { } vehiclePayload)
+        {
+            if (FindVisualAncestor<Grid>(node) is { } documentBlock)
+            {
+                SetLegacyGraphDropHighlight(documentBlock);
+            }
+            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphEdgesCanvas));
+            e.Effects = DragDropEffects.Link;
+            e.Handled = true;
+            return;
+        }
+
+        e.Effects = DragDropEffects.None;
+    }
+
+    private void LegacyGraphDocumentNode_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement node &&
+            FindVisualAncestor<Grid>(node) is { } documentBlock &&
+            legacyGraphDropHighlightTarget == documentBlock)
+        {
+            ClearLegacyGraphDropHighlight();
+        }
+    }
+
+    private void LegacyGraphDocumentNode_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement node ||
+            node.DataContext is not AbacusLegacyExportCandidateGraphDocument document ||
+            GetLegacyGraphVehicleNodeDragPayload(e.Data) is not { } vehiclePayload)
+        {
+            return;
+        }
+
+        ApplyLegacyGraphManualLink(document, vehiclePayload.VehicleId);
+        ClearLegacyGraphDropHighlight();
+        e.Effects = DragDropEffects.Link;
+        e.Handled = true;
+    }
+
+    private void LegacyGraphVehicleNode_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement node ||
+            node.DataContext is not AbacusLegacyExportCandidateGraphVehicle vehicle)
+        {
+            return;
+        }
+
+        legacyGraphNodeDragVehicle = vehicle;
+        legacyGraphNodeDragStartPoint = e.GetPosition(this);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphVehicleNode_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (legacyGraphNodeDragVehicle is null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(this);
+        if (Math.Abs(currentPoint.X - legacyGraphNodeDragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(currentPoint.Y - legacyGraphNodeDragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var vehicle = legacyGraphNodeDragVehicle;
+        legacyGraphNodeDragVehicle = null;
+        var payload = new LegacyGraphVehicleNodeDragPayload(vehicle.VehicleId);
+        var data = new DataObject();
+        data.SetData(typeof(LegacyGraphVehicleNodeDragPayload), payload);
+        BeginLegacyGraphConnectionPreview(sender as FrameworkElement);
+        try
+        {
+            DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        }
+        finally
+        {
+            EndLegacyGraphConnectionPreview();
+            ClearLegacyGraphDropHighlight();
+        }
+
+        e.Handled = true;
+    }
+
+    private void LegacyGraphVehicleNode_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        legacyGraphNodeDragVehicle = null;
+        e.Handled = true;
+    }
+
     private static LegacyGraphDocumentDragPayload? GetLegacyGraphDocumentDragPayload(IDataObject data) =>
         data.GetData(typeof(LegacyGraphDocumentDragPayload)) as LegacyGraphDocumentDragPayload;
+
+    private static LegacyGraphVehicleNodeDragPayload? GetLegacyGraphVehicleNodeDragPayload(IDataObject data) =>
+        data.GetData(typeof(LegacyGraphVehicleNodeDragPayload)) as LegacyGraphVehicleNodeDragPayload;
 
     private void SetLegacyGraphDropHighlight(Grid target)
     {
@@ -3324,13 +3537,117 @@ public partial class MainWindow : Window
         var payload = new LegacyGraphDocumentDragPayload(document, "document-handle");
         var data = new DataObject();
         data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
-        DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        BeginLegacyGraphConnectionPreview(sender as FrameworkElement);
+        try
+        {
+            DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        }
+        finally
+        {
+            EndLegacyGraphConnectionPreview();
+            ClearLegacyGraphDropHighlight();
+        }
         e.Handled = true;
     }
 
     private void LegacyGraphDocumentHandle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         legacyGraphHandleDragDocument = null;
+        e.Handled = true;
+    }
+
+    private void BeginLegacyGraphConnectionPreview(FrameworkElement? source)
+    {
+        EndLegacyGraphConnectionPreview();
+        if (source is null)
+        {
+            return;
+        }
+
+        LegacyGraphEdgesCanvas.UpdateLayout();
+        var sourcePoint = source.TranslatePoint(
+            new Point(source.ActualWidth / 2, source.ActualHeight / 2),
+            LegacyGraphEdgesCanvas);
+        legacyGraphActiveConnectionSource = source;
+        source.GiveFeedback += LegacyGraphActiveConnection_GiveFeedback;
+        legacyGraphActiveConnectionLine = new Line
+        {
+            Stroke = ToBrush("#2563EB"),
+            StrokeThickness = 3,
+            StrokeDashArray = new DoubleCollection { 6, 4 },
+            Opacity = 0.9,
+            IsHitTestVisible = false,
+        };
+        legacyGraphActiveConnectionLine.X1 = sourcePoint.X;
+        legacyGraphActiveConnectionLine.Y1 = sourcePoint.Y;
+        legacyGraphActiveConnectionLine.X2 = sourcePoint.X;
+        legacyGraphActiveConnectionLine.Y2 = sourcePoint.Y;
+        LegacyGraphEdgesCanvas.Children.Add(legacyGraphActiveConnectionLine);
+        Panel.SetZIndex(legacyGraphActiveConnectionLine, 50);
+    }
+
+    private void UpdateLegacyGraphActiveConnectionLine(Point targetPoint)
+    {
+        if (legacyGraphActiveConnectionLine is null)
+        {
+            return;
+        }
+
+        legacyGraphActiveConnectionLine.X2 = targetPoint.X;
+        legacyGraphActiveConnectionLine.Y2 = targetPoint.Y;
+    }
+
+    private void EndLegacyGraphConnectionPreview()
+    {
+        if (legacyGraphActiveConnectionLine is not null)
+        {
+            LegacyGraphEdgesCanvas.Children.Remove(legacyGraphActiveConnectionLine);
+        }
+
+        if (legacyGraphActiveConnectionSource is not null)
+        {
+            legacyGraphActiveConnectionSource.GiveFeedback -= LegacyGraphActiveConnection_GiveFeedback;
+        }
+
+        legacyGraphActiveConnectionLine = null;
+        legacyGraphActiveConnectionSource = null;
+    }
+
+    private void LegacyGraphActiveConnection_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        if (legacyGraphActiveConnectionLine is not null)
+        {
+            UpdateLegacyGraphActiveConnectionLine(Mouse.GetPosition(LegacyGraphEdgesCanvas));
+        }
+
+        e.UseDefaultCursors = true;
+        e.Handled = true;
+    }
+
+    private void LegacyGraphCanvas_DragOver(object sender, DragEventArgs e)
+    {
+        if (legacyGraphActiveConnectionLine is not null)
+        {
+            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphEdgesCanvas));
+        }
+
+        if (GetLegacyGraphVehicleNodeDragPayload(e.Data) is not null ||
+            GetLegacyGraphDocumentDragPayload(e.Data) is not null)
+        {
+            e.Effects = DragDropEffects.Link;
+            e.Handled = true;
+        }
+    }
+
+    private void LegacyGraphCanvas_DragLeave(object sender, DragEventArgs e)
+    {
+        // 子要素への移動時に仮接続線を消さないため、ここでは状態を保持します。
+    }
+
+    private void LegacyGraphCanvas_Drop(object sender, DragEventArgs e)
+    {
+        ClearLegacyGraphDropHighlight();
+        e.Effects = DragDropEffects.None;
         e.Handled = true;
     }
 
@@ -3409,6 +3726,7 @@ public partial class MainWindow : Window
         {
             legacyGraphDocumentCardDragDocument = document;
             legacyGraphDocumentCardDragStartPoint = e.GetPosition(this);
+            legacyGraphDocumentCardDragSourceElement = documentElement;
             UpdateLegacyGraphInspector(document);
             e.Handled = true;
             return;
@@ -3417,6 +3735,7 @@ public partial class MainWindow : Window
         legacyGraphDraggingElement = element;
         UpdateLegacyGraphInspector(element is FrameworkElement frameworkElement ? frameworkElement.Tag : null);
         var position = e.GetPosition(LegacyGraphCanvas);
+        legacyGraphBlockDragStartPoint = position;
         legacyGraphDragOffset = new Point(
             position.X - Canvas.GetLeft(element),
             position.Y - Canvas.GetTop(element));
@@ -3443,7 +3762,16 @@ public partial class MainWindow : Window
                 var payload = new LegacyGraphDocumentDragPayload(document, "document-card");
                 var data = new DataObject();
                 data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
-                DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+                BeginLegacyGraphBlockVisualDrag(legacyGraphDocumentCardDragSourceElement);
+                try
+                {
+                    DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+                }
+                finally
+                {
+                    ClearLegacyGraphBlockVisualDrag();
+                    legacyGraphDocumentCardDragSourceElement = null;
+                }
                 e.Handled = true;
             }
 
@@ -3456,11 +3784,14 @@ public partial class MainWindow : Window
         }
 
         var position = e.GetPosition(LegacyGraphCanvas);
-        var left = Math.Max(0, position.X - legacyGraphDragOffset.X);
-        var top = Math.Max(0, position.Y - legacyGraphDragOffset.Y);
-        Canvas.SetLeft(legacyGraphDraggingElement, left);
-        Canvas.SetTop(legacyGraphDraggingElement, top);
-        UpdateLegacyGraphEdges();
+        if (legacyGraphBlockDragPreview is null &&
+            (Math.Abs(position.X - legacyGraphBlockDragStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+             Math.Abs(position.Y - legacyGraphBlockDragStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance))
+        {
+            BeginLegacyGraphBlockVisualDrag(legacyGraphDraggingElement as FrameworkElement);
+        }
+
+        UpdateLegacyGraphDragPreviewPosition(position);
         e.Handled = true;
     }
 
@@ -3472,14 +3803,79 @@ public partial class MainWindow : Window
         }
 
         legacyGraphDocumentCardDragDocument = null;
+        legacyGraphDocumentCardDragSourceElement = null;
 
         if (legacyGraphDraggingElement is not null)
         {
             legacyGraphDraggingElement.ReleaseMouseCapture();
             legacyGraphDraggingElement = null;
-            UpdateLegacyGraphEdges();
+            ClearLegacyGraphBlockVisualDrag();
             e.Handled = true;
         }
+    }
+
+    private void BeginLegacyGraphBlockVisualDrag(FrameworkElement? source)
+    {
+        if (source is null || legacyGraphBlockDragPreview is not null)
+        {
+            return;
+        }
+
+        var width = Math.Max(120, GetLegacyGraphElementWidth(source));
+        var height = Math.Max(58, GetLegacyGraphElementHeight(source));
+        legacyGraphBlockDragPreviewSource = source;
+        source.Opacity = 0.38;
+        legacyGraphBlockDragPreview = new Border
+        {
+            Width = width,
+            Height = height,
+            Background = new VisualBrush(source) { Opacity = 0.9 },
+            BorderBrush = ToBrush("#2563EB"),
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(7),
+            Opacity = 0.9,
+            IsHitTestVisible = false,
+        };
+        LegacyGraphDragPreviewCanvas.Width = LegacyGraphCanvas.Width;
+        LegacyGraphDragPreviewCanvas.Height = LegacyGraphCanvas.Height;
+        LegacyGraphDragPreviewCanvas.Children.Add(legacyGraphBlockDragPreview);
+        source.GiveFeedback += LegacyGraphBlockDragPreview_GiveFeedback;
+        Panel.SetZIndex(legacyGraphBlockDragPreview, 100);
+    }
+
+    private void UpdateLegacyGraphDragPreviewPosition(Point position)
+    {
+        if (legacyGraphBlockDragPreview is null)
+        {
+            return;
+        }
+
+        Canvas.SetLeft(legacyGraphBlockDragPreview, Math.Max(0, position.X - legacyGraphDragOffset.X));
+        Canvas.SetTop(legacyGraphBlockDragPreview, Math.Max(0, position.Y - legacyGraphDragOffset.Y));
+    }
+
+    private void LegacyGraphBlockDragPreview_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        UpdateLegacyGraphDragPreviewPosition(Mouse.GetPosition(LegacyGraphDragPreviewCanvas));
+        e.UseDefaultCursors = true;
+        e.Handled = true;
+    }
+
+    private void ClearLegacyGraphBlockVisualDrag()
+    {
+        if (legacyGraphBlockDragPreviewSource is not null)
+        {
+            legacyGraphBlockDragPreviewSource.GiveFeedback -= LegacyGraphBlockDragPreview_GiveFeedback;
+            legacyGraphBlockDragPreviewSource.Opacity = 1;
+        }
+
+        if (legacyGraphBlockDragPreview is not null)
+        {
+            LegacyGraphDragPreviewCanvas.Children.Remove(legacyGraphBlockDragPreview);
+        }
+
+        legacyGraphBlockDragPreview = null;
+        legacyGraphBlockDragPreviewSource = null;
     }
 
     private void ResetLegacyCandidateGraph(string status)
@@ -3501,6 +3897,8 @@ public partial class MainWindow : Window
         legacyGraphTrayDragDocument = null;
         legacyGraphHandleDragDocument = null;
         legacyGraphDocumentCardDragDocument = null;
+        legacyGraphDocumentCardDragSourceElement = null;
+        legacyGraphNodeDragVehicle = null;
         legacyGraphCustomerDragSource = null;
         ClearLegacyGraphCustomerDropHighlight();
         ClearLegacyGraphCustomerUngroupDropHighlight();
@@ -3510,6 +3908,8 @@ public partial class MainWindow : Window
         LegacyGraphScrollViewer.ReleaseMouseCapture();
         LegacyGraphInspectorScrollViewer.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
+        ClearLegacyGraphBlockVisualDrag();
+        EndLegacyGraphConnectionPreview();
         legacyGraphEdges.Clear();
         LegacyGraphCustomersList.ItemsSource = null;
         LegacyGraphUnresolvedVehicleList.ItemsSource = null;
@@ -3517,6 +3917,7 @@ public partial class MainWindow : Window
         LegacyGraphUnresolvedMaintenanceList.ItemsSource = null;
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
+        LegacyGraphDragPreviewCanvas.Children.Clear();
         LegacyGraphInspectorTitleText.Text = "顧客を選択してください";
         LegacyGraphInspectorStateText.Text = "";
         LegacyGraphInspectorStateBorder.Background = ToBrush("#F4F7FB");
@@ -5471,6 +5872,8 @@ public partial class MainWindow : Window
     private sealed record LegacyGraphDocumentDragPayload(
         AbacusLegacyExportCandidateGraphDocument Document,
         string SourceKind);
+
+    private sealed record LegacyGraphVehicleNodeDragPayload(string VehicleId);
 
     private sealed record LegacyGraphCustomerDragPayload(string CustomerId);
 

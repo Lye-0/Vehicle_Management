@@ -946,7 +946,7 @@
                                    Text="候補パッケージを再検証すると、ここにグラフを表示します。" />
                         <Border Margin="0,10,0,0" Padding="12" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
-                                       Text="車両右側の●と書類左側の●が接続ノードです。書類カードを車両へドラッグして接続し、切断ボタンで一時的に未接続にできます。" />
+                                       Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。" />
                         </Border>
                         <Grid Margin="0,14,0,0" Height="820">
                             <Grid.ColumnDefinitions>
@@ -960,7 +960,16 @@
                                     BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補グループは黄色、プレビュー保存済みは薄い青、承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
+                                    <Border x:Name="LegacyGraphCustomerUngroupDropZone" Margin="0,8,0,0" Padding="8"
+                                            Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
+                                            CornerRadius="5" AllowDrop="True" Visibility="Collapsed"
+                                            DragOver="LegacyGraphCustomerUngroupDropZone_DragOver"
+                                            DragLeave="LegacyGraphCustomerUngroupDropZone_DragLeave"
+                                            Drop="LegacyGraphCustomerUngroupDropZone_Drop">
+                                        <TextBlock Foreground="#9A3412" FontSize="11" TextWrapping="Wrap"
+                                                   Text="統合候補から外すには、顧客ブロックをここへドラッグ" />
+                                    </Border>
                                     <ListBox x:Name="LegacyGraphCustomersList" Margin="0,8,0,0" Height="685"
                                              Padding="0,0,14,0"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1009,15 +1018,6 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
-                                    <Border x:Name="LegacyGraphCustomerUngroupDropZone" Margin="0,8,0,0" Padding="8"
-                                            Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
-                                            CornerRadius="5" AllowDrop="True"
-                                            DragOver="LegacyGraphCustomerUngroupDropZone_DragOver"
-                                            DragLeave="LegacyGraphCustomerUngroupDropZone_DragLeave"
-                                            Drop="LegacyGraphCustomerUngroupDropZone_Drop">
-                                        <TextBlock Foreground="#9A3412" FontSize="11" TextWrapping="Wrap"
-                                                   Text="統合候補から外すには、顧客ブロックをここへドラッグ" />
-                                    </Border>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
@@ -1033,10 +1033,16 @@
                                         <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
                                             <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
                                                 IsHitTestVisible="False" />
-                                        <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720"
+                                            <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720"
+                                                AllowDrop="True"
                                                 PreviewMouseLeftButtonDown="LegacyGraphCanvas_PreviewMouseLeftButtonDown"
                                                 PreviewMouseMove="LegacyGraphCanvas_PreviewMouseMove"
-                                                PreviewMouseLeftButtonUp="LegacyGraphCanvas_PreviewMouseLeftButtonUp" />
+                                                PreviewMouseLeftButtonUp="LegacyGraphCanvas_PreviewMouseLeftButtonUp"
+                                                DragOver="LegacyGraphCanvas_DragOver"
+                                                DragLeave="LegacyGraphCanvas_DragLeave"
+                                                Drop="LegacyGraphCanvas_Drop" />
+                                            <Canvas x:Name="LegacyGraphDragPreviewCanvas" Width="1120" Height="720"
+                                                    IsHitTestVisible="False" Panel.ZIndex="20" />
                                     </Grid>
                                 </ScrollViewer>
                             </Border>
