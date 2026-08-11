@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportReader legacyExportReader = new();
     private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
+    private readonly AbacusLegacyExportPreviewPackageReader legacyExportPackageReader = new();
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
@@ -370,6 +371,11 @@ public partial class MainWindow : Window
             LegacyExportPreviewGrid.ItemsSource = null;
             LegacyExportPreviewStatusText.Text = "未作成";
             LegacyExportPreviewResultText.Text = "";
+            LegacyExportPackagePathTextBox.Text = "";
+            ReadLegacyExportPackageButton.IsEnabled = false;
+            LegacyExportPackageStatusText.Text = "未読込";
+            LegacyExportPackageResultText.Text = "";
+            LegacyExportPackageRowsGrid.ItemsSource = null;
         }
     }
 
@@ -456,6 +462,12 @@ public partial class MainWindow : Window
         InspectLegacyExportsButton.IsEnabled = false;
         LegacyExportPathTextBox.IsEnabled = false;
         LegacyExportPreviewGrid.ItemsSource = null;
+        LegacyExportPackagePathTextBox.Text = "";
+        ReadLegacyExportPackageButton.IsEnabled = false;
+        SelectLegacyExportPackageFolderButton.IsEnabled = false;
+        LegacyExportPackageStatusText.Text = "未読込";
+        LegacyExportPackageResultText.Text = "";
+        LegacyExportPackageRowsGrid.ItemsSource = null;
         LegacyExportPreviewStatusText.Text = "固定列CSVを再検証し、登録前候補CSVを作成しています…";
         LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         LegacyExportPreviewResultText.Text = "";
@@ -473,6 +485,10 @@ public partial class MainWindow : Window
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / 販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
                 $"顧客名空欄で無視: {result.SkippedBlankCustomerRows:N0}行 / 整備書類の車両未確定で除外: {result.SkippedMaintenanceWithoutVehicleRows:N0}行 / 要確認の車両紐付け: {result.AmbiguousVehicleRows:N0}行\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
+            LegacyExportPackagePathTextBox.Text = result.PackagePath;
+            ReadLegacyExportPackageButton.IsEnabled = true;
+            LegacyExportPackageStatusText.Text = "候補パッケージを読み込んで再検証できます。";
+            LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#1E40AF")!;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
@@ -485,6 +501,81 @@ public partial class MainWindow : Window
             InspectLegacyExportsButton.IsEnabled = true;
             LegacyExportPathTextBox.IsEnabled = true;
             CreateLegacyExportPreviewButton.IsEnabled = false;
+            SelectLegacyExportPackageFolderButton.IsEnabled = true;
+        }
+    }
+
+    private void SelectLegacyExportPackageFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "ABACUS登録前候補パッケージを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        LegacyExportPackagePathTextBox.Text = dialog.FolderName;
+        ReadLegacyExportPackageButton.IsEnabled = true;
+        LegacyExportPackageStatusText.Text = "候補パッケージを選択しました。再検証を実行してください。";
+        LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        LegacyExportPackageResultText.Text = "";
+        LegacyExportPackageRowsGrid.ItemsSource = null;
+    }
+
+    private async void ReadLegacyExportPackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var packagePath = LegacyExportPackagePathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            MessageBox.Show(this, "登録前候補パッケージを選択してください。", "候補未選択");
+            return;
+        }
+
+        ReadLegacyExportPackageButton.IsEnabled = false;
+        SelectLegacyExportPackageFolderButton.IsEnabled = false;
+        LegacyExportPackagePathTextBox.IsEnabled = false;
+        LegacyExportPackageRowsGrid.ItemsSource = null;
+        LegacyExportPackageResultText.Text = "";
+        LegacyExportPackageStatusText.Text = "マニフェストと候補CSVを再検証しています…";
+        LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await legacyExportPackageReader.ReadAsync(packagePath);
+            LegacyExportPackageRowsGrid.ItemsSource = result.Rows;
+            var statusSummary = result.Rows
+                .GroupBy(row => row.MatchStatus, StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => $"{group.Key}:{group.Count():N0}");
+            var warningSummary = result.Warnings.Count == 0
+                ? "なし"
+                : string.Join(" / ", result.Warnings.Take(3));
+            LegacyExportPackageStatusText.Text =
+                "候補パッケージの再検証に合格しました。登録・API送信・画像アップロードは行っていません。";
+            LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            LegacyExportPackageResultText.Text =
+                $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / 販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
+                $"顧客名空欄で無視: {result.SkippedBlankCustomerRows:N0}行 / 整備書類の車両未確定で除外: {result.SkippedMaintenanceWithoutVehicleRows:N0}行 / 要確認の車両紐付け: {result.AmbiguousVehicleRows:N0}行\n" +
+                $"表示行の判定: {string.Join(" / ", statusSummary)}\n" +
+                $"CSV: {string.Join(" / ", result.DataFiles.Select(file => $"{file.FileName} {file.SizeBytes:N0} bytes"))}\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}\n" +
+                $"警告: {warningSummary}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            LegacyExportPackageRowsGrid.ItemsSource = null;
+            LegacyExportPackageStatusText.Text = $"候補パッケージの再検証に失敗しました: {exception.Message}";
+            LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            LegacyExportPackageResultText.Text = "ハッシュ、見出し、列数、行数のいずれかが一致しない可能性があります。元の候補パッケージを変更せず、再作成してください。";
+        }
+        finally
+        {
+            ReadLegacyExportPackageButton.IsEnabled = true;
+            SelectLegacyExportPackageFolderButton.IsEnabled = true;
+            LegacyExportPackagePathTextBox.IsEnabled = true;
         }
     }
 

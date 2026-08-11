@@ -384,6 +384,23 @@ public partial class App : Application
             var legacyPreviewVehiclesText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "vehicles.csv"));
             var legacyPreviewSalesText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "sales.csv"));
             var legacyPreviewMaintenanceText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "maintenance.csv"));
+            var legacyPackageRead = await new AbacusLegacyExportPreviewPackageReader().ReadAsync(legacyPreview.PackagePath);
+            var tamperedLegacyPackagePath = Path.Combine(testRoot, "legacy-preview-tampered");
+            Directory.CreateDirectory(tamperedLegacyPackagePath);
+            foreach (var packageFile in Directory.EnumerateFiles(legacyPreview.PackagePath))
+            {
+                File.Copy(packageFile, Path.Combine(tamperedLegacyPackagePath, Path.GetFileName(packageFile)));
+            }
+            await File.AppendAllTextAsync(Path.Combine(tamperedLegacyPackagePath, "vehicles.csv"), "tampered");
+            var rejectedLegacyPackageTamper = false;
+            try
+            {
+                await new AbacusLegacyExportPreviewPackageReader().ReadAsync(tamperedLegacyPackagePath);
+            }
+            catch (InvalidDataException)
+            {
+                rejectedLegacyPackageTamper = true;
+            }
             var matchingExportFolder = Path.Combine(testRoot, "matching-export");
             Directory.CreateDirectory(matchingExportFolder);
             File.Copy(
@@ -624,6 +641,14 @@ public partial class App : Application
                 legacyPreviewVehiclesText.Contains("CHASSIS1", StringComparison.Ordinal) &&
                 legacyPreviewSalesText.Contains("S-1", StringComparison.Ordinal) &&
                 legacyPreviewMaintenanceText.Contains("M-1", StringComparison.Ordinal) &&
+                legacyPackageRead.ManifestSha256 == legacyPreview.ManifestSha256 &&
+                legacyPackageRead.CustomerRowCount == legacyPreview.CustomerRowCount &&
+                legacyPackageRead.VehicleRowCount == legacyPreview.VehicleRowCount &&
+                legacyPackageRead.SalesRowCount == legacyPreview.SalesRowCount &&
+                legacyPackageRead.MaintenanceRowCount == legacyPreview.MaintenanceRowCount &&
+                legacyPackageRead.DataFiles.Count == 4 &&
+                legacyPackageRead.Rows.Count == legacyPreview.PreviewRows.Count &&
+                rejectedLegacyPackageTamper &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
             return selfTestPassed;
