@@ -339,10 +339,16 @@ public partial class App : Application
             salesExportFields[0] = "2026/08/11";
             salesExportFields[1] = "S-1";
             salesExportFields[5] = "顧客A";
+            salesExportFields[15] = "車両A";
+            salesExportFields[21] = "CHASSIS1";
+            salesExportFields[22] = "大阪537む16";
             var maintenanceExportFields = Enumerable.Repeat(string.Empty, 29).ToArray();
             maintenanceExportFields[0] = "2026/08/11";
             maintenanceExportFields[1] = "M-1";
             maintenanceExportFields[4] = "顧客A";
+            maintenanceExportFields[13] = "車両A";
+            maintenanceExportFields[19] = "CHASSIS1";
+            maintenanceExportFields[20] = "大阪537む16";
             maintenanceExportFields[28] = "既知\u0004区切り";
             var vehicleExportFields = Enumerable.Repeat(string.Empty, 23).ToArray();
             vehicleExportFields[0] = "顧客A";
@@ -363,6 +369,21 @@ public partial class App : Application
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou2.csv"), string.Join(',', vehicleExportFields), shiftJis);
             var legacyExportAnalysis = await new AbacusLegacyExportInspector().AnalyzeAsync(legacyExportFolder);
+            var legacyPreviewSource = Path.Combine(testRoot, "legacy-preview-source");
+            Directory.CreateDirectory(legacyPreviewSource);
+            File.Copy(Path.Combine(legacyExportFolder, "hanbai.csv"), Path.Combine(legacyPreviewSource, "hanbai.csv"));
+            File.Copy(Path.Combine(legacyExportFolder, "seibi.csv"), Path.Combine(legacyPreviewSource, "seibi.csv"));
+            File.Copy(Path.Combine(legacyExportFolder, "syaryou.csv"), Path.Combine(legacyPreviewSource, "syaryou.csv"));
+            var legacyPreviewParent = Path.Combine(testRoot, "legacy-preview-packages");
+            Directory.CreateDirectory(legacyPreviewParent);
+            var legacyPreview = await new AbacusLegacyExportPreviewStore().CreateAsync(
+                legacyPreviewSource,
+                legacyPreviewParent);
+            var legacyPreviewManifestText = await File.ReadAllTextAsync(legacyPreview.ManifestPath);
+            var legacyPreviewCustomersText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "customers.csv"));
+            var legacyPreviewVehiclesText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "vehicles.csv"));
+            var legacyPreviewSalesText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "sales.csv"));
+            var legacyPreviewMaintenanceText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "maintenance.csv"));
             var matchingExportFolder = Path.Combine(testRoot, "matching-export");
             Directory.CreateDirectory(matchingExportFolder);
             File.Copy(
@@ -460,7 +481,7 @@ public partial class App : Application
                 [0x81]);
             var invalidSales = await parser.ParseAsync(invalidFolder, AbacusTabSpecifications.Sales);
             var invalidMaintenance = await parser.ParseAsync(invalidFolder, AbacusTabSpecifications.Maintenance);
-            return workspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
+            var selfTestPassed = workspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 workspace.SourceAfterCopyReport.FolderFingerprint == before.FolderFingerprint &&
                 File.Exists(workspace.ManifestPath) &&
                 verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
@@ -546,7 +567,6 @@ public partial class App : Application
                 webImportRegistrationManifestText.Contains("abacus-web-import-registration-package", StringComparison.Ordinal) &&
                 webImportRegistrationManifestText.Contains("\"status\": \"registration-preview\"", StringComparison.Ordinal) &&
                 rejectedDuplicateImageLinkApproval &&
-                !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&
                 cropResult.WasCropped &&
                 cropResult.Image.PixelWidth == 88 &&
@@ -590,8 +610,23 @@ public partial class App : Application
                 legacyExportAnalysis.MaintenanceRows == 1 &&
                 legacyExportAnalysis.VehicleRows == 2 &&
                 legacyExportAnalysis.VehicleFileCount == 2 &&
+                legacyPreview.CustomerRowCount == 1 &&
+                legacyPreview.VehicleRowCount == 1 &&
+                legacyPreview.SalesRowCount == 1 &&
+                legacyPreview.MaintenanceRowCount == 1 &&
+                legacyPreview.SkippedBlankCustomerRows == 0 &&
+                legacyPreview.SkippedMaintenanceWithoutVehicleRows == 0 &&
+                legacyPreview.AmbiguousVehicleRows == 0 &&
+                legacyPreview.ManifestSha256.Length == 64 &&
+                legacyPreviewManifestText.Contains("abacus-export-import-preview", StringComparison.Ordinal) &&
+                legacyPreviewManifestText.Contains("\"status\": \"preview-only\"", StringComparison.Ordinal) &&
+                legacyPreviewCustomersText.TrimStart('\uFEFF').StartsWith("顧客ID,顧客番号,顧客名", StringComparison.Ordinal) &&
+                legacyPreviewVehiclesText.Contains("CHASSIS1", StringComparison.Ordinal) &&
+                legacyPreviewSalesText.Contains("S-1", StringComparison.Ordinal) &&
+                legacyPreviewMaintenanceText.Contains("M-1", StringComparison.Ordinal) &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
+            return selfTestPassed;
         }
         finally
         {

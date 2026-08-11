@@ -2,9 +2,38 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using VehicleManagement.AbacusImport;
 
+if (args.Length == 2 && args[0].Equals("--legacy-export", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusLegacyExportReader().ReadAsync(args[1]);
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        result.FolderPath,
+        result.IsValid,
+        Files = result.Files.Select(file => new
+        {
+            file.FileName,
+            file.Kind,
+            file.ExpectedColumns,
+            file.TotalRows,
+            file.ValidRows,
+            file.BlankRequiredRows,
+            file.InvalidDateRows,
+            file.Errors,
+            Columns = file.FirstRowSamples,
+        }),
+        result.Errors,
+    }, new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return result.IsValid ? 0 : 1;
+}
+
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: VehicleManagement.AbacusImport.Cli <ABACUS folder>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --legacy-export <CSV folder>");
     return 2;
 }
 

@@ -831,10 +831,50 @@
                                 <DataGridCheckBoxColumn Header="合格" Binding="{Binding IsValid, Mode=OneWay}" Width="65" />
                             </DataGrid.Columns>
                         </DataGrid>
+                        <TextBlock Margin="0,16,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="先頭データ行の列サンプル（0始まり）" />
+                        <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="ファイルごとに先頭の正常行だけを表示します。値の確認用であり、この表からCSVやABACUSを書き換えることはありません。" />
+                        <DataGrid x:Name="LegacyExportColumnsGrid" Height="270" Margin="0,0,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="ファイル" Binding="{Binding FileName}" Width="1.4*" />
+                                <DataGridTextColumn Header="CSV行" Binding="{Binding RowNumber}" Width="65" />
+                                <DataGridTextColumn Header="列番号" Binding="{Binding ColumnIndex}" Width="75" />
+                                <DataGridTextColumn Header="値" Binding="{Binding Value}" Width="4*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
                         <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="TransformationReadinessText" Foreground="#805B10"
                                        TextWrapping="Wrap" LineHeight="24" />
                         </Border>
+
+                        <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="固定列CSVから登録前候補を作成" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="診断に合格した販売・整備・車両一覧CSVを、既存Webインポート形式の顧客・車両・書類候補へ変換します。顧客名空欄行は無視し、車両識別子が一意に一致しない整備書類は除外します。金額の税・明細は未確定として明示します。" />
+                        <Button x:Name="CreateLegacyExportPreviewButton" HorizontalAlignment="Left"
+                                Content="保存先を選んで登録前候補を作成" IsEnabled="False"
+                                Click="CreateLegacyExportPreviewButton_Click" />
+                        <TextBlock x:Name="LegacyExportPreviewStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                   Text="未作成" TextWrapping="Wrap" />
+                        <Border Margin="0,12,0,0" Padding="14" Background="#F4F7FB" CornerRadius="8">
+                            <TextBlock x:Name="LegacyExportPreviewResultText" Foreground="#36465A"
+                                       LineHeight="24" TextWrapping="Wrap" />
+                        </Border>
+                        <DataGrid x:Name="LegacyExportPreviewGrid" Height="280" Margin="0,14,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="種類" Binding="{Binding Kind}" Width="85" />
+                                <DataGridTextColumn Header="出典" Binding="{Binding SourceFileName}" Width="1.1*" />
+                                <DataGridTextColumn Header="行" Binding="{Binding SourceRowNumber}" Width="55" />
+                                <DataGridTextColumn Header="顧客名" Binding="{Binding CustomerName}" Width="1.4*" />
+                                <DataGridTextColumn Header="車名" Binding="{Binding VehicleName}" Width="1.5*" />
+                                <DataGridTextColumn Header="書類番号" Binding="{Binding DocumentNumber}" Width="95" />
+                                <DataGridTextColumn Header="判定" Binding="{Binding MatchStatus}" Width="80" />
+                                <DataGridTextColumn Header="理由" Binding="{Binding Warning}" Width="3*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
 
                         <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6C. 全車両一覧エクスポート導線の診断" />

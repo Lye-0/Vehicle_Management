@@ -127,10 +127,20 @@ Gate 6Aでは、利用者が選択した通常フォルダーへ`ABACUS-Migratio
 
 Gate 6Bでは、ABACUSが出力する見出しなし固定列CSVを読み取り専用で診断します。販売は33列、整備は29列、車両一覧は23列として扱い、Shift-JISの不正バイト、引用符、列数、5MB・5,000行の上限、フィールド長、制御文字、主要な必須値を検証します。`syaryou.csv`と`syaryou2.csv`が同時に存在する場合、同一車両の重複可能性があるため自動結合しません。この段階では登録用データを出力しません。
 
+Gate 6Bの診断画面では、各CSVの先頭データ行を0始まりの列番号付きで表示します。金額・明細・日付の位置を人が確認した後、車両一覧が1ファイルだけで診断に合格した場合に限り、「固定列CSVから登録前候補を作成」を実行できます。作成先には`ABACUS-Export-Import-Preview-*`を新規作成し、`customers.csv`、`vehicles.csv`、`sales.csv`、`maintenance.csv`、`manifest.json`を保存します。これは既存Webインポート形式に合わせた読み取り専用の候補であり、Web API、D1、Object Storage、画像アップロード、ABACUS原本への書き込みは行いません。
+
+候補化では、車両一覧の各行を独立した車両候補として扱います。顧客名だけでは統合せず、住所がある場合は顧客名と住所を候補キーに含め、住所のない行には出典ファイル名と行番号を含めます。書類の車台番号・登録番号が車両一覧の1行に一致し、顧客名（および双方に住所がある場合の住所）も矛盾しない場合だけ車両へ仮紐付けします。複数候補、識別子競合、顧客情報の不一致は「要確認」として自動紐付けを保留し、整備書類は車両が一意に確定しない行を候補CSVから除外します。顧客名が空欄の行はエラーにせず無視し、除外件数を画面とマニフェストへ記録します。販売・整備の税額と明細列は、ABACUSの確定位置を別途確認するまで未確定として警告を残します。
+
 GUIを使わず、個人情報を出力せずに集計だけを確認する場合は次を使用します。
 
 ```powershell
 dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- "<ABACUSフォルダー>"
+```
+
+固定列CSVの診断結果と先頭データ行の列サンプルを確認する場合は、次を使用します。出力はローカルの端末に表示するだけで、CSVやABACUSフォルダーは変更しません。
+
+```powershell
+dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- --legacy-export "<ABACUSのCSVフォルダー>"
 ```
 
 ## ビルドと起動

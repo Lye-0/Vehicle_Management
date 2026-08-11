@@ -24,7 +24,8 @@ public partial class MainWindow : Window
     private readonly AbacusCaptureCropper captureCropper = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
-    private readonly AbacusLegacyExportInspector legacyExportInspector = new();
+    private readonly AbacusLegacyExportReader legacyExportReader = new();
+    private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
@@ -363,7 +364,12 @@ public partial class MainWindow : Window
             LegacyExportPathTextBox.Text = dialog.FolderName;
             LegacyExportStatusText.Text = "未診断";
             LegacyExportFilesGrid.ItemsSource = null;
+            LegacyExportColumnsGrid.ItemsSource = null;
             TransformationReadinessText.Text = "";
+            CreateLegacyExportPreviewButton.IsEnabled = false;
+            LegacyExportPreviewGrid.ItemsSource = null;
+            LegacyExportPreviewStatusText.Text = "未作成";
+            LegacyExportPreviewResultText.Text = "";
         }
     }
 
@@ -380,11 +386,23 @@ public partial class MainWindow : Window
         LegacyExportStatusText.Text = "固定列CSVをShift-JISとして厳格に診断しています…";
         try
         {
-            var result = await legacyExportInspector.AnalyzeAsync(LegacyExportPathTextBox.Text.Trim());
-            LegacyExportFilesGrid.ItemsSource = result.Files;
-            var errors = result.Files.Sum(file => file.Errors.Count);
+            var result = await legacyExportReader.ReadAsync(LegacyExportPathTextBox.Text.Trim());
+            var fileAnalyses = result.Files
+                .Select(file => new AbacusLegacyExportFileAnalysis(
+                    file.FileName,
+                    file.Kind,
+                    file.ExpectedColumns,
+                    file.TotalRows,
+                    file.ValidRows,
+                    file.BlankRequiredRows,
+                    file.InvalidDateRows,
+                    file.Errors))
+                .ToArray();
+            LegacyExportFilesGrid.ItemsSource = fileAnalyses;
+            LegacyExportColumnsGrid.ItemsSource = result.FirstRowSamples;
+            var errors = result.Errors.Count + result.Files.Sum(file => file.InvalidDateRows);
             LegacyExportStatusText.Text = result.IsValid
-                ? "固定列形式の診断に合格しました。CSVへの書き込みは行っていません。"
+                ? "固定列形式の診断に合格しました。先頭行の列サンプルを表示しています。CSVへの書き込みは行っていません。"
                 : $"構造エラーが{errors:N0}件あります。変換には使用できません。";
             LegacyExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(result.IsValid ? "#17643A" : "#A61B1B")!;
             var vehicleDecision = result.VehicleFileCount switch
@@ -396,7 +414,8 @@ public partial class MainWindow : Window
             TransformationReadinessText.Text =
                 $"販売CSV: {result.SalesRows:N0}行 / 整備CSV: {result.MaintenanceRows:N0}行 / 車両CSV: {result.VehicleRows:N0}行\n" +
                 $"{vehicleDecision}\n" +
-                "顧客・車両の基本列位置は確定しました。書類の金額・明細と、全車両一覧の取得方法を確定するまで登録用データは出力しません。";
+                "下の列サンプルで金額・明細・日付の位置を確認してから、登録用データの候補化へ進みます。車両一覧が1ファイルで診断に合格した場合だけ、下の候補作成ボタンを押せます。現段階では登録用データを出力しません。";
+            CreateLegacyExportPreviewButton.IsEnabled = result.IsValid && result.VehicleFileCount == 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
@@ -404,12 +423,68 @@ public partial class MainWindow : Window
             LegacyExportStatusText.Text = $"固定列CSVを診断できません: {exception.Message}";
             LegacyExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             LegacyExportFilesGrid.ItemsSource = null;
+            LegacyExportColumnsGrid.ItemsSource = null;
             TransformationReadinessText.Text = "";
+            CreateLegacyExportPreviewButton.IsEnabled = false;
         }
         finally
         {
             InspectLegacyExportsButton.IsEnabled = true;
             LegacyExportPathTextBox.IsEnabled = true;
+        }
+    }
+
+    private async void CreateLegacyExportPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text))
+        {
+            MessageBox.Show(this, "先にABACUSエクスポートフォルダーを指定してください。", "フォルダー未選択");
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "登録前候補CSVの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        CreateLegacyExportPreviewButton.IsEnabled = false;
+        InspectLegacyExportsButton.IsEnabled = false;
+        LegacyExportPathTextBox.IsEnabled = false;
+        LegacyExportPreviewGrid.ItemsSource = null;
+        LegacyExportPreviewStatusText.Text = "固定列CSVを再検証し、登録前候補CSVを作成しています…";
+        LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        LegacyExportPreviewResultText.Text = "";
+        try
+        {
+            var result = await legacyExportPreviewStore.CreateAsync(
+                LegacyExportPathTextBox.Text.Trim(),
+                dialog.FolderName);
+            LegacyExportPreviewGrid.ItemsSource = result.PreviewRows;
+            LegacyExportPreviewStatusText.Text = "登録前候補CSVを作成し、作成後の再読込検証に合格しました。登録・API送信・画像アップロードは行っていません。";
+            LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            LegacyExportPreviewResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"マニフェスト: {result.ManifestPath}\n" +
+                $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / 販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
+                $"顧客名空欄で無視: {result.SkippedBlankCustomerRows:N0}行 / 整備書類の車両未確定で除外: {result.SkippedMaintenanceWithoutVehicleRows:N0}行 / 要確認の車両紐付け: {result.AmbiguousVehicleRows:N0}行\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            LegacyExportPreviewStatusText.Text = $"登録前候補CSVを作成できません: {exception.Message}";
+            LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            InspectLegacyExportsButton.IsEnabled = true;
+            LegacyExportPathTextBox.IsEnabled = true;
+            CreateLegacyExportPreviewButton.IsEnabled = false;
         }
     }
 
