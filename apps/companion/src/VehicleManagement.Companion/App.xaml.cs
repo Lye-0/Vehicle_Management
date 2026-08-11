@@ -654,6 +654,8 @@ public partial class App : Application
                 legacyCandidateGraph.Customers[0].Documents == 2 &&
                 legacyCandidateGraph.AllDocuments.Count == 2 &&
                 legacyCandidateGraph.UnresolvedDocuments.Count == 0 &&
+                legacyCandidateGraph.UnresolvedVehicleRows.Count == 0 &&
+                legacyCandidateGraph.AllDocuments.All(document => !string.IsNullOrWhiteSpace(document.DocumentDate)) &&
                 legacyCandidateGraph.SolidLinkCount == 2 &&
                 legacyCandidateGraph.ReviewLinkCount == 0 &&
                 legacyCandidateGraph.UnmatchedDocumentCount == 0 &&

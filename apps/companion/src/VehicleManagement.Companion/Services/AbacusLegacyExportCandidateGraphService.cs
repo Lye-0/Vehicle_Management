@@ -13,6 +13,8 @@ public sealed record AbacusLegacyExportCandidateGraphDocument(
     string CustomerName,
     string VehicleName,
     string RegistrationNumber,
+    string DocumentDate,
+    string TotalAmount,
     string MatchStatus,
     string Warning,
     string? LinkedVehicleId,
@@ -40,6 +42,9 @@ public sealed record AbacusLegacyExportCandidateGraphVehicle(
     string CustomerName,
     string Maker,
     string VehicleName,
+    string ModelYear,
+    string InspectionDate,
+    string Mileage,
     string RegistrationNumber,
     string ChassisNumber,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> Documents)
@@ -53,7 +58,14 @@ public sealed record AbacusLegacyExportCandidateGraphVehicle(
 
 public sealed record AbacusLegacyExportCandidateGraphCustomer(
     string CustomerId,
+    string CustomerNumber,
     string CustomerName,
+    string NameKana,
+    string PhoneNumber,
+    string EmailAddress,
+    string PostalCode,
+    string Address,
+    string Memo,
     IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> Vehicles,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> UnresolvedDocuments)
 {
@@ -70,6 +82,7 @@ public sealed record AbacusLegacyExportCandidateGraphResult(
     IReadOnlyList<AbacusLegacyExportCandidateGraphCustomer> Customers,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> AllDocuments,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> UnresolvedDocuments,
+    IReadOnlyList<AbacusLegacyExportPreviewRow> UnresolvedVehicleRows,
     int SolidLinkCount,
     int ReviewLinkCount,
     int UnmatchedDocumentCount,
@@ -126,7 +139,14 @@ public sealed class AbacusLegacyExportCandidateGraphService
 
             customers.Add(customerId, new CustomerBuilder(
                 customerId,
+                Value(row.Fields, 1),
                 Value(row.Fields, 2),
+                Value(row.Fields, 3),
+                Value(row.Fields, 4),
+                Value(row.Fields, 5),
+                Value(row.Fields, 6),
+                Value(row.Fields, 7),
+                Value(row.Fields, 8),
                 new List<VehicleBuilder>(),
                 new List<AbacusLegacyExportCandidateGraphDocument>()));
         }
@@ -153,6 +173,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 customer.DisplayName,
                 Value(row.Fields, 3),
                 Value(row.Fields, 4),
+                Value(row.Fields, 8),
+                Value(row.Fields, 9),
+                Value(row.Fields, 10),
                 Value(row.Fields, 6),
                 Value(row.Fields, 7),
                 new List<AbacusLegacyExportCandidateGraphDocument>());
@@ -177,6 +200,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 4,
                 5,
                 6,
+                7,
+                12,
                 Value(row.Fields, 14),
                 vehicles,
                 customers,
@@ -193,6 +218,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 5,
                 6,
                 7,
+                8,
+                14,
                 Value(row.Fields, 16),
                 vehicles,
                 customers,
@@ -221,6 +248,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 manifestRow.CustomerName,
                 manifestRow.VehicleName,
                 "",
+                "",
+                "",
                 manifestRow.MatchStatus,
                 manifestRow.Warning,
                 null,
@@ -241,7 +270,14 @@ public sealed class AbacusLegacyExportCandidateGraphService
             .OrderBy(customer => customer.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(customer => new AbacusLegacyExportCandidateGraphCustomer(
                 customer.CustomerId,
+                customer.CustomerNumber,
                 customer.DisplayName,
+                customer.NameKana,
+                customer.PhoneNumber,
+                customer.EmailAddress,
+                customer.PostalCode,
+                customer.Address,
+                customer.Memo,
                 customer.Vehicles
                     .OrderBy(vehicle => vehicle.DisplayName, StringComparer.OrdinalIgnoreCase)
                     .Select(vehicle => new AbacusLegacyExportCandidateGraphVehicle(
@@ -250,6 +286,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
                         vehicle.CustomerName,
                         vehicle.Maker,
                         vehicle.VehicleName,
+                        vehicle.ModelYear,
+                        vehicle.InspectionDate,
+                        vehicle.Mileage,
                         vehicle.RegistrationNumber,
                         vehicle.ChassisNumber,
                         vehicle.Documents.ToArray()))
@@ -272,6 +311,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
             customerResults,
             documents,
             unresolved,
+            package.Rows
+                .Where(row => row.Kind == "車両一覧" && row.MatchStatus != "候補")
+                .ToArray(),
             solidLinkCount,
             reviewLinkCount,
             unmatchedCount,
@@ -284,6 +326,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
         int customerNameIndex,
         int vehicleNameIndex,
         int registrationIndex,
+        int documentDateIndex,
+        int totalAmountIndex,
         string memo,
         IReadOnlyDictionary<string, VehicleBuilder> vehicles,
         IReadOnlyDictionary<string, CustomerBuilder> customers,
@@ -327,6 +371,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
             customerName,
             vehicleName,
             registrationNumber,
+            Value(row.Fields, documentDateIndex),
+            Value(row.Fields, totalAmountIndex),
             matchStatus,
             warning,
             linkedVehicleId,
@@ -487,12 +533,26 @@ public sealed class AbacusLegacyExportCandidateGraphService
 
     private sealed class CustomerBuilder(
         string customerId,
+        string customerNumber,
         string displayName,
+        string nameKana,
+        string phoneNumber,
+        string emailAddress,
+        string postalCode,
+        string address,
+        string memo,
         List<VehicleBuilder> vehicles,
         List<AbacusLegacyExportCandidateGraphDocument> unresolvedDocuments)
     {
         public string CustomerId { get; } = customerId;
+        public string CustomerNumber { get; } = customerNumber;
         public string DisplayName { get; } = displayName;
+        public string NameKana { get; } = nameKana;
+        public string PhoneNumber { get; } = phoneNumber;
+        public string EmailAddress { get; } = emailAddress;
+        public string PostalCode { get; } = postalCode;
+        public string Address { get; } = address;
+        public string Memo { get; } = memo;
         public List<VehicleBuilder> Vehicles { get; } = vehicles;
         public List<AbacusLegacyExportCandidateGraphDocument> UnresolvedDocuments { get; } = unresolvedDocuments;
     }
@@ -503,6 +563,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
         string customerName,
         string maker,
         string vehicleName,
+        string modelYear,
+        string inspectionDate,
+        string mileage,
         string registrationNumber,
         string chassisNumber,
         List<AbacusLegacyExportCandidateGraphDocument> documents)
@@ -513,6 +576,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
         public string Maker { get; } = maker;
         public string VehicleName { get; } = vehicleName;
         public string DisplayName => string.IsNullOrWhiteSpace(VehicleName) ? "車名未設定" : VehicleName;
+        public string ModelYear { get; } = modelYear;
+        public string InspectionDate { get; } = inspectionDate;
+        public string Mileage { get; } = mileage;
         public string RegistrationNumber { get; } = registrationNumber;
         public string ChassisNumber { get; } = chassisNumber;
         public List<AbacusLegacyExportCandidateGraphDocument> Documents { get; } = documents;
