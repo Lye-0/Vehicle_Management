@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows;
 using System.Windows.Media;
@@ -367,6 +368,20 @@ public partial class App : Application
                 destination,
                 matchingExportFolder,
                 Path.GetFileName(imageLinkManifest.FilePath));
+            var registrationPackageParent = Path.Combine(testRoot, "registration-packages");
+            Directory.CreateDirectory(registrationPackageParent);
+            var imageRegistrationPackage = await new AbacusImageRegistrationPreviewStore().CreateAsync(
+                destination,
+                matchingExportFolder,
+                registrationPackageParent);
+            var registrationPackageManifestText = await File.ReadAllTextAsync(
+                imageRegistrationPackage.ManifestPath);
+            var copiedRegistrationImage = Path.Combine(
+                imageRegistrationPackage.PackagePath,
+                "images",
+                $"{imageRegistrationPackage.Candidates[0].CandidateId}.png");
+            var copiedRegistrationImageSha256 = Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(copiedRegistrationImage)));
             var rejectedDuplicateImageLinkApproval = false;
             try
             {
@@ -417,6 +432,13 @@ public partial class App : Application
                 imageLinkApproval.Sha256.Length == 64 &&
                 imageLinkApproval.VehicleCsvFileName == "syaryou.csv" &&
                 imageLinkApproval.VehicleCsvRowNumber == 1 &&
+                imageRegistrationPackage.CandidateCount == 1 &&
+                imageRegistrationPackage.ImageCount == 1 &&
+                File.Exists(imageRegistrationPackage.ManifestPath) &&
+                File.Exists(copiedRegistrationImage) &&
+                copiedRegistrationImageSha256 == imageRegistrationPackage.Candidates[0].ImageSha256 &&
+                registrationPackageManifestText.Contains("abacus-image-registration-preview", StringComparison.Ordinal) &&
+                registrationPackageManifestText.Contains("\"status\": \"preview-only\"", StringComparison.Ordinal) &&
                 rejectedDuplicateImageLinkApproval &&
                 !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&

@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
     private readonly AbacusImageLinkMatcher imageLinkMatcher = new();
     private readonly AbacusImageLinkApprovalStore imageLinkApprovalStore = new();
+    private readonly AbacusImageRegistrationPreviewStore imageRegistrationPreviewStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -53,6 +54,7 @@ public partial class MainWindow : Window
     private bool abacusMayBeRunning;
     private bool imageLinkMatchBusy;
     private bool imageLinkApprovalBusy;
+    private bool imageRegistrationPreviewBusy;
 
     public MainWindow()
     {
@@ -1066,6 +1068,7 @@ public partial class MainWindow : Window
         imageLinkMatchBusy = true;
         SetImageLinkMatchControlsBusy(true);
         ImageLinkMatchesGrid.ItemsSource = null;
+        ResetImageRegistrationPreview(clearDestination: false);
         ImageLinkMatchSummaryText.Text = "";
         ImageLinkMatchStatusText.Text = "マニフェスト・画像・車両一覧CSVを読み取り、SHA-256と識別子を照合しています…";
         ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
@@ -1134,6 +1137,8 @@ public partial class MainWindow : Window
         {
             UpdateImageLinkApprovalButtonState();
         }
+        SelectImageRegistrationDestinationButton.IsEnabled = !busy && !imageRegistrationPreviewBusy;
+        UpdateImageRegistrationPreviewButtonState();
     }
 
     private void UpdateImageLinkMatchButtonState()
@@ -1690,7 +1695,112 @@ public partial class MainWindow : Window
         ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         ImageLinkApprovalStatusText.Text = "照合結果から一意の候補を選択すると、目視確認済みとして記録できます。";
         ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        ResetImageRegistrationPreview(clearDestination: clearPaths);
         UpdateImageLinkMatchButtonState();
+    }
+
+    private void SelectImageRegistrationDestinationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "登録前候補パッケージの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        ImageRegistrationDestinationTextBox.Text = dialog.FolderName;
+        ResetImageRegistrationPreview(clearDestination: false);
+        ImageRegistrationPreviewStatusText.Text =
+            "登録前パッケージ保存先を選択しました。確認済み証跡と車両一覧CSVを確認してください。";
+        UpdateImageRegistrationPreviewButtonState();
+    }
+
+    private async void CreateImageRegistrationPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        var approvalFolder = ImageLinkManifestFolderTextBox.Text.Trim();
+        var vehicleFolder = ImageLinkVehicleExportFolderTextBox.Text.Trim();
+        var destinationFolder = ImageRegistrationDestinationTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(approvalFolder) ||
+            string.IsNullOrWhiteSpace(vehicleFolder) ||
+            string.IsNullOrWhiteSpace(destinationFolder))
+        {
+            MessageBox.Show(
+                this,
+                "確認済み証跡保存先、車両一覧CSVフォルダー、登録前パッケージ保存先を選択してください。",
+                "保存先がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        imageRegistrationPreviewBusy = true;
+        UpdateImageRegistrationPreviewButtonState();
+        SelectImageRegistrationDestinationButton.IsEnabled = false;
+        ImageRegistrationPreviewGrid.ItemsSource = null;
+        ImageRegistrationPreviewResultText.Text = "";
+        ImageRegistrationPreviewStatusText.Text =
+            "確認済み証跡・画像・車両一覧CSVを再検証し、登録前候補パッケージを作成しています…";
+        ImageRegistrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await imageRegistrationPreviewStore.CreateAsync(
+                approvalFolder,
+                vehicleFolder,
+                destinationFolder);
+            ImageRegistrationPreviewGrid.ItemsSource = result.Candidates;
+            ImageRegistrationPreviewStatusText.Text =
+                "登録前候補パッケージを作成しました。顧客・車両・画像の登録はまだ行っていません。";
+            ImageRegistrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            ImageRegistrationPreviewResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"マニフェスト: {result.ManifestPath}\n" +
+                $"候補: {result.CandidateCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            ImageRegistrationPreviewGrid.ItemsSource = null;
+            ImageRegistrationPreviewResultText.Text = "";
+            ImageRegistrationPreviewStatusText.Text =
+                $"登録前候補パッケージを作成できません: {exception.Message}";
+            ImageRegistrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            imageRegistrationPreviewBusy = false;
+            SelectImageRegistrationDestinationButton.IsEnabled = true;
+            UpdateImageRegistrationPreviewButtonState();
+        }
+    }
+
+    private void ResetImageRegistrationPreview(bool clearDestination)
+    {
+        if (clearDestination)
+        {
+            ImageRegistrationDestinationTextBox.Clear();
+        }
+
+        ImageRegistrationPreviewGrid.ItemsSource = null;
+        ImageRegistrationPreviewResultText.Text = "";
+        ImageRegistrationPreviewStatusText.Text =
+            "画像保存先・車両一覧CSVフォルダー・パッケージ保存先を選択してください。";
+        ImageRegistrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        UpdateImageRegistrationPreviewButtonState();
+    }
+
+    private void UpdateImageRegistrationPreviewButtonState()
+    {
+        CreateImageRegistrationPreviewButton.IsEnabled =
+            !imageRegistrationPreviewBusy &&
+            !imageLinkMatchBusy &&
+            !string.IsNullOrWhiteSpace(ImageLinkManifestFolderTextBox.Text) &&
+            !string.IsNullOrWhiteSpace(ImageLinkVehicleExportFolderTextBox.Text) &&
+            !string.IsNullOrWhiteSpace(ImageRegistrationDestinationTextBox.Text);
     }
 
     private string? GetActiveWorkspacePath() =>
