@@ -84,6 +84,11 @@ public partial class MainWindow : Window
     private Point legacyGraphInspectorPanStartPoint;
     private double legacyGraphInspectorPanStartVerticalOffset;
     private double legacyGraphInspectorPanStartPageOffset;
+    private AbacusLegacyExportCandidateGraphDocument? legacyGraphTrayDragDocument;
+    private Point legacyGraphTrayDragStartPoint;
+    private AbacusLegacyExportCandidateGraphDocument? legacyGraphHandleDragDocument;
+    private Point legacyGraphHandleDragStartPoint;
+    private Grid? legacyGraphDropHighlightTarget;
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
 
     public MainWindow()
@@ -594,15 +599,14 @@ public partial class MainWindow : Window
                 legacyGraphSelectedItem = null;
                 LegacyGraphCustomersList.ItemsSource = graph.Customers;
                 LegacyGraphUnresolvedVehicleList.ItemsSource = graph.UnresolvedVehicleRows;
-                LegacyGraphUnresolvedSalesList.ItemsSource = graph.UnresolvedDocuments.Where(document => document.Kind == "販売書類").ToArray();
-                LegacyGraphUnresolvedMaintenanceList.ItemsSource = graph.UnresolvedDocuments.Where(document => document.Kind == "整備書類").ToArray();
+                RefreshLegacyGraphUnresolvedDocumentLists();
                 LegacyGraphStatusText.Text =
                     $"グラフを作成しました。顧客 {graph.Customers.Count:N0}件 / 車両 {graph.Customers.Sum(customer => customer.Vehicles.Count):N0}台 / 書類 {graph.AllDocuments.Count:N0}件。" +
                     $"未確定車両 {graph.UnresolvedVehicleRows.Count:N0}件。" +
                     $"実線 {graph.SolidLinkCount:N0}件 / 要確認 {graph.ReviewLinkCount:N0}件 / 未確定 {graph.UnmatchedDocumentCount:N0}件。";
                 LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
                 LegacyGraphLegendText.Text =
-                    "左の顧客を選ぶと、顧客→車両→書類の順に表示します。実線は一意一致、点線は要確認・未一致・除外です。ブロックは表示位置だけドラッグできます。";
+                    "緑の実線は自動確定、橙・赤の点線は要確認／未確定、青の点線は仮紐付けです。書類カードの↔ハンドル、または未確定トレイのカードを車両ブロックへドラッグして紐付けを変更できます。";
                 LegacyGraphCustomersList.SelectedIndex = graph.Customers.Count > 0 ? 0 : -1;
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException)
@@ -676,6 +680,52 @@ public partial class MainWindow : Window
             legacyGraphSelectedItem = vehicleRow;
             UpdateLegacyGraphInspector(vehicleRow);
         }
+    }
+
+    private void LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ListBox list)
+        {
+            return;
+        }
+
+        var item = FindVisualAncestor<ListBoxItem>(e.OriginalSource as DependencyObject);
+        if (item?.DataContext is not AbacusLegacyExportCandidateGraphDocument document)
+        {
+            return;
+        }
+
+        list.SelectedItem = document;
+        legacyGraphTrayDragDocument = document;
+        legacyGraphTrayDragStartPoint = e.GetPosition(this);
+    }
+
+    private void LegacyGraphUnresolvedDocumentList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (legacyGraphTrayDragDocument is null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(this);
+        if (Math.Abs(currentPoint.X - legacyGraphTrayDragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(currentPoint.Y - legacyGraphTrayDragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var document = legacyGraphTrayDragDocument;
+        legacyGraphTrayDragDocument = null;
+        var payload = new LegacyGraphDocumentDragPayload(document, "unresolved-tray");
+        var data = new DataObject();
+        data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
+        DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        legacyGraphTrayDragDocument = null;
     }
 
     private void LegacyGraphPageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -964,6 +1014,22 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private static DependencyObject? FindLegacyGraphLinkHandle(DependencyObject? source)
+    {
+        var current = source;
+        while (current is not null)
+        {
+            if (current is FrameworkElement element && element.Tag is LegacyGraphLinkHandleMarker)
+            {
+                return current;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
     private static T? FindVisualAncestor<T>(DependencyObject? source)
         where T : DependencyObject
     {
@@ -985,8 +1051,8 @@ public partial class MainWindow : Window
     {
         legacyGraphSelectedItem = selected;
         LegacyGraphMergeButton.IsEnabled = false;
-        LegacyGraphReassignButton.IsEnabled = selected is AbacusLegacyExportCandidateGraphDocument &&
-            legacyExportCandidateGraphResult is not null;
+        LegacyGraphReassignButton.IsEnabled = selected is AbacusLegacyExportCandidateGraphDocument documentForButton &&
+            FindManualLinkedVehicle(documentForButton) is not null;
         switch (selected)
         {
             case AbacusLegacyExportCandidateGraphCustomer customer:
@@ -1022,6 +1088,7 @@ public partial class MainWindow : Window
             case AbacusLegacyExportCandidateGraphDocument document:
                 LegacyGraphInspectorTitleText.Text = $"{document.Kind}: {Fallback(document.DocumentNumber)}";
                 var manualVehicle = FindManualLinkedVehicle(document);
+                LegacyGraphReassignButton.IsEnabled = manualVehicle is not null;
                 LegacyGraphInspectorStatusText.Text = manualVehicle is null
                     ? $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}"
                     : $"判定: 手動仮紐付け（未登録）\n紐付け先: {manualVehicle.DisplayName}";
@@ -1068,6 +1135,19 @@ public partial class MainWindow : Window
         return legacyExportCandidateGraphResult.Customers
             .SelectMany(customer => customer.Vehicles)
             .FirstOrDefault(vehicle => string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
+    }
+
+    private void LegacyGraphClearManualLinkButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphSelectedItem is not AbacusLegacyExportCandidateGraphDocument document)
+        {
+            return;
+        }
+
+        if (legacyGraphManualDocumentLinks.Remove(GetLegacyDocumentKey(document)))
+        {
+            RefreshLegacyGraphAfterManualLink(document, null);
+        }
     }
 
     private void LegacyGraphReassignButton_Click(object sender, RoutedEventArgs e)
@@ -1228,6 +1308,7 @@ public partial class MainWindow : Window
             RenderLegacyGraphCustomer(targetCustomer);
         }
 
+        RefreshLegacyGraphUnresolvedDocumentLists();
         legacyGraphSelectedItem = document;
         UpdateLegacyGraphInspector(document);
         var manualCount = legacyGraphManualDocumentLinks.Count;
@@ -1235,6 +1316,34 @@ public partial class MainWindow : Window
             ? "手動仮紐付けを解除しました。"
             : $"手動仮紐付けを{manualCount:N0}件表示中です。元CSV・ABACUSフォルダーは変更していません。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private void ApplyLegacyGraphManualLink(
+        AbacusLegacyExportCandidateGraphDocument document,
+        string vehicleId)
+    {
+        legacyGraphManualDocumentLinks[GetLegacyDocumentKey(document)] = vehicleId;
+        RefreshLegacyGraphAfterManualLink(document, vehicleId);
+    }
+
+    private void RefreshLegacyGraphUnresolvedDocumentLists()
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            LegacyGraphUnresolvedSalesList.ItemsSource = null;
+            LegacyGraphUnresolvedMaintenanceList.ItemsSource = null;
+            return;
+        }
+
+        var unresolved = legacyExportCandidateGraphResult.UnresolvedDocuments
+            .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
+            .ToArray();
+        LegacyGraphUnresolvedSalesList.ItemsSource = unresolved
+            .Where(document => document.Kind == "販売書類")
+            .ToArray();
+        LegacyGraphUnresolvedMaintenanceList.ItemsSource = unresolved
+            .Where(document => document.Kind == "整備書類")
+            .ToArray();
     }
 
     private AbacusLegacyExportCandidateGraphCustomer? FindOriginalCustomerForDocument(
@@ -1305,6 +1414,7 @@ public partial class MainWindow : Window
                 vehicleWidth,
                 vehicleHeight);
             vehicleBlock.Tag = vehicle;
+            AttachLegacyGraphVehicleDropTarget(vehicleBlock, vehicle);
             AddGraphElement(vehicleBlock, vehicleX, vehicleY);
             AddGraphEdge(customerBlock, vehicleBlock, "#2563EB", dashed: false);
 
@@ -1426,7 +1536,42 @@ public partial class MainWindow : Window
             manual ? "#EFF6FF" : visual.Fill,
             manual || visual.Dashed,
             width,
-            height);
+            height,
+            manual ? "仮紐付け済み" : visual.Dashed ? "要確認・未確定" : "自動確定");
+        if (block.Children.OfType<StackPanel>().FirstOrDefault() is { } content)
+        {
+            // 右上の紐付け変更ハンドルと本文が重ならないように余白を確保します。
+            content.Margin = new Thickness(12, 8, 42, 8);
+        }
+        var linkHandle = new Border
+        {
+            Width = 28,
+            Height = 25,
+            Margin = new Thickness(0, 7, 7, 0),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = ToBrush(manual ? "#DBEAFE" : "#FFFFFF"),
+            BorderBrush = ToBrush(manual ? "#2563EB" : visual.Stroke),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Cursor = Cursors.Hand,
+            ToolTip = "このハンドルを別の車両ブロックへドラッグして紐付けを変更",
+            Tag = new LegacyGraphLinkHandleMarker(),
+            DataContext = document,
+        };
+        linkHandle.Child = new TextBlock
+        {
+            Text = "↔",
+            FontSize = 17,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush(manual ? "#1D4ED8" : visual.Stroke),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        linkHandle.PreviewMouseLeftButtonDown += LegacyGraphDocumentHandle_MouseLeftButtonDown;
+        linkHandle.PreviewMouseMove += LegacyGraphDocumentHandle_MouseMove;
+        linkHandle.PreviewMouseLeftButtonUp += LegacyGraphDocumentHandle_MouseLeftButtonUp;
+        block.Children.Add(linkHandle);
         if (!string.IsNullOrWhiteSpace(document.Warning))
         {
             block.ToolTip = document.Warning;
@@ -1442,7 +1587,8 @@ public partial class MainWindow : Window
         string fill,
         bool dashed,
         double width,
-        double height)
+        double height,
+        string? badgeText = null)
     {
         var block = new Grid
         {
@@ -1451,6 +1597,7 @@ public partial class MainWindow : Window
             Height = double.NaN,
             VerticalAlignment = VerticalAlignment.Top,
             Cursor = Cursors.SizeAll,
+            ClipToBounds = false,
         };
         var outline = new Rectangle
         {
@@ -1466,6 +1613,24 @@ public partial class MainWindow : Window
         }
 
         var content = new StackPanel { Margin = new Thickness(12, 8, 12, 8) };
+        if (!string.IsNullOrWhiteSpace(badgeText))
+        {
+            content.Children.Add(new Border
+            {
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 0, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = ToBrush(stroke),
+                CornerRadius = new CornerRadius(3),
+                Child = new TextBlock
+                {
+                    Text = badgeText,
+                    FontSize = 10,
+                    Foreground = Brushes.White,
+                    FontWeight = FontWeights.SemiBold,
+                },
+            });
+        }
         content.Children.Add(new TextBlock
         {
             Text = title,
@@ -1487,6 +1652,121 @@ public partial class MainWindow : Window
         block.PreviewMouseMove += LegacyGraphBlock_MouseMove;
         block.PreviewMouseLeftButtonUp += LegacyGraphBlock_MouseLeftButtonUp;
         return block;
+    }
+
+    private void AttachLegacyGraphVehicleDropTarget(
+        Grid vehicleBlock,
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        vehicleBlock.AllowDrop = true;
+        vehicleBlock.DragEnter += (_, e) => HandleLegacyGraphVehicleDragOver(vehicleBlock, vehicle, e);
+        vehicleBlock.DragOver += (_, e) => HandleLegacyGraphVehicleDragOver(vehicleBlock, vehicle, e);
+        vehicleBlock.DragLeave += (_, _) =>
+        {
+            if (ReferenceEquals(legacyGraphDropHighlightTarget, vehicleBlock))
+            {
+                ClearLegacyGraphDropHighlight();
+            }
+        };
+        vehicleBlock.Drop += (_, e) =>
+        {
+            var payload = GetLegacyGraphDocumentDragPayload(e.Data);
+            if (payload is null)
+            {
+                return;
+            }
+
+            ApplyLegacyGraphManualLink(payload.Document, vehicle.VehicleId);
+            e.Effects = DragDropEffects.Link;
+            ClearLegacyGraphDropHighlight();
+            e.Handled = true;
+        };
+    }
+
+    private void HandleLegacyGraphVehicleDragOver(
+        Grid vehicleBlock,
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        DragEventArgs e)
+    {
+        if (GetLegacyGraphDocumentDragPayload(e.Data) is null)
+        {
+            e.Effects = DragDropEffects.None;
+            return;
+        }
+
+        SetLegacyGraphDropHighlight(vehicleBlock);
+        e.Effects = DragDropEffects.Link;
+        e.Handled = true;
+    }
+
+    private static LegacyGraphDocumentDragPayload? GetLegacyGraphDocumentDragPayload(IDataObject data) =>
+        data.GetData(typeof(LegacyGraphDocumentDragPayload)) as LegacyGraphDocumentDragPayload;
+
+    private void SetLegacyGraphDropHighlight(Grid target)
+    {
+        if (ReferenceEquals(legacyGraphDropHighlightTarget, target))
+        {
+            return;
+        }
+
+        ClearLegacyGraphDropHighlight();
+        legacyGraphDropHighlightTarget = target;
+        target.Opacity = 0.82;
+        target.RenderTransformOrigin = new Point(0.5, 0.5);
+        target.RenderTransform = new ScaleTransform(1.02, 1.02);
+    }
+
+    private void ClearLegacyGraphDropHighlight()
+    {
+        if (legacyGraphDropHighlightTarget is null)
+        {
+            return;
+        }
+
+        legacyGraphDropHighlightTarget.Opacity = 1;
+        legacyGraphDropHighlightTarget.RenderTransform = null;
+        legacyGraphDropHighlightTarget = null;
+    }
+
+    private void LegacyGraphDocumentHandle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement handle || handle.DataContext is not AbacusLegacyExportCandidateGraphDocument document)
+        {
+            return;
+        }
+
+        legacyGraphHandleDragDocument = document;
+        legacyGraphHandleDragStartPoint = e.GetPosition(this);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphDocumentHandle_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (legacyGraphHandleDragDocument is null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(this);
+        if (Math.Abs(currentPoint.X - legacyGraphHandleDragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(currentPoint.Y - legacyGraphHandleDragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var document = legacyGraphHandleDragDocument;
+        legacyGraphHandleDragDocument = null;
+        var payload = new LegacyGraphDocumentDragPayload(document, "document-handle");
+        var data = new DataObject();
+        data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
+        DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphDocumentHandle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        legacyGraphHandleDragDocument = null;
+        e.Handled = true;
     }
 
     private void AddGraphElement(UIElement element, double left, double vehicleY)
@@ -1554,6 +1834,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (FindLegacyGraphLinkHandle(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         legacyGraphDraggingElement = element;
         UpdateLegacyGraphInspector(element is FrameworkElement frameworkElement ? frameworkElement.Tag : null);
         var position = e.GetPosition(LegacyGraphCanvas);
@@ -1566,6 +1851,11 @@ public partial class MainWindow : Window
 
     private void LegacyGraphBlock_MouseMove(object sender, MouseEventArgs e)
     {
+        if (FindLegacyGraphLinkHandle(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         if (legacyGraphDraggingElement is null || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
@@ -1582,6 +1872,11 @@ public partial class MainWindow : Window
 
     private void LegacyGraphBlock_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (FindLegacyGraphLinkHandle(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         if (legacyGraphDraggingElement is not null)
         {
             legacyGraphDraggingElement.ReleaseMouseCapture();
@@ -1599,6 +1894,9 @@ public partial class MainWindow : Window
         legacyGraphPanning = false;
         legacyGraphInspectorPanning = false;
         legacyGraphInspectorPanningPage = false;
+        legacyGraphTrayDragDocument = null;
+        legacyGraphHandleDragDocument = null;
+        ClearLegacyGraphDropHighlight();
         LegacyGraphCanvas.ReleaseMouseCapture();
         LegacyGraphScrollViewer.ReleaseMouseCapture();
         LegacyGraphInspectorScrollViewer.ReleaseMouseCapture();
@@ -3551,6 +3849,12 @@ public partial class MainWindow : Window
 
         return $"{value:N2} {units[unit]}";
     }
+
+    private sealed record LegacyGraphDocumentDragPayload(
+        AbacusLegacyExportCandidateGraphDocument Document,
+        string SourceKind);
+
+    private sealed record LegacyGraphLinkHandleMarker;
 
     private sealed record LegacyGraphEdge(UIElement Source, UIElement Target, Line Line);
 

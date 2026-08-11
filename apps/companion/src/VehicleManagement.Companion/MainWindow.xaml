@@ -1003,8 +1003,8 @@
                                                    TextWrapping="Wrap" LineHeight="20" />
                                         <Button x:Name="LegacyGraphMergeButton" Margin="0,16,0,0"
                                                 Content="類似顧客を比較して統合（次段階）" IsEnabled="False" />
-                                        <Button x:Name="LegacyGraphReassignButton" Content="書類の紐付け先を変更"
-                                                IsEnabled="False" Click="LegacyGraphReassignButton_Click" />
+                                        <Button x:Name="LegacyGraphReassignButton" Content="仮紐付けを解除"
+                                                IsEnabled="False" Click="LegacyGraphClearManualLinkButton_Click" />
                                     </StackPanel>
                                 </ScrollViewer>
                             </Border>
@@ -1012,7 +1012,7 @@
                         <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="未確定トレイ" />
                         <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="車両・販売書類・整備書類を分けて表示します。候補を選ぶと中央のグラフと詳細パネルで根拠を確認できます。書類を選択して右側のボタンから、別車両への手動仮紐付けを確認できます。" />
+                                   Text="車両・販売書類・整備書類を分けて表示します。候補を選ぶと中央のグラフと詳細パネルで根拠を確認できます。販売書類・整備書類はカードを車両ブロックへ直接ドラッグして仮紐付けします。" />
                         <Grid Height="250">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -1028,11 +1028,16 @@
                                              SelectionChanged="LegacyGraphUnresolvedSelectionChanged">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <StackPanel Margin="2,3">
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding VehicleName}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Foreground="#A61B1B" FontSize="11" Text="{Binding Warning}" TextWrapping="Wrap" />
-                                                    <TextBlock Foreground="#718096" FontSize="11" Text="{Binding SourceFileName}" />
-                                                </StackPanel>
+                                                <Border Margin="2,3" Padding="8" Background="#FEF2F2" BorderBrush="#B91C1C"
+                                                        BorderThickness="2" CornerRadius="5">
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding VehicleName}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#A61B1B" FontSize="11"
+                                                                   Text="{Binding Warning}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#718096" FontSize="11"
+                                                                   Text="{Binding SourceFileName}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
@@ -1042,22 +1047,32 @@
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定販売書類" />
                                     <ListBox x:Name="LegacyGraphUnresolvedSalesList" Margin="0,7,0,0" Height="195"
-                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged">
+                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             PreviewMouseLeftButtonDown="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonDown"
+                                             PreviewMouseMove="LegacyGraphUnresolvedDocumentList_PreviewMouseMove"
+                                             PreviewMouseLeftButtonUp="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <StackPanel Margin="2,3">
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=販売書類 {0}}" />
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text="{Binding CustomerName}" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text=" / " />
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text="{Binding VehicleName}" TextTrimming="CharacterEllipsis" />
+                                                <Border Margin="2,3" Padding="8" Background="#FFF7ED" BorderBrush="#D97706"
+                                                        BorderThickness="2" CornerRadius="5" Cursor="SizeAll">
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=販売書類 {0}}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
+                                                                   TextWrapping="Wrap">
+                                                            <Run Text="{Binding CustomerName}" />
+                                                            <Run Text=" / " />
+                                                            <Run Text="{Binding VehicleName}" />
+                                                        </TextBlock>
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#D97706" FontSize="11"
+                                                                   TextWrapping="Wrap">
+                                                            <Run Text="{Binding MatchStatus}" />
+                                                            <Run Text=": " />
+                                                            <Run Text="{Binding Warning}" />
+                                                        </TextBlock>
+                                                        <TextBlock Margin="0,4,0,0" Foreground="#8A5A00" FontSize="10"
+                                                                   Text="車両ブロックへドラッグして仮紐付け" TextWrapping="Wrap" />
                                                     </StackPanel>
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text="{Binding MatchStatus}" />
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text=": " />
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text="{Binding Warning}" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                </StackPanel>
+                                                </Border>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
@@ -1067,22 +1082,32 @@
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定整備書類" />
                                     <ListBox x:Name="LegacyGraphUnresolvedMaintenanceList" Margin="0,7,0,0" Height="195"
-                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged">
+                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             PreviewMouseLeftButtonDown="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonDown"
+                                             PreviewMouseMove="LegacyGraphUnresolvedDocumentList_PreviewMouseMove"
+                                             PreviewMouseLeftButtonUp="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <StackPanel Margin="2,3">
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=整備書類 {0}}" />
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text="{Binding CustomerName}" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text=" / " />
-                                                        <TextBlock Foreground="#52647A" FontSize="11" Text="{Binding VehicleName}" TextTrimming="CharacterEllipsis" />
+                                                <Border Margin="2,3" Padding="8" Background="#FFF7ED" BorderBrush="#D97706"
+                                                        BorderThickness="2" CornerRadius="5" Cursor="SizeAll">
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=整備書類 {0}}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
+                                                                   TextWrapping="Wrap">
+                                                            <Run Text="{Binding CustomerName}" />
+                                                            <Run Text=" / " />
+                                                            <Run Text="{Binding VehicleName}" />
+                                                        </TextBlock>
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#D97706" FontSize="11"
+                                                                   TextWrapping="Wrap">
+                                                            <Run Text="{Binding MatchStatus}" />
+                                                            <Run Text=": " />
+                                                            <Run Text="{Binding Warning}" />
+                                                        </TextBlock>
+                                                        <TextBlock Margin="0,4,0,0" Foreground="#8A5A00" FontSize="10"
+                                                                   Text="車両ブロックへドラッグして仮紐付け" TextWrapping="Wrap" />
                                                     </StackPanel>
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text="{Binding MatchStatus}" />
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text=": " />
-                                                        <TextBlock Foreground="#D97706" FontSize="11" Text="{Binding Warning}" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                </StackPanel>
+                                                </Border>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
