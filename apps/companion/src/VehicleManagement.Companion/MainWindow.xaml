@@ -940,7 +940,7 @@
                                     BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="チェックは次段階の統合操作で使用します。" TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="同名顧客は詳細パネルから比較し、保存後にグラフへ仮反映できます。" TextWrapping="Wrap" />
                                     <ListBox x:Name="LegacyGraphCustomersList" Margin="0,8,0,0" Height="735"
                                              SelectionChanged="LegacyGraphCustomersList_SelectionChanged">
                                         <ListBox.ItemTemplate>
@@ -1006,6 +1006,9 @@
                                         <Button x:Name="LegacyGraphMergeButton" Margin="0,16,0,0"
                                                 Content="同名顧客を比較・統合プレビュー" IsEnabled="False"
                                                 Click="LegacyGraphMergeButton_Click" />
+                                        <Button x:Name="LegacyGraphApplyMergePreviewButton" Margin="0,8,0,0"
+                                                Content="統合プレビューをキャンバスに仮反映" IsEnabled="False"
+                                                Click="LegacyGraphApplyMergePreviewButton_Click" />
                                         <Button x:Name="LegacyGraphReassignButton" Content="仮紐付けを解除"
                                                 IsEnabled="False" Click="LegacyGraphClearManualLinkButton_Click" />
                                     </StackPanel>
