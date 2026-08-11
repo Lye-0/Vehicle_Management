@@ -167,6 +167,32 @@ public partial class App : Application
                 },
                 8);
             var imageExport = await new AbacusClipboardImageExporter().ExportAsync(testImage, destination);
+            var imageLinkManifest = await new AbacusImageLinkManifestStore().CreateAsync(
+                imageExport,
+                source,
+                workspace.WorkspacePath,
+                before.FolderFingerprint,
+                workspace.WorkspaceReport.FolderFingerprint,
+                "chassis-1",
+                "大阪 537 む 16",
+                "顧客A");
+            var rejectedImageLinkWithoutIdentifier = false;
+            try
+            {
+                await new AbacusImageLinkManifestStore().CreateAsync(
+                    imageExport,
+                    source,
+                    workspace.WorkspacePath,
+                    before.FolderFingerprint,
+                    workspace.WorkspaceReport.FolderFingerprint,
+                    string.Empty,
+                    string.Empty,
+                    string.Empty);
+            }
+            catch (InvalidDataException)
+            {
+                rejectedImageLinkWithoutIdentifier = true;
+            }
             var cropPixels = new byte[140 * 120 * 4];
             for (var y = 0; y < 100; y++)
             {
@@ -347,6 +373,12 @@ public partial class App : Application
                 imageExport.PixelWidth == 2 &&
                 imageExport.PixelHeight == 2 &&
                 imageExport.Sha256.Length == 64 &&
+                File.Exists(imageLinkManifest.FilePath) &&
+                imageLinkManifest.Sha256.Length == 64 &&
+                imageLinkManifest.MatchStrategy == "chassis" &&
+                imageLinkManifest.ChassisNumber == "CHASSIS1" &&
+                imageLinkManifest.RegistrationNumber == "大阪537む16" &&
+                rejectedImageLinkWithoutIdentifier &&
                 cropResult.WasCropped &&
                 cropResult.Image.PixelWidth == 88 &&
                 cropResult.Image.PixelHeight == 88 &&

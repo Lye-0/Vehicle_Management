@@ -446,6 +446,41 @@
                                 Content="画像ウィンドウ1件を保存" IsEnabled="False" Click="CaptureImageWindowButton_Click" />
                         <TextBlock x:Name="ImageWindowCaptureStatusText" Margin="0,10,0,20" Foreground="#36465A"
                                    Text="画像を表示して「表示画面を診断」を実行すると保存できます。" TextWrapping="Wrap" />
+
+                        <TextBlock Margin="0,10,0,8" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="5G. 保存画像を車両識別子へ紐付け準備" />
+                        <Border Padding="14" Background="#EAF2FF" CornerRadius="8">
+                            <TextBlock Foreground="#1E40AF" TextWrapping="Wrap"
+                                       Text="保存した画像をデータベースへ自動登録する前に、ABACUS画面で確認した車台番号または登録番号を明示して、確認専用のマニフェストを作成します。車台番号を優先してください。登録番号だけの場合は再利用の可能性があるため、後で必ず確認します。" />
+                        </Border>
+                        <Grid Margin="0,12,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,8,10,0" Foreground="#36465A"
+                                       Text="車台番号（推奨）" />
+                            <TextBox x:Name="ImageLinkChassisNumberTextBox" Grid.Row="0" Grid.Column="1" MinHeight="36"
+                                     Padding="9,6" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,8,10,0" Foreground="#36465A"
+                                       Text="登録番号" />
+                            <TextBox x:Name="ImageLinkRegistrationNumberTextBox" Grid.Row="1" Grid.Column="1" MinHeight="36"
+                                     Padding="9,6" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,8,10,0" Foreground="#36465A"
+                                       Text="顧客名（確認用・任意）" />
+                            <TextBox x:Name="ImageLinkCustomerNameTextBox" Grid.Row="2" Grid.Column="1" MinHeight="36"
+                                     Padding="9,6" />
+                        </Grid>
+                        <Button x:Name="CreateImageLinkManifestButton" Margin="0,12,0,0" HorizontalAlignment="Left"
+                                Content="画像と車両識別子の紐付け準備を作成" IsEnabled="False"
+                                Click="CreateImageLinkManifestButton_Click" />
+                        <TextBlock x:Name="ImageLinkManifestStatusText" Margin="0,10,0,20" Foreground="#36465A"
+                                   Text="画像を1件保存すると、車両識別子を入力してマニフェストを作成できます。" TextWrapping="Wrap" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

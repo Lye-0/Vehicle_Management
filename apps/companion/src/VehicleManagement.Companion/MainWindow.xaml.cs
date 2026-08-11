@@ -26,15 +26,23 @@ public partial class MainWindow : Window
     private readonly AbacusLegacyExportInspector legacyExportInspector = new();
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
+    private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
     private AbacusWorkspaceResult? workspaceResult;
     private string? verifiedWorkspacePath;
     private string? verifiedSourcePath;
+    private string? verifiedOriginalFingerprint;
+    private string? verifiedWorkspaceFingerprint;
     private uint? inspectedClipboardSequenceNumber;
     private long? diagnosedImageWindowHandle;
     private int? diagnosedAbacusProcessId;
+    private AbacusImageExportResult? lastImageCaptureResult;
+    private string? lastImageCaptureSourceFolder;
+    private string? lastImageCaptureWorkspaceFolder;
+    private string? lastImageCaptureSourceFingerprint;
+    private string? lastImageCaptureWorkspaceFingerprint;
     private AbacusLinkagePlan? linkagePlan;
     private AbacusFp5Inspection? fp5Inspection;
     private bool allowClose;
@@ -117,6 +125,7 @@ public partial class MainWindow : Window
             fp5Inspection = null;
             ExtractFp5CandidateButton.IsEnabled = false;
             Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
+            ResetImageLinkCapture();
         }
     }
 
@@ -138,6 +147,7 @@ public partial class MainWindow : Window
             fp5Inspection = null;
             ExtractFp5CandidateButton.IsEnabled = false;
             Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
+            ResetImageLinkCapture();
         }
     }
 
@@ -629,6 +639,7 @@ public partial class MainWindow : Window
 
         BeginOperation("作業用コピーを作成しています…");
         workspaceResult = null;
+        ResetImageLinkCapture();
         LaunchAbacusButton.IsEnabled = false;
         try
         {
@@ -644,6 +655,8 @@ public partial class MainWindow : Window
                 operationCancellation!.Token);
             verifiedWorkspacePath = workspaceResult.WorkspacePath;
             verifiedSourcePath = sourceReport.SourcePath;
+            verifiedOriginalFingerprint = sourceReport.FolderFingerprint;
+            verifiedWorkspaceFingerprint = workspaceResult.WorkspaceReport.FolderFingerprint;
             WorkspacePathText.Text = $"検証済み作業用コピー:\n{workspaceResult.WorkspacePath}\n原本の再検証: 一致";
             OperationStatusText.Text = "作業用コピーと保存用原本のハッシュが一致しました。";
             LaunchAbacusButton.IsEnabled = true;
@@ -716,6 +729,9 @@ public partial class MainWindow : Window
             workspaceResult = null;
             verifiedWorkspacePath = null;
             verifiedSourcePath = null;
+            verifiedOriginalFingerprint = null;
+            verifiedWorkspaceFingerprint = null;
+            ResetImageLinkCapture();
             VerifyExistingWorkspaceButton.IsEnabled = true;
             ImageLaunchAbacusButton.IsEnabled = false;
             ImageDiagnosticStatusText.Text = "未検証です。「コピーを再検証」を押してください。";
@@ -734,6 +750,7 @@ public partial class MainWindow : Window
         VerifyExistingWorkspaceButton.IsEnabled = false;
         ImageCancelButton.IsEnabled = true;
         verifiedWorkspacePath = null;
+        ResetImageLinkCapture();
         ImageUiElementsGrid.ItemsSource = null;
         try
         {
@@ -750,6 +767,8 @@ public partial class MainWindow : Window
                 operationCancellation!.Token);
             verifiedWorkspacePath = result.WorkspacePath;
             verifiedSourcePath = result.SourcePath;
+            verifiedOriginalFingerprint = result.OriginalFingerprint;
+            verifiedWorkspaceFingerprint = result.WorkspaceReport.FolderFingerprint;
             workspaceResult = null;
             var runtimeChangeDetail = result.AllowedRuntimeChanges.Count == 0
                 ? "作成時から変更なし"
@@ -889,6 +908,14 @@ public partial class MainWindow : Window
         try
         {
             var result = await clipboardImageExporter.ExportAsync(cropResult.Image, destination);
+            lastImageCaptureResult = result;
+            lastImageCaptureSourceFolder = verifiedSourcePath;
+            lastImageCaptureWorkspaceFolder = GetActiveWorkspacePath();
+            lastImageCaptureSourceFingerprint = verifiedOriginalFingerprint;
+            lastImageCaptureWorkspaceFingerprint = verifiedWorkspaceFingerprint;
+            CreateImageLinkManifestButton.IsEnabled = true;
+            ImageLinkManifestStatusText.Text = "画像を保存しました。車両画面で確認した識別子を入力して、紐付け準備を作成してください。";
+            ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
             ImageWindowCaptureStatusText.Text =
                 $"画像表示ウィンドウを保存しました。\n{result.FilePath}\n" +
                 $"{result.PixelWidth:N0} × {result.PixelHeight:N0}px / {FormatFileSize(result.FileSize)} / SHA-256: {result.Sha256}";
@@ -900,6 +927,83 @@ public partial class MainWindow : Window
             ImageWindowCaptureStatusText.Text = $"画像ウィンドウの保存に失敗しました: {exception.Message}";
             ImageWindowCaptureStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             CaptureImageWindowButton.IsEnabled = true;
+        }
+    }
+
+    private async void CreateImageLinkManifestButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (lastImageCaptureResult is null ||
+            string.IsNullOrWhiteSpace(lastImageCaptureSourceFolder) ||
+            string.IsNullOrWhiteSpace(lastImageCaptureWorkspaceFolder))
+        {
+            MessageBox.Show(
+                this,
+                "先に検証済み作業用コピーから画像を1件保存してください。",
+                "保存画像がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var chassisNumber = ImageLinkChassisNumberTextBox.Text.Trim();
+        var registrationNumber = ImageLinkRegistrationNumberTextBox.Text.Trim();
+        var customerName = ImageLinkCustomerNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(chassisNumber) && string.IsNullOrWhiteSpace(registrationNumber))
+        {
+            MessageBox.Show(
+                this,
+                "車台番号または登録番号を少なくとも1つ入力してください。車台番号を優先してください。",
+                "車両識別子がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var identifierKind = string.IsNullOrWhiteSpace(chassisNumber) ? "登録番号だけ" : "車台番号を優先";
+        var confirmation = MessageBox.Show(
+            this,
+            $"保存済み画像を、次の識別情報で紐付け準備します。\n\n" +
+            $"車台番号: {(string.IsNullOrWhiteSpace(chassisNumber) ? "（未入力）" : chassisNumber)}\n" +
+            $"登録番号: {(string.IsNullOrWhiteSpace(registrationNumber) ? "（未入力）" : registrationNumber)}\n" +
+            $"顧客名: {(string.IsNullOrWhiteSpace(customerName) ? "（未入力）" : customerName)}\n" +
+            $"照合方式: {identifierKind}\n\n" +
+            "これは確認専用のマニフェストを画像と同じフォルダーへ作成するだけです。データベース登録やアップロードは行いません。ABACUS画面の表示と一致することを確認してから続行してください。",
+            "画像の紐付け準備",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        CreateImageLinkManifestButton.IsEnabled = false;
+        ImageLinkManifestStatusText.Text = "画像のSHA-256と作業用コピーの検証情報を確認し、マニフェストを作成しています…";
+        ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await imageLinkManifestStore.CreateAsync(
+                lastImageCaptureResult,
+                lastImageCaptureSourceFolder,
+                lastImageCaptureWorkspaceFolder,
+                lastImageCaptureSourceFingerprint,
+                lastImageCaptureWorkspaceFingerprint,
+                chassisNumber,
+                registrationNumber,
+                customerName);
+            ImageLinkManifestStatusText.Text =
+                $"画像紐付けマニフェストを作成しました。\n" +
+                $"保存先: {result.FilePath}\n" +
+                $"照合方式: {(result.MatchStrategy == "chassis" ? "車台番号" : "登録番号（要確認）")}\n" +
+                $"マニフェスト SHA-256: {result.Sha256}\n" +
+                "この段階ではデータベース登録・アップロードを行っていません。";
+            ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            ImageLinkManifestStatusText.Text = $"画像紐付けマニフェストの作成に失敗しました: {exception.Message}";
+            ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            CreateImageLinkManifestButton.IsEnabled = true;
         }
     }
 
@@ -1015,6 +1119,14 @@ public partial class MainWindow : Window
         try
         {
             var result = await clipboardImageExporter.ExportAsync(clipboardImage.Image, destination);
+            lastImageCaptureResult = result;
+            lastImageCaptureSourceFolder = verifiedSourcePath;
+            lastImageCaptureWorkspaceFolder = GetActiveWorkspacePath();
+            lastImageCaptureSourceFingerprint = verifiedOriginalFingerprint;
+            lastImageCaptureWorkspaceFingerprint = verifiedWorkspaceFingerprint;
+            CreateImageLinkManifestButton.IsEnabled = true;
+            ImageLinkManifestStatusText.Text = "画像を保存しました。車両画面で確認した識別子を入力して、紐付け準備を作成してください。";
+            ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
             ImageExportStatusText.Text =
                 $"画像1件を保存しました。\n{result.FilePath}\n" +
                 $"{result.PixelWidth:N0} × {result.PixelHeight:N0}px / {FormatFileSize(result.FileSize)} / SHA-256: {result.Sha256}";
@@ -1294,6 +1406,8 @@ public partial class MainWindow : Window
         workspaceResult = null;
         verifiedWorkspacePath = null;
         verifiedSourcePath = null;
+        verifiedOriginalFingerprint = null;
+        verifiedWorkspaceFingerprint = null;
         ValidationResultText.Text = "未検査";
         FileCountText.Text = "-";
         TotalSizeText.Text = "-";
@@ -1312,6 +1426,21 @@ public partial class MainWindow : Window
         diagnosedImageWindowHandle = null;
         diagnosedAbacusProcessId = null;
         CaptureImageWindowButton.IsEnabled = false;
+    }
+
+    private void ResetImageLinkCapture()
+    {
+        lastImageCaptureResult = null;
+        lastImageCaptureSourceFolder = null;
+        lastImageCaptureWorkspaceFolder = null;
+        lastImageCaptureSourceFingerprint = null;
+        lastImageCaptureWorkspaceFingerprint = null;
+        CreateImageLinkManifestButton.IsEnabled = false;
+        ImageLinkChassisNumberTextBox.Clear();
+        ImageLinkRegistrationNumberTextBox.Clear();
+        ImageLinkCustomerNameTextBox.Clear();
+        ImageLinkManifestStatusText.Text = "画像を1件保存すると、車両識別子を入力してマニフェストを作成できます。";
+        ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
     }
 
     private string? GetActiveWorkspacePath() =>
