@@ -764,7 +764,10 @@ public partial class MainWindow : Window
         data.SetData(
             typeof(LegacyGraphCustomerDragPayload),
             new LegacyGraphCustomerDragPayload(sourceCustomer.CustomerId));
-        SetLegacyGraphCustomerUngroupDropZoneVisible(true);
+        var sourceGroupKey = GetLegacyCustomerMergeKey(sourceCustomer);
+        var showUngroupZone = TryGetLegacyGraphMergeGroup(sourceGroupKey, out var sourceGroup) &&
+                              sourceGroup.CustomerIds.Count > 1;
+        SetLegacyGraphCustomerUngroupDropZoneVisible(showUngroupZone);
         try
         {
             DragDrop.DoDragDrop(list, data, DragDropEffects.Link);
@@ -929,6 +932,7 @@ public partial class MainWindow : Window
                 legacyGraphCustomerUngroupDropHighlight = zone;
                 zone.Background = ToBrush("#FDE68A");
                 zone.BorderBrush = ToBrush("#B45309");
+                zone.Opacity = 1;
             }
         }
 
@@ -968,6 +972,7 @@ public partial class MainWindow : Window
 
         legacyGraphCustomerUngroupDropHighlight.Background = ToBrush("#FFF7ED");
         legacyGraphCustomerUngroupDropHighlight.BorderBrush = ToBrush("#D97706");
+        legacyGraphCustomerUngroupDropHighlight.Opacity = 0.62;
         legacyGraphCustomerUngroupDropHighlight = null;
     }
 
@@ -3152,14 +3157,16 @@ public partial class MainWindow : Window
 
         var disconnectButton = new Button
         {
-            Width = 30,
-            Height = 24,
+            Width = 18,
+            Height = 18,
+            MinWidth = 0,
+            MinHeight = 0,
             Margin = new Thickness(13, 0, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0),
             Content = "×",
-            FontSize = 16,
+            FontSize = 12,
             Foreground = ToBrush(stroke),
             Background = Brushes.White,
             BorderBrush = ToBrush(stroke),
@@ -3388,7 +3395,7 @@ public partial class MainWindow : Window
             {
                 SetLegacyGraphDropHighlight(documentBlock);
             }
-            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphEdgesCanvas));
+            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphCanvas));
             e.Effects = DragDropEffects.Link;
             e.Handled = true;
             return;
@@ -3564,10 +3571,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        LegacyGraphEdgesCanvas.UpdateLayout();
-        var sourcePoint = source.TranslatePoint(
-            new Point(source.ActualWidth / 2, source.ActualHeight / 2),
-            LegacyGraphEdgesCanvas);
+        LegacyGraphCanvas.UpdateLayout();
+        var sourcePoint = GetLegacyGraphNodeCanvasPoint(source);
         legacyGraphActiveConnectionSource = source;
         source.GiveFeedback += LegacyGraphActiveConnection_GiveFeedback;
         legacyGraphActiveConnectionLine = new Line
@@ -3597,6 +3602,34 @@ public partial class MainWindow : Window
         legacyGraphActiveConnectionLine.Y2 = targetPoint.Y;
     }
 
+    private Point GetLegacyGraphNodeCanvasPoint(FrameworkElement node)
+    {
+        if (FindVisualAncestor<Grid>(node) is not { } block)
+        {
+            return node.TranslatePoint(
+                new Point(node.ActualWidth / 2, node.ActualHeight / 2),
+                LegacyGraphCanvas);
+        }
+
+        var left = Canvas.GetLeft(block);
+        var top = Canvas.GetTop(block);
+        if (double.IsNaN(left))
+        {
+            left = 0;
+        }
+
+        if (double.IsNaN(top))
+        {
+            top = 0;
+        }
+
+        var width = GetLegacyGraphElementWidth(block);
+        var height = GetLegacyGraphElementHeight(block);
+        return node.Tag is LegacyGraphVehicleNodeMarker
+            ? new Point(left + width, top + height / 2)
+            : new Point(left, top + height / 2);
+    }
+
     private void EndLegacyGraphConnectionPreview()
     {
         if (legacyGraphActiveConnectionLine is not null)
@@ -3617,7 +3650,7 @@ public partial class MainWindow : Window
     {
         if (legacyGraphActiveConnectionLine is not null)
         {
-            UpdateLegacyGraphActiveConnectionLine(Mouse.GetPosition(LegacyGraphEdgesCanvas));
+            UpdateLegacyGraphActiveConnectionLine(Mouse.GetPosition(LegacyGraphCanvas));
         }
 
         e.UseDefaultCursors = true;
@@ -3628,7 +3661,7 @@ public partial class MainWindow : Window
     {
         if (legacyGraphActiveConnectionLine is not null)
         {
-            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphEdgesCanvas));
+            UpdateLegacyGraphActiveConnectionLine(e.GetPosition(LegacyGraphCanvas));
         }
 
         if (GetLegacyGraphVehicleNodeDragPayload(e.Data) is not null ||
@@ -3727,6 +3760,10 @@ public partial class MainWindow : Window
             legacyGraphDocumentCardDragDocument = document;
             legacyGraphDocumentCardDragStartPoint = e.GetPosition(this);
             legacyGraphDocumentCardDragSourceElement = documentElement;
+            var cardPosition = e.GetPosition(LegacyGraphCanvas);
+            legacyGraphDragOffset = new Point(
+                cardPosition.X - Canvas.GetLeft(documentElement),
+                cardPosition.Y - Canvas.GetTop(documentElement));
             UpdateLegacyGraphInspector(document);
             e.Handled = true;
             return;

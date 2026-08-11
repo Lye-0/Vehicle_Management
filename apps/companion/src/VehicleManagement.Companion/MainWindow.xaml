@@ -950,7 +950,7 @@
                         </Border>
                         <Grid Margin="0,14,0,0" Height="820">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="400" />
+                                <ColumnDefinition Width="500" />
                                 <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="12" />
@@ -961,26 +961,22 @@
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
                                     <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
-                                    <Border x:Name="LegacyGraphCustomerUngroupDropZone" Margin="0,8,0,0" Padding="8"
-                                            Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
-                                            CornerRadius="5" AllowDrop="True" Visibility="Collapsed"
-                                            DragOver="LegacyGraphCustomerUngroupDropZone_DragOver"
-                                            DragLeave="LegacyGraphCustomerUngroupDropZone_DragLeave"
-                                            Drop="LegacyGraphCustomerUngroupDropZone_Drop">
-                                        <TextBlock Foreground="#9A3412" FontSize="11" TextWrapping="Wrap"
-                                                   Text="統合候補から外すには、顧客ブロックをここへドラッグ" />
-                                    </Border>
-                                    <ListBox x:Name="LegacyGraphCustomersList" Margin="0,8,0,0" Height="685"
-                                             Padding="0,0,14,0"
-                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                             AllowDrop="True"
-                                             SelectionChanged="LegacyGraphCustomersList_SelectionChanged"
-                                             PreviewMouseLeftButtonDown="LegacyGraphCustomerList_PreviewMouseLeftButtonDown"
-                                             PreviewMouseMove="LegacyGraphCustomerList_PreviewMouseMove"
-                                             PreviewMouseLeftButtonUp="LegacyGraphCustomerList_PreviewMouseLeftButtonUp"
-                                             DragOver="LegacyGraphCustomerList_DragOver"
-                                             DragLeave="LegacyGraphCustomerList_DragLeave"
-                                             Drop="LegacyGraphCustomerList_Drop">
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="126" />
+                                        </Grid.ColumnDefinitions>
+                                        <ListBox x:Name="LegacyGraphCustomersList" Height="685"
+                                                 Padding="0,0,14,0"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 AllowDrop="True"
+                                                 SelectionChanged="LegacyGraphCustomersList_SelectionChanged"
+                                                 PreviewMouseLeftButtonDown="LegacyGraphCustomerList_PreviewMouseLeftButtonDown"
+                                                 PreviewMouseMove="LegacyGraphCustomerList_PreviewMouseMove"
+                                                 PreviewMouseLeftButtonUp="LegacyGraphCustomerList_PreviewMouseLeftButtonUp"
+                                                 DragOver="LegacyGraphCustomerList_DragOver"
+                                                 DragLeave="LegacyGraphCustomerList_DragLeave"
+                                                 Drop="LegacyGraphCustomerList_Drop">
                                         <ListBox.ItemContainerStyle>
                                             <Style TargetType="ListBoxItem">
                                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -1017,7 +1013,18 @@
                                                 </Border>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
-                                    </ListBox>
+                                        </ListBox>
+                                        <Border x:Name="LegacyGraphCustomerUngroupDropZone" Grid.Column="1" Margin="8,8,0,0" Padding="8"
+                                                MinHeight="96" VerticalAlignment="Top"
+                                                Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
+                                                CornerRadius="5" AllowDrop="True" Visibility="Collapsed" Opacity="0.62"
+                                                DragOver="LegacyGraphCustomerUngroupDropZone_DragOver"
+                                                DragLeave="LegacyGraphCustomerUngroupDropZone_DragLeave"
+                                                Drop="LegacyGraphCustomerUngroupDropZone_Drop">
+                                            <TextBlock Foreground="#9A3412" FontSize="11" TextWrapping="Wrap"
+                                                       Text="統合解除\nここへ顧客をドロップ" />
+                                        </Border>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
