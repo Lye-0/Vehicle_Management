@@ -109,6 +109,8 @@ Gate 5Iでは、Gate 5Hで一意の候補になった「一致」または「要
 
 Gate 5Jでは、`human-reviewed`の確認済み証跡を再検証し、確認済み画像と対応する`syaryou.csv`／`syaryou2.csv`の行だけを新しい`ABACUS-Image-Registration-Preview-*`フォルダーへコピーします。`manifest.json`には確認済み証跡・画像・CSV行のハッシュ、CSVファイル名・行番号、車両識別子、顧客名、画像相対パスを登録前候補として保存します。顧客名だけで同姓同名を統合せず、候補IDは証跡・マニフェスト・CSV行から決定します。画像コピー後とマニフェスト保存後に再読込検証を行いますが、この段階でも顧客ID・車両IDの解決、データベース登録、API送信、ObjectStorageへのアップロード、ABACUSフォルダーへの書き込みは行いません。
 
+Gate 5Kでは、Gate 5Jの`ABACUS-Image-Registration-Preview-*`を入力として、既存WebインポートAPIの見出しに合わせたUTF-8（BOM付き）`customers.csv`と`vehicles.csv`、画像対応表`image-attachments.json`を新しい`ABACUS-Web-Import-Preview-*`へ作成します。ABACUSの元号年・日付・数値・記録簿表記は、APIが受け付ける値へ変換できた場合だけ正規化し、原文と出典を備考へ残します。候補ごとに決定的な仮の顧客ID・顧客番号・車両IDを発行し、顧客名による既存顧客への自動照合や同姓同名の自動統合は行いません。同じ顧客名が複数候補に現れる場合は、複数車両か同姓同名かを手動確認する警告をマニフェストへ記録します。CSVの作成後もWeb API送信、顧客・車両の登録、画像アップロードは行わず、画像対応表は次段階の手動アップロード用です。
+
 ## 永続ローカル移行パッケージ
 
 Gate 6Aでは、利用者が選択した通常フォルダーへ`ABACUS-Migration-Preview-*`フォルダーを新規作成します。開発中のWorkersプロセスが持つ一時ファイルシステムは永続保存先として扱いません。将来、開発用または本番用ObjectStorageへ接続する前段として、補助ソフト側に永続成果物の境界を置きます。

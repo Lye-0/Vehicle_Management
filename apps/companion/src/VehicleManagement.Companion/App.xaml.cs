@@ -348,9 +348,16 @@ public partial class App : Application
             vehicleExportFields[0] = "顧客A";
             vehicleExportFields[11] = "メーカーA";
             vehicleExportFields[12] = "車両A";
+            vehicleExportFields[13] = "H6";
+            vehicleExportFields[14] = "1000";
+            vehicleExportFields[15] = "5MT";
+            vehicleExportFields[16] = "緑";
             vehicleExportFields[17] = "MODEL-A";
             vehicleExportFields[18] = "CHASSIS1";
             vehicleExportFields[19] = "大阪537む16";
+            vehicleExportFields[20] = "10300";
+            vehicleExportFields[21] = "H26.06.07";
+            vehicleExportFields[22] = "有";
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "hanbai.csv"), string.Join(',', salesExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "seibi.csv"), string.Join(',', maintenanceExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
@@ -382,6 +389,20 @@ public partial class App : Application
                 $"{imageRegistrationPackage.Candidates[0].CandidateId}.png");
             var copiedRegistrationImageSha256 = Convert.ToHexString(
                 SHA256.HashData(await File.ReadAllBytesAsync(copiedRegistrationImage)));
+            var webImportPackageParent = Path.Combine(testRoot, "web-import-packages");
+            Directory.CreateDirectory(webImportPackageParent);
+            var webImportPackage = await new AbacusWebImportPreviewStore().CreateAsync(
+                imageRegistrationPackage.PackagePath,
+                webImportPackageParent);
+            var webImportManifestText = await File.ReadAllTextAsync(webImportPackage.ManifestPath);
+            var webCustomersCsvText = await File.ReadAllTextAsync(webImportPackage.CustomersCsvPath);
+            var webVehiclesCsvText = await File.ReadAllTextAsync(webImportPackage.VehiclesCsvPath);
+            var webImageAttachmentsText = await File.ReadAllTextAsync(webImportPackage.ImageAttachmentsPath);
+            var copiedWebImage = Path.Combine(
+                webImportPackage.PackagePath,
+                webImportPackage.Candidates[0].PackageImageFileName.Replace('/', Path.DirectorySeparatorChar));
+            var copiedWebImageSha256 = Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(copiedWebImage)));
             var rejectedDuplicateImageLinkApproval = false;
             try
             {
@@ -439,6 +460,28 @@ public partial class App : Application
                 copiedRegistrationImageSha256 == imageRegistrationPackage.Candidates[0].ImageSha256 &&
                 registrationPackageManifestText.Contains("abacus-image-registration-preview", StringComparison.Ordinal) &&
                 registrationPackageManifestText.Contains("\"status\": \"preview-only\"", StringComparison.Ordinal) &&
+                webImportPackage.CandidateCount == 1 &&
+                webImportPackage.CustomerRowCount == 1 &&
+                webImportPackage.VehicleRowCount == 1 &&
+                webImportPackage.ImageCount == 1 &&
+                webImportPackage.SameNameGroupCount == 0 &&
+                webImportPackage.ManifestSha256.Length == 64 &&
+                File.Exists(webImportPackage.CustomersCsvPath) &&
+                File.Exists(webImportPackage.VehiclesCsvPath) &&
+                File.Exists(webImportPackage.ImageAttachmentsPath) &&
+                File.Exists(copiedWebImage) &&
+                copiedWebImageSha256 == webImportPackage.Candidates[0].ImageSha256 &&
+                webImportPackage.Candidates[0].ModelYear == "1994" &&
+                webImportPackage.Candidates[0].InspectionDate == "2014-06-07" &&
+                webImportPackage.Candidates[0].Mileage == "10300" &&
+                webImportPackage.Candidates[0].InspectionRecord == "あり" &&
+                webCustomersCsvText.TrimStart('\uFEFF').StartsWith("顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数", StringComparison.Ordinal) &&
+                webVehiclesCsvText.TrimStart('\uFEFF').StartsWith("車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考", StringComparison.Ordinal) &&
+                webVehiclesCsvText.Contains("大阪537む16", StringComparison.Ordinal) &&
+                webVehiclesCsvText.Contains("CHASSIS1", StringComparison.Ordinal) &&
+                webImageAttachmentsText.Contains("manual-upload-required", StringComparison.Ordinal) &&
+                webImportManifestText.Contains("abacus-web-import-preview", StringComparison.Ordinal) &&
+                webImportManifestText.Contains("\"status\": \"preview-only\"", StringComparison.Ordinal) &&
                 rejectedDuplicateImageLinkApproval &&
                 !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&

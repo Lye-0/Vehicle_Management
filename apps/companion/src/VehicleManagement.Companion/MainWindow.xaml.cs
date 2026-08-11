@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly AbacusImageLinkMatcher imageLinkMatcher = new();
     private readonly AbacusImageLinkApprovalStore imageLinkApprovalStore = new();
     private readonly AbacusImageRegistrationPreviewStore imageRegistrationPreviewStore = new();
+    private readonly AbacusWebImportPreviewStore webImportPreviewStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -55,6 +56,7 @@ public partial class MainWindow : Window
     private bool imageLinkMatchBusy;
     private bool imageLinkApprovalBusy;
     private bool imageRegistrationPreviewBusy;
+    private bool webImportPreviewBusy;
 
     public MainWindow()
     {
@@ -1069,6 +1071,7 @@ public partial class MainWindow : Window
         SetImageLinkMatchControlsBusy(true);
         ImageLinkMatchesGrid.ItemsSource = null;
         ResetImageRegistrationPreview(clearDestination: false);
+        ResetWebImportPreview(clearPaths: true);
         ImageLinkMatchSummaryText.Text = "";
         ImageLinkMatchStatusText.Text = "マニフェスト・画像・車両一覧CSVを読み取り、SHA-256と識別子を照合しています…";
         ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
@@ -1139,6 +1142,9 @@ public partial class MainWindow : Window
         }
         SelectImageRegistrationDestinationButton.IsEnabled = !busy && !imageRegistrationPreviewBusy;
         UpdateImageRegistrationPreviewButtonState();
+        SelectWebImportSourcePackageButton.IsEnabled = !busy && !webImportPreviewBusy;
+        SelectWebImportDestinationButton.IsEnabled = !busy && !webImportPreviewBusy;
+        UpdateWebImportPreviewButtonState();
     }
 
     private void UpdateImageLinkMatchButtonState()
@@ -1696,6 +1702,7 @@ public partial class MainWindow : Window
         ImageLinkApprovalStatusText.Text = "照合結果から一意の候補を選択すると、目視確認済みとして記録できます。";
         ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         ResetImageRegistrationPreview(clearDestination: clearPaths);
+        ResetWebImportPreview(clearPaths: true);
         UpdateImageLinkMatchButtonState();
     }
 
@@ -1759,6 +1766,11 @@ public partial class MainWindow : Window
                 $"マニフェスト: {result.ManifestPath}\n" +
                 $"候補: {result.CandidateCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
+            WebImportSourcePackageTextBox.Text = result.PackagePath;
+            ResetWebImportPreview(clearPaths: false);
+            WebImportPreviewStatusText.Text =
+                "Gate5Jの候補パッケージを入力に設定しました。候補保存先を選択するとWeb CSV候補を作成できます。";
+            UpdateWebImportPreviewButtonState();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or JsonException or ArgumentException or
@@ -1778,6 +1790,104 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SelectWebImportSourcePackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Webインポート候補の入力パッケージを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportSourcePackageTextBox.Text = dialog.FolderName;
+        ResetWebImportPreview(clearPaths: false);
+        WebImportPreviewStatusText.Text =
+            "入力候補パッケージを選択しました。候補保存先を選択してください。";
+        UpdateWebImportPreviewButtonState();
+    }
+
+    private void SelectWebImportDestinationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Webインポート候補の保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportDestinationTextBox.Text = dialog.FolderName;
+        ResetWebImportPreview(clearPaths: false);
+        WebImportPreviewStatusText.Text =
+            "候補保存先を選択しました。入力パッケージを確認して作成できます。";
+        UpdateWebImportPreviewButtonState();
+    }
+
+    private async void CreateWebImportPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        var sourcePackage = WebImportSourcePackageTextBox.Text.Trim();
+        var destinationFolder = WebImportDestinationTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(sourcePackage) || string.IsNullOrWhiteSpace(destinationFolder))
+        {
+            MessageBox.Show(
+                this,
+                "入力候補パッケージと候補保存先を選択してください。",
+                "保存先がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        webImportPreviewBusy = true;
+        UpdateWebImportPreviewButtonState();
+        SelectWebImportSourcePackageButton.IsEnabled = false;
+        SelectWebImportDestinationButton.IsEnabled = false;
+        WebImportPreviewGrid.ItemsSource = null;
+        WebImportPreviewResultText.Text = "";
+        WebImportPreviewStatusText.Text =
+            "登録前候補パッケージを再検証し、Webインポート用CSV候補を作成しています…";
+        WebImportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await webImportPreviewStore.CreateAsync(sourcePackage, destinationFolder);
+            WebImportPreviewGrid.ItemsSource = result.Candidates;
+            WebImportPreviewStatusText.Text =
+                "Webインポート用CSV候補を作成しました。登録・API送信・画像アップロードはまだ行っていません。";
+            WebImportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            WebImportPreviewResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"顧客CSV: {result.CustomersCsvPath}\n" +
+                $"車両CSV: {result.VehiclesCsvPath}\n" +
+                $"画像対応表: {result.ImageAttachmentsPath}\n" +
+                $"候補: {result.CandidateCount:N0}件 / 顧客行: {result.CustomerRowCount:N0}行 / " +
+                $"車両行: {result.VehicleRowCount:N0}行 / 画像: {result.ImageCount:N0}件\n" +
+                $"同じ顧客名の手動確認グループ: {result.SameNameGroupCount:N0}件\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            WebImportPreviewGrid.ItemsSource = null;
+            WebImportPreviewResultText.Text = "";
+            WebImportPreviewStatusText.Text =
+                $"Webインポート用CSV候補を作成できません: {exception.Message}";
+            WebImportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            webImportPreviewBusy = false;
+            SelectWebImportSourcePackageButton.IsEnabled = true;
+            SelectWebImportDestinationButton.IsEnabled = true;
+            UpdateWebImportPreviewButtonState();
+        }
+    }
+
     private void ResetImageRegistrationPreview(bool clearDestination)
     {
         if (clearDestination)
@@ -1791,6 +1901,32 @@ public partial class MainWindow : Window
             "画像保存先・車両一覧CSVフォルダー・パッケージ保存先を選択してください。";
         ImageRegistrationPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         UpdateImageRegistrationPreviewButtonState();
+    }
+
+    private void ResetWebImportPreview(bool clearPaths)
+    {
+        if (clearPaths)
+        {
+            WebImportSourcePackageTextBox.Clear();
+            WebImportDestinationTextBox.Clear();
+        }
+
+        WebImportPreviewGrid.ItemsSource = null;
+        WebImportPreviewResultText.Text = "";
+        WebImportPreviewStatusText.Text =
+            "入力候補パッケージと候補保存先を選択してください。";
+        WebImportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        UpdateWebImportPreviewButtonState();
+    }
+
+    private void UpdateWebImportPreviewButtonState()
+    {
+        CreateWebImportPreviewButton.IsEnabled =
+            !webImportPreviewBusy &&
+            !imageLinkMatchBusy &&
+            !imageRegistrationPreviewBusy &&
+            !string.IsNullOrWhiteSpace(WebImportSourcePackageTextBox.Text) &&
+            !string.IsNullOrWhiteSpace(WebImportDestinationTextBox.Text);
     }
 
     private void UpdateImageRegistrationPreviewButtonState()
