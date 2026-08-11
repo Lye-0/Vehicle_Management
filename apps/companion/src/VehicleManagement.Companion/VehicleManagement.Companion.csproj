@@ -10,6 +10,8 @@
     <ProjectReference Include="..\VehicleManagement.AbacusImport\VehicleManagement.AbacusImport.csproj" />
     <ProjectReference Include="..\VehicleManagement.LegacyHost\VehicleManagement.LegacyHost.csproj"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\VehicleManagement.LegacyAutomationProbe\VehicleManagement.LegacyAutomationProbe.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\VehicleManagement.LocalProtocol\VehicleManagement.LocalProtocol.csproj" />
   </ItemGroup>
 
@@ -17,6 +19,7 @@
     <ItemGroup>
       <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyHost\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LegacyHost*" />
       <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyHost\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LocalProtocol.dll" />
+      <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyAutomationProbe\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LegacyAutomationProbe*" />
     </ItemGroup>
     <MakeDir Directories="$(OutDir)LegacyHost" />
     <Copy SourceFiles="@(LegacyHostOutput)"

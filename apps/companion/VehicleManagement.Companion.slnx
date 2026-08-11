@@ -4,6 +4,7 @@
     <Project Path="src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj" />
     <Project Path="src/VehicleManagement.Companion/VehicleManagement.Companion.csproj" />
     <Project Path="src/VehicleManagement.LegacyHost/VehicleManagement.LegacyHost.csproj" />
+    <Project Path="src/VehicleManagement.LegacyAutomationProbe/VehicleManagement.LegacyAutomationProbe.csproj" />
     <Project Path="src/VehicleManagement.LocalProtocol/VehicleManagement.LocalProtocol.csproj" />
   </Folder>
 </Solution>

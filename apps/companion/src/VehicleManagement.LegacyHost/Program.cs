@@ -166,7 +166,7 @@ internal static partial class Program
 
             return await WaitForAbacusWindowAsync(request.RequestId, executablePath);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return new LegacyHostMessage(
                 "error",
@@ -443,63 +443,74 @@ internal static partial class Program
         }
 
         abacusProcess.Refresh();
-        var serverType = Type.GetTypeFromProgID("FMPRO.Application", throwOnError: false);
-        if (serverType is null)
+        var probePath = Path.Combine(AppContext.BaseDirectory, "VehicleManagement.LegacyAutomationProbe.exe");
+        if (!File.Exists(probePath))
         {
             return new LegacyHostMessage(
                 "abacus-automation-inspected",
                 requestId,
-                Status: "automation-unregistered",
-                Message: "FMPRO.ApplicationのActiveX登録を確認できませんでした。スクリプト実行は行っていません。",
+                Status: "automation-probe-unavailable",
+                Message: "x86 ActiveX診断プロセスが見つかりません。スクリプト実行は行っていません。",
                 ProcessId: abacusProcess.Id,
                 Architecture: HostArchitecture,
                 TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
-                AutomationServer: "FMPRO.Application");
+                AutomationServer: "FMPRO.Application (x86 probe missing)");
         }
 
-        object? activeObject = null;
+        var exitCode = -1;
         try
         {
-            if (CLSIDFromProgID("FMPRO.Application", out var classId) != 0)
+            using var probe = Process.Start(new ProcessStartInfo(probePath)
             {
-                throw new COMException("FMPRO.ApplicationのCLSIDを取得できませんでした。");
-            }
-
-            var hresult = GetActiveObject(ref classId, IntPtr.Zero, out activeObject);
-            if (hresult != 0)
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
+            }) ?? throw new InvalidOperationException("x86 ActiveX診断プロセスを開始できませんでした。");
+            if (!probe.WaitForExit(5000))
             {
-                throw new COMException("FMPRO.Applicationの実行中インスタンスを取得できませんでした。", hresult);
-            }
+                try
+                {
+                    probe.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The probe may have exited between the timeout and Kill.
+                }
 
-            return new LegacyHostMessage(
-                "abacus-automation-inspected",
-                requestId,
-                Status: "automation-active",
-                Message: "FMPRO.Applicationの実行中ActiveXインスタンスを確認しました。スクリプト実行は行っていません。",
-                ProcessId: abacusProcess.Id,
-                Architecture: HostArchitecture,
-                TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
-                AutomationServer: "FMPRO.Application");
+                exitCode = -2;
+            }
         }
-        catch (COMException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return new LegacyHostMessage(
                 "abacus-automation-inspected",
                 requestId,
-                Status: "automation-inactive",
-                Message: $"FMPRO.Applicationは登録済みですが、実行中インスタンスを取得できませんでした（HRESULT: 0x{exception.HResult:X8}）。スクリプト実行は行っていません。",
+                Status: "automation-probe-failed",
+                Message: $"x86 ActiveX診断プロセスを実行できませんでした: {exception.Message}",
                 ProcessId: abacusProcess.Id,
                 Architecture: HostArchitecture,
                 TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
-                AutomationServer: "FMPRO.Application");
+                AutomationServer: "FMPRO.Application (x86 probe failed)");
         }
-        finally
+
+        var (status, message) = exitCode switch
         {
-            if (activeObject is not null && Marshal.IsComObject(activeObject))
-            {
-                Marshal.ReleaseComObject(activeObject);
-            }
-        }
+            0 => ("automation-active", "x86プローブでFMPRO.Applicationの実行中ActiveXインスタンスを確認しました。スクリプト実行は行っていません。"),
+            10 => ("automation-unregistered", "x86プローブでもFMPRO.ApplicationのActiveX登録を確認できませんでした。スクリプト実行は行っていません。"),
+            12 => ("automation-inactive", "FMPRO.Applicationはx86側で登録済みですが、実行中インスタンスを取得できませんでした。スクリプト実行は行っていません。"),
+            -2 => ("automation-probe-timeout", "x86 ActiveX診断が5秒以内に終了しませんでした。スクリプト実行は行っていません。"),
+            _ => ($"automation-probe-result-{exitCode}", $"x86 ActiveX診断が終了コード{exitCode}を返しました。スクリプト実行は行っていません。"),
+        };
+
+        return new LegacyHostMessage(
+            "abacus-automation-inspected",
+            requestId,
+            Status: status,
+            Message: message,
+            ProcessId: abacusProcess.Id,
+            Architecture: HostArchitecture,
+            TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+            AutomationServer: "FMPRO.Application (x86 probe)");
     }
 
     private static int GetNativeWindowDepth(IntPtr windowHandle, IntPtr rootHandle)
@@ -797,15 +808,6 @@ internal static partial class Program
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr windowHandle, int index);
-
-    [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
-    private static extern int CLSIDFromProgID(string progId, out Guid classId);
-
-    [DllImport("oleaut32.dll")]
-    private static extern int GetActiveObject(
-        ref Guid classId,
-        IntPtr reserved,
-        [MarshalAs(UnmanagedType.IUnknown)] out object activeObject);
 
     [GeneratedRegex("^[A-Za-z0-9.-]{1,120}$", RegexOptions.CultureInvariant)]
     private static partial Regex ValidPipeName();
