@@ -914,6 +914,65 @@
                             </DataGrid.Columns>
                         </DataGrid>
 
+                        <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="6B補足2. 顧客・車両・書類のグラフ型確認" />
+                        <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="再検証済み候補パッケージを顧客・車両・書類の関係として表示します。実線は一意一致、点線は要確認・未一致・除外です。この段階では登録や紐付けの変更は行わず、ブロックの表示位置だけ移動できます。" />
+                        <TextBlock x:Name="LegacyGraphStatusText" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="候補パッケージを再検証すると、ここにグラフを表示します。" />
+                        <Border Margin="0,10,0,0" Padding="12" Background="#FFF4D6" CornerRadius="8">
+                            <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
+                                       Text="青い顧客ブロックから車両、書類へ読み進めます。点線の書類は候補として人の確認が必要です。" />
+                        </Border>
+                        <Grid Margin="0,14,0,0" Height="760">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="270" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Padding="10" Background="#F4F7FB" BorderBrush="#D8E1EC"
+                                    BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
+                                    <ListBox x:Name="LegacyGraphCustomersList" Margin="0,8,0,0" Height="700"
+                                             SelectionChanged="LegacyGraphCustomersList_SelectionChanged">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="2,5">
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="12"
+                                                               Text="{Binding VehicleSummary}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
+                                    BorderThickness="1" CornerRadius="6">
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720" Background="#F7F9FC" />
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                        <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
+                                   Text="未確定・要確認の書類" />
+                        <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
+                                   Text="選択顧客へ安全に紐付けられなかった書類を一覧で確認できます。顧客名が同じだけの場合は自動統合していません。" />
+                        <DataGrid x:Name="LegacyGraphUnresolvedGrid" Height="240" Margin="0,0,0,0" IsReadOnly="True"
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="種類" Binding="{Binding Kind}" Width="85" />
+                                <DataGridTextColumn Header="出典" Binding="{Binding SourceLocation}" Width="1.4*" />
+                                <DataGridTextColumn Header="顧客名" Binding="{Binding CustomerName}" Width="1.4*" />
+                                <DataGridTextColumn Header="車名" Binding="{Binding VehicleName}" Width="1.4*" />
+                                <DataGridTextColumn Header="書類番号" Binding="{Binding DocumentNumber}" Width="100" />
+                                <DataGridTextColumn Header="判定" Binding="{Binding MatchStatus}" Width="80" />
+                                <DataGridTextColumn Header="候補車両" Binding="{Binding CandidateSummary}" Width="85" />
+                                <DataGridTextColumn Header="理由" Binding="{Binding Warning}" Width="3*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+
                         <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6C. 全車両一覧エクスポート導線の診断" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"

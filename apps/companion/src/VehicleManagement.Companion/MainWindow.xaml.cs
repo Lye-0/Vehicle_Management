@@ -5,8 +5,11 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Line = System.Windows.Shapes.Line;
+using Rectangle = System.Windows.Shapes.Rectangle;
 using Microsoft.Win32;
 using VehicleManagement.AbacusImport;
 using VehicleManagement.Companion.Services;
@@ -27,6 +30,7 @@ public partial class MainWindow : Window
     private readonly AbacusLegacyExportReader legacyExportReader = new();
     private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
     private readonly AbacusLegacyExportPreviewPackageReader legacyExportPackageReader = new();
+    private readonly AbacusLegacyExportCandidateGraphService legacyExportCandidateGraphService = new();
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
@@ -65,6 +69,9 @@ public partial class MainWindow : Window
     private bool webImportRegistrationBusy;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
+    private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
+    private UIElement? legacyGraphDraggingElement;
+    private Point legacyGraphDragOffset;
 
     public MainWindow()
     {
@@ -376,6 +383,7 @@ public partial class MainWindow : Window
             LegacyExportPackageStatusText.Text = "未読込";
             LegacyExportPackageResultText.Text = "";
             LegacyExportPackageRowsGrid.ItemsSource = null;
+            ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
         }
     }
 
@@ -468,6 +476,7 @@ public partial class MainWindow : Window
         LegacyExportPackageStatusText.Text = "未読込";
         LegacyExportPackageResultText.Text = "";
         LegacyExportPackageRowsGrid.ItemsSource = null;
+        ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
         LegacyExportPreviewStatusText.Text = "固定列CSVを再検証し、登録前候補CSVを作成しています…";
         LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         LegacyExportPreviewResultText.Text = "";
@@ -523,6 +532,7 @@ public partial class MainWindow : Window
         LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         LegacyExportPackageResultText.Text = "";
         LegacyExportPackageRowsGrid.ItemsSource = null;
+        ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
     }
 
     private async void ReadLegacyExportPackageButton_Click(object sender, RoutedEventArgs e)
@@ -539,6 +549,7 @@ public partial class MainWindow : Window
         LegacyExportPackagePathTextBox.IsEnabled = false;
         LegacyExportPackageRowsGrid.ItemsSource = null;
         LegacyExportPackageResultText.Text = "";
+        ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
         LegacyExportPackageStatusText.Text = "マニフェストと候補CSVを再検証しています…";
         LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         try
@@ -562,11 +573,31 @@ public partial class MainWindow : Window
                 $"CSV: {string.Join(" / ", result.DataFiles.Select(file => $"{file.FileName} {file.SizeBytes:N0} bytes"))}\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}\n" +
                 $"警告: {warningSummary}";
+            try
+            {
+                var graph = await legacyExportCandidateGraphService.BuildAsync(result);
+                legacyExportCandidateGraphResult = graph;
+                LegacyGraphCustomersList.ItemsSource = graph.Customers;
+                LegacyGraphUnresolvedGrid.ItemsSource = graph.UnresolvedDocuments;
+                LegacyGraphStatusText.Text =
+                    $"グラフを作成しました。顧客 {graph.Customers.Count:N0}件 / 車両 {graph.Customers.Sum(customer => customer.Vehicles.Count):N0}台 / 書類 {graph.AllDocuments.Count:N0}件。" +
+                    $"実線 {graph.SolidLinkCount:N0}件 / 要確認 {graph.ReviewLinkCount:N0}件 / 未確定 {graph.UnmatchedDocumentCount:N0}件。";
+                LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+                LegacyGraphLegendText.Text =
+                    "左の顧客を選ぶと、顧客→車両→書類の順に表示します。実線は一意一致、点線は要確認・未一致・除外です。ブロックは表示位置だけドラッグできます。";
+                LegacyGraphCustomersList.SelectedIndex = graph.Customers.Count > 0 ? 0 : -1;
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException)
+            {
+                ResetLegacyCandidateGraph($"グラフの作成に失敗しました: {exception.Message}");
+                LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
         {
             LegacyExportPackageRowsGrid.ItemsSource = null;
+            ResetLegacyCandidateGraph("候補パッケージの再検証に失敗したため、グラフをクリアしました。");
             LegacyExportPackageStatusText.Text = $"候補パッケージの再検証に失敗しました: {exception.Message}";
             LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             LegacyExportPackageResultText.Text = "ハッシュ、見出し、列数、行数のいずれかが一致しない可能性があります。元の候補パッケージを変更せず、再作成してください。";
@@ -604,6 +635,292 @@ public partial class MainWindow : Window
             SetAbacusButtonsBusy(false);
         }
     }
+
+    private void LegacyGraphCustomersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (LegacyGraphCustomersList.SelectedItem is AbacusLegacyExportCandidateGraphCustomer customer)
+        {
+            RenderLegacyGraphCustomer(customer);
+        }
+    }
+
+    private void RenderLegacyGraphCustomer(AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        LegacyGraphCanvas.Children.Clear();
+        const double customerX = 30;
+        const double customerY = 32;
+        const double customerWidth = 225;
+        const double customerHeight = 88;
+        const double vehicleX = 320;
+        const double vehicleWidth = 290;
+        const double vehicleHeight = 94;
+        const double documentX = 690;
+        const double documentWidth = 390;
+        const double documentHeight = 88;
+        const double vehicleGap = 112;
+        const double documentGap = 102;
+
+        var customerBlock = CreateLegacyGraphBlock(
+            $"顧客: {customer.DisplayName}",
+            $"ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件",
+            "#2563EB",
+            "#EAF2FF",
+            dashed: false,
+            customerWidth,
+            customerHeight);
+        AddGraphElement(customerBlock, customerX, customerY);
+
+        var nextDocumentY = customerY + customerHeight + 38;
+        for (var vehicleIndex = 0; vehicleIndex < customer.Vehicles.Count; vehicleIndex++)
+        {
+            var vehicle = customer.Vehicles[vehicleIndex];
+            var vehicleY = customerY + vehicleIndex * vehicleGap;
+            AddGraphLine(
+                customerX + customerWidth,
+                customerY + customerHeight / 2,
+                vehicleX,
+                vehicleY + vehicleHeight / 2,
+                "#2563EB",
+                dashed: false);
+            var vehicleTitle = string.IsNullOrWhiteSpace(vehicle.Maker)
+                ? vehicle.DisplayName
+                : $"{vehicle.Maker} {vehicle.DisplayName}";
+            var vehicleBlock = CreateLegacyGraphBlock(
+                $"車両: {vehicleTitle}",
+                $"登録: {Fallback(vehicle.RegistrationNumber)}\n車台: {Fallback(vehicle.ChassisNumber)}",
+                "#059669",
+                "#ECFDF5",
+                dashed: false,
+                vehicleWidth,
+                vehicleHeight);
+            AddGraphElement(vehicleBlock, vehicleX, vehicleY);
+
+            for (var documentIndex = 0; documentIndex < vehicle.Documents.Count; documentIndex++)
+            {
+                var document = vehicle.Documents[documentIndex];
+                var documentY = vehicleY + documentIndex * documentGap;
+                AddGraphLine(
+                    vehicleX + vehicleWidth,
+                    vehicleY + vehicleHeight / 2,
+                    documentX,
+                    documentY + documentHeight / 2,
+                    "#166534",
+                    dashed: false);
+                var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight);
+                AddGraphElement(documentBlock, documentX, documentY);
+                nextDocumentY = Math.Max(nextDocumentY, documentY + documentHeight + 20);
+            }
+        }
+
+        for (var documentIndex = 0; documentIndex < customer.UnresolvedDocuments.Count; documentIndex++)
+        {
+            var document = customer.UnresolvedDocuments[documentIndex];
+            var documentY = nextDocumentY + documentIndex * documentGap;
+            AddGraphLine(
+                customerX + customerWidth,
+                customerY + customerHeight / 2,
+                documentX,
+                documentY + documentHeight / 2,
+                "#D97706",
+                dashed: true);
+            var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight);
+            AddGraphElement(documentBlock, documentX, documentY);
+        }
+
+        if (customer.Vehicles.Count == 0 && customer.UnresolvedDocuments.Count == 0)
+        {
+            var emptyBlock = CreateLegacyGraphBlock(
+                "表示できる車両・書類はありません",
+                "顧客CSVには存在しますが、候補CSVに車両・書類がありません。",
+                "#718096",
+                "#F4F7FB",
+                dashed: true,
+                vehicleWidth,
+                vehicleHeight);
+            AddGraphElement(emptyBlock, vehicleX, vehicleY: 140);
+        }
+
+        LegacyGraphCanvas.Width = 1120;
+        LegacyGraphCanvas.Height = Math.Max(720, nextDocumentY + Math.Max(1, customer.UnresolvedDocuments.Count) * documentGap + 70);
+    }
+
+    private Grid CreateLegacyDocumentBlock(
+        AbacusLegacyExportCandidateGraphDocument document,
+        double width,
+        double height)
+    {
+        var visual = GetDocumentVisual(document.MatchStatus);
+        var subtitle =
+            $"判定: {document.MatchStatus}\n" +
+            $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)}\n" +
+            $"出典: {document.SourceLocation}";
+        var block = CreateLegacyGraphBlock(
+            $"{document.Kind}: {Fallback(document.DocumentNumber)}",
+            subtitle,
+            visual.Stroke,
+            visual.Fill,
+            visual.Dashed,
+            width,
+            height);
+        if (!string.IsNullOrWhiteSpace(document.Warning))
+        {
+            block.ToolTip = document.Warning;
+        }
+
+        return block;
+    }
+
+    private Grid CreateLegacyGraphBlock(
+        string title,
+        string subtitle,
+        string stroke,
+        string fill,
+        bool dashed,
+        double width,
+        double height)
+    {
+        var block = new Grid
+        {
+            Width = width,
+            Height = height,
+            Cursor = Cursors.SizeAll,
+        };
+        var outline = new Rectangle
+        {
+            Stroke = ToBrush(stroke),
+            Fill = ToBrush(fill),
+            StrokeThickness = 2,
+            RadiusX = 7,
+            RadiusY = 7,
+        };
+        if (dashed)
+        {
+            outline.StrokeDashArray = new DoubleCollection { 5, 3 };
+        }
+
+        var content = new StackPanel { Margin = new Thickness(12, 8, 12, 8) };
+        content.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        content.Children.Add(new TextBlock
+        {
+            Margin = new Thickness(0, 3, 0, 0),
+            Text = subtitle,
+            FontSize = 12,
+            Foreground = ToBrush("#52647A"),
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        block.Children.Add(outline);
+        block.Children.Add(content);
+        block.PreviewMouseLeftButtonDown += LegacyGraphBlock_MouseLeftButtonDown;
+        block.PreviewMouseMove += LegacyGraphBlock_MouseMove;
+        block.PreviewMouseLeftButtonUp += LegacyGraphBlock_MouseLeftButtonUp;
+        return block;
+    }
+
+    private void AddGraphElement(UIElement element, double left, double vehicleY)
+    {
+        LegacyGraphCanvas.Children.Add(element);
+        Canvas.SetLeft(element, left);
+        Canvas.SetTop(element, vehicleY);
+    }
+
+    private void AddGraphLine(
+        double x1,
+        double y1,
+        double x2,
+        double y2,
+        string stroke,
+        bool dashed)
+    {
+        var line = new Line
+        {
+            X1 = x1,
+            Y1 = y1,
+            X2 = x2,
+            Y2 = y2,
+            Stroke = ToBrush(stroke),
+            StrokeThickness = 2,
+            IsHitTestVisible = false,
+        };
+        if (dashed)
+        {
+            line.StrokeDashArray = new DoubleCollection { 5, 3 };
+        }
+
+        LegacyGraphCanvas.Children.Add(line);
+    }
+
+    private void LegacyGraphBlock_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not UIElement element)
+        {
+            return;
+        }
+
+        legacyGraphDraggingElement = element;
+        var position = e.GetPosition(LegacyGraphCanvas);
+        legacyGraphDragOffset = new Point(
+            position.X - Canvas.GetLeft(element),
+            position.Y - Canvas.GetTop(element));
+        element.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void LegacyGraphBlock_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (legacyGraphDraggingElement is null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(LegacyGraphCanvas);
+        var left = Math.Max(0, position.X - legacyGraphDragOffset.X);
+        var top = Math.Max(0, position.Y - legacyGraphDragOffset.Y);
+        Canvas.SetLeft(legacyGraphDraggingElement, left);
+        Canvas.SetTop(legacyGraphDraggingElement, top);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphBlock_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (legacyGraphDraggingElement is not null)
+        {
+            legacyGraphDraggingElement.ReleaseMouseCapture();
+            legacyGraphDraggingElement = null;
+            e.Handled = true;
+        }
+    }
+
+    private void ResetLegacyCandidateGraph(string status)
+    {
+        legacyExportCandidateGraphResult = null;
+        legacyGraphDraggingElement = null;
+        LegacyGraphCustomersList.ItemsSource = null;
+        LegacyGraphUnresolvedGrid.ItemsSource = null;
+        LegacyGraphCanvas.Children.Clear();
+        LegacyGraphStatusText.Text = status;
+        LegacyGraphStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
+    }
+
+    private static (string Stroke, string Fill, bool Dashed) GetDocumentVisual(string status) => status switch
+    {
+        "一意一致" => ("#166534", "#ECFDF5", false),
+        "要確認" or "候補" => ("#D97706", "#FFF7ED", true),
+        _ => ("#B91C1C", "#FEF2F2", true),
+    };
+
+    private static string Fallback(string value) => string.IsNullOrWhiteSpace(value) ? "未設定" : value;
+
+    private static Brush ToBrush(string color) =>
+        (Brush)new BrushConverter().ConvertFromString(color)!;
 
     private async void InspectAbacusNativeWindowsButton_Click(object sender, RoutedEventArgs e)
     {

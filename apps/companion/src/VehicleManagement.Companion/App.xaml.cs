@@ -385,6 +385,7 @@ public partial class App : Application
             var legacyPreviewSalesText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "sales.csv"));
             var legacyPreviewMaintenanceText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "maintenance.csv"));
             var legacyPackageRead = await new AbacusLegacyExportPreviewPackageReader().ReadAsync(legacyPreview.PackagePath);
+            var legacyCandidateGraph = await new AbacusLegacyExportCandidateGraphService().BuildAsync(legacyPackageRead);
             var tamperedLegacyPackagePath = Path.Combine(testRoot, "legacy-preview-tampered");
             Directory.CreateDirectory(tamperedLegacyPackagePath);
             foreach (var packageFile in Directory.EnumerateFiles(legacyPreview.PackagePath))
@@ -648,6 +649,14 @@ public partial class App : Application
                 legacyPackageRead.MaintenanceRowCount == legacyPreview.MaintenanceRowCount &&
                 legacyPackageRead.DataFiles.Count == 4 &&
                 legacyPackageRead.Rows.Count == legacyPreview.PreviewRows.Count &&
+                legacyCandidateGraph.Customers.Count == 1 &&
+                legacyCandidateGraph.Customers[0].Vehicles.Count == 1 &&
+                legacyCandidateGraph.Customers[0].Documents == 2 &&
+                legacyCandidateGraph.AllDocuments.Count == 2 &&
+                legacyCandidateGraph.UnresolvedDocuments.Count == 0 &&
+                legacyCandidateGraph.SolidLinkCount == 2 &&
+                legacyCandidateGraph.ReviewLinkCount == 0 &&
+                legacyCandidateGraph.UnmatchedDocumentCount == 0 &&
                 rejectedLegacyPackageTamper &&
                 !invalidSales.IsValid &&
                 !invalidMaintenance.IsValid;
