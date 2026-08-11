@@ -265,7 +265,8 @@
             </TabItem>
 
             <TabItem Header="紐付けプレビュー">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="顧客・複数車両・書類の紐付けプレビュー" />
@@ -955,17 +956,27 @@
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">
-                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                    <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
-                                        <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
+                                <ScrollViewer x:Name="LegacyGraphScrollViewer"
+                                              HorizontalScrollBarVisibility="Auto"
+                                              VerticalScrollBarVisibility="Auto"
+                                              CanContentScroll="False"
+                                              PreviewMouseWheel="LegacyGraphScrollViewer_PreviewMouseWheel">
+                                        <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
+                                            <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
                                                 IsHitTestVisible="False" />
-                                        <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720" />
+                                        <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720"
+                                                PreviewMouseLeftButtonDown="LegacyGraphCanvas_PreviewMouseLeftButtonDown"
+                                                PreviewMouseMove="LegacyGraphCanvas_PreviewMouseMove"
+                                                PreviewMouseLeftButtonUp="LegacyGraphCanvas_PreviewMouseLeftButtonUp" />
                                     </Grid>
                                 </ScrollViewer>
                             </Border>
                             <Border Grid.Column="4" Padding="14" Background="#FFFFFF" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ScrollViewer x:Name="LegacyGraphInspectorScrollViewer"
+                                              VerticalScrollBarVisibility="Auto"
+                                              CanContentScroll="False"
+                                              PreviewMouseWheel="LegacyGraphInspectorScrollViewer_PreviewMouseWheel">
                                     <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
                                                    Text="選択項目の詳細" />
