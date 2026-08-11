@@ -583,7 +583,8 @@
                         <TextBlock x:Name="Fp5InspectionStatusText" Margin="0,10,0,0" Foreground="#52647A"
                                    Text="未診断" TextWrapping="Wrap" />
                         <DataGrid x:Name="Fp5CandidatesGrid" Height="220" Margin="0,14,0,0" IsReadOnly="True"
-                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                                  AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column"
+                                  SelectionChanged="Fp5CandidatesGrid_SelectionChanged">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
                                 <DataGridTextColumn Header="位置" Binding="{Binding Offset}" Width="120" />
@@ -592,6 +593,11 @@
                                 <DataGridTextColumn Header="高さ" Binding="{Binding PixelHeight}" Width="75" />
                             </DataGrid.Columns>
                         </DataGrid>
+                        <Button x:Name="ExtractFp5CandidateButton" Margin="0,12,0,0" HorizontalAlignment="Left"
+                                Content="選択したJPEG候補を1件検証出力" IsEnabled="False"
+                                Click="ExtractFp5CandidateButton_Click" />
+                        <TextBlock x:Name="Fp5CandidateExportStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                   Text="候補を選択すると1件検証出力できます。" TextWrapping="Wrap" />
                         <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
                                        TextWrapping="Wrap" LineHeight="24" />

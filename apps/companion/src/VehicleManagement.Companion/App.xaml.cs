@@ -114,13 +114,24 @@ public partial class App : Application
             var fakeFp5Header = new byte[1024];
             var fakeFp5HeaderText = Encoding.ASCII.GetBytes("Copyright 1984-1999 FileMaker, Inc. Pro 5.0");
             fakeFp5HeaderText.CopyTo(fakeFp5Header, 480);
-            var fakeJpeg = new byte[]
-            {
-                0xFF, 0xD8,
-                0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46,
-                0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x02, 0x00, 0x03, 0x01, 0x01, 0x11, 0x00,
-                0xFF, 0xD9,
-            };
+            var fakeBitmap = BitmapSource.Create(
+                3,
+                2,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null,
+                new byte[]
+                {
+                    0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255,
+                    255, 255, 255, 255, 100, 100, 100, 255, 50, 50, 50, 255,
+                },
+                3 * 4);
+            using var fakeJpegStream = new MemoryStream();
+            var fakeJpegEncoder = new JpegBitmapEncoder();
+            fakeJpegEncoder.Frames.Add(BitmapFrame.Create(fakeBitmap));
+            fakeJpegEncoder.Save(fakeJpegStream);
+            var fakeJpeg = fakeJpegStream.ToArray();
             await File.WriteAllBytesAsync(
                 Path.Combine(source, "BackUp-5.fp5"),
                 [.. fakeFp5Header, .. fakeJpeg]);
@@ -242,6 +253,24 @@ public partial class App : Application
             var analysis = await new AbacusDataAnalyzer(parser).AnalyzeAsync(source);
             var linkage = await new AbacusLinkagePlanner(parser).PlanAsync(source);
             var fp5Inspection = await new AbacusFp5Inspector().InspectAsync(source);
+            var fp5ExportDestination = Path.Combine(testRoot, "fp5-export");
+            Directory.CreateDirectory(fp5ExportDestination);
+            var fp5Export = await new AbacusFp5CandidateExporter().ExportAsync(
+                source,
+                fp5Inspection.Candidates[0],
+                fp5ExportDestination);
+            var rejectedInternalFp5Export = false;
+            try
+            {
+                await new AbacusFp5CandidateExporter().ExportAsync(
+                    source,
+                    fp5Inspection.Candidates[0],
+                    source);
+            }
+            catch (InvalidOperationException)
+            {
+                rejectedInternalFp5Export = true;
+            }
             var packageParent = Path.Combine(testRoot, "migration-packages");
             Directory.CreateDirectory(packageParent);
             var migrationPreview = await new AbacusMigrationPreviewStore(
@@ -312,6 +341,12 @@ public partial class App : Application
                 fp5Inspection.Candidates.Count == 1 &&
                 fp5Inspection.Candidates[0].PixelWidth == 3 &&
                 fp5Inspection.Candidates[0].PixelHeight == 2 &&
+                File.Exists(fp5Export.FilePath) &&
+                fp5Export.FileSize == fp5Inspection.Candidates[0].Length &&
+                fp5Export.PixelWidth == 3 &&
+                fp5Export.PixelHeight == 2 &&
+                fp5Export.Sha256.Length == 64 &&
+                rejectedInternalFp5Export &&
                 Directory.GetFiles(migrationPreview.PackagePath).Length == 1 &&
                 migrationPreview.ManifestSha256.Length == 64 &&
                 migrationPreview.CustomerCandidates == linkage.CustomerCandidates &&

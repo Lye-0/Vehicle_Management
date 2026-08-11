@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportInspector legacyExportInspector = new();
     private readonly AbacusFp5Inspector fp5Inspector = new();
+    private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
     private long? diagnosedImageWindowHandle;
     private int? diagnosedAbacusProcessId;
     private AbacusLinkagePlan? linkagePlan;
+    private AbacusFp5Inspection? fp5Inspection;
     private bool allowClose;
     private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
@@ -111,6 +114,9 @@ public partial class MainWindow : Window
             Fp5InspectionStatusText.Text = "未診断";
             Fp5InspectionResultText.Text = "";
             Fp5CandidatesGrid.ItemsSource = null;
+            fp5Inspection = null;
+            ExtractFp5CandidateButton.IsEnabled = false;
+            Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
         }
     }
 
@@ -129,6 +135,9 @@ public partial class MainWindow : Window
             Fp5InspectionStatusText.Text = "未診断";
             Fp5InspectionResultText.Text = "";
             Fp5CandidatesGrid.ItemsSource = null;
+            fp5Inspection = null;
+            ExtractFp5CandidateButton.IsEnabled = false;
+            Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
         }
     }
 
@@ -145,10 +154,15 @@ public partial class MainWindow : Window
         Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         Fp5InspectionResultText.Text = "";
         Fp5CandidatesGrid.ItemsSource = null;
+        fp5Inspection = null;
+        ExtractFp5CandidateButton.IsEnabled = false;
+        Fp5CandidateExportStatusText.Text = "候補を選択すると1件検証出力できます。";
         try
         {
             var result = await fp5Inspector.InspectAsync(MigrationSourcePathTextBox.Text.Trim());
+            fp5Inspection = result;
             Fp5CandidatesGrid.ItemsSource = result.Candidates;
+            ExtractFp5CandidateButton.IsEnabled = result.IsValid && result.Candidates.Count > 0;
             Fp5InspectionStatusText.Text = result.IsValid
                 ? "FileMaker Pro 5.0のヘッダーとJPEG候補を確認しました。ファイルの書き込みは行っていません。"
                 : $"fp5診断を完了しました。エラー{result.Errors.Count:N0}件、警告{result.Warnings.Count:N0}件。";
@@ -182,12 +196,83 @@ public partial class MainWindow : Window
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
         {
+            fp5Inspection = null;
+            ExtractFp5CandidateButton.IsEnabled = false;
             Fp5InspectionStatusText.Text = $"fp5診断に失敗しました: {exception.Message}";
             Fp5InspectionStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
         }
         finally
         {
             InspectFp5Button.IsEnabled = true;
+        }
+    }
+
+    private void Fp5CandidatesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ExtractFp5CandidateButton.IsEnabled = fp5Inspection?.IsValid == true &&
+                                              Fp5CandidatesGrid.SelectedItem is AbacusFp5ImageCandidate;
+    }
+
+    private async void ExtractFp5CandidateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (fp5Inspection is not { IsValid: true } ||
+            Fp5CandidatesGrid.SelectedItem is not AbacusFp5ImageCandidate candidate)
+        {
+            MessageBox.Show(this, "先に診断結果からJPEG候補を1件選択してください。", "候補未選択");
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "検証出力するJPEGの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            $"候補#{candidate.Index}を1件だけJPEGとして検証出力します。\n\n" +
+            "保存用原本・作業用コピーの内部には保存しません。元画像と車両の紐付けは行いません。\n\n" +
+            $"保存先: {dialog.FolderName}\n続行しますか？",
+            "JPEG候補を1件検証出力",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        ExtractFp5CandidateButton.IsEnabled = false;
+        Fp5CandidateExportStatusText.Text = "候補の範囲・JPEGマーカー・画像デコードを再検証しています…";
+        Fp5CandidateExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await fp5CandidateExporter.ExportAsync(
+                fp5Inspection.FolderPath,
+                candidate,
+                dialog.FolderName);
+            Fp5CandidateExportStatusText.Text =
+                $"1件の検証出力に成功しました。\n" +
+                $"保存先: {result.FilePath}\n" +
+                $"サイズ: {result.FileSize:N0} bytes / 寸法: {result.PixelWidth:N0} × {result.PixelHeight:N0}\n" +
+                $"SHA-256: {result.Sha256}\n" +
+                "fp5内の元データや車両情報は変更していません。";
+            Fp5CandidateExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or InvalidOperationException or
+                                           NotSupportedException)
+        {
+            Fp5CandidateExportStatusText.Text = $"JPEG候補の検証出力に失敗しました: {exception.Message}";
+            Fp5CandidateExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            ExtractFp5CandidateButton.IsEnabled = fp5Inspection?.IsValid == true &&
+                                                  Fp5CandidatesGrid.SelectedItem is AbacusFp5ImageCandidate;
         }
     }
 
