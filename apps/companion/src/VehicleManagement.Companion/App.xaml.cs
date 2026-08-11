@@ -403,6 +403,19 @@ public partial class App : Application
                 webImportPackage.Candidates[0].PackageImageFileName.Replace('/', Path.DirectorySeparatorChar));
             var copiedWebImageSha256 = Convert.ToHexString(
                 SHA256.HashData(await File.ReadAllBytesAsync(copiedWebImage)));
+            var mappingPackage = await new AbacusWebImportMappingStore().ReadPackageAsync(
+                webImportPackage.PackagePath);
+            var mappingDestinationParent = Path.Combine(testRoot, "web-import-mappings");
+            Directory.CreateDirectory(mappingDestinationParent);
+            var mappingApproval = await new AbacusWebImportMappingStore().CreateApprovalAsync(
+                webImportPackage.PackagePath,
+                mappingDestinationParent,
+                mappingPackage.Candidates
+                    .Select(candidate => new AbacusWebImportMappingSelection(
+                        candidate.CandidateId,
+                        candidate.DefaultCustomerGroupKey))
+                    .ToArray());
+            var mappingManifestText = await File.ReadAllTextAsync(mappingApproval.MappingManifestPath);
             var rejectedDuplicateImageLinkApproval = false;
             try
             {
@@ -482,6 +495,16 @@ public partial class App : Application
                 webImageAttachmentsText.Contains("manual-upload-required", StringComparison.Ordinal) &&
                 webImportManifestText.Contains("abacus-web-import-preview", StringComparison.Ordinal) &&
                 webImportManifestText.Contains("\"status\": \"preview-only\"", StringComparison.Ordinal) &&
+                mappingPackage.CandidateCount == 1 &&
+                mappingPackage.SameNameGroupCount == 0 &&
+                mappingPackage.Candidates[0].DefaultCustomerGroupKey == webImportPackage.Candidates[0].CustomerId &&
+                mappingApproval.CandidateCount == 1 &&
+                mappingApproval.CustomerGroupCount == 1 &&
+                mappingApproval.GroupedVehicleCount == 0 &&
+                mappingApproval.SameNameGroupCount == 0 &&
+                mappingApproval.MappingManifestSha256.Length == 64 &&
+                mappingManifestText.Contains("abacus-web-import-mapping", StringComparison.Ordinal) &&
+                mappingManifestText.Contains("\"status\": \"human-reviewed\"", StringComparison.Ordinal) &&
                 rejectedDuplicateImageLinkApproval &&
                 !duplicateImageLinkMatch.IsValid &&
                 duplicateImageLinkMatch.ConflictCount == 1 &&

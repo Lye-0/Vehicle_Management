@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly AbacusImageLinkApprovalStore imageLinkApprovalStore = new();
     private readonly AbacusImageRegistrationPreviewStore imageRegistrationPreviewStore = new();
     private readonly AbacusWebImportPreviewStore webImportPreviewStore = new();
+    private readonly AbacusWebImportMappingStore webImportMappingStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -57,6 +58,9 @@ public partial class MainWindow : Window
     private bool imageLinkApprovalBusy;
     private bool imageRegistrationPreviewBusy;
     private bool webImportPreviewBusy;
+    private bool webImportMappingBusy;
+    private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
+    private List<WebImportMappingRow> webImportMappingRows = [];
 
     public MainWindow()
     {
@@ -1072,6 +1076,7 @@ public partial class MainWindow : Window
         ImageLinkMatchesGrid.ItemsSource = null;
         ResetImageRegistrationPreview(clearDestination: false);
         ResetWebImportPreview(clearPaths: true);
+        ResetWebImportMapping(clearPaths: true);
         ImageLinkMatchSummaryText.Text = "";
         ImageLinkMatchStatusText.Text = "マニフェスト・画像・車両一覧CSVを読み取り、SHA-256と識別子を照合しています…";
         ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
@@ -1145,6 +1150,9 @@ public partial class MainWindow : Window
         SelectWebImportSourcePackageButton.IsEnabled = !busy && !webImportPreviewBusy;
         SelectWebImportDestinationButton.IsEnabled = !busy && !webImportPreviewBusy;
         UpdateWebImportPreviewButtonState();
+        SelectWebImportMappingSourceButton.IsEnabled = !busy && !webImportMappingBusy;
+        SelectWebImportMappingDestinationButton.IsEnabled = !busy && !webImportMappingBusy;
+        UpdateWebImportMappingButtonState();
     }
 
     private void UpdateImageLinkMatchButtonState()
@@ -1703,6 +1711,7 @@ public partial class MainWindow : Window
         ImageLinkApprovalStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         ResetImageRegistrationPreview(clearDestination: clearPaths);
         ResetWebImportPreview(clearPaths: true);
+        ResetWebImportMapping(clearPaths: true);
         UpdateImageLinkMatchButtonState();
     }
 
@@ -1771,6 +1780,11 @@ public partial class MainWindow : Window
             WebImportPreviewStatusText.Text =
                 "Gate5Jの候補パッケージを入力に設定しました。候補保存先を選択するとWeb CSV候補を作成できます。";
             UpdateWebImportPreviewButtonState();
+            WebImportMappingSourceTextBox.Text = result.PackagePath;
+            ResetWebImportMapping(clearPaths: false);
+            WebImportMappingStatusText.Text =
+                "Gate5Jの候補パッケージを対応付け確認の入力に設定しました。候補を読み込んでください。";
+            UpdateWebImportMappingButtonState();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or JsonException or ArgumentException or
@@ -1868,6 +1882,11 @@ public partial class MainWindow : Window
                 $"車両行: {result.VehicleRowCount:N0}行 / 画像: {result.ImageCount:N0}件\n" +
                 $"同じ顧客名の手動確認グループ: {result.SameNameGroupCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
+            WebImportMappingSourceTextBox.Text = result.PackagePath;
+            ResetWebImportMapping(clearPaths: false);
+            WebImportMappingStatusText.Text =
+                "Gate5KのWebインポート候補を対応付け確認の入力に設定しました。候補を読み込んでください。";
+            UpdateWebImportMappingButtonState();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or JsonException or ArgumentException or
@@ -1885,6 +1904,177 @@ public partial class MainWindow : Window
             SelectWebImportSourcePackageButton.IsEnabled = true;
             SelectWebImportDestinationButton.IsEnabled = true;
             UpdateWebImportPreviewButtonState();
+        }
+    }
+
+    private void SelectWebImportMappingSourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "顧客・車両対応付けの入力パッケージを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportMappingSourceTextBox.Text = dialog.FolderName;
+        ResetWebImportMapping(clearPaths: false);
+        WebImportMappingStatusText.Text =
+            "入力候補パッケージを選択しました。「候補を読み込む」を押してください。";
+        UpdateWebImportMappingButtonState();
+    }
+
+    private void SelectWebImportMappingDestinationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "顧客・車両対応付け証跡の保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        WebImportMappingDestinationTextBox.Text = dialog.FolderName;
+        ResetWebImportMapping(clearPaths: false);
+        WebImportMappingStatusText.Text =
+            "対応付け証跡の保存先を選択しました。候補を読み込んでください。";
+        UpdateWebImportMappingButtonState();
+    }
+
+    private async void ReadWebImportMappingCandidatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var sourcePackage = WebImportMappingSourceTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(sourcePackage))
+        {
+            MessageBox.Show(
+                this,
+                "入力候補パッケージを選択してください。",
+                "入力先がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        webImportMappingBusy = true;
+        UpdateWebImportMappingButtonState();
+        SelectWebImportMappingSourceButton.IsEnabled = false;
+        SelectWebImportMappingDestinationButton.IsEnabled = false;
+        WebImportMappingGrid.ItemsSource = null;
+        WebImportMappingResultText.Text = "";
+        WebImportMappingStatusText.Text =
+            "候補CSV・画像・マニフェストのSHA-256を再検証しています…";
+        WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            loadedWebImportMappingPackage = await webImportMappingStore.ReadPackageAsync(sourcePackage);
+            webImportMappingRows = loadedWebImportMappingPackage.Candidates
+                .Select(candidate => new WebImportMappingRow(candidate))
+                .ToList();
+            WebImportMappingGrid.ItemsSource = webImportMappingRows;
+            WebImportMappingStatusText.Text =
+                $"候補を{loadedWebImportMappingPackage.CandidateCount:N0}件読み込みました。顧客グループキーを確認・編集してください。";
+            WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            loadedWebImportMappingPackage = null;
+            webImportMappingRows = [];
+            WebImportMappingGrid.ItemsSource = null;
+            WebImportMappingStatusText.Text =
+                $"候補の読み込みに失敗しました: {exception.Message}";
+            WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            webImportMappingBusy = false;
+            SelectWebImportMappingSourceButton.IsEnabled = true;
+            SelectWebImportMappingDestinationButton.IsEnabled = true;
+            UpdateWebImportMappingButtonState();
+        }
+    }
+
+    private async void CreateWebImportMappingApprovalButton_Click(object sender, RoutedEventArgs e)
+    {
+        var sourcePackage = WebImportMappingSourceTextBox.Text.Trim();
+        var destinationFolder = WebImportMappingDestinationTextBox.Text.Trim();
+        if (loadedWebImportMappingPackage is null ||
+            string.IsNullOrWhiteSpace(sourcePackage) ||
+            string.IsNullOrWhiteSpace(destinationFolder) ||
+            webImportMappingRows.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "先に入力候補を読み込み、対応付け証跡の保存先を選択してください。",
+                "対応付け候補がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            "表示中の顧客グループキーで対応付けを確定しますか？\n\n" +
+            "同じキーの行は同一顧客の複数車両として扱う予定になります。\n" +
+            "この操作は確認済み証跡JSONを作成するだけで、顧客・車両・画像の登録やAPI送信は行いません。",
+            "対応付けの確認",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        webImportMappingBusy = true;
+        UpdateWebImportMappingButtonState();
+        SelectWebImportMappingSourceButton.IsEnabled = false;
+        SelectWebImportMappingDestinationButton.IsEnabled = false;
+        CreateWebImportMappingApprovalButton.IsEnabled = false;
+        WebImportMappingResultText.Text = "";
+        WebImportMappingStatusText.Text =
+            "対応付け直前の再検証と顧客名の整合性確認を行っています…";
+        WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var selections = webImportMappingRows
+                .Select(row => new AbacusWebImportMappingSelection(row.CandidateId, row.CustomerGroupKey))
+                .ToArray();
+            var result = await webImportMappingStore.CreateApprovalAsync(
+                sourcePackage,
+                destinationFolder,
+                selections);
+            WebImportMappingStatusText.Text =
+                "顧客・車両対応付けの確認済み証跡を作成しました。登録・API送信・画像アップロードはまだ行っていません。";
+            WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            WebImportMappingResultText.Text =
+                $"保存先: {result.MappingPackagePath}\n" +
+                $"マニフェスト: {result.MappingManifestPath}\n" +
+                $"候補: {result.CandidateCount:N0}件 / 顧客グループ: {result.CustomerGroupCount:N0}件\n" +
+                $"複数車両としてまとめた車両: {result.GroupedVehicleCount:N0}件\n" +
+                $"同じ顧客名の確認グループ: {result.SameNameGroupCount:N0}件\n" +
+                (result.Warnings.Count == 0 ? "警告: なし" : $"警告:\n{string.Join("\n", result.Warnings)}") +
+                $"\nマニフェスト SHA-256: {result.MappingManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            WebImportMappingResultText.Text = "";
+            WebImportMappingStatusText.Text =
+                $"対応付け証跡を作成できません: {exception.Message}";
+            WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            webImportMappingBusy = false;
+            SelectWebImportMappingSourceButton.IsEnabled = true;
+            SelectWebImportMappingDestinationButton.IsEnabled = true;
+            UpdateWebImportMappingButtonState();
         }
     }
 
@@ -1917,6 +2107,38 @@ public partial class MainWindow : Window
             "入力候補パッケージと候補保存先を選択してください。";
         WebImportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         UpdateWebImportPreviewButtonState();
+    }
+
+    private void ResetWebImportMapping(bool clearPaths)
+    {
+        if (clearPaths)
+        {
+            WebImportMappingSourceTextBox.Clear();
+            WebImportMappingDestinationTextBox.Clear();
+        }
+
+        loadedWebImportMappingPackage = null;
+        webImportMappingRows = [];
+        WebImportMappingGrid.ItemsSource = null;
+        WebImportMappingResultText.Text = "";
+        WebImportMappingStatusText.Text =
+            "入力候補パッケージを選択して候補を読み込んでください。";
+        WebImportMappingStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        UpdateWebImportMappingButtonState();
+    }
+
+    private void UpdateWebImportMappingButtonState()
+    {
+        ReadWebImportMappingCandidatesButton.IsEnabled =
+            !webImportMappingBusy &&
+            !imageLinkMatchBusy &&
+            !string.IsNullOrWhiteSpace(WebImportMappingSourceTextBox.Text);
+        CreateWebImportMappingApprovalButton.IsEnabled =
+            !webImportMappingBusy &&
+            !imageLinkMatchBusy &&
+            loadedWebImportMappingPackage is not null &&
+            webImportMappingRows.Count > 0 &&
+            !string.IsNullOrWhiteSpace(WebImportMappingDestinationTextBox.Text);
     }
 
     private void UpdateWebImportPreviewButtonState()
@@ -1967,6 +2189,16 @@ public partial class MainWindow : Window
         }
 
         return $"{value:N2} {units[unit]}";
+    }
+
+    private sealed class WebImportMappingRow(AbacusWebImportMappingCandidate candidate)
+    {
+        public string CandidateId { get; } = candidate.CandidateId;
+        public string CustomerName { get; } = candidate.CustomerName;
+        public string VehicleName { get; } = candidate.VehicleName;
+        public string ChassisNumber { get; } = candidate.ChassisNumber;
+        public string RegistrationNumber { get; } = candidate.RegistrationNumber;
+        public string CustomerGroupKey { get; set; } = candidate.DefaultCustomerGroupKey;
     }
 
     private async void MainWindow_Closing(object? sender, CancelEventArgs e)
