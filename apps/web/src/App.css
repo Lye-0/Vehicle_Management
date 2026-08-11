@@ -1391,6 +1391,35 @@
 .csv-import-errors { display: grid; gap: 4px; margin: 0; padding: 10px 10px 10px 26px; color: #9a5a00; border: 1px solid #efd28c; border-radius: 8px; background: #fff9e8; font-size: 10px; line-height: 1.5; }
 .csv-import-result { display: flex; align-items: center; gap: 7px; margin-top: 16px; }
 .csv-import-result span { margin-left: 4px; }
+.abacus-package-panel { margin-top: 16px; }
+.abacus-package-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.abacus-package-controls .button { display: inline-flex; align-items: center; gap: 7px; }
+.abacus-package-hidden-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.abacus-package-hint { color: var(--text-muted); font-size: 10px; }
+.abacus-package-message { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 10px 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); font-size: 11px; }
+.abacus-package-message.is-success { color: #16794a; border-color: #b8e5c9; background: #eaf8ef; }
+.abacus-package-message.is-error { color: #9b2c2c; border-color: #efb7b7; background: #fff1f1; }
+.abacus-package-errors, .abacus-package-warnings { display: grid; gap: 4px; margin: 10px 0 0; padding: 10px 10px 10px 26px; color: #9a5a00; border: 1px solid #efd28c; border-radius: 8px; background: #fff9e8; font-size: 10px; line-height: 1.5; }
+.abacus-package-errors { color: #9b2c2c; border-color: #efb7b7; background: #fff1f1; }
+.abacus-package-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.abacus-package-summary span { padding: 5px 8px; border-radius: 999px; background: var(--surface-subtle); }
+.abacus-package-meta { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 10px; color: var(--text-muted); font-size: 10px; }
+.abacus-package-meta strong { color: var(--text-secondary); }
+.abacus-package-groups, .abacus-package-api-preview { margin-top: 16px; }
+.abacus-package-groups h3, .abacus-package-api-preview h3 { margin: 0 0 8px; color: var(--text); font-size: 12px; }
+.abacus-package-table { display: grid; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.abacus-package-row { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(180px, 1.5fr) 90px; min-width: 470px; border-top: 1px solid var(--border); }
+.abacus-package-row:first-child { border-top: 0; }
+.abacus-package-row span { min-width: 0; padding: 8px 10px; overflow: hidden; color: var(--text-secondary); border-left: 1px solid var(--border); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.abacus-package-row span:first-child { border-left: 0; }
+.abacus-package-row.is-head span { color: var(--text); background: var(--surface-subtle); font-weight: 800; }
+.abacus-package-api-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.abacus-package-api-card { display: grid; gap: 5px; padding: 10px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); font-size: 10px; }
+.abacus-package-api-card strong { color: var(--text); font-size: 11px; }
+.abacus-package-api-card .is-success { color: #16794a; }
+.abacus-package-api-card .is-warning { color: #9a5a00; }
+.abacus-package-api-card small { color: #9a5a00; }
+.abacus-package-no-commit { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 10px 12px; color: #1e40af; border: 1px solid #c6d8f5; border-radius: 8px; background: #eef5ff; font-size: 10px; }
 .backup-panel { margin-top: 16px; }
 .backup-notice { padding: 10px 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); font-size: 11px; }
 .backup-accordion { margin-top: 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
@@ -1795,6 +1824,7 @@
   .form-grid { grid-template-columns: 1fr; }
   .csv-export-grid { grid-template-columns: 1fr; }
   .csv-import-controls { grid-template-columns: 1fr; align-items: stretch; }
+  .abacus-package-api-grid { grid-template-columns: 1fr; }
   .modal-form, .modal-header { padding-left: 18px; padding-right: 18px; }
   .modal.master-sync-modal .master-sync-modal-footer { padding: 18px; flex-wrap: wrap; }
   .modal.master-sync-modal .master-sync-modal-footer .button { flex: 1 1 auto; }
@@ -2281,6 +2311,7 @@
   .maintenance-statement { min-width: 0; }
   .settings-nav { grid-template-columns: 1fr; }
   .settings-form-grid, .csv-import-controls { grid-template-columns: 1fr; }
+  .abacus-package-api-grid { grid-template-columns: 1fr; }
   .settings-section-heading { flex-wrap: wrap; }
   .settings-section-heading .settings-add-button { margin-left: auto; }
   .backup-settings-table { overflow-x: auto; overscroll-behavior-inline: contain; }

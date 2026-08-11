@@ -115,6 +115,8 @@ Gate 5Lでは、Gate 5Kの候補CSVを再検証して顧客・車両の一覧を
 
 Gate 5Mでは、Gate 5Lの`human-reviewed`対応付け証跡と入力候補パッケージを再検証し、`ABACUS-Web-Import-Registration-Preview-*`フォルダーへ登録前パッケージを作成します。顧客グループごとに決定的な顧客ID・顧客番号を発行し、同じ顧客に複数車両がある場合は顧客CSVを1行、車両CSVを複数行へ変換します。車両ID、画像、画像SHA-256、候補ID、対応付け判断、CSV行の出典は保持し、`image-attachments.json`の顧客ID・車両IDも出力後の値へ更新します。出力マニフェストは対応付け証跡と入力候補マニフェストのSHA-256を記録し、CSV・画像・JSONを再読込検証します。この段階でもWeb API、D1、Object Storage、ABACUSフォルダーへの接続・書込は行いません。
 
+Gate 5Nでは、Webアプリの設定画面からGate 5Mの`ABACUS-Web-Import-Registration-Preview-*`フォルダーを選択し、ブラウザー内でマニフェスト、全ファイルのサイズ・SHA-256、CSVのUTF-8・見出し・列数、画像対応表の参照先を再検証します。検証に合格した`customers.csv`と`vehicles.csv`だけを既存Web APIの`preview`エンドポイントへ送信し、API側の入力エラーと件数を表示します。`commit`エンドポイントは呼び出さず、顧客・車両の登録、画像アップロード、D1・Object Storageへの書込は行いません。フォルダー内の画像はローカル検証と対応表確認のために読み取るだけで、Webへ送信しません。実登録の前に、次段階で人が最終確認する導線を設けます。
+
 ## 永続ローカル移行パッケージ
 
 Gate 6Aでは、利用者が選択した通常フォルダーへ`ABACUS-Migration-Preview-*`フォルダーを新規作成します。開発中のWorkersプロセスが持つ一時ファイルシステムは永続保存先として扱いません。将来、開発用または本番用ObjectStorageへ接続する前段として、補助ソフト側に永続成果物の境界を置きます。
