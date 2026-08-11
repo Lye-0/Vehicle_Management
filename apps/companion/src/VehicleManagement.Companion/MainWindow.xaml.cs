@@ -70,6 +70,8 @@ public partial class MainWindow : Window
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
     private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
+    private readonly Dictionary<string, string> legacyGraphManualDocumentLinks = new(StringComparer.OrdinalIgnoreCase);
+    private object? legacyGraphSelectedItem;
     private UIElement? legacyGraphDraggingElement;
     private Point legacyGraphDragOffset;
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
@@ -578,6 +580,8 @@ public partial class MainWindow : Window
             {
                 var graph = await legacyExportCandidateGraphService.BuildAsync(result);
                 legacyExportCandidateGraphResult = graph;
+                legacyGraphManualDocumentLinks.Clear();
+                legacyGraphSelectedItem = null;
                 LegacyGraphCustomersList.ItemsSource = graph.Customers;
                 LegacyGraphUnresolvedVehicleList.ItemsSource = graph.UnresolvedVehicleRows;
                 LegacyGraphUnresolvedSalesList.ItemsSource = graph.UnresolvedDocuments.Where(document => document.Kind == "販売書類").ToArray();
@@ -644,6 +648,7 @@ public partial class MainWindow : Window
     {
         if (LegacyGraphCustomersList.SelectedItem is AbacusLegacyExportCandidateGraphCustomer customer)
         {
+            legacyGraphSelectedItem = customer;
             UpdateLegacyGraphInspector(customer);
             RenderLegacyGraphCustomer(customer);
         }
@@ -653,16 +658,22 @@ public partial class MainWindow : Window
     {
         if (sender is ListBox list && list.SelectedItem is AbacusLegacyExportCandidateGraphDocument document)
         {
+            legacyGraphSelectedItem = document;
             UpdateLegacyGraphInspector(document);
         }
         else if (sender is ListBox vehicleList && vehicleList.SelectedItem is AbacusLegacyExportPreviewRow vehicleRow)
         {
+            legacyGraphSelectedItem = vehicleRow;
             UpdateLegacyGraphInspector(vehicleRow);
         }
     }
 
     private void UpdateLegacyGraphInspector(object? selected)
     {
+        legacyGraphSelectedItem = selected;
+        LegacyGraphMergeButton.IsEnabled = false;
+        LegacyGraphReassignButton.IsEnabled = selected is AbacusLegacyExportCandidateGraphDocument &&
+            legacyExportCandidateGraphResult is not null;
         switch (selected)
         {
             case AbacusLegacyExportCandidateGraphCustomer customer:
@@ -697,8 +708,10 @@ public partial class MainWindow : Window
                 break;
             case AbacusLegacyExportCandidateGraphDocument document:
                 LegacyGraphInspectorTitleText.Text = $"{document.Kind}: {Fallback(document.DocumentNumber)}";
-                LegacyGraphInspectorStatusText.Text =
-                    $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}";
+                var manualVehicle = FindManualLinkedVehicle(document);
+                LegacyGraphInspectorStatusText.Text = manualVehicle is null
+                    ? $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}"
+                    : $"判定: 手動仮紐付け（未登録）\n紐付け先: {manualVehicle.DisplayName}";
                 LegacyGraphInspectorDetailsText.Text =
                     $"顧客: {Fallback(document.CustomerName)}\n" +
                     $"車名: {Fallback(document.VehicleName)}\n" +
@@ -706,8 +719,12 @@ public partial class MainWindow : Window
                     $"日付: {Fallback(document.DocumentDate)}\n" +
                     $"合計: {Fallback(document.TotalAmount)}\n" +
                     $"出典: {document.SourceLocation}";
+                var manualEvidence = manualVehicle is null
+                    ? ""
+                    : $"\n手動で選択した車両ID: {manualVehicle.VehicleId}\nこの変更は画面上の仮紐付けです。元CSV・ABACUSフォルダーは変更していません。";
                 LegacyGraphInspectorEvidenceText.Text =
-                    $"{Fallback(document.Warning)}\n候補車両ID: {(document.CandidateVehicleIds.Count == 0 ? "なし" : string.Join(", ", document.CandidateVehicleIds))}";
+                    $"{Fallback(document.Warning)}\n候補車両ID: {(document.CandidateVehicleIds.Count == 0 ? "なし" : string.Join(", ", document.CandidateVehicleIds))}" +
+                    manualEvidence;
                 break;
             case AbacusLegacyExportPreviewRow vehicleRow:
                 LegacyGraphInspectorTitleText.Text = $"未確定車両: {Fallback(vehicleRow.VehicleName)}";
@@ -724,6 +741,203 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorEvidenceText.Text = "";
                 break;
         }
+    }
+
+    private AbacusLegacyExportCandidateGraphVehicle? FindManualLinkedVehicle(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        if (legacyExportCandidateGraphResult is null ||
+            !legacyGraphManualDocumentLinks.TryGetValue(GetLegacyDocumentKey(document), out var vehicleId))
+        {
+            return null;
+        }
+
+        return legacyExportCandidateGraphResult.Customers
+            .SelectMany(customer => customer.Vehicles)
+            .FirstOrDefault(vehicle => string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
+    }
+
+    private void LegacyGraphReassignButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphSelectedItem is not AbacusLegacyExportCandidateGraphDocument document ||
+            legacyExportCandidateGraphResult is null)
+        {
+            return;
+        }
+
+        var candidateVehicleIds = document.CandidateVehicleIds.ToHashSet(StringComparer.Ordinal);
+        var choices = legacyExportCandidateGraphResult.Customers
+            .SelectMany(customer => customer.Vehicles.Select(vehicle => new LegacyGraphVehicleChoice(
+                vehicle.VehicleId,
+                $"{customer.DisplayName} / {vehicle.Maker} {vehicle.DisplayName}",
+                vehicle.IdentifierSummary,
+                customer.DisplayName)))
+            .OrderByDescending(choice => candidateVehicleIds.Contains(choice.VehicleId))
+            .ThenBy(choice => choice.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (choices.Length == 0)
+        {
+            MessageBox.Show(this, "選択できる車両がありません。", "紐付け先なし", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Owner = this,
+            Title = $"{document.Kind}の紐付け先を変更",
+            Width = 720,
+            Height = 430,
+            MinWidth = 560,
+            MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = ToBrush("#F4F7FB"),
+        };
+        var root = new Grid { Margin = new Thickness(22) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        root.Children.Add(new TextBlock
+        {
+            Text = $"{document.Kind}: {Fallback(document.DocumentNumber)}",
+            FontSize = 18,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+        });
+        var evidence = new TextBlock
+        {
+            Margin = new Thickness(0, 9, 0, 0),
+            Text = $"顧客名: {Fallback(document.CustomerName)} / 車名: {Fallback(document.VehicleName)} / 登録番号: {Fallback(document.RegistrationNumber)}\n" +
+                   $"元の判定: {document.MatchStatus} / {Fallback(document.Warning)}",
+            Foreground = ToBrush("#52647A"),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        Grid.SetRow(evidence, 1);
+        root.Children.Add(evidence);
+
+        var choicePanel = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+        choicePanel.Children.Add(new TextBlock
+        {
+            Text = "紐付け先の車両",
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+        });
+        choicePanel.Children.Add(new TextBlock
+        {
+            Margin = new Thickness(0, 4, 0, 8),
+            Text = "候補車両を先頭に表示しています。ここでの変更は画面上の仮紐付けです。",
+            Foreground = ToBrush("#52647A"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var vehicleCombo = new ComboBox
+        {
+            ItemsSource = choices,
+            DisplayMemberPath = nameof(LegacyGraphVehicleChoice.DisplayName),
+            MinHeight = 38,
+            Padding = new Thickness(8, 5, 8, 5),
+        };
+        var currentVehicle = FindManualLinkedVehicle(document);
+        vehicleCombo.SelectedItem = choices.FirstOrDefault(choice =>
+            string.Equals(choice.VehicleId, currentVehicle?.VehicleId, StringComparison.Ordinal)) ?? choices[0];
+        choicePanel.Children.Add(vehicleCombo);
+        var choiceDetails = new TextBlock
+        {
+            Margin = new Thickness(0, 9, 0, 0),
+            Foreground = ToBrush("#718096"),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        void RefreshChoiceDetails()
+        {
+            choiceDetails.Text = vehicleCombo.SelectedItem is LegacyGraphVehicleChoice choice
+                ? $"対象顧客: {choice.CustomerName}\n識別情報: {Fallback(choice.IdentifierSummary)}\n車両ID: {choice.VehicleId}"
+                : "車両を選択してください。";
+        }
+        vehicleCombo.SelectionChanged += (_, _) => RefreshChoiceDetails();
+        RefreshChoiceDetails();
+        choicePanel.Children.Add(choiceDetails);
+        Grid.SetRow(choicePanel, 2);
+        root.Children.Add(choicePanel);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var clearRequested = false;
+        var assignButton = new Button { Content = "この車両へ仮紐付け", MinWidth = 150 };
+        var clearButton = new Button { Content = "未紐付けに戻す", MinWidth = 125, IsEnabled = currentVehicle is not null };
+        var cancelButton = new Button { Content = "キャンセル", MinWidth = 100 };
+        assignButton.Click += (_, _) =>
+        {
+            if (vehicleCombo.SelectedItem is not LegacyGraphVehicleChoice)
+            {
+                MessageBox.Show(dialog, "紐付け先の車両を選択してください。", "車両未選択", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            dialog.DialogResult = true;
+        };
+        clearButton.Click += (_, _) =>
+        {
+            clearRequested = true;
+            legacyGraphManualDocumentLinks.Remove(GetLegacyDocumentKey(document));
+            dialog.DialogResult = true;
+            RefreshLegacyGraphAfterManualLink(document, null);
+        };
+        cancelButton.Click += (_, _) => dialog.DialogResult = false;
+        buttons.Children.Add(assignButton);
+        buttons.Children.Add(clearButton);
+        buttons.Children.Add(cancelButton);
+        Grid.SetRow(buttons, 3);
+        root.Children.Add(buttons);
+
+        dialog.Content = root;
+        if (dialog.ShowDialog() == true && !clearRequested && vehicleCombo.SelectedItem is LegacyGraphVehicleChoice selectedChoice)
+        {
+            legacyGraphManualDocumentLinks[GetLegacyDocumentKey(document)] = selectedChoice.VehicleId;
+            RefreshLegacyGraphAfterManualLink(document, selectedChoice.VehicleId);
+        }
+    }
+
+    private void RefreshLegacyGraphAfterManualLink(
+        AbacusLegacyExportCandidateGraphDocument document,
+        string? vehicleId)
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return;
+        }
+
+        var targetCustomer = vehicleId is null
+            ? FindOriginalCustomerForDocument(document)
+            : legacyExportCandidateGraphResult.Customers.FirstOrDefault(customer =>
+                customer.Vehicles.Any(vehicle => string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal)));
+        if (targetCustomer is not null)
+        {
+            LegacyGraphCustomersList.SelectedItem = targetCustomer;
+            RenderLegacyGraphCustomer(targetCustomer);
+        }
+
+        legacyGraphSelectedItem = document;
+        UpdateLegacyGraphInspector(document);
+        var manualCount = legacyGraphManualDocumentLinks.Count;
+        LegacyGraphStatusText.Text = manualCount == 0
+            ? "手動仮紐付けを解除しました。"
+            : $"手動仮紐付けを{manualCount:N0}件表示中です。元CSV・ABACUSフォルダーは変更していません。";
+        LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private AbacusLegacyExportCandidateGraphCustomer? FindOriginalCustomerForDocument(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return null;
+        }
+
+        var key = GetLegacyDocumentKey(document);
+        return legacyExportCandidateGraphResult.Customers.FirstOrDefault(customer =>
+            customer.Vehicles.Any(vehicle => vehicle.Documents.Any(item =>
+                string.Equals(GetLegacyDocumentKey(item), key, StringComparison.OrdinalIgnoreCase))) ||
+            customer.UnresolvedDocuments.Any(item =>
+                string.Equals(GetLegacyDocumentKey(item), key, StringComparison.OrdinalIgnoreCase)));
     }
 
     private void RenderLegacyGraphCustomer(AbacusLegacyExportCandidateGraphCustomer customer)
@@ -781,23 +995,32 @@ public partial class MainWindow : Window
             AddGraphElement(vehicleBlock, vehicleX, vehicleY);
             AddGraphEdge(customerBlock, vehicleBlock, "#2563EB", dashed: false);
 
-            for (var documentIndex = 0; documentIndex < vehicle.Documents.Count; documentIndex++)
+            var vehicleDocuments = GetDocumentsForVehicle(vehicle);
+            for (var documentIndex = 0; documentIndex < vehicleDocuments.Count; documentIndex++)
             {
-                var document = vehicle.Documents[documentIndex];
+                var document = vehicleDocuments[documentIndex];
                 var documentY = vehicleY + documentIndex * documentGap;
-                var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight);
+                var documentBlock = CreateLegacyDocumentBlock(
+                    document,
+                    documentWidth,
+                    documentHeight,
+                    IsManualLinkForVehicle(document, vehicle.VehicleId));
                 documentBlock.Tag = document;
                 AddGraphElement(documentBlock, documentX, documentY);
-                AddGraphEdge(vehicleBlock, documentBlock, "#166534", dashed: false);
+                var isManualLink = IsManualLinkForVehicle(document, vehicle.VehicleId);
+                AddGraphEdge(vehicleBlock, documentBlock, isManualLink ? "#2563EB" : "#166534", dashed: isManualLink);
                 nextDocumentY = Math.Max(nextDocumentY, documentY + documentHeight + 20);
             }
         }
 
-        for (var documentIndex = 0; documentIndex < customer.UnresolvedDocuments.Count; documentIndex++)
+        var unresolvedDocuments = customer.UnresolvedDocuments
+            .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
+            .ToArray();
+        for (var documentIndex = 0; documentIndex < unresolvedDocuments.Length; documentIndex++)
         {
-            var document = customer.UnresolvedDocuments[documentIndex];
+            var document = unresolvedDocuments[documentIndex];
             var documentY = nextDocumentY + documentIndex * documentGap;
-            var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight);
+            var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight, manual: false);
             documentBlock.Tag = document;
             AddGraphElement(documentBlock, documentX, documentY);
             AddGraphEdge(customerBlock, documentBlock, "#D97706", dashed: true);
@@ -826,23 +1049,52 @@ public partial class MainWindow : Window
         UpdateLegacyGraphEdges();
     }
 
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetDocumentsForVehicle(
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        var documents = vehicle.Documents
+            .Where(document => !legacyGraphManualDocumentLinks.TryGetValue(
+                GetLegacyDocumentKey(document),
+                out var targetVehicleId) ||
+                string.Equals(targetVehicleId, vehicle.VehicleId, StringComparison.Ordinal))
+            .ToList();
+
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return documents;
+        }
+
+        foreach (var document in legacyExportCandidateGraphResult.AllDocuments.Where(document =>
+                     IsManualLinkForVehicle(document, vehicle.VehicleId) &&
+                     documents.All(existing => !string.Equals(
+                         GetLegacyDocumentKey(existing),
+                         GetLegacyDocumentKey(document),
+                         StringComparison.OrdinalIgnoreCase))))
+        {
+            documents.Add(document);
+        }
+
+        return documents;
+    }
+
     private Grid CreateLegacyDocumentBlock(
         AbacusLegacyExportCandidateGraphDocument document,
         double width,
-        double height)
+        double height,
+        bool manual)
     {
         var visual = GetDocumentVisual(document.MatchStatus);
         var subtitle =
-            $"判定: {document.MatchStatus}\n" +
+            $"判定: {(manual ? "手動仮紐付け" : document.MatchStatus)}\n" +
             $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)}\n" +
             $"日付: {Fallback(document.DocumentDate)} / 合計: {Fallback(document.TotalAmount)}\n" +
             $"出典: {document.SourceLocation}";
         var block = CreateLegacyGraphBlock(
             $"{document.Kind}: {Fallback(document.DocumentNumber)}",
             subtitle,
-            visual.Stroke,
-            visual.Fill,
-            visual.Dashed,
+            manual ? "#2563EB" : visual.Stroke,
+            manual ? "#EFF6FF" : visual.Fill,
+            manual || visual.Dashed,
             width,
             height);
         if (!string.IsNullOrWhiteSpace(document.Warning))
@@ -996,6 +1248,8 @@ public partial class MainWindow : Window
     private void ResetLegacyCandidateGraph(string status)
     {
         legacyExportCandidateGraphResult = null;
+        legacyGraphManualDocumentLinks.Clear();
+        legacyGraphSelectedItem = null;
         legacyGraphDraggingElement = null;
         legacyGraphEdges.Clear();
         LegacyGraphCustomersList.ItemsSource = null;
@@ -1012,6 +1266,15 @@ public partial class MainWindow : Window
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
     }
+
+    private bool IsManualLinkForVehicle(
+        AbacusLegacyExportCandidateGraphDocument document,
+        string vehicleId) =>
+        legacyGraphManualDocumentLinks.TryGetValue(GetLegacyDocumentKey(document), out var linkedVehicleId) &&
+        string.Equals(linkedVehicleId, vehicleId, StringComparison.Ordinal);
+
+    private static string GetLegacyDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
+        string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
 
     private static (string Stroke, string Fill, bool Dashed) GetDocumentVisual(string status) => status switch
     {
@@ -2938,6 +3201,12 @@ public partial class MainWindow : Window
     }
 
     private sealed record LegacyGraphEdge(UIElement Source, UIElement Target, Line Line);
+
+    private sealed record LegacyGraphVehicleChoice(
+        string VehicleId,
+        string DisplayName,
+        string IdentifierSummary,
+        string CustomerName);
 
     private sealed class WebImportMappingRow(AbacusWebImportMappingCandidate candidate)
     {
