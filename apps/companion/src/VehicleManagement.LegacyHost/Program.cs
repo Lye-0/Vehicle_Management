@@ -479,6 +479,10 @@ internal static partial class Program
 
                 exitCode = -2;
             }
+            else
+            {
+                exitCode = probe.ExitCode;
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
