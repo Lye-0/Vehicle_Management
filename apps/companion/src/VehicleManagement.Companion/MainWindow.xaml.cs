@@ -1008,7 +1008,7 @@ public partial class MainWindow : Window
                 return current;
             }
 
-            current = VisualTreeHelper.GetParent(current);
+            current = GetLegacyGraphParent(current);
         }
 
         return null;
@@ -1024,10 +1024,33 @@ public partial class MainWindow : Window
                 return current;
             }
 
-            current = VisualTreeHelper.GetParent(current);
+            current = GetLegacyGraphParent(current);
         }
 
         return null;
+    }
+
+    private static DependencyObject? GetLegacyGraphParent(DependencyObject source)
+    {
+        // TextBlock内のRunなどはVisualではなくContentElementです。
+        // VisualTreeHelper.GetParentを直接呼ぶとInvalidOperationExceptionになるため、
+        // WPFの要素種別に応じて親をたどります。
+        if (source is Visual || source is System.Windows.Media.Media3D.Visual3D)
+        {
+            return VisualTreeHelper.GetParent(source);
+        }
+
+        if (source is ContentElement contentElement)
+        {
+            return ContentOperations.GetParent(contentElement);
+        }
+
+        if (source is FrameworkContentElement frameworkContentElement)
+        {
+            return frameworkContentElement.Parent;
+        }
+
+        return LogicalTreeHelper.GetParent(source);
     }
 
     private static T? FindVisualAncestor<T>(DependencyObject? source)
@@ -1041,7 +1064,7 @@ public partial class MainWindow : Window
                 return match;
             }
 
-            current = VisualTreeHelper.GetParent(current);
+            current = GetLegacyGraphParent(current);
         }
 
         return null;
@@ -1384,7 +1407,7 @@ public partial class MainWindow : Window
         const double documentWidth = 390;
         const double documentHeight = 118;
         const double vehicleGap = 180;
-        const double documentGap = 158;
+        const double documentSpacing = 24;
 
         var customerBlock = CreateLegacyGraphBlock(
             $"顧客: {customer.DisplayName}",
@@ -1397,7 +1420,9 @@ public partial class MainWindow : Window
         customerBlock.Tag = customer;
         AddGraphElement(customerBlock, customerX, customerY);
 
-        var nextDocumentY = customerY + customerHeight + 38;
+        // 書類は同じ列に縦積みします。固定間隔では長いカードが重なるため、
+        // 実際にレイアウトされたカードの高さを使って次の位置を決めます。
+        var nextDocumentY = customerY;
         for (var vehicleIndex = 0; vehicleIndex < customer.Vehicles.Count; vehicleIndex++)
         {
             var vehicle = customer.Vehicles[vehicleIndex];
@@ -1419,10 +1444,9 @@ public partial class MainWindow : Window
             AddGraphEdge(customerBlock, vehicleBlock, "#2563EB", dashed: false);
 
             var vehicleDocuments = GetDocumentsForVehicle(vehicle);
-            for (var documentIndex = 0; documentIndex < vehicleDocuments.Count; documentIndex++)
+            var documentY = Math.Max(vehicleY, nextDocumentY);
+            foreach (var document in vehicleDocuments)
             {
-                var document = vehicleDocuments[documentIndex];
-                var documentY = vehicleY + documentIndex * documentGap;
                 var documentBlock = CreateLegacyDocumentBlock(
                     document,
                     documentWidth,
@@ -1432,8 +1456,12 @@ public partial class MainWindow : Window
                 AddGraphElement(documentBlock, documentX, documentY);
                 var isManualLink = IsManualLinkForVehicle(document, vehicle.VehicleId);
                 AddGraphEdge(vehicleBlock, documentBlock, isManualLink ? "#2563EB" : "#166534", dashed: isManualLink);
-                nextDocumentY = Math.Max(nextDocumentY, documentY + documentHeight + 20);
+                LegacyGraphCanvas.UpdateLayout();
+                nextDocumentY = documentY + GetLegacyGraphElementHeight(documentBlock) + documentSpacing;
+                documentY = nextDocumentY;
             }
+
+            nextDocumentY = Math.Max(nextDocumentY, vehicleY + vehicleHeight + documentSpacing);
         }
 
         var unresolvedDocuments = customer.UnresolvedDocuments
@@ -1449,14 +1477,15 @@ public partial class MainWindow : Window
                 .Max();
             nextDocumentY = Math.Max(nextDocumentY, assignedContentBottom + 20);
         }
-        for (var documentIndex = 0; documentIndex < unresolvedDocuments.Length; documentIndex++)
+        var unresolvedDocumentY = nextDocumentY;
+        foreach (var document in unresolvedDocuments)
         {
-            var document = unresolvedDocuments[documentIndex];
-            var documentY = nextDocumentY + documentIndex * documentGap;
             var documentBlock = CreateLegacyDocumentBlock(document, documentWidth, documentHeight, manual: false);
             documentBlock.Tag = document;
-            AddGraphElement(documentBlock, documentX, documentY);
+            AddGraphElement(documentBlock, documentX, unresolvedDocumentY);
             AddGraphEdge(customerBlock, documentBlock, "#D97706", dashed: true);
+            LegacyGraphCanvas.UpdateLayout();
+            unresolvedDocumentY += GetLegacyGraphElementHeight(documentBlock) + documentSpacing;
         }
 
         if (customer.Vehicles.Count == 0 && customer.UnresolvedDocuments.Count == 0)
