@@ -345,12 +345,27 @@ public partial class App : Application
             maintenanceExportFields[28] = "既知\u0004区切り";
             var vehicleExportFields = Enumerable.Repeat(string.Empty, 23).ToArray();
             vehicleExportFields[0] = "顧客A";
+            vehicleExportFields[11] = "メーカーA";
             vehicleExportFields[12] = "車両A";
+            vehicleExportFields[17] = "MODEL-A";
+            vehicleExportFields[18] = "CHASSIS1";
+            vehicleExportFields[19] = "大阪537む16";
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "hanbai.csv"), string.Join(',', salesExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "seibi.csv"), string.Join(',', maintenanceExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou2.csv"), string.Join(',', vehicleExportFields), shiftJis);
             var legacyExportAnalysis = await new AbacusLegacyExportInspector().AnalyzeAsync(legacyExportFolder);
+            var matchingExportFolder = Path.Combine(testRoot, "matching-export");
+            Directory.CreateDirectory(matchingExportFolder);
+            File.Copy(
+                Path.Combine(legacyExportFolder, "syaryou.csv"),
+                Path.Combine(matchingExportFolder, "syaryou.csv"));
+            var imageLinkMatch = await new AbacusImageLinkMatcher().MatchAsync(
+                destination,
+                matchingExportFolder);
+            var duplicateImageLinkMatch = await new AbacusImageLinkMatcher().MatchAsync(
+                destination,
+                legacyExportFolder);
             var invalidFolder = Path.Combine(testRoot, "invalid");
             Directory.CreateDirectory(invalidFolder);
             await File.WriteAllTextAsync(
@@ -379,6 +394,11 @@ public partial class App : Application
                 imageLinkManifest.ChassisNumber == "CHASSIS1" &&
                 imageLinkManifest.RegistrationNumber == "大阪537む16" &&
                 rejectedImageLinkWithoutIdentifier &&
+                imageLinkMatch.IsValid &&
+                imageLinkMatch.MatchedCount == 1 &&
+                imageLinkMatch.Rows is [{ Status: "matched" }] &&
+                !duplicateImageLinkMatch.IsValid &&
+                duplicateImageLinkMatch.ConflictCount == 1 &&
                 cropResult.WasCropped &&
                 cropResult.Image.PixelWidth == 88 &&
                 cropResult.Image.PixelHeight == 88 &&

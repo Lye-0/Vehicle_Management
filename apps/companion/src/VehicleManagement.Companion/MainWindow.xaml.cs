@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -27,6 +28,7 @@ public partial class MainWindow : Window
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
+    private readonly AbacusImageLinkMatcher imageLinkMatcher = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -48,6 +50,7 @@ public partial class MainWindow : Window
     private bool allowClose;
     private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
+    private bool imageLinkMatchBusy;
 
     public MainWindow()
     {
@@ -1007,6 +1010,123 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SelectImageLinkManifestFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "画像マニフェスト保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        ImageLinkManifestFolderTextBox.Text = dialog.FolderName;
+        ResetImageLinkMatch(clearPaths: false);
+        ImageLinkMatchStatusText.Text = "画像マニフェスト保存先を選択しました。車両一覧CSVフォルダーも選択してください。";
+        UpdateImageLinkMatchButtonState();
+    }
+
+    private void SelectImageLinkVehicleExportFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "ABACUS車両一覧CSVフォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        ImageLinkVehicleExportFolderTextBox.Text = dialog.FolderName;
+        ResetImageLinkMatch(clearPaths: false);
+        ImageLinkMatchStatusText.Text = "車両一覧CSVフォルダーを選択しました。照合を実行できます。";
+        UpdateImageLinkMatchButtonState();
+    }
+
+    private async void MatchImageLinksButton_Click(object sender, RoutedEventArgs e)
+    {
+        var imageFolder = ImageLinkManifestFolderTextBox.Text.Trim();
+        var vehicleFolder = ImageLinkVehicleExportFolderTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(imageFolder) || string.IsNullOrWhiteSpace(vehicleFolder))
+        {
+            MessageBox.Show(
+                this,
+                "画像マニフェスト保存先と車両一覧CSVフォルダーを選択してください。",
+                "照合先がありません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        imageLinkMatchBusy = true;
+        SetImageLinkMatchControlsBusy(true);
+        ImageLinkMatchesGrid.ItemsSource = null;
+        ImageLinkMatchSummaryText.Text = "";
+        ImageLinkMatchStatusText.Text = "マニフェスト・画像・車両一覧CSVを読み取り、SHA-256と識別子を照合しています…";
+        ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var report = await imageLinkMatcher.MatchAsync(imageFolder, vehicleFolder);
+            ImageLinkMatchesGrid.ItemsSource = report.Rows;
+            ImageLinkMatchSummaryText.Text =
+                $"マニフェスト: {report.ManifestCount:N0}件 / " +
+                $"一致: {report.MatchedCount:N0}件 / " +
+                $"要確認: {report.ReviewCount:N0}件 / " +
+                $"競合: {report.ConflictCount:N0}件 / " +
+                $"未一致: {report.NotFoundCount:N0}件 / " +
+                $"不正: {report.InvalidCount:N0}件";
+            if (report.Errors.Count > 0)
+            {
+                ImageLinkMatchSummaryText.Text +=
+                    $"\nエラー詳細:\n{string.Join("\n", report.Errors.Take(10))}";
+            }
+
+            var hasConcerns = report.ReviewCount > 0 ||
+                              report.ConflictCount > 0 ||
+                              report.NotFoundCount > 0 ||
+                              report.InvalidCount > 0;
+            ImageLinkMatchStatusText.Text = report.IsValid && !hasConcerns
+                ? "照合が完了しました。『一致』だけが自動登録候補です。"
+                : "照合が完了しました。要確認・競合・未一致・不正は自動登録候補として扱いません。";
+            ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+                report.ConflictCount > 0 || report.InvalidCount > 0 ? "#A61B1B" : hasConcerns ? "#805B10" : "#17643A")!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            ImageLinkMatchesGrid.ItemsSource = null;
+            ImageLinkMatchSummaryText.Text = "";
+            ImageLinkMatchStatusText.Text = $"画像マニフェストと車両一覧CSVの照合に失敗しました: {exception.Message}";
+            ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            imageLinkMatchBusy = false;
+            SetImageLinkMatchControlsBusy(false);
+        }
+    }
+
+    private void SetImageLinkMatchControlsBusy(bool busy)
+    {
+        SelectImageLinkManifestFolderButton.IsEnabled = !busy;
+        SelectImageLinkVehicleExportFolderButton.IsEnabled = !busy;
+        MatchImageLinksButton.IsEnabled = !busy &&
+            !string.IsNullOrWhiteSpace(ImageLinkManifestFolderTextBox.Text) &&
+            !string.IsNullOrWhiteSpace(ImageLinkVehicleExportFolderTextBox.Text);
+    }
+
+    private void UpdateImageLinkMatchButtonState()
+    {
+        if (!imageLinkMatchBusy)
+        {
+            SetImageLinkMatchControlsBusy(false);
+        }
+    }
+
     private async void InspectClipboardButton_Click(object sender, RoutedEventArgs e)
     {
         InspectClipboardButton.IsEnabled = false;
@@ -1441,6 +1561,22 @@ public partial class MainWindow : Window
         ImageLinkCustomerNameTextBox.Clear();
         ImageLinkManifestStatusText.Text = "画像を1件保存すると、車両識別子を入力してマニフェストを作成できます。";
         ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        ResetImageLinkMatch();
+    }
+
+    private void ResetImageLinkMatch(bool clearPaths = true)
+    {
+        if (clearPaths)
+        {
+            ImageLinkManifestFolderTextBox.Clear();
+            ImageLinkVehicleExportFolderTextBox.Clear();
+        }
+
+        ImageLinkMatchesGrid.ItemsSource = null;
+        ImageLinkMatchSummaryText.Text = "";
+        ImageLinkMatchStatusText.Text = "画像保存先と車両一覧CSVフォルダーを選択してください。";
+        ImageLinkMatchStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
+        UpdateImageLinkMatchButtonState();
     }
 
     private string? GetActiveWorkspacePath() =>
