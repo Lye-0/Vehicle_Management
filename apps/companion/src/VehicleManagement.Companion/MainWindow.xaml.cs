@@ -678,10 +678,22 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LegacyGraphScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    private void LegacyGraphPageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        ScrollLegacyGraphPageByWheel(e.Delta);
-        // キャンバス内のScrollViewerへホイールを渡さず、常にページを動かします。
+        var source = e.OriginalSource as DependencyObject;
+        var inspector = FindVisualAncestor<ScrollViewer>(source);
+        if (ReferenceEquals(inspector, LegacyGraphInspectorScrollViewer))
+        {
+            LegacyGraphInspectorScrollViewer.UpdateLayout();
+            if (TryScrollVertical(LegacyGraphInspectorScrollViewer, e.Delta))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
+        // グラフ上のホイールは、グラフ内のScrollViewerではなくページを動かします。
+        TryScrollLegacyGraphPageByWheel(e.Delta);
         e.Handled = true;
     }
 
@@ -746,6 +758,7 @@ public partial class MainWindow : Window
         }
 
         LegacyGraphInspectorScrollViewer.UpdateLayout();
+        LegacyGraphPageScrollViewer.UpdateLayout();
         legacyGraphInspectorPanning = true;
         legacyGraphInspectorPanningPage = LegacyGraphInspectorScrollViewer.ScrollableHeight <= 0;
         legacyGraphInspectorPanStartPoint = e.GetPosition(LegacyGraphInspectorScrollViewer);
@@ -795,39 +808,31 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void LegacyGraphInspectorScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        var scrollViewer = LegacyGraphInspectorScrollViewer;
-        if (scrollViewer.ScrollableHeight > 0)
-        {
-            var nextOffset = scrollViewer.VerticalOffset - e.Delta;
-            scrollViewer.ScrollToVerticalOffset(Math.Clamp(
-                nextOffset,
-                0,
-                scrollViewer.ScrollableHeight));
-        }
-        else
-        {
-            ScrollLegacyGraphPageByWheel(e.Delta);
-        }
-
-        // 詳細欄にスクロール余地がない場合も、内側の既定スクロールへ流しません。
-        e.Handled = true;
-    }
-
-    private void ScrollLegacyGraphPageByWheel(int delta)
+    private bool TryScrollLegacyGraphPageByWheel(int delta)
     {
         LegacyGraphPageScrollViewer.UpdateLayout();
-        if (LegacyGraphPageScrollViewer.ScrollableHeight <= 0)
+        return TryScrollVertical(LegacyGraphPageScrollViewer, delta);
+    }
+
+    private static bool TryScrollVertical(ScrollViewer scrollViewer, int delta)
+    {
+        if (scrollViewer.ScrollableHeight <= 0)
         {
-            return;
+            return false;
         }
 
-        var nextOffset = LegacyGraphPageScrollViewer.VerticalOffset - delta;
-        LegacyGraphPageScrollViewer.ScrollToVerticalOffset(Math.Clamp(
-            nextOffset,
+        var currentOffset = scrollViewer.VerticalOffset;
+        var nextOffset = Math.Clamp(
+            currentOffset - delta,
             0,
-            LegacyGraphPageScrollViewer.ScrollableHeight));
+            scrollViewer.ScrollableHeight);
+        if (Math.Abs(nextOffset - currentOffset) <= double.Epsilon)
+        {
+            return false;
+        }
+
+        scrollViewer.ScrollToVerticalOffset(nextOffset);
+        return true;
     }
 
     private void LegacyGraphCanvas_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

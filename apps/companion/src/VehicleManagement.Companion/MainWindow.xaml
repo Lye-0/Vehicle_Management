@@ -40,7 +40,8 @@
                        Text="Windows上でのみ実行できるABACUS連携処理を、Webアプリから分離して担当します。" />
         </StackPanel>
 
-        <TabControl Grid.Row="2" Background="White" BorderBrush="#D8E1EC">
+        <TabControl Grid.Row="2" Background="White" BorderBrush="#D8E1EC"
+                    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
             <TabItem Header="接続状態">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <Border Padding="24">
@@ -266,7 +267,9 @@
 
             <TabItem Header="紐付けプレビュー">
                 <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Background="Transparent"
+                              PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="顧客・複数車両・書類の紐付けプレビュー" />
@@ -963,8 +966,7 @@
                                               Background="Transparent"
                                               PreviewMouseLeftButtonDown="LegacyGraphScrollViewer_PreviewMouseLeftButtonDown"
                                               PreviewMouseMove="LegacyGraphScrollViewer_PreviewMouseMove"
-                                              PreviewMouseLeftButtonUp="LegacyGraphScrollViewer_PreviewMouseLeftButtonUp"
-                                              PreviewMouseWheel="LegacyGraphScrollViewer_PreviewMouseWheel">
+                                              PreviewMouseLeftButtonUp="LegacyGraphScrollViewer_PreviewMouseLeftButtonUp">
                                         <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
                                             <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
                                                 IsHitTestVisible="False" />
@@ -983,8 +985,7 @@
                                               Background="Transparent"
                                               PreviewMouseLeftButtonDown="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonDown"
                                               PreviewMouseMove="LegacyGraphInspectorScrollViewer_PreviewMouseMove"
-                                              PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp"
-                                              PreviewMouseWheel="LegacyGraphInspectorScrollViewer_PreviewMouseWheel">
+                                              PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp">
                                     <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
                                                    Text="選択項目の詳細" />
