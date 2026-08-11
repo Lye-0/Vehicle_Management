@@ -48,6 +48,11 @@ public partial class App : Application
             {
                 return 7;
             }
+            var automationWithoutAbacus = await session.InspectAbacusAutomationAsync();
+            if (automationWithoutAbacus.Status != "abacus-not-running" || automationWithoutAbacus.IsRunning)
+            {
+                return 8;
+            }
             await session.StopAsync();
             if (session.Snapshot.State != LegacyHostState.Stopped)
             {

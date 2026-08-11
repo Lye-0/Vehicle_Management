@@ -288,6 +288,30 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void InspectAbacusAutomationButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectAbacusAutomationButton.IsEnabled = false;
+        AbacusAutomationStatusText.Text = "FileMaker ActiveXの登録と実行中インスタンスを読み取り診断しています…";
+        AbacusAutomationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var result = await session.InspectAbacusAutomationAsync();
+            abacusMayBeRunning = result.IsRunning;
+            AbacusAutomationStatusText.Text = result.Message;
+            AbacusAutomationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+                result.Status == "automation-active" ? "#17643A" : "#805B10")!;
+        }
+        catch (Exception exception)
+        {
+            AbacusAutomationStatusText.Text = $"ActiveX診断に失敗しました: {exception.Message}";
+            AbacusAutomationStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            SetAbacusButtonsBusy(false);
+        }
+    }
+
     private void SelectAnalysisFolderButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
@@ -1104,6 +1128,7 @@ public partial class MainWindow : Window
         InspectImageUiButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusMenuButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusNativeWindowsButton.IsEnabled = !busy && abacusMayBeRunning;
+        InspectAbacusAutomationButton.IsEnabled = !busy && abacusMayBeRunning;
     }
 
     private void ResetInspection(bool clearPath = true)

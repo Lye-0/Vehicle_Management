@@ -225,6 +225,26 @@ public sealed class LegacyHostSession : IAsyncDisposable
         }
     }
 
+    public async Task<AbacusRuntimeSnapshot> InspectAbacusAutomationAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnected();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            var response = await SendAsync(
+                new LegacyHostMessage("inspect-abacus-automation", Guid.NewGuid().ToString("N")),
+                timeout.Token);
+            return ToAbacusSnapshot(response);
+        }
+        finally
+        {
+            operationLock.Release();
+        }
+    }
+
     public async Task<AbacusRuntimeSnapshot> CloseAbacusAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -350,7 +370,8 @@ public sealed class LegacyHostSession : IAsyncDisposable
         response.AutomationElementCount,
         response.AutomationElements,
         response.MenuItems,
-        response.NativeWindows);
+        response.NativeWindows,
+        response.AutomationServer);
 
     private void EnsureConnected()
     {

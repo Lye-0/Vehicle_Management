@@ -551,6 +551,11 @@
                         </DataGrid>
                         <TextBlock x:Name="AbacusNativeWindowsStatusText" Margin="0,14,0,0" Foreground="#52647A"
                                    Text="内部ウィンドウ診断は未実行です。" TextWrapping="Wrap" />
+                        <Button x:Name="InspectAbacusAutomationButton" Margin="0,10,0,0" HorizontalAlignment="Left"
+                                Content="FileMaker ActiveXを診断" IsEnabled="False"
+                                Click="InspectAbacusAutomationButton_Click" />
+                        <TextBlock x:Name="AbacusAutomationStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                   Text="ActiveX診断は未実行です。" TextWrapping="Wrap" />
                         <DataGrid x:Name="AbacusNativeWindowsGrid" Height="260" Margin="0,10,0,0" IsReadOnly="True"
                                   AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
                             <DataGrid.Columns>

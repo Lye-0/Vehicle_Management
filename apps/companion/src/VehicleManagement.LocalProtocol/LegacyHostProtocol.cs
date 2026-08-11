@@ -64,7 +64,8 @@ public sealed record LegacyHostMessage(
     int? AutomationElementCount = null,
     IReadOnlyList<LegacyAutomationElementInfo>? AutomationElements = null,
     IReadOnlyList<LegacyMenuItemInfo>? MenuItems = null,
-    IReadOnlyList<LegacyNativeWindowInfo>? NativeWindows = null);
+    IReadOnlyList<LegacyNativeWindowInfo>? NativeWindows = null,
+    string? AutomationServer = null);
 
 public sealed record LegacyAutomationElementInfo(
     int Index,

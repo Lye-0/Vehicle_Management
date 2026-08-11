@@ -93,6 +93,7 @@ internal static partial class Program
                         "inspect-abacus-ui" => await InspectAbacusUiAsync(request.RequestId),
                         "inspect-abacus-menu" => InspectAbacusMenu(request.RequestId),
                         "inspect-abacus-native-windows" => InspectAbacusNativeWindows(request.RequestId),
+                        "inspect-abacus-automation" => InspectAbacusAutomation(request.RequestId),
                         "close-abacus" => await CloseAbacusAsync(request.RequestId),
                         "shutdown" => new LegacyHostMessage("stopping", request.RequestId, Status: "stopping"),
                         _ => new LegacyHostMessage(
@@ -429,6 +430,78 @@ internal static partial class Program
             NativeWindows: windows);
     }
 
+    private static LegacyHostMessage InspectAbacusAutomation(string requestId)
+    {
+        if (abacusProcess is null || abacusProcess.HasExited)
+        {
+            return new LegacyHostMessage(
+                "error",
+                requestId,
+                Status: "abacus-not-running",
+                Message: "コピー側ABACUSを起動してから診断してください。",
+                Architecture: HostArchitecture);
+        }
+
+        abacusProcess.Refresh();
+        var serverType = Type.GetTypeFromProgID("FMPRO.Application", throwOnError: false);
+        if (serverType is null)
+        {
+            return new LegacyHostMessage(
+                "abacus-automation-inspected",
+                requestId,
+                Status: "automation-unregistered",
+                Message: "FMPRO.ApplicationのActiveX登録を確認できませんでした。スクリプト実行は行っていません。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture,
+                TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+                AutomationServer: "FMPRO.Application");
+        }
+
+        object? activeObject = null;
+        try
+        {
+            if (CLSIDFromProgID("FMPRO.Application", out var classId) != 0)
+            {
+                throw new COMException("FMPRO.ApplicationのCLSIDを取得できませんでした。");
+            }
+
+            var hresult = GetActiveObject(ref classId, IntPtr.Zero, out activeObject);
+            if (hresult != 0)
+            {
+                throw new COMException("FMPRO.Applicationの実行中インスタンスを取得できませんでした。", hresult);
+            }
+
+            return new LegacyHostMessage(
+                "abacus-automation-inspected",
+                requestId,
+                Status: "automation-active",
+                Message: "FMPRO.Applicationの実行中ActiveXインスタンスを確認しました。スクリプト実行は行っていません。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture,
+                TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+                AutomationServer: "FMPRO.Application");
+        }
+        catch (COMException exception)
+        {
+            return new LegacyHostMessage(
+                "abacus-automation-inspected",
+                requestId,
+                Status: "automation-inactive",
+                Message: $"FMPRO.Applicationは登録済みですが、実行中インスタンスを取得できませんでした（HRESULT: 0x{exception.HResult:X8}）。スクリプト実行は行っていません。",
+                ProcessId: abacusProcess.Id,
+                Architecture: HostArchitecture,
+                TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
+                AutomationServer: "FMPRO.Application");
+        }
+        finally
+        {
+            if (activeObject is not null && Marshal.IsComObject(activeObject))
+            {
+                Marshal.ReleaseComObject(activeObject);
+            }
+        }
+    }
+
     private static int GetNativeWindowDepth(IntPtr windowHandle, IntPtr rootHandle)
     {
         var depth = 1;
@@ -724,6 +797,15 @@ internal static partial class Program
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr windowHandle, int index);
+
+    [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CLSIDFromProgID(string progId, out Guid classId);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int GetActiveObject(
+        ref Guid classId,
+        IntPtr reserved,
+        [MarshalAs(UnmanagedType.IUnknown)] out object activeObject);
 
     [GeneratedRegex("^[A-Za-z0-9.-]{1,120}$", RegexOptions.CultureInvariant)]
     private static partial Regex ValidPipeName();
