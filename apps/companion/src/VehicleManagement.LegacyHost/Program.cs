@@ -460,12 +460,16 @@ internal static partial class Program
         var exitCode = -1;
         try
         {
-            using var probe = Process.Start(new ProcessStartInfo(probePath)
+            var probeStartInfo = new ProcessStartInfo(probePath)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = AppContext.BaseDirectory,
-            }) ?? throw new InvalidOperationException("x86 ActiveX診断プロセスを開始できませんでした。");
+            };
+            probeStartInfo.ArgumentList.Add("--probe");
+
+            using var probe = Process.Start(probeStartInfo)
+                ?? throw new InvalidOperationException("x86 ActiveX診断プロセスを開始できませんでした。");
             if (!probe.WaitForExit(5000))
             {
                 try
