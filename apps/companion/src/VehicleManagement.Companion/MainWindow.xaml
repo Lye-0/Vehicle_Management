@@ -960,6 +960,10 @@
                                               HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Auto"
                                               CanContentScroll="False"
+                                              Background="Transparent"
+                                              PreviewMouseLeftButtonDown="LegacyGraphScrollViewer_PreviewMouseLeftButtonDown"
+                                              PreviewMouseMove="LegacyGraphScrollViewer_PreviewMouseMove"
+                                              PreviewMouseLeftButtonUp="LegacyGraphScrollViewer_PreviewMouseLeftButtonUp"
                                               PreviewMouseWheel="LegacyGraphScrollViewer_PreviewMouseWheel">
                                         <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
                                             <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
@@ -976,6 +980,10 @@
                                 <ScrollViewer x:Name="LegacyGraphInspectorScrollViewer"
                                               VerticalScrollBarVisibility="Auto"
                                               CanContentScroll="False"
+                                              Background="Transparent"
+                                              PreviewMouseLeftButtonDown="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonDown"
+                                              PreviewMouseMove="LegacyGraphInspectorScrollViewer_PreviewMouseMove"
+                                              PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp"
                                               PreviewMouseWheel="LegacyGraphInspectorScrollViewer_PreviewMouseWheel">
                                     <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -78,6 +79,9 @@ public partial class MainWindow : Window
     private Point legacyGraphPanStartPoint;
     private double legacyGraphPanStartHorizontalOffset;
     private double legacyGraphPanStartVerticalOffset;
+    private bool legacyGraphInspectorPanning;
+    private Point legacyGraphInspectorPanStartPoint;
+    private double legacyGraphInspectorPanStartVerticalOffset;
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
 
     public MainWindow()
@@ -691,6 +695,102 @@ public partial class MainWindow : Window
         }
     }
 
+    private void LegacyGraphScrollViewer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        if (FindLegacyGraphBlock(source) is not null ||
+            FindVisualAncestor<ScrollBar>(source) is not null)
+        {
+            return;
+        }
+
+        legacyGraphPanning = true;
+        legacyGraphPanStartPoint = e.GetPosition(LegacyGraphScrollViewer);
+        legacyGraphPanStartHorizontalOffset = LegacyGraphScrollViewer.HorizontalOffset;
+        legacyGraphPanStartVerticalOffset = LegacyGraphScrollViewer.VerticalOffset;
+        LegacyGraphScrollViewer.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void LegacyGraphScrollViewer_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!legacyGraphPanning || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(LegacyGraphScrollViewer);
+        var desiredHorizontalOffset = legacyGraphPanStartHorizontalOffset +
+            legacyGraphPanStartPoint.X - currentPoint.X;
+        var desiredVerticalOffset = legacyGraphPanStartVerticalOffset +
+            legacyGraphPanStartPoint.Y - currentPoint.Y;
+        var constrainedOffset = ConstrainLegacyGraphPan(
+            desiredHorizontalOffset,
+            desiredVerticalOffset);
+        LegacyGraphScrollViewer.ScrollToHorizontalOffset(constrainedOffset.X);
+        LegacyGraphScrollViewer.ScrollToVerticalOffset(constrainedOffset.Y);
+        e.Handled = true;
+    }
+
+    private void LegacyGraphScrollViewer_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!legacyGraphPanning)
+        {
+            return;
+        }
+
+        legacyGraphPanning = false;
+        LegacyGraphScrollViewer.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    private void LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        if (FindVisualAncestor<ScrollBar>(source) is not null ||
+            FindVisualAncestor<Button>(source) is not null ||
+            FindVisualAncestor<TextBox>(source) is not null ||
+            FindVisualAncestor<ComboBox>(source) is not null)
+        {
+            return;
+        }
+
+        legacyGraphInspectorPanning = true;
+        legacyGraphInspectorPanStartPoint = e.GetPosition(LegacyGraphInspectorScrollViewer);
+        legacyGraphInspectorPanStartVerticalOffset = LegacyGraphInspectorScrollViewer.VerticalOffset;
+        LegacyGraphInspectorScrollViewer.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void LegacyGraphInspectorScrollViewer_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!legacyGraphInspectorPanning || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(LegacyGraphInspectorScrollViewer);
+        var desiredVerticalOffset = legacyGraphInspectorPanStartVerticalOffset +
+            legacyGraphInspectorPanStartPoint.Y - currentPoint.Y;
+        LegacyGraphInspectorScrollViewer.ScrollToVerticalOffset(Math.Clamp(
+            desiredVerticalOffset,
+            0,
+            LegacyGraphInspectorScrollViewer.ScrollableHeight));
+        e.Handled = true;
+    }
+
+    private void LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!legacyGraphInspectorPanning)
+        {
+            return;
+        }
+
+        legacyGraphInspectorPanning = false;
+        LegacyGraphInspectorScrollViewer.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
     private void LegacyGraphInspectorScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         var scrollViewer = LegacyGraphInspectorScrollViewer;
@@ -775,8 +875,8 @@ public partial class MainWindow : Window
             {
                 var left = Canvas.GetLeft(block);
                 var top = Canvas.GetTop(block);
-                var width = block.Width;
-                var height = block.Height;
+                var width = GetLegacyGraphElementWidth(block);
+                var height = GetLegacyGraphElementHeight(block);
                 var minimumHorizontal = Math.Max(0, left - viewportWidth + minimumVisibleBlockPixels);
                 var maximumHorizontal = Math.Min(maxHorizontalOffset, left + width - minimumVisibleBlockPixels);
                 var minimumVertical = Math.Max(0, top - viewportHeight + minimumVisibleBlockPixels);
@@ -822,6 +922,23 @@ public partial class MainWindow : Window
                  element.Tag is AbacusLegacyExportCandidateGraphDocument))
             {
                 return current;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        var current = source;
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
             }
 
             current = VisualTreeHelper.GetParent(current);
@@ -1116,15 +1233,15 @@ public partial class MainWindow : Window
         const double customerX = 30;
         const double customerY = 32;
         const double customerWidth = 225;
-        const double customerHeight = 88;
+        const double customerHeight = 112;
         const double vehicleX = 320;
         const double vehicleWidth = 290;
-        const double vehicleHeight = 94;
+        const double vehicleHeight = 112;
         const double documentX = 690;
         const double documentWidth = 390;
-        const double documentHeight = 88;
-        const double vehicleGap = 112;
-        const double documentGap = 102;
+        const double documentHeight = 118;
+        const double vehicleGap = 180;
+        const double documentGap = 158;
 
         var customerBlock = CreateLegacyGraphBlock(
             $"顧客: {customer.DisplayName}",
@@ -1178,6 +1295,16 @@ public partial class MainWindow : Window
         var unresolvedDocuments = customer.UnresolvedDocuments
             .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
             .ToArray();
+        if (unresolvedDocuments.Length > 0)
+        {
+            LegacyGraphCanvas.UpdateLayout();
+            var assignedContentBottom = LegacyGraphCanvas.Children
+                .OfType<FrameworkElement>()
+                .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
+                .DefaultIfEmpty(nextDocumentY)
+                .Max();
+            nextDocumentY = Math.Max(nextDocumentY, assignedContentBottom + 20);
+        }
         for (var documentIndex = 0; documentIndex < unresolvedDocuments.Length; documentIndex++)
         {
             var document = unresolvedDocuments[documentIndex];
@@ -1203,11 +1330,18 @@ public partial class MainWindow : Window
         }
 
         LegacyGraphCanvas.Width = 1120;
-        LegacyGraphCanvas.Height = Math.Max(720, nextDocumentY + Math.Max(1, customer.UnresolvedDocuments.Count) * documentGap + 70);
+        LegacyGraphCanvas.UpdateLayout();
+        var contentBottom = LegacyGraphCanvas.Children
+            .OfType<FrameworkElement>()
+            .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
+            .DefaultIfEmpty(720)
+            .Max();
+        LegacyGraphCanvas.Height = Math.Max(720, contentBottom + 70);
         LegacyGraphEdgesCanvas.Width = LegacyGraphCanvas.Width;
         LegacyGraphEdgesCanvas.Height = LegacyGraphCanvas.Height;
         LegacyGraphBoardGrid.Width = LegacyGraphCanvas.Width;
         LegacyGraphBoardGrid.Height = LegacyGraphCanvas.Height;
+        LegacyGraphCanvas.UpdateLayout();
         UpdateLegacyGraphEdges();
     }
 
@@ -1279,7 +1413,9 @@ public partial class MainWindow : Window
         var block = new Grid
         {
             Width = width,
-            Height = height,
+            MinHeight = height,
+            Height = double.NaN,
+            VerticalAlignment = VerticalAlignment.Top,
             Cursor = Cursors.SizeAll,
         };
         var outline = new Rectangle
@@ -1302,7 +1438,6 @@ public partial class MainWindow : Window
             FontWeight = FontWeights.SemiBold,
             Foreground = ToBrush("#10233F"),
             TextWrapping = TextWrapping.Wrap,
-            TextTrimming = TextTrimming.CharacterEllipsis,
         });
         content.Children.Add(new TextBlock
         {
@@ -1311,7 +1446,6 @@ public partial class MainWindow : Window
             FontSize = 12,
             Foreground = ToBrush("#52647A"),
             TextWrapping = TextWrapping.Wrap,
-            TextTrimming = TextTrimming.CharacterEllipsis,
         });
         block.Children.Add(outline);
         block.Children.Add(content);
@@ -1353,15 +1487,31 @@ public partial class MainWindow : Window
             var sourceTop = Canvas.GetTop(edge.Source);
             var targetLeft = Canvas.GetLeft(edge.Target);
             var targetTop = Canvas.GetTop(edge.Target);
-            var sourceWidth = edge.Source is FrameworkElement sourceElement ? sourceElement.Width : 0;
-            var sourceHeight = edge.Source is FrameworkElement sourceHeightElement ? sourceHeightElement.Height : 0;
-            var targetHeight = edge.Target is FrameworkElement targetElement ? targetElement.Height : 0;
+            var sourceWidth = edge.Source is FrameworkElement sourceElement
+                ? GetLegacyGraphElementWidth(sourceElement)
+                : 0;
+            var sourceHeight = edge.Source is FrameworkElement sourceHeightElement
+                ? GetLegacyGraphElementHeight(sourceHeightElement)
+                : 0;
+            var targetHeight = edge.Target is FrameworkElement targetElement
+                ? GetLegacyGraphElementHeight(targetElement)
+                : 0;
             edge.Line.X1 = sourceLeft + sourceWidth;
             edge.Line.Y1 = sourceTop + sourceHeight / 2;
             edge.Line.X2 = targetLeft;
             edge.Line.Y2 = targetTop + targetHeight / 2;
         }
     }
+
+    private static double GetLegacyGraphElementWidth(FrameworkElement element) =>
+        element.ActualWidth > 0 && !double.IsNaN(element.ActualWidth)
+            ? element.ActualWidth
+            : double.IsNaN(element.Width) ? 0 : element.Width;
+
+    private static double GetLegacyGraphElementHeight(FrameworkElement element) =>
+        element.ActualHeight > 0 && !double.IsNaN(element.ActualHeight)
+            ? element.ActualHeight
+            : double.IsNaN(element.Height) ? element.MinHeight : element.Height;
 
     private void LegacyGraphBlock_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -1413,7 +1563,10 @@ public partial class MainWindow : Window
         legacyGraphManualDocumentLinks.Clear();
         legacyGraphSelectedItem = null;
         legacyGraphPanning = false;
+        legacyGraphInspectorPanning = false;
         LegacyGraphCanvas.ReleaseMouseCapture();
+        LegacyGraphScrollViewer.ReleaseMouseCapture();
+        LegacyGraphInspectorScrollViewer.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
         legacyGraphEdges.Clear();
         LegacyGraphCustomersList.ItemsSource = null;
