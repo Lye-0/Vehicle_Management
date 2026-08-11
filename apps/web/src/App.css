@@ -1419,6 +1419,17 @@
 .abacus-package-api-card .is-success { color: #16794a; }
 .abacus-package-api-card .is-warning { color: #9a5a00; }
 .abacus-package-api-card small { color: #9a5a00; }
+.abacus-registration-action { display: grid; gap: 9px; margin-top: 16px; padding: 14px; border: 1px solid #efd28c; border-radius: 8px; background: #fff9e8; }
+.abacus-registration-action h3 { margin: 0; color: var(--text); font-size: 12px; }
+.abacus-registration-action p { margin: 0; color: #7b5a1a; font-size: 10px; line-height: 1.6; }
+.abacus-registration-action label { display: grid; gap: 5px; max-width: 430px; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.abacus-registration-action label span { color: var(--text); }
+.abacus-registration-action input { width: 100%; box-sizing: border-box; padding: 8px 9px; color: var(--text); border: 1px solid #d8be75; border-radius: 6px; background: #fff; font: inherit; }
+.abacus-registration-action input:focus { outline: 2px solid #8bb8f4; outline-offset: 1px; }
+.abacus-registration-action small { color: #7b5a1a; font-size: 9px; line-height: 1.5; }
+.abacus-registration-result { display: grid; gap: 5px; margin-top: 14px; padding: 12px; color: #16794a; border: 1px solid #b8e5c9; border-radius: 8px; background: #eaf8ef; font-size: 10px; line-height: 1.5; }
+.abacus-registration-result strong { font-size: 12px; }
+.abacus-registration-result.is-warning { color: #9a5a00; border-color: #efd28c; background: #fff9e8; }
 .abacus-package-no-commit { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 10px 12px; color: #1e40af; border: 1px solid #c6d8f5; border-radius: 8px; background: #eef5ff; font-size: 10px; }
 .backup-panel { margin-top: 16px; }
 .backup-notice { padding: 10px 12px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); font-size: 11px; }
