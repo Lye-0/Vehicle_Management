@@ -213,20 +213,144 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog(this) == true)
         {
-            SourcePathTextBox.Text = dialog.FolderName;
-            AnalysisPathTextBox.Text = dialog.FolderName;
-            LinkagePathTextBox.Text = dialog.FolderName;
-            MigrationSourcePathTextBox.Text = dialog.FolderName;
-            ResetLegacyExportImportState();
-            Fp5InspectionStatusText.Text = "未診断";
-            Fp5InspectionResultText.Text = "";
-            Fp5CandidatesGrid.ItemsSource = null;
-            fp5Inspection = null;
-            ExtractFp5CandidateButton.IsEnabled = false;
-            Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
-            ResetImageLinkCapture();
-            await AutoDetectAndInspectLegacyExportsAsync(dialog.FolderName);
+            await ApplySelectedAbacusFolderAsync(dialog.FolderName);
         }
+    }
+
+    private async Task ApplySelectedAbacusFolderAsync(string folderPath)
+    {
+        UnifiedImportFolderPathTextBox.Text = folderPath;
+        SourcePathTextBox.Text = folderPath;
+        AnalysisPathTextBox.Text = folderPath;
+        LinkagePathTextBox.Text = folderPath;
+        MigrationSourcePathTextBox.Text = folderPath;
+        ResetLegacyExportImportState();
+        Fp5InspectionStatusText.Text = "未診断";
+        Fp5InspectionResultText.Text = "";
+        Fp5CandidatesGrid.ItemsSource = null;
+        fp5Inspection = null;
+        ExtractFp5CandidateButton.IsEnabled = false;
+        Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
+        ResetImageLinkCapture();
+        await AutoDetectAndInspectLegacyExportsAsync(folderPath);
+        UpdateUnifiedImportEntryState();
+    }
+
+    private async void UnifiedImportSelectFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "保存用ABACUSフォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        UnifiedImportFolderPathTextBox.Text = dialog.FolderName;
+        UnifiedImportStatusText.Text = "ABACUSフォルダーを読み取り、CSVを自動検出しています…";
+        UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        UnifiedImportCreateCanvasButton.IsEnabled = false;
+        await ApplySelectedAbacusFolderAsync(dialog.FolderName);
+        UpdateUnifiedImportEntryState();
+    }
+
+    private async void UnifiedImportCreateCanvasButton_Click(object sender, RoutedEventArgs e)
+    {
+        var folderPath = UnifiedImportFolderPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+        {
+            MessageBox.Show(this, "保存用ABACUSフォルダーを選択してください。", "フォルダー未選択");
+            return;
+        }
+
+        if (legacyExportCandidateGraphResult is not null)
+        {
+            ShowUnifiedImportGraph();
+            return;
+        }
+
+        UnifiedImportCreateCanvasButton.IsEnabled = false;
+        UnifiedImportStatusText.Text = "CSVを診断し、キャンパス表示用の候補を準備しています…";
+        UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            await ApplySelectedAbacusFolderAsync(folderPath);
+            if (!CreateLegacyExportPreviewButton.IsEnabled)
+            {
+                UnifiedImportStatusText.Text = "CSVの診断に合格していません。詳細診断で内容を確認してください。";
+                UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+                return;
+            }
+
+            var dialog = new OpenFolderDialog
+            {
+                Title = "登録前候補パッケージの保存先を選択",
+                Multiselect = false,
+            };
+            if (dialog.ShowDialog(this) != true)
+            {
+                UnifiedImportStatusText.Text = "保存先が選択されていないため、候補作成を保留しました。";
+                UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#805B10")!;
+                return;
+            }
+
+            await CreateLegacyExportPreviewAsync(dialog.FolderName);
+            if (legacyExportCandidateGraphResult is not null)
+            {
+                UnifiedImportStatusText.Text = "キャンパスを表示しました。顧客統合・書類紐付け・ノード操作を確認できます。";
+                UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+                ShowUnifiedImportGraph();
+            }
+            else
+            {
+                UnifiedImportStatusText.Text = "候補パッケージを作成できませんでした。詳細診断のエラーを確認してください。";
+                UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
+        }
+        finally
+        {
+            UpdateUnifiedImportEntryState();
+        }
+    }
+
+    private void UnifiedImportOpenDiagnosticsButton_Click(object sender, RoutedEventArgs e)
+    {
+        LegacyPreparationExpander.IsExpanded = true;
+        LegacyPreparationExpander.BringIntoView();
+    }
+
+    private void UpdateUnifiedImportEntryState()
+    {
+        if (legacyExportCandidateGraphResult is not null)
+        {
+            UnifiedImportCreateCanvasButton.IsEnabled = true;
+            UnifiedImportCreateCanvasButton.Content = "キャンパスを表示";
+            UnifiedImportStatusText.Text = "キャンパスを表示できます。";
+            UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+            UnifiedImportSummaryText.Text = "候補パッケージは読み込み済みです。ボタンを押すとキャンパスへ移動します。";
+            return;
+        }
+
+        UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
+        UnifiedImportCreateCanvasButton.IsEnabled = CreateLegacyExportPreviewButton.IsEnabled;
+        UnifiedImportStatusText.Text = CreateLegacyExportPreviewButton.IsEnabled
+            ? "CSVの固定列診断に合格しました。候補作成先を選ぶとキャンパスを表示できます。"
+            : "CSVを検出または診断できていません。必要な場合は詳細診断を開いて確認してください。";
+        UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
+            CreateLegacyExportPreviewButton.IsEnabled ? "#17643A" : "#805B10")!;
+        UnifiedImportSummaryText.Text = string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text)
+            ? "CSVフォルダーを検出できていません。"
+            : LegacyExportStatusText.Text;
+    }
+
+    private void ShowUnifiedImportGraph()
+    {
+        LegacyPreparationExpander.IsExpanded = false;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() => LegacyGraphSectionTitle.BringIntoView()));
     }
 
     private void SelectMigrationSourceButton_Click(object sender, RoutedEventArgs e)
@@ -527,6 +651,11 @@ public partial class MainWindow : Window
         LegacyExportPackageResultText.Text = "";
         LegacyExportPackageRowsGrid.ItemsSource = null;
         ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
+        UnifiedImportCreateCanvasButton.IsEnabled = false;
+        UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
+        UnifiedImportStatusText.Text = "ABACUSフォルダーを選択してください。";
+        UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        UnifiedImportSummaryText.Text = "";
     }
 
     private void SelectLegacyExportFolderButton_Click(object sender, RoutedEventArgs e)
@@ -663,6 +792,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        await CreateLegacyExportPreviewAsync(dialog.FolderName);
+    }
+
+    private async Task CreateLegacyExportPreviewAsync(string destinationFolder)
+    {
+        if (string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text))
+        {
+            return;
+        }
+
         CreateLegacyExportPreviewButton.IsEnabled = false;
         InspectLegacyExportsButton.IsEnabled = false;
         LegacyExportPathTextBox.IsEnabled = false;
@@ -681,7 +820,7 @@ public partial class MainWindow : Window
         {
             var result = await legacyExportPreviewStore.CreateAsync(
                 LegacyExportPathTextBox.Text.Trim(),
-                dialog.FolderName);
+                destinationFolder);
             LegacyExportPreviewGrid.ItemsSource = result.PreviewRows;
             LegacyExportPreviewStatusText.Text = "登録前候補CSVを作成し、作成後の再読込検証に合格しました。登録・API送信・画像アップロードは行っていません。";
             LegacyExportPreviewStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
@@ -709,6 +848,7 @@ public partial class MainWindow : Window
             LegacyExportPathTextBox.IsEnabled = true;
             CreateLegacyExportPreviewButton.IsEnabled = false;
             SelectLegacyExportPackageFolderButton.IsEnabled = true;
+            UpdateUnifiedImportEntryState();
         }
     }
 
