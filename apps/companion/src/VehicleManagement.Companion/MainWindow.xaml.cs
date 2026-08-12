@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly AbacusImageLinkMatcher imageLinkMatcher = new();
     private readonly AbacusImageLinkApprovalStore imageLinkApprovalStore = new();
     private readonly AbacusImageRegistrationPreviewStore imageRegistrationPreviewStore = new();
+    private readonly AbacusBulkImagePreparationStore bulkImagePreparationStore = new();
     private readonly AbacusWebImportPreviewStore webImportPreviewStore = new();
     private readonly AbacusWebImportMappingStore webImportMappingStore = new();
     private readonly AbacusWebImportRegistrationPackageStore webImportRegistrationPackageStore = new();
@@ -70,12 +71,14 @@ public partial class MainWindow : Window
     private bool imageLinkMatchBusy;
     private bool imageLinkApprovalBusy;
     private bool imageRegistrationPreviewBusy;
+    private bool bulkImagePreparationBusy;
     private bool webImportPreviewBusy;
     private bool webImportMappingBusy;
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
     private string? legacyGraphFinalPackagePath;
     private string? legacyGraphImageRegistrationPreviewPath;
+    private AbacusBulkImagePreparationResult? bulkImagePreparationResult;
     private CancellationTokenSource? legacyExportDetectionCancellation;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
@@ -238,7 +241,10 @@ public partial class MainWindow : Window
 
     private async Task ApplySelectedAbacusFolderAsync(string folderPath)
     {
+        var previousBulkSourcePath = BulkImageSourcePathTextBox.Text.Trim();
+        var bulkSourceChanged = !string.Equals(previousBulkSourcePath, folderPath, StringComparison.OrdinalIgnoreCase);
         UnifiedImportFolderPathTextBox.Text = folderPath;
+        BulkImageSourcePathTextBox.Text = folderPath;
         SourcePathTextBox.Text = folderPath;
         AnalysisPathTextBox.Text = folderPath;
         LinkagePathTextBox.Text = folderPath;
@@ -251,8 +257,13 @@ public partial class MainWindow : Window
         ExtractFp5CandidateButton.IsEnabled = false;
         Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
         ResetImageLinkCapture();
+        if (bulkSourceChanged)
+        {
+            ResetBulkImagePreparationState();
+        }
         await AutoDetectAndInspectLegacyExportsAsync(folderPath);
         UpdateUnifiedImportEntryState();
+        UpdateBulkImagePreparationButtonState();
     }
 
     private async void UnifiedImportSelectFolderButton_Click(object sender, RoutedEventArgs e)
@@ -338,6 +349,127 @@ public partial class MainWindow : Window
     {
         LegacyPreparationExpander.IsExpanded = true;
         LegacyPreparationExpander.BringIntoView();
+    }
+
+    private void SelectBulkImageDestinationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "一括画像パッケージの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        BulkImageDestinationTextBox.Text = dialog.FolderName;
+        BulkImageStatusText.Text = "保存先を選択しました。ABACUSフォルダー内の標準画像を一括照合できます。";
+        BulkImageStatusText.Foreground = ToBrush("#52647A");
+        UpdateBulkImagePreparationButtonState();
+    }
+
+    private async void PrepareBulkImagesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (bulkImagePreparationBusy)
+        {
+            return;
+        }
+
+        var sourceFolder = BulkImageSourcePathTextBox.Text.Trim();
+        var vehicleExportFolder = LegacyExportPathTextBox.Text.Trim();
+        var destinationParent = BulkImageDestinationTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
+        {
+            MessageBox.Show(this, "先にABACUSインポート画面で保存用フォルダーを選択してください。", "入力フォルダー未選択");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(destinationParent) || !Directory.Exists(destinationParent))
+        {
+            MessageBox.Show(this, "一括パッケージの保存先フォルダーを選択してください。", "保存先未選択");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(vehicleExportFolder) || !Directory.Exists(vehicleExportFolder))
+        {
+            vehicleExportFolder = sourceFolder;
+        }
+
+        bulkImagePreparationBusy = true;
+        UpdateBulkImagePreparationButtonState();
+        BulkImageStatusText.Text = "標準画像を検証し、車両一覧CSVとの一意照合を行っています…";
+        BulkImageStatusText.Foreground = ToBrush("#52647A");
+        BulkImageCandidatesGrid.ItemsSource = null;
+        try
+        {
+            var result = await bulkImagePreparationStore.CreateAsync(
+                sourceFolder,
+                vehicleExportFolder,
+                destinationParent);
+            bulkImagePreparationResult = result;
+            BulkImageCandidatesGrid.ItemsSource = result.Candidates;
+            LegacyGraphImageRegistrationPreviewPathTextBox.Text = result.ImageCount > 0
+                ? result.PackagePath
+                : string.Empty;
+            legacyGraphImageRegistrationPreviewPath = result.ImageCount > 0
+                ? result.PackagePath
+                : null;
+            OpenBulkImagePackageButton.IsEnabled = true;
+
+            var warningText = result.Warnings.Count == 0
+                ? string.Empty
+                : $"\n注意: {string.Join("\n", result.Warnings)}";
+            BulkImageStatusText.Text =
+                $"一括画像パッケージを作成しました。入力画像 {result.SourceImageCount:N0}件 / " +
+                $"一意照合 {result.MatchedCount:N0}件 / 要確認 {result.ReviewCount:N0}件 / " +
+                $"未照合 {result.NotFoundCount:N0}件 / 抽出不可 {result.RejectedCount:N0}件。\n" +
+                $"登録前パッケージ: {result.PackagePath}\n" +
+                (result.ImageCount > 0
+                    ? "一意照合済み画像をグラフ確定時の画像登録前パッケージへ自動設定しました。"
+                    : "一意照合済み画像がないため、画像登録前パッケージはグラフへ設定していません。") +
+                warningText;
+            BulkImageStatusText.Foreground = ToBrush(result.ImageCount > 0 ? "#17643A" : "#805B10");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or NotSupportedException)
+        {
+            bulkImagePreparationResult = null;
+            OpenBulkImagePackageButton.IsEnabled = false;
+            BulkImageStatusText.Text = $"一括画像処理に失敗しました: {exception.Message}";
+            BulkImageStatusText.Foreground = ToBrush("#A61B1B");
+        }
+        finally
+        {
+            bulkImagePreparationBusy = false;
+            UpdateBulkImagePreparationButtonState();
+        }
+    }
+
+    private void OpenBulkImagePackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var packagePath = bulkImagePreparationResult?.PackagePath;
+        if (string.IsNullOrWhiteSpace(packagePath) || !Directory.Exists(packagePath))
+        {
+            BulkImageStatusText.Text = "作成済み一括画像パッケージの保存先が見つかりません。もう一度実行してください。";
+            BulkImageStatusText.Foreground = ToBrush("#A61B1B");
+            OpenBulkImagePackageButton.IsEnabled = false;
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = Path.GetFullPath(packagePath),
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            BulkImageStatusText.Text = $"一括画像パッケージを開けません: {exception.Message}";
+            BulkImageStatusText.Foreground = ToBrush("#A61B1B");
+        }
     }
 
     private void UpdateUnifiedImportEntryState()
@@ -6857,6 +6989,28 @@ public partial class MainWindow : Window
         ImageLinkManifestStatusText.Text = "画像を1件保存すると、車両識別子を入力してマニフェストを作成できます。";
         ImageLinkManifestStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#36465A")!;
         ResetImageLinkMatch();
+    }
+
+    private void ResetBulkImagePreparationState()
+    {
+        bulkImagePreparationResult = null;
+        BulkImageCandidatesGrid.ItemsSource = null;
+        OpenBulkImagePackageButton.IsEnabled = false;
+        BulkImageStatusText.Text = "先にABACUSインポート画面で保存用フォルダーを選択してください。";
+        BulkImageStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphImageRegistrationPreviewPathTextBox.Clear();
+        legacyGraphImageRegistrationPreviewPath = null;
+    }
+
+    private void UpdateBulkImagePreparationButtonState()
+    {
+        PrepareBulkImagesButton.IsEnabled =
+            !bulkImagePreparationBusy &&
+            !string.IsNullOrWhiteSpace(BulkImageSourcePathTextBox.Text) &&
+            Directory.Exists(BulkImageSourcePathTextBox.Text.Trim()) &&
+            !string.IsNullOrWhiteSpace(BulkImageDestinationTextBox.Text) &&
+            Directory.Exists(BulkImageDestinationTextBox.Text.Trim());
+        SelectBulkImageDestinationButton.IsEnabled = !bulkImagePreparationBusy;
     }
 
     private void ResetImageLinkMatch(bool clearPaths = true)

@@ -377,6 +377,59 @@
             <TabItem x:Name="ImagePreparationTab" Header="画像抽出準備">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
+                        <Border Padding="14" Background="#EAF2FF" BorderBrush="#B9D2F2" BorderThickness="1"
+                                CornerRadius="8" Margin="0,0,0,20">
+                            <StackPanel>
+                                <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                           Text="Gate 10. ABACUS画像を一括抽出・自動照合" />
+                                <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="選択中のABACUSフォルダー内にある標準PNG/JPEGをまとめて検証し、ファイル名の車台番号・登録番号を車両一覧CSVへ照合します。一意に一致した画像だけを登録前パッケージへ含め、複数候補・未照合・抽出不可は別レポートへ分離します。UCSコンテナの推測分割や原本への書き込みは行いません。" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,8,10,0" Foreground="#36465A"
+                                               Text="入力ABACUSフォルダー" />
+                                    <TextBox x:Name="BulkImageSourcePathTextBox" Grid.Column="1" MinHeight="36"
+                                             Padding="9,6" IsReadOnly="True" />
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,8,10,0" Foreground="#36465A"
+                                               Text="一括パッケージ保存先" />
+                                    <TextBox x:Name="BulkImageDestinationTextBox" Grid.Column="1" MinHeight="36"
+                                             Padding="9,6" />
+                                    <Button x:Name="SelectBulkImageDestinationButton" Grid.Column="2" Margin="10,0,0,0"
+                                            Content="フォルダー選択" Click="SelectBulkImageDestinationButton_Click" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button x:Name="PrepareBulkImagesButton" Content="画像を一括抽出・照合"
+                                            IsEnabled="False" Click="PrepareBulkImagesButton_Click" />
+                                    <Button x:Name="OpenBulkImagePackageButton" Margin="10,0,0,0"
+                                            Content="一括パッケージを開く" IsEnabled="False"
+                                            Click="OpenBulkImagePackageButton_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="BulkImageStatusText" Margin="0,10,0,0" Foreground="#52647A"
+                                           Text="先にABACUSインポート画面で保存用フォルダーを選択してください。" TextWrapping="Wrap" />
+                                <DataGrid x:Name="BulkImageCandidatesGrid" Height="250" Margin="0,12,0,0"
+                                          IsReadOnly="True" AutoGenerateColumns="False" CanUserAddRows="False"
+                                          HeadersVisibility="Column">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="判定" Binding="{Binding StatusLabel}" Width="130" />
+                                        <DataGridTextColumn Header="入力画像" Binding="{Binding SourceRelativePath}" Width="2*" />
+                                        <DataGridTextColumn Header="顧客名" Binding="{Binding CustomerName}" Width="1.2*" />
+                                        <DataGridTextColumn Header="車名" Binding="{Binding VehicleName}" Width="1.2*" />
+                                        <DataGridTextColumn Header="識別子" Binding="{Binding Identifier}" Width="1.2*" />
+                                        <DataGridTextColumn Header="理由" Binding="{Binding Reason}" Width="3*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="5A. 車両画像画面の読み取り診断" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
