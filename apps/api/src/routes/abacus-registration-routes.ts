@@ -234,10 +234,12 @@ async function commitGraphFinalRegistration(
   const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes))
   const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes))
   const links = parseFinalDocumentLinks(await decodeUtf8(files.links.bytes))
-  validateFinalPackage(manifest, customerRows, vehicleRows, salesRows, maintenanceRows, links)
+  const normalizedDocuments = normalizeGraphFinalDocumentNumbers(salesRows, maintenanceRows, links.documents)
+  const normalizedLinks = { documents: normalizedDocuments.links, excludedDocumentKeys: links.excludedDocumentKeys }
+  validateFinalPackage(manifest, customerRows, vehicleRows, normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks)
 
   const existingRows = await validateExistingRows(database, organizationId, customerRows, vehicleRows)
-  const documentRows = buildFinalDocumentRows(salesRows, maintenanceRows, links.documents)
+  const documentRows = buildFinalDocumentRows(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks.documents)
   const existingDocuments = await validateExistingFinalDocuments(database, organizationId, documentRows)
   const now = new Date().toISOString()
   const statements = [
@@ -260,8 +262,9 @@ async function commitGraphFinalRegistration(
     vehicleCount: vehicleRows.length,
     salesCount: salesRows.length,
     maintenanceCount: maintenanceRows.length,
-    vehiclelessDocumentCount: links.documents.filter((link) => link.vehicleless).length,
+    vehiclelessDocumentCount: normalizedLinks.documents.filter((link) => link.vehicleless).length,
     excludedDocumentCount: Array.isArray(manifest.excludedDocumentKeys) ? manifest.excludedDocumentKeys.length : 0,
+    numberAdjustedDocumentCount: normalizedDocuments.numberAdjustedDocumentCount,
     customers: { imported: existingRows.newCustomerCount, updated: existingRows.existingCustomerCount },
     vehicles: { imported: existingRows.newVehicleCount, updated: existingRows.existingVehicleCount },
     documents: { imported: existingDocuments.newDocumentCount, existing: existingDocuments.existingDocumentCount },
@@ -338,12 +341,11 @@ function parseFinalVehicles(text: string, customersRows: CustomerRegistrationRow
 function parseFinalSales(text: string) {
   const rows = parseFinalRows(text, finalSalesHeaders, 'sales.csv', maximumRows, true)
   const ids = new Set<string>()
-  const numbers = new Set<string>()
   return rows.map((row, index) => {
     const id = requiredFinalIdentifier(row[0], '販売書類ID', ['abacus-sales-'])
     const number = requiredText(row[1], '販売書類番号')
-    if (ids.has(id) || numbers.has(number)) throw new HttpError(400, `sales.csv ${index + 2}行目の識別子または書類番号が重複しています。`)
-    ids.add(id); numbers.add(number)
+    if (ids.has(id)) throw new HttpError(400, `sales.csv ${index + 2}行目の書類IDが重複しています。`)
+    ids.add(id)
     return { id, number, type: requiredText(row[2], '書類種別'), status: normalizeImportedStatus(row[3]), customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: requiredDate(row[7], '発行日'), dueDate: optionalDate(row[8], '支払期限'), taxRate: nonNegativeInteger(row[9], '税率'), subtotal: nonNegativeInteger(row[10], '小計'), tax: nonNegativeInteger(row[11], '消費税'), total: nonNegativeInteger(row[12], '合計'), itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考'), details: row[15].trim() } satisfies FinalSalesRow
   })
 }
@@ -351,15 +353,50 @@ function parseFinalSales(text: string) {
 function parseFinalMaintenance(text: string) {
   const rows = parseFinalRows(text, finalMaintenanceHeaders, 'maintenance.csv', maximumRows, true)
   const ids = new Set<string>()
-  const numbers = new Set<string>()
   return rows.map((row, index) => {
     const id = requiredFinalIdentifier(row[0], '整備書類ID', ['abacus-maintenance-'])
     const number = requiredText(row[1], '整備書類番号')
-    if (ids.has(id) || numbers.has(number)) throw new HttpError(400, `maintenance.csv ${index + 2}行目の識別子または書類番号が重複しています。`)
-    ids.add(id); numbers.add(number)
+    if (ids.has(id)) throw new HttpError(400, `maintenance.csv ${index + 2}行目の書類IDが重複しています。`)
+    ids.add(id)
     const intakeDate = optionalDate(row[8], '入庫日')
     return { id, number, type: requiredText(row[2], '書類種別'), category: normalizeMaintenanceCategory(row[3]), status: normalizeImportedStatus(row[4]), customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate, plannedReleaseDate: optionalDate(row[9], '出庫予定日'), dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), subtotal: nonNegativeInteger(row[12], '小計'), tax: nonNegativeInteger(row[13], '消費税'), total: nonNegativeInteger(row[14], '合計'), itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考'), details: row[17].trim() } satisfies FinalMaintenanceRow
   })
+}
+
+function normalizeGraphFinalDocumentNumbers(
+  salesRows: FinalSalesRow[],
+  maintenanceRows: FinalMaintenanceRow[],
+  links: GraphFinalDocumentLink[],
+) {
+  const documentNumbers = new Map<string, string>()
+  let numberAdjustedDocumentCount = 0
+
+  const normalizeRows = <T extends { id: string; number: string; details: string }>(rows: T[]) => {
+    const used = new Set<string>()
+    return rows.map((row) => {
+      const originalNumber = row.number
+      let number = originalNumber
+      let suffix = 2
+      while (used.has(number)) number = `${originalNumber}-${suffix++}`
+      used.add(number)
+      documentNumbers.set(row.id, number)
+      if (number === originalNumber) return row
+      numberAdjustedDocumentCount += 1
+      const sourceDetails = row.details.trim()
+      const details = sourceDetails
+        ? `${sourceDetails}\nABACUS原書類番号=${originalNumber}`
+        : `ABACUS原書類番号=${originalNumber}`
+      return { ...row, number, details }
+    })
+  }
+
+  const normalizedSalesRows = normalizeRows(salesRows)
+  const normalizedMaintenanceRows = normalizeRows(maintenanceRows)
+  const normalizedLinks = links.map((link) => {
+    const number = documentNumbers.get(link.documentId)
+    return number && number !== link.documentNumber ? { ...link, documentNumber: number } : link
+  })
+  return { salesRows: normalizedSalesRows, maintenanceRows: normalizedMaintenanceRows, links: normalizedLinks, numberAdjustedDocumentCount }
 }
 
 function parseFinalRows(text: string, expectedHeaders: string[], label: string, maximum: number, allowEmpty: boolean) {

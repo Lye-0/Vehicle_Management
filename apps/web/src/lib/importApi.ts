@@ -42,6 +42,7 @@ export type AbacusGraphFinalRegistrationResult = {
   maintenanceCount: number
   vehiclelessDocumentCount: number
   excludedDocumentCount: number
+  numberAdjustedDocumentCount: number
   customers: { imported: number; updated: number }
   vehicles: { imported: number; updated: number }
   documents: { imported: number; existing: number }

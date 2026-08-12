@@ -141,7 +141,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         }
 
         ValidateManualLinks(snapshot, documentByKey, vehiclesById, groupByKey);
-        var finalDocuments = new List<FinalDocument>(documents.Length - excludedKeys.Count);
+        var finalDocumentCandidates = new List<FinalDocument>(documents.Length - excludedKeys.Count);
         foreach (var document in documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -156,13 +156,18 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 ? groupBySourceCustomerId[vehiclesById[linkedVehicleId].CustomerId]
                 : ResolveCustomerOnlyGroup(document, key, snapshot, sourceCustomers, groupBySourceCustomerId, groupByKey);
             var vehicle = linkedVehicleId is null ? null : vehiclesById[linkedVehicleId];
-            finalDocuments.Add(new FinalDocument(
+            finalDocumentCandidates.Add(new FinalDocument(
                 document,
                 key,
                 CreateStableId(document.Kind == "販売書類" ? "abacus-sales" : "abacus-maintenance", key),
                 targetGroup,
                 vehicle));
         }
+
+        // ABACUSでは同じ書類番号が別の行で再利用されることがあります。
+        // Web側の書類番号は組織内で一意であるため、重複時だけ決定的な枝番を付けます。
+        // 元の番号は備考へ残し、書類ID・出典による追跡可能性を維持します。
+        var finalDocuments = AssignImportDocumentNumbers(finalDocumentCandidates);
 
         var customerRows = groups
             .Select(group => new FinalCustomer(group, sourceVehicles.Count(vehicle => groupBySourceCustomerId[vehicle.CustomerId].GroupKey == group.GroupKey), finalDocuments.Count(document => document.Group.GroupKey == group.GroupKey)))
@@ -195,7 +200,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     document.DocumentKey,
                     document.DocumentId,
                     document.Document.Kind,
-                    document.Document.DocumentNumber,
+                    document.ImportDocumentNumber,
                     document.Group.CustomerId,
                     document.Group.CustomerName,
                     document.Vehicle?.VehicleId,
@@ -231,6 +236,11 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             if (excludedKeys.Count > 0)
             {
                 warnings.Add($"未確定トレイ等の除外指定{excludedKeys.Count:N0}件は出力していません。");
+            }
+            var renumberedDocumentCount = finalDocuments.Count(document => !string.Equals(document.ImportDocumentNumber, document.Document.DocumentNumber, StringComparison.Ordinal));
+            if (renumberedDocumentCount > 0)
+            {
+                warnings.Add($"ABACUS内で書類番号が重複した{renumberedDocumentCount:N0}件に、登録用の枝番を付けています。元の番号は備考へ記録しています。");
             }
 
             var manifest = new OutputManifest(
@@ -292,7 +302,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 finalDocuments.Select(document => new AbacusLegacyGraphFinalDocumentPreview(
                     document.DocumentId,
                     document.Document.Kind,
-                    document.Document.DocumentNumber,
+                    document.ImportDocumentNumber,
                     document.Group.CustomerId,
                     document.Group.CustomerName,
                     document.Vehicle?.VehicleId,
@@ -509,13 +519,16 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var vehicleName = finalDocument.Vehicle?.VehicleName ?? "";
         var registrationNumber = finalDocument.Vehicle?.RegistrationNumber ?? "";
         var total = document.TotalAmount;
+        var originalNumberMemo = string.Equals(finalDocument.ImportDocumentNumber, document.DocumentNumber, StringComparison.Ordinal)
+            ? ""
+            : $" 原書類番号={document.DocumentNumber};";
         var memo = Truncate(
-            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 元顧客名={document.CustomerName}; " +
+            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 元顧客名={document.CustomerName};{originalNumberMemo} " +
             (finalDocument.Vehicle is null ? "車両情報なし（顧客直結の特例）" : $"車両ID={finalDocument.Vehicle.VehicleId}"));
         return isMaintenance
             ? [
                 finalDocument.DocumentId,
-                document.DocumentNumber,
+                finalDocument.ImportDocumentNumber,
                 "整備請求書",
                 "一般整備",
                 "下書き",
@@ -535,7 +548,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             ]
             : [
                 finalDocument.DocumentId,
-                document.DocumentNumber,
+                finalDocument.ImportDocumentNumber,
                 "請求書",
                 "下書き",
                 finalDocument.Group.CustomerName,
@@ -555,6 +568,33 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static string GetDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
         string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
+
+    private static IReadOnlyList<FinalDocument> AssignImportDocumentNumbers(IReadOnlyList<FinalDocument> documents)
+    {
+        var usedByKind = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var result = new List<FinalDocument>(documents.Count);
+        foreach (var document in documents)
+        {
+            var kind = document.Document.Kind;
+            if (!usedByKind.TryGetValue(kind, out var used))
+            {
+                used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                usedByKind.Add(kind, used);
+            }
+
+            var originalNumber = RequiredText(document.Document.DocumentNumber, "書類番号");
+            var importNumber = originalNumber;
+            var suffix = 2;
+            while (!used.Add(importNumber))
+            {
+                importNumber = $"{originalNumber}-{suffix++}";
+            }
+
+            result.Add(document with { ImportDocumentNumber = importNumber });
+        }
+
+        return result;
+    }
 
     private static string CreateStableId(string prefix, string value) =>
         $"{prefix}-{Convert.ToHexString(SHA256.HashData(StrictUtf8.GetBytes(value))).ToLowerInvariant()[..24]}";
@@ -708,7 +748,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string DocumentKey,
         string DocumentId,
         AbacusLegacyGraphFinalCustomerGroup Group,
-        AbacusLegacyExportCandidateGraphVehicle? Vehicle);
+        AbacusLegacyExportCandidateGraphVehicle? Vehicle)
+    {
+        public string ImportDocumentNumber { get; init; } = Document.DocumentNumber;
+    }
 
     private sealed record DocumentLinksDocument(
         int Version,
