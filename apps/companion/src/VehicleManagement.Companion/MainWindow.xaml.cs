@@ -693,6 +693,7 @@ public partial class MainWindow : Window
             ReadLegacyExportPackageButton.IsEnabled = true;
             LegacyExportPackageStatusText.Text = "候補パッケージを読み込んで再検証できます。";
             LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#1E40AF")!;
+            await ReadLegacyExportPackageAsync(result.PackagePath, automatic: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
@@ -739,6 +740,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        await ReadLegacyExportPackageAsync(packagePath, automatic: false);
+    }
+
+    private async Task ReadLegacyExportPackageAsync(string packagePath, bool automatic)
+    {
         ReadLegacyExportPackageButton.IsEnabled = false;
         SelectLegacyExportPackageFolderButton.IsEnabled = false;
         LegacyExportPackagePathTextBox.IsEnabled = false;
@@ -758,8 +764,9 @@ public partial class MainWindow : Window
             var warningSummary = result.Warnings.Count == 0
                 ? "なし"
                 : string.Join(" / ", result.Warnings.Take(3));
-            LegacyExportPackageStatusText.Text =
-                "候補パッケージの再検証に合格しました。登録・API送信・画像アップロードは行っていません。";
+            LegacyExportPackageStatusText.Text = automatic
+                ? "候補パッケージを自動で再検証し、グラフを表示しています。登録・API送信・画像アップロードは行っていません。"
+                : "候補パッケージの再検証に合格しました。登録・API送信・画像アップロードは行っていません。";
             LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
             LegacyExportPackageResultText.Text =
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / 販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +

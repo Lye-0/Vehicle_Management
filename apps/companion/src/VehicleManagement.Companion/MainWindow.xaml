@@ -907,7 +907,7 @@
                         <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6B補足. 登録前候補パッケージを再検証" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="作成済みの候補パッケージを後から読み込み、マニフェスト・CSVのSHA-256・見出し・列数・行数を再検証します。顧客・車両・書類の登録、API送信、画像アップロードは行いません。" />
+                                   Text="作成済みの候補パッケージを後から読み込み、マニフェスト・CSVのSHA-256・見出し・列数・行数を再検証します。候補作成直後は自動で再検証してグラフを表示します。顧客・車両・書類の登録、API送信、画像アップロードは行いません。" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
