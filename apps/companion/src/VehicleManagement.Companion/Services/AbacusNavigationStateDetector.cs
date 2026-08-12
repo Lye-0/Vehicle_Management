@@ -11,7 +11,7 @@ public enum AbacusNavigationState
     NotRunning,
     MainMenu,
     VehicleList,
-    VehicleDetail,
+    VehicleManagement,
     ExpandedImage,
     Unknown,
 }
@@ -79,13 +79,13 @@ public sealed class AbacusNavigationStateDetector
                 visibleWindows);
         }
 
-        var vehicleDetailWindow = visibleWindows.FirstOrDefault(window => IsWindow(window, "abx-cs-mn.ucs"));
-        if (vehicleDetailWindow is not null)
+        var vehicleManagementWindow = visibleWindows.FirstOrDefault(window => IsWindow(window, "abx-cs-mn.ucs"));
+        if (vehicleManagementWindow is not null)
         {
             return Create(
-                AbacusNavigationState.VehicleDetail,
-                "車両詳細",
-                $"車両詳細ウィンドウ {vehicleDetailWindow.Title} を確認しました。右側の画像領域を表示できます。",
+                AbacusNavigationState.VehicleManagement,
+                "車両管理画面（一覧・詳細）",
+                $"車両管理ウィンドウ {vehicleManagementWindow.Title} を確認しました。一覧と詳細は画面内容の確認が必要です。",
                 runtime,
                 visibleWindows);
         }

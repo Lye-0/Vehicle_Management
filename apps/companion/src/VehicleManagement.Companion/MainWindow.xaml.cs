@@ -5791,7 +5791,7 @@ public partial class MainWindow : Window
         var (foreground, background) = snapshot.State switch
         {
             AbacusNavigationState.MainMenu => ("#1E40AF", "#EAF2FF"),
-            AbacusNavigationState.VehicleList or AbacusNavigationState.VehicleDetail or AbacusNavigationState.ExpandedImage
+            AbacusNavigationState.VehicleList or AbacusNavigationState.VehicleManagement or AbacusNavigationState.ExpandedImage
                 => ("#17643A", "#EAF7EF"),
             AbacusNavigationState.NotRunning => ("#52647A", "#E9EEF5"),
             _ => ("#805B10", "#FFF4D6"),
