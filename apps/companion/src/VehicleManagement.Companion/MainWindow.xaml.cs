@@ -423,7 +423,7 @@ public partial class MainWindow : Window
             BulkImageStatusText.Text =
                 $"一括画像パッケージを作成しました。標準画像 {result.SourceImageCount:N0}件 / UCS抽出 {result.EmbeddedImageCount:N0}件 / " +
                 $"一意照合 {result.MatchedCount:N0}件 / 要確認 {result.ReviewCount:N0}件 / " +
-                $"未照合 {result.NotFoundCount:N0}件 / 抽出不可 {result.RejectedCount:N0}件。\n" +
+                $"未照合 {result.NotFoundCount:N0}件 / 重複除外 {result.DuplicateCount:N0}件 / 抽出不可 {result.RejectedCount:N0}件。\n" +
                 $"登録前パッケージ: {result.PackagePath}\n" +
                 (result.ImageCount > 0
                     ? "一意照合済み画像をグラフ確定時の画像登録前パッケージへ自動設定しました。"
