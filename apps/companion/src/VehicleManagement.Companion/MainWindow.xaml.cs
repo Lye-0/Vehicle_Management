@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private readonly AbacusWebImportPreviewStore webImportPreviewStore = new();
     private readonly AbacusWebImportMappingStore webImportMappingStore = new();
     private readonly AbacusWebImportRegistrationPackageStore webImportRegistrationPackageStore = new();
+    private readonly AbacusLegacyGraphFinalPackageStore legacyGraphFinalPackageStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
     private bool webImportPreviewBusy;
     private bool webImportMappingBusy;
     private bool webImportRegistrationBusy;
+    private bool legacyGraphFinalPackageBusy;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
     private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
@@ -2605,6 +2607,123 @@ public partial class MainWindow : Window
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
     }
 
+    private async void LegacyGraphCreateFinalPackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyExportCandidateGraphResult is null || !legacyGraphImportConfirmed || legacyGraphFinalPackageBusy)
+        {
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "グラフ確定パッケージの保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            "確定した顧客統合・書類紐付けを登録前パッケージへ出力しますか？\n\n" +
+            "顧客CSV・車両CSV・販売CSV・整備CSV・書類リンク・除外一覧を新規フォルダーへ保存します。\n" +
+            "Web API、D1、画像アップロード、元CSV・ABACUSフォルダーの変更は行いません。",
+            "登録前パッケージの作成",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        legacyGraphFinalPackageBusy = true;
+        LegacyGraphCreateFinalPackageButton.IsEnabled = false;
+        LegacyGraphFinalPackageResultText.Text = "";
+        LegacyGraphFinalPackageStatusText.Text = "確定状態・書類リンク・除外一覧を再検証してパッケージを作成しています…";
+        LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+        try
+        {
+            var snapshot = BuildLegacyGraphFinalizationSnapshot();
+            var result = await legacyGraphFinalPackageStore.CreateAsync(
+                legacyExportCandidateGraphResult,
+                snapshot,
+                dialog.FolderName);
+            LegacyGraphFinalPackageStatusText.Text =
+                "グラフ確定後の登録前パッケージを作成しました。Web API・DB・画像アップロードはまだ行っていません。";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#17643A");
+            LegacyGraphFinalPackageResultText.Text =
+                $"保存先: {result.PackagePath}\n" +
+                $"マニフェスト: {result.ManifestPath}\n" +
+                $"顧客CSV: {result.CustomersCsvPath}\n" +
+                $"車両CSV: {result.VehiclesCsvPath}\n" +
+                $"販売CSV: {result.SalesCsvPath}\n" +
+                $"整備CSV: {result.MaintenanceCsvPath}\n" +
+                $"書類リンク: {result.DocumentLinksPath}\n" +
+                $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / " +
+                $"販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
+                $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件\n" +
+                $"マニフェスト SHA-256: {result.ManifestSha256}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or JsonException or ArgumentException or
+                                           NotSupportedException)
+        {
+            LegacyGraphFinalPackageResultText.Text = "";
+            LegacyGraphFinalPackageStatusText.Text =
+                $"グラフ確定パッケージを作成できません: {exception.Message}";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+        }
+        finally
+        {
+            legacyGraphFinalPackageBusy = false;
+            UpdateLegacyGraphImportConfirmationButton();
+        }
+    }
+
+    private AbacusLegacyGraphFinalizationSnapshot BuildLegacyGraphFinalizationSnapshot()
+    {
+        if (legacyExportCandidateGraphResult is null || !legacyGraphImportConfirmed)
+        {
+            throw new InvalidDataException("グラフのインポート内容が最終確定されていません。");
+        }
+
+        var groups = legacyExportCandidateGraphResult.Customers
+            .OrderBy(customer => customer.CustomerId, StringComparer.Ordinal)
+            .GroupBy(GetLegacyCustomerMergeKey, StringComparer.Ordinal)
+            .Select(grouping =>
+            {
+                var sourceCustomers = grouping.ToArray();
+                var hasMergeGroup = TryGetLegacyGraphMergeGroup(grouping.Key, out var mergeGroup) &&
+                                    mergeGroup.CustomerIds.Count > 1;
+                var displayCustomer = hasMergeGroup
+                    ? GetLegacyGraphDisplayCustomer(sourceCustomers[0])
+                    : sourceCustomers[0];
+                return new AbacusLegacyGraphFinalCustomerGroup(
+                    grouping.Key,
+                    hasMergeGroup ? mergeGroup!.Origin : "single",
+                    !hasMergeGroup || legacyGraphAppliedCustomerMergeKeys.Contains(grouping.Key),
+                    sourceCustomers.Select(customer => customer.CustomerId).ToArray(),
+                    displayCustomer.CustomerId,
+                    displayCustomer.CustomerNumber,
+                    displayCustomer.CustomerName,
+                    displayCustomer.NameKana,
+                    displayCustomer.PhoneNumber,
+                    displayCustomer.EmailAddress,
+                    displayCustomer.PostalCode,
+                    displayCustomer.Address,
+                    displayCustomer.Memo);
+            })
+            .ToArray();
+
+        return new AbacusLegacyGraphFinalizationSnapshot(
+            groups,
+            new Dictionary<string, string>(legacyGraphManualDocumentLinks, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphManualDocumentCustomerLinks, StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(legacyGraphExcludedDocumentKeys, StringComparer.OrdinalIgnoreCase),
+            legacyGraphImportConfirmed);
+    }
+
     private int GetLegacyGraphPendingMergeGroupCount() =>
         legacyGraphCustomerMergeGroups.Values.Count(group =>
             group.CustomerIds.Count > 1 &&
@@ -2635,6 +2754,9 @@ public partial class MainWindow : Window
             LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
             LegacyGraphFinalizeImportStatusText.Text =
                 "候補パッケージを読み込むと、顧客統合と書類・ノード操作の完了後に確定できます。";
+            LegacyGraphCreateFinalPackageButton.IsEnabled = false;
+            LegacyGraphFinalPackageStatusText.Text =
+                "インポート内容を確定すると、確定済みのCSV・書類リンク・除外一覧をパッケージ化できます。";
             return;
         }
 
@@ -2644,6 +2766,13 @@ public partial class MainWindow : Window
             LegacyGraphFinalizeImportButton.Content = "インポート内容を確定済み";
             LegacyGraphFinalizeImportStatusText.Text =
                 $"インポート内容を確定済みです。除外確定: {legacyGraphExcludedDocumentKeys.Count:N0}件。操作を変更すると確定が解除されます。";
+            LegacyGraphCreateFinalPackageButton.IsEnabled = !legacyGraphFinalPackageBusy;
+            if (!legacyGraphFinalPackageBusy && string.IsNullOrWhiteSpace(LegacyGraphFinalPackageResultText.Text))
+            {
+                LegacyGraphFinalPackageStatusText.Text =
+                    "確定内容を登録前パッケージへ保存できます。保存後もWeb API・DB・画像アップロードは行いません。";
+                LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+            }
             return;
         }
 
@@ -2652,6 +2781,7 @@ public partial class MainWindow : Window
         var trayCount = GetLegacyGraphTrayDocuments().Count;
         LegacyGraphFinalizeImportButton.IsEnabled = pendingMergeGroupCount == 0 && pendingDocumentCount == 0;
         LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
+        LegacyGraphCreateFinalPackageButton.IsEnabled = false;
         if (pendingMergeGroupCount > 0 || pendingDocumentCount > 0)
         {
             var pendingDetails = new List<string>();
@@ -4833,6 +4963,7 @@ public partial class MainWindow : Window
         legacyGraphTrayDocumentKeys.Clear();
         legacyGraphExcludedDocumentKeys.Clear();
         legacyGraphImportConfirmed = false;
+        legacyGraphFinalPackageBusy = false;
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -4888,6 +5019,11 @@ public partial class MainWindow : Window
         LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
         LegacyGraphFinalizeImportStatusText.Text =
             "顧客統合と書類・ノード操作を完了すると、インポート内容を確定できます。";
+        LegacyGraphCreateFinalPackageButton.IsEnabled = false;
+        LegacyGraphFinalPackageStatusText.Text =
+            "インポート内容を確定すると、確定済みのCSV・書類リンク・除外一覧をパッケージ化できます。";
+        LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphFinalPackageResultText.Text = "";
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
