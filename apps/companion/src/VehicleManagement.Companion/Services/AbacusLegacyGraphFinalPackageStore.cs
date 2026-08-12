@@ -242,6 +242,11 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 warnings.Add($"ABACUS内で書類番号が重複した{renumberedDocumentCount:N0}件に、登録用の枝番を付けています。元の番号は備考へ記録しています。");
             }
+            var amountDefaultedDocumentCount = finalDocuments.Count(document => string.IsNullOrWhiteSpace(document.Document.TotalAmount));
+            if (amountDefaultedDocumentCount > 0)
+            {
+                warnings.Add($"ABACUSで金額が未設定の{amountDefaultedDocumentCount:N0}件は、小計・合計を0として登録用CSVへ出力しています。元データに金額がないことは備考へ記録しています。");
+            }
 
             var manifest = new OutputManifest(
                 1,
@@ -518,12 +523,14 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var document = finalDocument.Document;
         var vehicleName = finalDocument.Vehicle?.VehicleName ?? "";
         var registrationNumber = finalDocument.Vehicle?.RegistrationNumber ?? "";
-        var total = document.TotalAmount;
+        var amountWasMissing = string.IsNullOrWhiteSpace(document.TotalAmount);
+        var total = amountWasMissing ? "0" : document.TotalAmount;
         var originalNumberMemo = string.Equals(finalDocument.ImportDocumentNumber, document.DocumentNumber, StringComparison.Ordinal)
             ? ""
             : $" 原書類番号={document.DocumentNumber};";
+        var missingAmountMemo = amountWasMissing ? " 金額未設定（小計・合計を0として登録）;" : "";
         var memo = Truncate(
-            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 元顧客名={document.CustomerName};{originalNumberMemo} " +
+            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 元顧客名={document.CustomerName};{originalNumberMemo}{missingAmountMemo} " +
             (finalDocument.Vehicle is null ? "車両情報なし（顧客直結の特例）" : $"車両ID={finalDocument.Vehicle.VehicleId}"));
         return isMaintenance
             ? [
