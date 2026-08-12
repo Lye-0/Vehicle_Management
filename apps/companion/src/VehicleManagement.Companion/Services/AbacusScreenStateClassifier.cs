@@ -45,12 +45,22 @@ public sealed class AbacusScreenStateClassifier
         var blue = 0;
         var dark = 0;
         var grayInk = 0;
-        var total = converted.PixelWidth * converted.PixelHeight;
+        var total = 0;
         for (var offset = 0; offset < pixels.Length; offset += 4)
         {
             var b = pixels[offset];
             var g = pixels[offset + 1];
             var r = pixels[offset + 2];
+            var alpha = pixels[offset + 3];
+            // PrintWindowで作成したHBITMAPには、未描画領域が透明画素として
+            // 残ることがあります。透明画素を黒・灰色として数えると、画面全体
+            // が暗色のように判定されるため、判定対象から除外します。
+            if (alpha < 16)
+            {
+                continue;
+            }
+
+            total++;
             var maximum = Math.Max(r, Math.Max(g, b));
             var minimum = Math.Min(r, Math.Min(g, b));
 
@@ -70,6 +80,11 @@ public sealed class AbacusScreenStateClassifier
             }
         }
 
+        if (total == 0)
+        {
+            return new AbacusScreenVisualResult(AbacusScreenVisualState.Unknown, 0, 0, 0);
+        }
+
         var blueRatio = blue / (double)total;
         var darkRatio = dark / (double)total;
         var grayInkRatio = grayInk / (double)total;
@@ -82,28 +97,25 @@ public sealed class AbacusScreenStateClassifier
         double darkRatio,
         double grayInkRatio)
     {
-        // メニューは画面上部と下部に大きな青系の面があり、文字・罫線が少ない。
-        if (blueRatio >= 0.08 && darkRatio <= 0.03)
+        // メニューは画面上部と下部に大きな青系の面があります。ABACUSの
+        // PrintWindow結果では未描画部分が暗色として残る場合があるため、
+        // 暗色比率を条件に含めず、青色比率を主な手掛かりにします。
+        if (blueRatio >= 0.04)
         {
             return AbacusScreenVisualState.MainMenu;
         }
 
-        // 拡大画像は車検証の灰色罫線が画面の大部分を占め、ABACUSの青い入力枠がほぼない。
-        if (blueRatio <= 0.018 && grayInkRatio >= 0.08)
-        {
-            return AbacusScreenVisualState.ExpandedImage;
-        }
-
-        // 一覧は多数の青い行罫線と文字を持つ。詳細は青い入力枠に加えて、
-        // 右側の画像領域があるため一覧より暗色画素の比率が低くなる。
-        if (blueRatio >= 0.035 && darkRatio >= 0.04)
+        // 車両一覧と車両詳細は同じ配色のため、ここでは一覧系として返し、
+        // 詳細かどうかはabx-cs-sk.ucsの子ウィンドウ有無と組み合わせて判定します。
+        if (blueRatio >= 0.0015)
         {
             return AbacusScreenVisualState.VehicleList;
         }
 
-        if (blueRatio >= 0.018 && darkRatio >= 0.012)
+        // 拡大画像は車検証の灰色罫線が画面の大部分を占め、青い入力枠がほぼありません。
+        if (grayInkRatio >= 0.08)
         {
-            return AbacusScreenVisualState.VehicleDetail;
+            return AbacusScreenVisualState.ExpandedImage;
         }
 
         return AbacusScreenVisualState.Unknown;

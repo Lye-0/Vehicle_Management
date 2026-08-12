@@ -140,6 +140,7 @@ public sealed class AbacusNavigationStateDetector
         }
 
         var metrics = FormatMetrics(visual);
+        var hasImageWindow = visibleWindows.Any(window => IsWindow(window, "abx-cs-sk.ucs"));
         return visual.State switch
         {
             AbacusScreenVisualState.MainMenu => Create(
@@ -148,7 +149,19 @@ public sealed class AbacusNavigationStateDetector
                 $"ABACUSのメインメニューを表示しています。{metrics}",
                 runtime,
                 visibleWindows),
+            AbacusScreenVisualState.VehicleList when hasImageWindow => Create(
+                AbacusNavigationState.VehicleDetail,
+                "車両詳細",
+                $"顧客・車両情報と右側の画像領域を表示しています。{metrics}",
+                runtime,
+                visibleWindows),
             AbacusScreenVisualState.VehicleList => Create(
+                AbacusNavigationState.VehicleList,
+                "車両一覧",
+                $"車両管理の一覧を表示しています。対象行を1回クリックして移動できます。{metrics}",
+                runtime,
+                visibleWindows),
+            AbacusScreenVisualState.ExpandedImage when !hasImageWindow => Create(
                 AbacusNavigationState.VehicleList,
                 "車両一覧",
                 $"車両管理の一覧を表示しています。対象行を1回クリックして移動できます。{metrics}",
