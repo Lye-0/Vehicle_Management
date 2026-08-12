@@ -119,6 +119,7 @@ public partial class MainWindow : Window
     private Border? legacyGraphCustomerUngroupDropHighlight;
     private Grid? legacyGraphDropHighlightTarget;
     private ListBox? legacyGraphTrayDropHighlightList;
+    private bool legacyGraphNativeDocumentDropTargetValid;
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
 
     public MainWindow()
@@ -140,10 +141,6 @@ public partial class MainWindow : Window
             UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
         }
 
-        if (legacyGraphNodeDragStarted)
-        {
-            UpdateLegacyGraphNodeDragFrame();
-        }
     }
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
@@ -1099,6 +1096,7 @@ public partial class MainWindow : Window
 
         var document = legacyGraphTrayDragDocument;
         legacyGraphTrayDragDocument = null;
+        legacyGraphNativeDocumentDropTargetValid = false;
         var payload = new LegacyGraphDocumentDragPayload(document, "unresolved-tray");
         var data = new DataObject();
         data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
@@ -1121,14 +1119,16 @@ public partial class MainWindow : Window
 
             Mouse.OverrideCursor = null;
             Cursor = null;
+            legacyGraphNativeDocumentDropTargetValid = false;
         }
         e.Handled = true;
     }
 
     private void LegacyGraphDocumentDrag_GiveFeedback(object sender, GiveFeedbackEventArgs e)
     {
-        Mouse.OverrideCursor = Cursors.Hand;
-        Cursor = Cursors.Hand;
+        var cursor = legacyGraphNativeDocumentDropTargetValid ? Cursors.Hand : Cursors.SizeAll;
+        Mouse.OverrideCursor = cursor;
+        Cursor = cursor;
         e.UseDefaultCursors = false;
         e.Handled = true;
     }
@@ -1143,6 +1143,7 @@ public partial class MainWindow : Window
         if (sender is not ListBox list ||
             GetLegacyGraphDocumentDragPayload(e.Data) is null)
         {
+            legacyGraphNativeDocumentDropTargetValid = false;
             e.Effects = DragDropEffects.None;
             return;
         }
@@ -1150,12 +1151,14 @@ public partial class MainWindow : Window
         ClearLegacyGraphTrayDropHighlight();
         legacyGraphTrayDropHighlightList = list;
         list.Opacity = 0.82;
+        legacyGraphNativeDocumentDropTargetValid = true;
         e.Effects = DragDropEffects.Link;
         e.Handled = true;
     }
 
     private void LegacyGraphUnresolvedDocumentList_DragLeave(object sender, DragEventArgs e)
     {
+        legacyGraphNativeDocumentDropTargetValid = false;
         ClearLegacyGraphTrayDropHighlight();
     }
 
@@ -3164,8 +3167,6 @@ public partial class MainWindow : Window
             width,
             height,
             statusLabel);
-        // 書類ブロックは車両・未確定トレイへ移動できることを常時示します。
-        block.Cursor = Cursors.Hand;
         if (block.Children.OfType<StackPanel>().FirstOrDefault() is { } content)
         {
             // 左右のノード・切断ボタンと本文が重ならないように余白を確保します。
@@ -3323,6 +3324,8 @@ public partial class MainWindow : Window
             {
                 ClearLegacyGraphDropHighlight();
             }
+
+            legacyGraphNativeDocumentDropTargetValid = false;
         };
         vehicleBlock.Drop += (_, e) =>
         {
@@ -3379,6 +3382,8 @@ public partial class MainWindow : Window
             {
                 ClearLegacyGraphDropHighlight();
             }
+
+            legacyGraphNativeDocumentDropTargetValid = false;
         };
         node.Drop += (_, e) =>
         {
@@ -3424,6 +3429,7 @@ public partial class MainWindow : Window
         }
 
         SetLegacyGraphDropHighlight(vehicleBlock);
+        legacyGraphNativeDocumentDropTargetValid = true;
         e.Effects = DragDropEffects.Link;
         e.Handled = true;
     }
@@ -3679,23 +3685,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        var pointer = Mouse.GetPosition(LegacyGraphScrollViewer);
+        var viewportHeight = LegacyGraphScrollViewer.ViewportHeight > 0
+            ? LegacyGraphScrollViewer.ViewportHeight
+            : LegacyGraphScrollViewer.ActualHeight;
+        var viewportWidth = LegacyGraphScrollViewer.ViewportWidth > 0
+            ? LegacyGraphScrollViewer.ViewportWidth
+            : LegacyGraphScrollViewer.ActualWidth;
+        var nearCanvas = pointer.X >= 0 && pointer.X <= viewportWidth;
         var edge = 64d;
-        var pointerScreen = PointToScreen(Mouse.GetPosition(this));
-        var viewportScreenOrigin = LegacyGraphScrollViewer.PointToScreen(new Point(0, 0));
-        var viewportWidth = LegacyGraphScrollViewer.ActualWidth;
-        var viewportHeight = LegacyGraphScrollViewer.ActualHeight;
-        var viewportScreenRight = viewportScreenOrigin.X + viewportWidth;
-        var viewportScreenBottom = viewportScreenOrigin.Y + viewportHeight;
-        // ScrollViewerの境界上でも判定できるよう、左右方向には少し余白を持たせます。
-        var nearCanvas = pointerScreen.X >= viewportScreenOrigin.X - 32 &&
-                         pointerScreen.X <= viewportScreenRight + 32;
-        // 40ms間隔で急激に移動しないよう、1 tickあたりの移動量を小さくします。
-        var step = 8d;
+        // 40msごとの移動量を小さくし、端に置いたままでもゆっくり追従させます。
+        var step = 2d;
         var direction = !nearCanvas
             ? 0
-            : pointerScreen.Y < viewportScreenOrigin.Y + edge
+            : pointer.Y < edge
                 ? -1
-                : pointerScreen.Y > viewportScreenBottom - edge
+                : pointer.Y > viewportHeight - edge
                     ? 1
                     : 0;
         var delta = direction * step;
@@ -4022,6 +4027,12 @@ public partial class MainWindow : Window
 
         if (legacyGraphBlockDragStarted)
         {
+            if (legacyGraphDocumentCardDragDocument is not null)
+            {
+                // 書類ブロックを掴んだ直後は通常の移動カーソルを維持し、
+                // 有効なドロップ先に入った時だけ手カーソルへ切り替えます。
+                SetLegacyGraphDocumentDragCursor(Cursors.SizeAll);
+            }
             UpdateLegacyGraphDragPreviewPosition(e.GetPosition(this));
             UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
             e.Handled = true;
@@ -4155,9 +4166,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var hit = VisualTreeHelper.HitTest(this, windowPoint)?.VisualHit;
-        if (FindVisualAncestor<ListBox>(hit) is { } list &&
-            IsLegacyGraphUnresolvedDocumentList(list))
+        var list = FindLegacyGraphUnresolvedDocumentListAt(windowPoint);
+        if (list is not null)
         {
             legacyGraphTrayDropHighlightList = list;
             list.Opacity = 0.82;
@@ -4165,24 +4175,69 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (FindLegacyGraphBlock(hit) is Grid vehicleBlock &&
-            vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle)
+        var vehicleBlock = FindLegacyGraphVehicleBlockAt(windowPoint);
+        if (vehicleBlock is not null)
         {
             SetLegacyGraphDropHighlight(vehicleBlock);
             SetLegacyGraphDocumentDragCursor(Cursors.Hand);
             return;
         }
 
-        SetLegacyGraphDocumentDragCursor(Cursors.Arrow);
+        SetLegacyGraphDocumentDragCursor(Cursors.SizeAll);
+    }
+
+    private ListBox? FindLegacyGraphUnresolvedDocumentListAt(Point windowPoint)
+    {
+        foreach (var list in new[] { LegacyGraphUnresolvedSalesList, LegacyGraphUnresolvedMaintenanceList })
+        {
+            if (IsLegacyGraphElementAtWindowPoint(list, windowPoint))
+            {
+                return list;
+            }
+        }
+
+        return null;
+    }
+
+    private Grid? FindLegacyGraphVehicleBlockAt(Point windowPoint)
+    {
+        foreach (var block in LegacyGraphCanvas.Children.OfType<Grid>())
+        {
+            if (block.Tag is AbacusLegacyExportCandidateGraphVehicle &&
+                IsLegacyGraphElementAtWindowPoint(block, windowPoint))
+            {
+                return block;
+            }
+        }
+
+        return null;
+    }
+
+    private bool IsLegacyGraphElementAtWindowPoint(FrameworkElement element, Point windowPoint)
+    {
+        if (!element.IsVisible || element.ActualWidth <= 0 || element.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var bounds = element.TransformToAncestor(this).TransformBounds(
+                new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+            return bounds.Contains(windowPoint);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private void HandleLegacyGraphDocumentBlockDrop(
         AbacusLegacyExportCandidateGraphDocument document,
         Point windowPoint)
     {
-        var hit = VisualTreeHelper.HitTest(this, windowPoint)?.VisualHit;
-        if (FindVisualAncestor<ListBox>(hit) is { } list &&
-            IsLegacyGraphUnresolvedDocumentList(list))
+        var list = FindLegacyGraphUnresolvedDocumentListAt(windowPoint);
+        if (list is not null)
         {
             var key = GetLegacyDocumentKey(document);
             legacyGraphManualDocumentLinks.Remove(key);
@@ -4195,8 +4250,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (FindLegacyGraphBlock(hit) is Grid vehicleBlock &&
-            vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle vehicle)
+        if (FindLegacyGraphVehicleBlockAt(windowPoint)?.Tag is AbacusLegacyExportCandidateGraphVehicle vehicle)
         {
             ApplyLegacyGraphManualLink(document, vehicle.VehicleId);
         }
@@ -4223,6 +4277,7 @@ public partial class MainWindow : Window
         legacyGraphInspectorPanning = false;
         legacyGraphInspectorPanningPage = false;
         legacyGraphTrayDragDocument = null;
+        legacyGraphNativeDocumentDropTargetValid = false;
         legacyGraphHandleDragDocument = null;
         legacyGraphDocumentCardDragDocument = null;
         legacyGraphNodeDragSource?.ReleaseMouseCapture();

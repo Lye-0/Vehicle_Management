@@ -1213,7 +1213,7 @@
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Margin="2,3" Padding="8" Background="#FFF7ED" BorderBrush="#D97706"
-                                                        BorderThickness="2" CornerRadius="5" Cursor="Hand">
+                                                        BorderThickness="2" CornerRadius="5" Cursor="SizeAll">
                                                     <StackPanel>
                                                         <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=販売書類 {0}}" TextWrapping="Wrap" />
                                                         <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
@@ -1251,7 +1251,7 @@
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Margin="2,3" Padding="8" Background="#FFF7ED" BorderBrush="#D97706"
-                                                        BorderThickness="2" CornerRadius="5" Cursor="Hand">
+                                                        BorderThickness="2" CornerRadius="5" Cursor="SizeAll">
                                                     <StackPanel>
                                                         <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber, StringFormat=整備書類 {0}}" TextWrapping="Wrap" />
                                                         <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
