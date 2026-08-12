@@ -192,6 +192,8 @@
                                     Click="InspectAbacusButton_Click" />
                             <Button x:Name="CloseAbacusButton" Content="ABACUSを閉じる" IsEnabled="False"
                                     Click="CloseAbacusButton_Click" />
+                            <Button x:Name="InspectAbacusNavigationButton" Content="画面遷移状態を診断"
+                                    IsEnabled="False" Click="InspectAbacusNavigationButton_Click" />
                         </WrapPanel>
                         <Border Margin="0,14,0,0" Padding="16" Background="#F4F7FB" CornerRadius="8">
                             <Grid>
@@ -213,7 +215,20 @@
                                 <TextBlock x:Name="AbacusWindowTitleText" Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueText}" Text="-" />
                                 <TextBlock Grid.Row="3" Style="{StaticResource LabelText}" Text="認識要素" />
                                 <TextBlock x:Name="AutomationElementCountText" Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueText}" Text="-" />
-                            </Grid>
+                                </Grid>
+                        </Border>
+                        <Border x:Name="AbacusNavigationStatePanel" Margin="0,14,0,0" Padding="12"
+                                Background="#E9EEF5" CornerRadius="6">
+                            <StackPanel>
+                                <TextBlock x:Name="AbacusNavigationStateText" FontSize="17" FontWeight="SemiBold"
+                                           Foreground="#52647A" Text="画面遷移状態は未診断です。" />
+                                <TextBlock x:Name="AbacusNavigationDetailText" Margin="0,5,0,0"
+                                           Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="「画面遷移状態を診断」を押すと、メニュー・車両一覧・車両詳細・拡大画像のどこにいるかを確認できます。" />
+                                <TextBlock x:Name="AbacusNavigationObservedText" Margin="0,5,0,0"
+                                           Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="確認中の子ウィンドウ: -" />
+                            </StackPanel>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
@@ -1478,24 +1493,8 @@
                         <Button x:Name="InspectAbacusNativeWindowsButton" Margin="10,0,0,0" HorizontalAlignment="Left"
                                 Content="内部ウィンドウを診断" IsEnabled="False"
                                 Click="InspectAbacusNativeWindowsButton_Click" />
-                        <Button x:Name="InspectAbacusNavigationButton" Margin="10,0,0,0" HorizontalAlignment="Left"
-                                Content="画面遷移状態を診断" IsEnabled="False"
-                                Click="InspectAbacusNavigationButton_Click" />
                         <TextBlock x:Name="AbacusMenuStatusText" Margin="0,10,0,0" Foreground="#52647A"
                                    Text="コピー側ABACUSを起動してから診断してください。" TextWrapping="Wrap" />
-                        <Border x:Name="AbacusNavigationStatePanel" Margin="0,12,0,0" Padding="12"
-                                Background="#E9EEF5" CornerRadius="6">
-                            <StackPanel>
-                                <TextBlock x:Name="AbacusNavigationStateText" FontSize="17" FontWeight="SemiBold"
-                                           Foreground="#52647A" Text="画面遷移状態は未診断です。" />
-                                <TextBlock x:Name="AbacusNavigationDetailText" Margin="0,5,0,0"
-                                           Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="「画面遷移状態を診断」を押すと、メニュー・車両一覧・車両詳細・拡大画像のどこにいるかを確認できます。" />
-                                <TextBlock x:Name="AbacusNavigationObservedText" Margin="0,5,0,0"
-                                           Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="確認中の子ウィンドウ: -" />
-                            </StackPanel>
-                        </Border>
                         <DataGrid x:Name="AbacusMenuItemsGrid" Height="260" Margin="0,14,0,0" IsReadOnly="True"
                                   AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
                             <DataGrid.Columns>
