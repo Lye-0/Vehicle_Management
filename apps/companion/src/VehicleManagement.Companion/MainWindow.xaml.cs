@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportReader legacyExportReader = new();
+    private readonly AbacusLegacyExportFolderDetector legacyExportFolderDetector = new();
     private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
     private readonly AbacusLegacyExportPreviewPackageReader legacyExportPackageReader = new();
     private readonly AbacusLegacyExportCandidateGraphService legacyExportCandidateGraphService = new();
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
     private bool webImportMappingBusy;
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
+    private CancellationTokenSource? legacyExportDetectionCancellation;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
     private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
@@ -200,7 +202,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SelectSourceButton_Click(object sender, RoutedEventArgs e)
+    private async void SelectSourceButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
@@ -213,6 +215,7 @@ public partial class MainWindow : Window
             AnalysisPathTextBox.Text = dialog.FolderName;
             LinkagePathTextBox.Text = dialog.FolderName;
             MigrationSourcePathTextBox.Text = dialog.FolderName;
+            ResetLegacyExportImportState();
             Fp5InspectionStatusText.Text = "未診断";
             Fp5InspectionResultText.Text = "";
             Fp5CandidatesGrid.ItemsSource = null;
@@ -220,6 +223,7 @@ public partial class MainWindow : Window
             ExtractFp5CandidateButton.IsEnabled = false;
             Fp5CandidateExportStatusText.Text = "候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。";
             ResetImageLinkCapture();
+            await AutoDetectAndInspectLegacyExportsAsync(dialog.FolderName);
         }
     }
 
@@ -430,8 +434,102 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task AutoDetectAndInspectLegacyExportsAsync(string abacusFolder)
+    {
+        CancelLegacyExportFolderDetection();
+        var cancellation = new CancellationTokenSource();
+        legacyExportDetectionCancellation = cancellation;
+        LegacyExportAutoDetectStatusText.Text = "ABACUSフォルダー内の既存CSVを自動検出しています…";
+        LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        try
+        {
+            var detection = await legacyExportFolderDetector.DetectAsync(abacusFolder, cancellation.Token);
+            if (cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (detection.HasUniqueCandidate && detection.UniqueFolderPath is { } folderPath)
+            {
+                LegacyExportPathTextBox.Text = folderPath;
+                LegacyExportAutoDetectStatusText.Text = "ABACUSフォルダー内のCSVフォルダーを1件検出しました。固定列を自動診断しています…";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
+                await InspectLegacyExportsAsync(folderPath, automatic: true, cancellation.Token);
+                return;
+            }
+
+            LegacyExportPathTextBox.Clear();
+            LegacyExportFilesGrid.ItemsSource = null;
+            LegacyExportColumnsGrid.ItemsSource = null;
+            CreateLegacyExportPreviewButton.IsEnabled = false;
+            if (detection.ScanLimitReached)
+            {
+                LegacyExportAutoDetectStatusText.Text = "CSV自動検出の走査上限に達しました。CSVフォルダーを手動で選択してください。";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
+            else if (detection.CandidateFolders.Count > 1)
+            {
+                LegacyExportAutoDetectStatusText.Text = $"CSVフォルダーを{detection.CandidateFolders.Count:N0}件検出しました。重複を避けるため自動選択せず、全件を含むフォルダーを手動で選択してください。";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#805B10")!;
+            }
+            else
+            {
+                LegacyExportAutoDetectStatusText.Text = "ABACUSフォルダー内に既存の販売・整備・車両一覧CSVを検出できませんでした。CSVフォルダーを手動で選択してください。";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#805B10")!;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            LegacyExportAutoDetectStatusText.Text = $"CSV自動検出に失敗しました: {exception.Message}。CSVフォルダーを手動で選択してください。";
+            LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+        }
+        finally
+        {
+            if (ReferenceEquals(legacyExportDetectionCancellation, cancellation))
+            {
+                legacyExportDetectionCancellation = null;
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelLegacyExportFolderDetection()
+    {
+        legacyExportDetectionCancellation?.Cancel();
+        legacyExportDetectionCancellation?.Dispose();
+        legacyExportDetectionCancellation = null;
+    }
+
+    private void ResetLegacyExportImportState()
+    {
+        CancelLegacyExportFolderDetection();
+        LegacyExportPathTextBox.Clear();
+        LegacyExportAutoDetectStatusText.Text = "ABACUSフォルダーを選択すると、内部のCSVを自動検出します。";
+        LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        LegacyExportStatusText.Text = "未診断";
+        LegacyExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
+        LegacyExportFilesGrid.ItemsSource = null;
+        LegacyExportColumnsGrid.ItemsSource = null;
+        TransformationReadinessText.Text = "";
+        CreateLegacyExportPreviewButton.IsEnabled = false;
+        LegacyExportPreviewGrid.ItemsSource = null;
+        LegacyExportPreviewStatusText.Text = "未作成";
+        LegacyExportPreviewResultText.Text = "";
+        LegacyExportPackagePathTextBox.Text = "";
+        ReadLegacyExportPackageButton.IsEnabled = false;
+        LegacyExportPackageStatusText.Text = "未読込";
+        LegacyExportPackageResultText.Text = "";
+        LegacyExportPackageRowsGrid.ItemsSource = null;
+        ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
+    }
+
     private void SelectLegacyExportFolderButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelLegacyExportFolderDetection();
         var dialog = new OpenFolderDialog
         {
             Title = "ABACUSの販売・整備・車両一覧CSVがあるフォルダーを選択",
@@ -440,6 +538,8 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             LegacyExportPathTextBox.Text = dialog.FolderName;
+            LegacyExportAutoDetectStatusText.Text = "CSVフォルダーを手動で選択しました。固定列を診断してください。";
+            LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
             LegacyExportStatusText.Text = "未診断";
             LegacyExportFilesGrid.ItemsSource = null;
             LegacyExportColumnsGrid.ItemsSource = null;
@@ -465,12 +565,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        await InspectLegacyExportsAsync(LegacyExportPathTextBox.Text.Trim(), automatic: false, CancellationToken.None);
+    }
+
+    private async Task InspectLegacyExportsAsync(string folderPath, bool automatic, CancellationToken cancellationToken)
+    {
         InspectLegacyExportsButton.IsEnabled = false;
         LegacyExportPathTextBox.IsEnabled = false;
         LegacyExportStatusText.Text = "固定列CSVをShift-JISとして厳格に診断しています…";
         try
         {
-            var result = await legacyExportReader.ReadAsync(LegacyExportPathTextBox.Text.Trim());
+            var result = await legacyExportReader.ReadAsync(folderPath, cancellationToken);
             var fileAnalyses = result.Files
                 .Select(file => new AbacusLegacyExportFileAnalysis(
                     file.FileName,
@@ -500,6 +605,21 @@ public partial class MainWindow : Window
                 $"{vehicleDecision}\n" +
                 "下の列サンプルで金額・明細・日付の位置を確認してから、登録用データの候補化へ進みます。車両一覧が1ファイルで診断に合格した場合だけ、下の候補作成ボタンを押せます。現段階では登録用データを出力しません。";
             CreateLegacyExportPreviewButton.IsEnabled = result.IsValid && result.VehicleFileCount == 1;
+
+            if (automatic)
+            {
+                LegacyExportAutoDetectStatusText.Text = result.IsValid
+                    ? "自動検出したCSVの診断に合格しました。列サンプルを確認して候補作成へ進めます。"
+                    : "自動検出したCSVの診断に失敗しました。内容を確認し、必要ならCSVフォルダーを手動で選択してください。";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(result.IsValid ? "#17643A" : "#A61B1B")!;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (automatic)
+            {
+                LegacyExportAutoDetectStatusText.Text = "CSV自動診断をキャンセルしました。CSVフォルダーを手動で選択できます。";
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            InvalidDataException or ArgumentException or NotSupportedException)
@@ -510,6 +630,11 @@ public partial class MainWindow : Window
             LegacyExportColumnsGrid.ItemsSource = null;
             TransformationReadinessText.Text = "";
             CreateLegacyExportPreviewButton.IsEnabled = false;
+            if (automatic)
+            {
+                LegacyExportAutoDetectStatusText.Text = $"自動検出したCSVを診断できません: {exception.Message}。CSVフォルダーを手動で選択してください。";
+                LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
         }
         finally
         {
@@ -7308,6 +7433,7 @@ public partial class MainWindow : Window
     private async Task FinishCloseAsync()
     {
         operationCancellation?.Cancel();
+        CancelLegacyExportFolderDetection();
         IsEnabled = false;
         await session.DisposeAsync();
         allowClose = true;
