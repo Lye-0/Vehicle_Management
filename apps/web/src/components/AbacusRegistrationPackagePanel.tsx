@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileUp, FolderOpen, ShieldCheck } from 'lucide-react'
 import { commitAbacusRegistration, previewCsvImport, uploadAbacusRegistrationImage, type AbacusRegistrationCommitResult, type CsvImportPreview } from '../lib/importApi'
+import { isGraphFinalManifest, validateGraphFinalPackage, type GraphFinalPackageValidation } from '../lib/abacusFinalPackage'
 
 type PackageFileDescriptor = {
   relativePath: string
@@ -41,6 +42,7 @@ type RegistrationManifest = {
 type PackageFiles = Map<string, File>
 
 type PackageValidation = {
+  format: 'legacy'
   manifest: RegistrationManifest
   files: PackageFiles
   customerRows: string[][]
@@ -50,6 +52,8 @@ type PackageValidation = {
   checkedImageCount: number
   manifestSha256: string
 }
+
+type RegistrationPackageValidation = PackageValidation | GraphFinalPackageValidation
 
 type ValidationFailure = Error & { details?: string[] }
 
@@ -71,7 +75,7 @@ type RegistrationState = {
 export function AbacusRegistrationPackagePanel() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
-  const [validation, setValidation] = useState<PackageValidation | null>(null)
+  const [validation, setValidation] = useState<RegistrationPackageValidation | null>(null)
   const [apiPreviews, setApiPreviews] = useState<{ customers: CsvImportPreview; vehicles: CsvImportPreview } | null>(null)
   const [errors, setErrors] = useState<string[]>([])
   const [message, setMessage] = useState('')
@@ -100,6 +104,10 @@ export function AbacusRegistrationPackagePanel() {
     try {
       const nextValidation = await validatePackage(Array.from(selectedFiles))
       setValidation(nextValidation)
+      if (nextValidation.format === 'graph-final') {
+        setMessage('グラフ確定後パッケージのローカル検証が完了しました。車両なし書類を含む登録前プレビューを表示しています。Web登録はまだ行っていません。')
+        return
+      }
       setMessage('ローカル検証に合格しました。Web APIのプレビューを確認しています…')
       const [customers, vehicles] = await Promise.all([
         previewCsvImport('customers', nextValidation.files.get('customers.csv') as File),
@@ -117,7 +125,7 @@ export function AbacusRegistrationPackagePanel() {
   }
 
   async function handleRegistration() {
-    if (!validation || !apiPreviews || confirmation !== registrationConfirmationText || registering) return
+    if (!validation || validation.format !== 'legacy' || !apiPreviews || confirmation !== registrationConfirmationText || registering) return
     if (apiPreviews.customers.errors.length > 0 || apiPreviews.vehicles.errors.length > 0) {
       setRegistrationError('Web APIプレビューに入力エラーがあるため、登録できません。')
       return
@@ -185,7 +193,9 @@ export function AbacusRegistrationPackagePanel() {
     }
   }
 
-  const manifest = validation?.manifest
+  const legacyValidation = validation?.format === 'legacy' ? validation : null
+  const finalValidation = validation?.format === 'graph-final' ? validation : null
+  const manifest = legacyValidation?.manifest
   const groups = manifest?.groups ?? []
   const hasErrors = errors.length > 0 || Boolean(registrationError) || Boolean(registration?.failedImages.length)
   return <section className="panel settings-panel abacus-package-panel">
@@ -193,18 +203,18 @@ export function AbacusRegistrationPackagePanel() {
     <div className="abacus-package-controls">
       <button className="button button-secondary" type="button" disabled={loading || registering} onClick={() => inputRef.current?.click()}><FolderOpen size={16} />{loading ? '検証中…' : registering ? '登録中…' : '登録前パッケージのフォルダーを選択'}</button>
       <input ref={inputRef} className="abacus-package-hidden-input" type="file" multiple onChange={(event) => { void handleFiles(event.target.files); event.currentTarget.value = '' }} />
-      <span className="abacus-package-hint">フォルダー選択後、manifest.json・CSV・画像をまとめて読み取ります。</span>
+      <span className="abacus-package-hint">フォルダー選択後、manifest.json・CSV・画像をまとめて読み取ります。{finalValidation ? ' Gate 8Aのグラフ確定後パッケージにも対応しています。' : ''}</span>
     </div>
     {message && <div className={`abacus-package-message${hasErrors ? ' is-error' : validation ? ' is-success' : ''}`} role="status">{hasErrors ? <AlertTriangle size={16} /> : validation && !loading ? <CheckCircle2 size={16} /> : <ShieldCheck size={16} />}<span>{message}</span></div>}
     {errors.length > 0 && <ul className="abacus-package-errors" role="alert">{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul>}
     {registrationError && <ul className="abacus-package-errors" role="alert"><li>{registrationError}</li></ul>}
-    {manifest && validation && <>
+    {legacyValidation && manifest && <>
       <div className="abacus-package-summary">
-        <span>候補 {formatCount(manifest.summary?.candidateCount ?? validation.vehicleRows.length)}件</span>
-        <span>顧客 {formatCount(manifest.summary?.customerRowCount ?? validation.customerRows.length)}行</span>
-        <span>車両 {formatCount(manifest.summary?.vehicleRowCount ?? validation.vehicleRows.length)}行</span>
-        <span>画像 {formatCount(manifest.summary?.imageCount ?? validation.checkedImageCount)}件</span>
-        <span>検証ファイル {formatCount(validation.checkedFileCount)}件</span>
+        <span>候補 {formatCount(manifest.summary?.candidateCount ?? legacyValidation.vehicleRows.length)}件</span>
+        <span>顧客 {formatCount(manifest.summary?.customerRowCount ?? legacyValidation.customerRows.length)}行</span>
+        <span>車両 {formatCount(manifest.summary?.vehicleRowCount ?? legacyValidation.vehicleRows.length)}行</span>
+        <span>画像 {formatCount(manifest.summary?.imageCount ?? legacyValidation.checkedImageCount)}件</span>
+        <span>検証ファイル {formatCount(legacyValidation.checkedFileCount)}件</span>
       </div>
       <div className="abacus-package-meta">
         <span><strong>形式</strong> {manifest.kind}</span>
@@ -218,6 +228,7 @@ export function AbacusRegistrationPackagePanel() {
       {registration && <div className={`abacus-registration-result${registration.failedImages.length > 0 ? ' is-warning' : ''}`}><strong>{registration.failedImages.length > 0 ? '顧客・車両登録済み（一部画像要再試行）' : 'ABACUS登録が完了しました'}</strong><span>顧客: 新規{registration.commit.customers.imported}件 / 更新{registration.commit.customers.updated}件</span><span>車両: 新規{registration.commit.vehicles.imported}件 / 更新{registration.commit.vehicles.updated}件</span><span>画像: 新規{registration.uploadedImageCount}件 / 既存{registration.alreadyUploadedImageCount}件 / 失敗{registration.failedImages.length}件</span>{registration.failedImages.length > 0 && <small>{registration.failedImages.slice(0, 5).join('、')}</small>}</div>}
       <div className="abacus-package-no-commit"><ShieldCheck size={16} /><span>{registration ? 'このパッケージの顧客・車両登録と画像処理の結果を表示しています。' : '登録ボタンを押すまでは顧客・車両の登録、画像アップロード、Web APIのcommitは行いません。'}</span></div>
     </>}
+    {finalValidation && <GraphFinalPackagePreview validation={finalValidation} />}
   </section>
 }
 
@@ -225,7 +236,39 @@ function ApiPreviewSummary({ label, preview }: { label: string; preview: CsvImpo
   return <div className="abacus-package-api-card"><strong>{label}</strong><span>全 {preview.totalRows}行</span><span className={preview.errors.length ? 'is-warning' : 'is-success'}>{preview.errors.length ? `要確認 ${preview.errors.length}件` : '入力エラーなし'}</span>{preview.errors.slice(0, 3).map((error) => <small key={`${error.row}-${error.message}`}>{error.row}行目: {error.message}</small>)}</div>
 }
 
-async function validatePackage(selectedFiles: File[]): Promise<PackageValidation> {
+function GraphFinalPackagePreview({ validation }: { validation: GraphFinalPackageValidation }) {
+  const { manifest, documents } = validation
+  const customerVehicleCounts = new Map<string, number>()
+  for (const row of validation.vehicleRows) customerVehicleCounts.set(row[1], (customerVehicleCounts.get(row[1]) ?? 0) + 1)
+  return <>
+    <div className="abacus-package-summary is-graph-final">
+      <span>顧客 {formatCount(validation.customerRows.length)}行</span>
+      <span>車両 {formatCount(validation.vehicleRows.length)}行</span>
+      <span>販売書類 {formatCount(validation.salesRows.length)}件</span>
+      <span>整備書類 {formatCount(validation.maintenanceRows.length)}件</span>
+      <span className="is-vehicleless">車両なし書類 {formatCount(documents.filter((document) => document.vehicleless).length)}件</span>
+      <span className="is-excluded">除外書類 {formatCount(validation.excludedDocumentKeys.length)}件</span>
+      <span>検証ファイル {formatCount(validation.checkedFileCount)}件</span>
+    </div>
+    <div className="abacus-package-meta">
+      <span><strong>形式</strong> {manifest.kind}</span>
+      <span><strong>状態</strong> {manifest.status}</span>
+      <span><strong>登録処理</strong> 次段階で実装（この画面では未実行）</span>
+    </div>
+    <div className="abacus-package-groups"><h3>確定済み顧客グループ（先頭20件）</h3><div className="abacus-package-table graph-final-groups"><div className="abacus-package-row is-head"><span>顧客名</span><span>顧客ID</span><span>車両 / 起源</span></div>{manifest.groups.slice(0, 20).map((group) => <div className="abacus-package-row" key={group.groupKey}><span>{group.customerName}</span><span title={group.customerId}>{group.customerId}</span><span>{customerVehicleCounts.get(group.customerId) ?? 0}台 / {group.origin === 'single' ? '単独' : group.origin}</span></div>)}</div></div>
+    <div className="abacus-package-groups"><h3>書類プレビュー（先頭30件）</h3><div className="abacus-package-table graph-final-documents"><div className="abacus-package-row is-head"><span>種別 / 番号</span><span>顧客</span><span>車両・出典</span></div>{documents.slice(0, 30).map((document) => <div className={`abacus-package-row${document.vehicleless ? ' is-vehicleless' : ''}`} key={document.documentId}><span>{document.documentKind} #{document.documentNumber}</span><span>{document.customerName}</span><span>{document.vehicleless ? '車両：なし' : `車両：${document.vehicleName || '未設定'}`} / {document.sourceLocation}</span></div>)}</div></div>
+    <div className="abacus-package-no-commit"><ShieldCheck size={16} /><span>このパッケージはローカル検証済みです。車両情報のない書類は「車両：なし」の特例として確認できますが、顧客・車両・書類の登録、画像アップロード、Web APIのcommitはまだ行っていません。</span></div>
+  </>
+}
+
+async function validatePackage(selectedFiles: File[]): Promise<RegistrationPackageValidation> {
+  const rawFiles = collectFiles(selectedFiles)
+  const rawManifestFile = rawFiles.get('manifest.json')
+  if (!rawManifestFile) throw validationError('manifest.jsonがありません。登録前パッケージのフォルダーを選択してください。')
+  if (rawManifestFile.size <= 0 || rawManifestFile.size > 2 * 1024 * 1024) throw validationError('manifest.jsonのサイズが不正です。')
+  const rawManifest = parseJson<unknown>(await readUtf8(rawManifestFile), 'manifest.json')
+  if (isGraphFinalManifest(rawManifest)) return validateGraphFinalPackage(selectedFiles)
+
   const files = collectFiles(selectedFiles)
   const manifestFile = files.get('manifest.json')
   if (!manifestFile) throw validationError('manifest.jsonがありません。登録前パッケージのフォルダーを選択してください。')
@@ -307,7 +350,7 @@ async function validatePackage(selectedFiles: File[]): Promise<PackageValidation
   if (expected?.vehicleRowCount !== undefined && expected.vehicleRowCount !== vehicleRows.length) details.push(`車両行数: マニフェスト${expected.vehicleRowCount} / 実ファイル${vehicleRows.length}`)
   if (expected?.imageCount !== undefined && expected.imageCount !== manifest.imageFiles.length) details.push(`画像数: マニフェスト${expected.imageCount} / 実ファイル${manifest.imageFiles.length}`)
   if (details.length > 0) throw validationError('マニフェストと実ファイルの集計が一致しません。', details)
-  return { manifest, files, customerRows, vehicleRows, attachments, checkedFileCount: descriptors.length, checkedImageCount: manifest.imageFiles.length, manifestSha256: await sha256(manifestFile) }
+  return { format: 'legacy', manifest, files, customerRows, vehicleRows, attachments, checkedFileCount: descriptors.length, checkedImageCount: manifest.imageFiles.length, manifestSha256: await sha256(manifestFile) }
 }
 
 async function verifyDescriptor(descriptor: PackageFileDescriptor, files: PackageFiles, checkedPaths: Set<string>, totalBytes: number, isImage: boolean) {
