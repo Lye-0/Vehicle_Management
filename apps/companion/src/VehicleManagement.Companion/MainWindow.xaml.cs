@@ -3695,7 +3695,7 @@ public partial class MainWindow : Window
         var nearCanvas = pointer.X >= 0 && pointer.X <= viewportWidth;
         var edge = 64d;
         // 40msごとの移動量を小さくし、端に置いたままでもゆっくり追従させます。
-        var step = 2d;
+        var step = 0.1d;
         var direction = !nearCanvas
             ? 0
             : pointer.Y < edge
