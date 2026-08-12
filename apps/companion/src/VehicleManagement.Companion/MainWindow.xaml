@@ -63,7 +63,7 @@
 
         <TabControl x:Name="MainTabControl" Grid.Row="2" Background="White" BorderBrush="#D8E1EC"
                     HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
-            <TabItem Header="接続状態">
+            <TabItem x:Name="ConnectionStatusTab" Header="接続状態" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <Border Padding="24">
                         <StackPanel>
@@ -110,7 +110,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="ABACUS検査・起動">
+            <TabItem x:Name="AbacusInspectionTab" Header="ABACUS検査・起動" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
@@ -234,7 +234,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="書類データ分析">
+            <TabItem x:Name="DocumentAnalysisTab" Header="書類データ分析" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
@@ -301,7 +301,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="紐付けプレビュー">
+            <TabItem x:Name="LinkagePreviewTab" Header="紐付けプレビュー" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
@@ -850,7 +850,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="ABACUSインポート">
+            <TabItem x:Name="UnifiedImportTab" Header="完成タブ（ABACUSインポート）">
                 <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Background="Transparent"
@@ -861,9 +861,9 @@
                                 BorderThickness="1" CornerRadius="10">
                             <StackPanel>
                                 <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="#10233F"
-                                           Text="ABACUSインポート" />
+                                           Text="ABACUSインポート（完成タブ）" />
                                 <TextBlock Margin="0,6,0,14" Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="保存用ABACUSフォルダーを選ぶと、内部のCSV検出と固定列診断を自動で行います。候補作成後はこのページ内でグラフ型キャンバスを表示します。元のABACUSフォルダーとCSVは変更しません。" />
+                                           Text="ABACUSフォルダーと生成物の保存先を選ぶと、解析・紐付け・画像準備・完成品作成をこのページで行えます。元のABACUSフォルダーとCSVは変更しません。" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -874,12 +874,44 @@
                                     <Button Grid.Column="1" Margin="10,0,0,0" Content="ABACUSフォルダーを選択"
                                             Click="UnifiedImportSelectFolderButton_Click" />
                                 </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,10,10,0" Foreground="#52647A"
+                                               Text="生成物保存先" />
+                                    <TextBox x:Name="UnifiedImportOutputParentPathTextBox" Grid.Column="1"
+                                             MinHeight="38" Padding="9,7" VerticalContentAlignment="Center"
+                                             TextChanged="UnifiedImportOutputParentPathTextBox_TextChanged" />
+                                    <Button x:Name="UnifiedImportSelectOutputParentButton" Grid.Column="2"
+                                            Margin="10,0,0,0" Content="保存先を選択"
+                                            Click="UnifiedImportSelectOutputParentButton_Click" />
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="260" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,10,10,0" Foreground="#52647A"
+                                               Text="画像取得方式" />
+                                    <ComboBox x:Name="UnifiedImportImageMethodComboBox" Grid.Column="1"
+                                              MinHeight="34" SelectedIndex="0" SelectionChanged="UnifiedImportImageMethodComboBox_SelectionChanged">
+                                        <ComboBoxItem Content="画面移動型（推奨）" Tag="screen-navigation" />
+                                        <ComboBoxItem Content="高速方式（検証中）" Tag="fast-experimental" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="UnifiedImportImageMethodStatusText" Grid.Column="2"
+                                               Margin="12,9,0,0" Foreground="#52647A" TextWrapping="Wrap"
+                                               Text="画面移動型を選択中。画像準備で一括取得できます。" />
+                                </Grid>
                                 <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
                                     <Button x:Name="UnifiedImportCreateCanvasButton"
                                             Content="解析してキャンパスを表示" IsEnabled="False"
                                             Click="UnifiedImportCreateCanvasButton_Click" />
                                     <Button x:Name="UnifiedImportOpenDiagnosticsButton"
-                                            Content="詳細診断を表示" Click="UnifiedImportOpenDiagnosticsButton_Click" />
+                                            Content="詳細調査を表示" Click="UnifiedImportOpenDiagnosticsButton_Click" />
                                 </StackPanel>
                                 <TextBlock x:Name="UnifiedImportStatusText" Margin="0,12,0,0"
                                            Foreground="#52647A" TextWrapping="Wrap"

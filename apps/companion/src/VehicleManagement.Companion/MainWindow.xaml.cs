@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private readonly AbacusWebImportMappingStore webImportMappingStore = new();
     private readonly AbacusWebImportRegistrationPackageStore webImportRegistrationPackageStore = new();
     private readonly AbacusLegacyGraphFinalPackageStore legacyGraphFinalPackageStore = new();
+    private readonly AbacusImportOutputPackageStore importOutputPackageStore = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -80,6 +81,7 @@ public partial class MainWindow : Window
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
     private string? legacyGraphFinalPackagePath;
+    private AbacusImportOutputPackageSession? unifiedImportOutputSession;
     private string? legacyGraphImageRegistrationPreviewPath;
     private AbacusBulkImagePreparationResult? bulkImagePreparationResult;
     private CancellationTokenSource? legacyExportDetectionCancellation;
@@ -152,6 +154,7 @@ public partial class MainWindow : Window
         session.StateChanged += Session_StateChanged;
         Closing += MainWindow_Closing;
         Render(session.Snapshot);
+        MainTabControl.SelectedItem = UnifiedImportTab;
     }
 
     private void MoveImagePreparationIntoUnifiedPage()
@@ -289,6 +292,70 @@ public partial class MainWindow : Window
         UpdateUnifiedImportEntryState();
     }
 
+    private void UnifiedImportSelectOutputParentButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "ABACUSインポート生成物の保存先を選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        if (legacyExportCandidateGraphResult is not null)
+        {
+            var result = MessageBox.Show(
+                this,
+                "生成物の保存先を変更すると、現在のキャンパス候補をいったん作り直します。変更しますか？",
+                "保存先の変更",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            ResetLegacyExportImportState();
+        }
+
+        UnifiedImportOutputParentPathTextBox.Text = dialog.FolderName;
+        UnifiedImportStatusText.Text = "生成物の保存先を選択しました。解析を開始できます。";
+        UnifiedImportStatusText.Foreground = ToBrush("#52647A");
+        UpdateUnifiedImportEntryState();
+    }
+
+    private void UnifiedImportOutputParentPathTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (UnifiedImportStatusText is null || UnifiedImportOutputParentPathTextBox is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(UnifiedImportOutputParentPathTextBox.Text))
+        {
+            UnifiedImportStatusText.Text = "生成物の保存先を選択してください。";
+            UnifiedImportStatusText.Foreground = ToBrush("#52647A");
+        }
+
+        UpdateUnifiedImportEntryState();
+    }
+
+    private void UnifiedImportImageMethodComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (UnifiedImportImageMethodStatusText is null || UnifiedImportImageMethodComboBox.SelectedItem is not ComboBoxItem item)
+        {
+            return;
+        }
+
+        var method = item.Tag as string;
+        UnifiedImportImageMethodStatusText.Text = method == "fast-experimental"
+            ? "高速方式を選択中。検証中のため、失敗時は画面移動型を使用してください。"
+            : "画面移動型を選択中。画像準備で一括取得できます。";
+        UnifiedImportImageMethodStatusText.Foreground = ToBrush(method == "fast-experimental" ? "#805B10" : "#52647A");
+    }
+
     private async void UnifiedImportCreateCanvasButton_Click(object sender, RoutedEventArgs e)
     {
         var folderPath = UnifiedImportFolderPathTextBox.Text.Trim();
@@ -300,6 +367,11 @@ public partial class MainWindow : Window
 
         if (legacyExportCandidateGraphResult is not null)
         {
+            if (!await EnsureUnifiedImportOutputSessionAsync(folderPath))
+            {
+                return;
+            }
+
             ShowUnifiedImportGraph();
             return;
         }
@@ -317,19 +389,14 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var dialog = new OpenFolderDialog
+            // ApplySelectedAbacusFolderAsync は既存の候補と保存セッションを初期化するため、
+            // CSV診断が完了した後にこの実行単位の work/ready ルートを作成します。
+            if (!await EnsureUnifiedImportOutputSessionAsync(folderPath))
             {
-                Title = "登録前候補パッケージの保存先を選択",
-                Multiselect = false,
-            };
-            if (dialog.ShowDialog(this) != true)
-            {
-                UnifiedImportStatusText.Text = "保存先が選択されていないため、候補作成を保留しました。";
-                UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#805B10")!;
                 return;
             }
 
-            await CreateLegacyExportPreviewAsync(dialog.FolderName);
+            await CreateLegacyExportPreviewAsync(unifiedImportOutputSession!.WorkIntermediatePath);
             if (legacyExportCandidateGraphResult is not null)
             {
                 UnifiedImportStatusText.Text = "キャンパスを表示しました。顧客統合・書類紐付け・ノード操作を確認できます。";
@@ -348,10 +415,64 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task<bool> EnsureUnifiedImportOutputSessionAsync(string sourceFolder)
+    {
+        var destinationParent = UnifiedImportOutputParentPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(destinationParent) || !Directory.Exists(destinationParent))
+        {
+            MessageBox.Show(this, "先に生成物の保存先を選択してください。保存先の下に作業用と完成品用のフォルダーを作成します。", "保存先未選択", MessageBoxButton.OK, MessageBoxImage.Warning);
+            UnifiedImportStatusText.Text = "生成物の保存先を選択してください。";
+            UnifiedImportStatusText.Foreground = ToBrush("#805B10");
+            return false;
+        }
+
+        var method = GetUnifiedImageAcquisitionMethod();
+        if (unifiedImportOutputSession is not null &&
+            string.Equals(unifiedImportOutputSession.SourcePath, Path.GetFullPath(sourceFolder), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(unifiedImportOutputSession.ImageAcquisitionMethod, method, StringComparison.Ordinal) &&
+            Directory.Exists(unifiedImportOutputSession.RootPath))
+        {
+            return true;
+        }
+
+        try
+        {
+            UnifiedImportStatusText.Text = "生成物ルート（work / ready）を準備しています…";
+            UnifiedImportStatusText.Foreground = ToBrush("#52647A");
+            unifiedImportOutputSession = await importOutputPackageStore.CreateAsync(
+                destinationParent,
+                sourceFolder,
+                sourceReport?.FolderFingerprint,
+                method);
+            UnifiedImportSummaryText.Text =
+                $"生成物ルート: {unifiedImportOutputSession.RootPath}\n" +
+                "作業途中のファイルはwork、Webへ渡す完成品はreadyへ分離します。";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            unifiedImportOutputSession = null;
+            UnifiedImportStatusText.Text = $"生成物ルートを作成できません: {exception.Message}";
+            UnifiedImportStatusText.Foreground = ToBrush("#A61B1B");
+            return false;
+        }
+    }
+
+    private string GetUnifiedImageAcquisitionMethod() =>
+        (UnifiedImportImageMethodComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "screen-navigation";
+
     private void UnifiedImportOpenDiagnosticsButton_Click(object sender, RoutedEventArgs e)
     {
+        ConnectionStatusTab.Visibility = Visibility.Visible;
+        AbacusInspectionTab.Visibility = Visibility.Visible;
+        DocumentAnalysisTab.Visibility = Visibility.Visible;
+        LinkagePreviewTab.Visibility = Visibility.Visible;
         LegacyPreparationExpander.IsExpanded = true;
         LegacyPreparationExpander.BringIntoView();
+        UnifiedImportOpenDiagnosticsButton.Content = "詳細調査タブを表示済み";
+        UnifiedImportStatusText.Text = "詳細調査タブを表示しました。通常操作はこの完成タブで続けられます。";
+        UnifiedImportStatusText.Foreground = ToBrush("#52647A");
     }
 
     private void SelectBulkImageDestinationButton_Click(object sender, RoutedEventArgs e)
@@ -477,6 +598,8 @@ public partial class MainWindow : Window
 
     private void UpdateUnifiedImportEntryState()
     {
+        var hasOutputParent = !string.IsNullOrWhiteSpace(UnifiedImportOutputParentPathTextBox.Text) &&
+                              Directory.Exists(UnifiedImportOutputParentPathTextBox.Text.Trim());
         if (legacyExportCandidateGraphResult is not null)
         {
             UnifiedImportCreateCanvasButton.IsEnabled = true;
@@ -488,12 +611,13 @@ public partial class MainWindow : Window
         }
 
         UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
-        UnifiedImportCreateCanvasButton.IsEnabled = CreateLegacyExportPreviewButton.IsEnabled;
+        UnifiedImportCreateCanvasButton.IsEnabled = CreateLegacyExportPreviewButton.IsEnabled && hasOutputParent;
         UnifiedImportStatusText.Text = CreateLegacyExportPreviewButton.IsEnabled
-            ? "CSVの固定列診断に合格しました。候補作成先を選ぶとキャンパスを表示できます。"
+            ? hasOutputParent
+                ? "CSVの固定列診断に合格しました。解析してキャンパスを表示できます。"
+                : "CSVの固定列診断に合格しました。先に生成物の保存先を選択してください。"
             : "CSVを検出または診断できていません。必要な場合は詳細診断を開いて確認してください。";
-        UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
-            CreateLegacyExportPreviewButton.IsEnabled ? "#17643A" : "#805B10")!;
+        UnifiedImportStatusText.Foreground = ToBrush(CreateLegacyExportPreviewButton.IsEnabled && hasOutputParent ? "#17643A" : "#805B10");
         UnifiedImportSummaryText.Text = string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text)
             ? "CSVフォルダーを検出できていません。"
             : LegacyExportStatusText.Text;
@@ -805,6 +929,7 @@ public partial class MainWindow : Window
         LegacyExportPackageResultText.Text = "";
         LegacyExportPackageRowsGrid.ItemsSource = null;
         ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
+        unifiedImportOutputSession = null;
         UnifiedImportCreateCanvasButton.IsEnabled = false;
         UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
         UnifiedImportStatusText.Text = "ABACUSフォルダーを選択してください。";
@@ -3171,14 +3296,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new OpenFolderDialog
+        string destinationFolder;
+        if (unifiedImportOutputSession is not null)
         {
-            Title = "グラフ確定パッケージの保存先を選択",
-            Multiselect = false,
-        };
-        if (dialog.ShowDialog(this) != true)
+            destinationFolder = unifiedImportOutputSession.WorkIntermediatePath;
+        }
+        else
         {
-            return;
+            var dialog = new OpenFolderDialog
+            {
+                Title = "グラフ確定パッケージの保存先を選択",
+                Multiselect = false,
+            };
+            if (dialog.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            destinationFolder = dialog.FolderName;
         }
 
         var imagePackageSummary = string.IsNullOrWhiteSpace(legacyGraphImageRegistrationPreviewPath)
@@ -3213,27 +3348,32 @@ public partial class MainWindow : Window
             var result = await legacyGraphFinalPackageStore.CreateAsync(
                 legacyExportCandidateGraphResult,
                 snapshot,
-                dialog.FolderName,
+                destinationFolder,
                 legacyGraphImageRegistrationPreviewPath);
+            AbacusImportOutputPackageReadyResult? readyResult = null;
+            if (unifiedImportOutputSession is not null)
+            {
+                readyResult = await importOutputPackageStore.CompleteAsync(unifiedImportOutputSession, result);
+            }
             LegacyGraphFinalPackageStatusText.Text =
                 result.ImageCount > 0
                     ? "グラフ確定後の登録前パッケージを作成しました。画像も再検証して同梱済みです。Web API・DB・画像アップロードはまだ行っていません。"
                     : "グラフ確定後の登録前パッケージを作成しました。Web API・DB・画像アップロードはまだ行っていません。";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#17643A");
-            legacyGraphFinalPackagePath = result.PackagePath;
+            legacyGraphFinalPackagePath = readyResult?.ReadyPath ?? result.PackagePath;
             LegacyGraphOpenFinalPackageButton.IsEnabled = true;
             LegacyGraphFinalPackageNextStepText.Text =
                 "次の操作: Webアプリの「ABACUS登録前パッケージをプレビュー」で、このフォルダーを選択してください。確認文字列を入力するまでは登録されません。";
             LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
             LegacyGraphFinalPackageResultText.Text =
-                $"保存先: {result.PackagePath}\n" +
-                $"マニフェスト: {result.ManifestPath}\n" +
-                $"顧客CSV: {result.CustomersCsvPath}\n" +
-                $"車両CSV: {result.VehiclesCsvPath}\n" +
-                $"販売CSV: {result.SalesCsvPath}\n" +
-                $"整備CSV: {result.MaintenanceCsvPath}\n" +
-                $"書類リンク: {result.DocumentLinksPath}\n" +
-                (result.ImageAttachmentsPath is null ? "" : $"画像対応表: {result.ImageAttachmentsPath}\n") +
+                $"保存先: {readyResult?.ReadyPath ?? result.PackagePath}\n" +
+                $"マニフェスト: {readyResult?.ReadyManifestPath ?? result.ManifestPath}\n" +
+                $"顧客CSV: {(readyResult is null ? result.CustomersCsvPath : Path.Combine(readyResult.ReadyPath, "data", "customers.csv"))}\n" +
+                $"車両CSV: {(readyResult is null ? result.VehiclesCsvPath : Path.Combine(readyResult.ReadyPath, "data", "vehicles.csv"))}\n" +
+                $"販売CSV: {(readyResult is null ? result.SalesCsvPath : Path.Combine(readyResult.ReadyPath, "data", "sales-documents.csv"))}\n" +
+                $"整備CSV: {(readyResult is null ? result.MaintenanceCsvPath : Path.Combine(readyResult.ReadyPath, "data", "maintenance-documents.csv"))}\n" +
+                $"書類リンク: {(readyResult is null ? result.DocumentLinksPath : Path.Combine(readyResult.ReadyPath, "mappings", "document-links.json"))}\n" +
+                (result.ImageAttachmentsPath is null ? "" : $"画像対応表: {(readyResult is null ? result.ImageAttachmentsPath : Path.Combine(readyResult.ReadyPath, "mappings", "image-attachments.json"))}\n") +
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / " +
                 $"販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
                 $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +

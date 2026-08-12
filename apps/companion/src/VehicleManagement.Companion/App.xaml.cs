@@ -109,8 +109,10 @@ public partial class App : Application
         var testRoot = Path.Combine(Path.GetTempPath(), $"VehicleManagement.Companion.SelfTest.{Guid.NewGuid():N}");
         var source = Path.Combine(testRoot, "source");
         var destination = Path.Combine(testRoot, "destination");
+        var outputPackageDestination = Path.Combine(testRoot, "output-package-parent");
         Directory.CreateDirectory(source);
         Directory.CreateDirectory(destination);
+        Directory.CreateDirectory(outputPackageDestination);
 
         try
         {
@@ -161,6 +163,26 @@ public partial class App : Application
             var workspaceService = new AbacusWorkspaceService(inspector);
             var workspace = await workspaceService.CreateAsync(before, destination);
             var verifiedWorkspace = await workspaceService.VerifyExistingAsync(workspace.WorkspacePath);
+            var outputPackageStore = new AbacusImportOutputPackageStore();
+            var outputPackageSession = await outputPackageStore.CreateAsync(
+                outputPackageDestination,
+                source,
+                before.FolderFingerprint,
+                "screen-navigation");
+            var outputRootManifestText = await File.ReadAllTextAsync(outputPackageSession.RootManifestPath);
+            var outputReadyManifestText = await File.ReadAllTextAsync(outputPackageSession.ReadyManifestPath);
+            var outputPackageStructureValid =
+                Directory.Exists(outputPackageSession.WorkAbacusCopyPath) &&
+                Directory.Exists(outputPackageSession.WorkIntermediatePath) &&
+                Directory.Exists(outputPackageSession.WorkCheckpointsPath) &&
+                Directory.Exists(outputPackageSession.WorkLogsPath) &&
+                Directory.Exists(Path.Combine(outputPackageSession.ReadyPath, "data")) &&
+                Directory.Exists(Path.Combine(outputPackageSession.ReadyPath, "mappings")) &&
+                Directory.Exists(Path.Combine(outputPackageSession.ReadyPath, "images")) &&
+                Directory.Exists(Path.Combine(outputPackageSession.ReadyPath, "reports")) &&
+                outputRootManifestText.Contains("\"status\": \"in-progress\"", StringComparison.Ordinal) &&
+                outputReadyManifestText.Contains("\"status\": \"pending\"", StringComparison.Ordinal) &&
+                !string.Equals(Path.GetFullPath(outputPackageSession.RootPath), Path.GetFullPath(source), StringComparison.OrdinalIgnoreCase);
             var testImage = BitmapSource.Create(
                 2,
                 2,
@@ -357,6 +379,8 @@ public partial class App : Application
             maintenanceExportFields[19] = "CHASSIS1";
             maintenanceExportFields[20] = "大阪537む16";
             maintenanceExportFields[28] = "既知\u0004区切り";
+            maintenanceExportFields[25] = "2026/08/12";
+            maintenanceExportFields[26] = "2026/08/13";
             var vehicleExportFields = Enumerable.Repeat(string.Empty, 23).ToArray();
             vehicleExportFields[0] = "顧客A";
             vehicleExportFields[11] = "メーカーA";
@@ -508,6 +532,7 @@ public partial class App : Application
             var invalidMaintenance = await parser.ParseAsync(invalidFolder, AbacusTabSpecifications.Maintenance);
             var selfTestPassed = workspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 workspace.SourceAfterCopyReport.FolderFingerprint == before.FolderFingerprint &&
+                outputPackageStructureValid &&
                 File.Exists(workspace.ManifestPath) &&
                 verifiedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
                 verifiedWorkspace.WorkspacePath == workspace.WorkspacePath &&
