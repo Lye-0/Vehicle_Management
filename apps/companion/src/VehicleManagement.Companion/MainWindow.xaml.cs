@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Line = System.Windows.Shapes.Line;
 using Rectangle = System.Windows.Shapes.Rectangle;
 using Microsoft.Win32;
@@ -87,6 +88,7 @@ public partial class MainWindow : Window
     private UIElement? legacyGraphDraggingElement;
     private Point legacyGraphDragOffset;
     private Point legacyGraphBlockDragStartPoint;
+    private bool legacyGraphBlockDragStarted;
     private bool legacyGraphPanning;
     private Point legacyGraphPanStartPoint;
     private double legacyGraphPanStartHorizontalOffset;
@@ -101,14 +103,13 @@ public partial class MainWindow : Window
     private AbacusLegacyExportCandidateGraphDocument? legacyGraphHandleDragDocument;
     private Point legacyGraphHandleDragStartPoint;
     private AbacusLegacyExportCandidateGraphDocument? legacyGraphDocumentCardDragDocument;
-    private Point legacyGraphDocumentCardDragStartPoint;
-    private FrameworkElement? legacyGraphDocumentCardDragSourceElement;
     private Border? legacyGraphBlockDragPreview;
     private FrameworkElement? legacyGraphBlockDragPreviewSource;
     private Line? legacyGraphActiveConnectionLine;
     private FrameworkElement? legacyGraphActiveConnectionSource;
     private FrameworkElement? legacyGraphNodeDragSource;
     private bool legacyGraphNodeDragStarted;
+    private DispatcherTimer? legacyGraphNodeAutoScrollTimer;
     private AbacusLegacyExportCandidateGraphVehicle? legacyGraphNodeDragVehicle;
     private Point legacyGraphNodeDragStartPoint;
     private AbacusLegacyExportCandidateGraphCustomer? legacyGraphCustomerDragSource;
@@ -3443,6 +3444,7 @@ public partial class MainWindow : Window
         }
 
         legacyGraphNodeDragSource?.ReleaseMouseCapture();
+        StopLegacyGraphNodeAutoScroll();
         EndLegacyGraphConnectionPreview();
         ClearLegacyGraphDropHighlight();
         legacyGraphHandleDragDocument = null;
@@ -3475,10 +3477,10 @@ public partial class MainWindow : Window
         {
             legacyGraphNodeDragStarted = true;
             BeginLegacyGraphConnectionPreview(legacyGraphNodeDragSource);
+            StartLegacyGraphNodeAutoScroll();
         }
 
-        UpdateLegacyGraphActiveConnectionLine(currentPoint);
-        UpdateLegacyGraphNodeDragTarget(currentPoint);
+        UpdateLegacyGraphNodeDragFrame();
 
         e.Handled = true;
     }
@@ -3529,6 +3531,7 @@ public partial class MainWindow : Window
         }
 
         legacyGraphNodeDragSource?.ReleaseMouseCapture();
+        StopLegacyGraphNodeAutoScroll();
         EndLegacyGraphConnectionPreview();
         ClearLegacyGraphDropHighlight();
         legacyGraphNodeDragVehicle = null;
@@ -3561,10 +3564,10 @@ public partial class MainWindow : Window
         {
             legacyGraphNodeDragStarted = true;
             BeginLegacyGraphConnectionPreview(legacyGraphNodeDragSource);
+            StartLegacyGraphNodeAutoScroll();
         }
 
-        UpdateLegacyGraphActiveConnectionLine(currentPoint);
-        UpdateLegacyGraphNodeDragTarget(currentPoint);
+        UpdateLegacyGraphNodeDragFrame();
 
         e.Handled = true;
     }
@@ -3597,6 +3600,75 @@ public partial class MainWindow : Window
         }
     }
 
+    private void StartLegacyGraphNodeAutoScroll()
+    {
+        legacyGraphNodeAutoScrollTimer ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(40),
+        };
+        legacyGraphNodeAutoScrollTimer.Tick -= LegacyGraphNodeAutoScrollTimer_Tick;
+        legacyGraphNodeAutoScrollTimer.Tick += LegacyGraphNodeAutoScrollTimer_Tick;
+        legacyGraphNodeAutoScrollTimer.Start();
+    }
+
+    private void StopLegacyGraphNodeAutoScroll()
+    {
+        legacyGraphNodeAutoScrollTimer?.Stop();
+    }
+
+    private void LegacyGraphNodeAutoScrollTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!legacyGraphNodeDragStarted || legacyGraphNodeDragSource is null)
+        {
+            StopLegacyGraphNodeAutoScroll();
+            return;
+        }
+
+        UpdateLegacyGraphNodeDragFrame();
+    }
+
+    private void UpdateLegacyGraphNodeDragFrame()
+    {
+        if (!legacyGraphNodeDragStarted)
+        {
+            return;
+        }
+
+        var pointer = Mouse.GetPosition(LegacyGraphScrollViewer);
+        var viewportHeight = LegacyGraphScrollViewer.ViewportHeight > 0
+            ? LegacyGraphScrollViewer.ViewportHeight
+            : LegacyGraphScrollViewer.ActualHeight;
+        var viewportWidth = LegacyGraphScrollViewer.ViewportWidth > 0
+            ? LegacyGraphScrollViewer.ViewportWidth
+            : LegacyGraphScrollViewer.ActualWidth;
+        var nearCanvas = pointer.X >= 0 && pointer.X <= viewportWidth;
+        var edge = 64d;
+        var step = 24d;
+        var delta = nearCanvas && pointer.Y < edge
+            ? -step
+            : nearCanvas && pointer.Y > viewportHeight - edge
+                ? step
+                : 0;
+        if (delta != 0)
+        {
+            LegacyGraphScrollViewer.UpdateLayout();
+            var nextOffset = Math.Clamp(
+                LegacyGraphScrollViewer.VerticalOffset + delta,
+                0,
+                LegacyGraphScrollViewer.ScrollableHeight);
+            if (Math.Abs(nextOffset - LegacyGraphScrollViewer.VerticalOffset) > double.Epsilon)
+            {
+                LegacyGraphScrollViewer.ScrollToVerticalOffset(nextOffset);
+                LegacyGraphScrollViewer.UpdateLayout();
+                LegacyGraphCanvas.UpdateLayout();
+            }
+        }
+
+        var currentPoint = Mouse.GetPosition(LegacyGraphCanvas);
+        UpdateLegacyGraphActiveConnectionLine(currentPoint);
+        UpdateLegacyGraphNodeDragTarget(currentPoint);
+    }
+
     private FrameworkElement? FindLegacyGraphVehicleNodeAt(Point point) =>
         FindLegacyGraphNodeAt(point, typeof(LegacyGraphVehicleNodeMarker));
 
@@ -3626,6 +3698,7 @@ public partial class MainWindow : Window
         var vehicle = legacyGraphNodeDragVehicle;
         var wasDragging = legacyGraphNodeDragStarted;
 
+        StopLegacyGraphNodeAutoScroll();
         legacyGraphNodeDragSource?.ReleaseMouseCapture();
         legacyGraphNodeDragSource = null;
         legacyGraphHandleDragDocument = null;
@@ -3844,36 +3917,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (element is FrameworkElement documentElement &&
-            documentElement.Tag is AbacusLegacyExportCandidateGraphDocument document)
-        {
-            legacyGraphDocumentCardDragDocument = document;
-            legacyGraphDocumentCardDragStartPoint = e.GetPosition(this);
-            legacyGraphDocumentCardDragSourceElement = documentElement;
-            var cardPosition = e.GetPosition(LegacyGraphCanvas);
-            var documentLeft = Canvas.GetLeft(documentElement);
-            var documentTop = Canvas.GetTop(documentElement);
-            if (double.IsNaN(documentLeft))
-            {
-                documentLeft = 0;
-            }
-
-            if (double.IsNaN(documentTop))
-            {
-                documentTop = 0;
-            }
-
-            legacyGraphDragOffset = new Point(
-                cardPosition.X - documentLeft,
-                cardPosition.Y - documentTop);
-            documentElement.CaptureMouse();
-            UpdateLegacyGraphInspector(document);
-            e.Handled = true;
-            return;
-        }
-
         legacyGraphDraggingElement = element;
-        UpdateLegacyGraphInspector(element is FrameworkElement frameworkElement ? frameworkElement.Tag : null);
+        legacyGraphBlockDragStarted = false;
+        legacyGraphDocumentCardDragDocument = element is FrameworkElement frameworkElement &&
+                                               frameworkElement.Tag is AbacusLegacyExportCandidateGraphDocument document
+            ? document
+            : null;
+        UpdateLegacyGraphInspector(element is FrameworkElement selectedElement ? selectedElement.Tag : null);
         var position = e.GetPosition(LegacyGraphCanvas);
         legacyGraphBlockDragStartPoint = position;
         var elementLeft = Canvas.GetLeft(element);
@@ -3897,75 +3947,52 @@ public partial class MainWindow : Window
 
     private void LegacyGraphBlock_MouseMove(object sender, MouseEventArgs e)
     {
-        if (FindLegacyGraphNodeInteraction(e.OriginalSource as DependencyObject) is not null)
-        {
-            return;
-        }
-
-        if (legacyGraphDocumentCardDragDocument is not null &&
-            e.LeftButton == MouseButtonState.Pressed)
-        {
-            var currentPoint = e.GetPosition(this);
-            if (Math.Abs(currentPoint.X - legacyGraphDocumentCardDragStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance ||
-                Math.Abs(currentPoint.Y - legacyGraphDocumentCardDragStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)
-            {
-                var document = legacyGraphDocumentCardDragDocument;
-                legacyGraphDocumentCardDragDocument = null;
-                var payload = new LegacyGraphDocumentDragPayload(document, "document-card");
-                var data = new DataObject();
-                data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
-                BeginLegacyGraphBlockVisualDrag(legacyGraphDocumentCardDragSourceElement);
-                try
-                {
-                    DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
-                }
-                finally
-                {
-                    legacyGraphDocumentCardDragSourceElement?.ReleaseMouseCapture();
-                    ClearLegacyGraphBlockVisualDrag();
-                    legacyGraphDocumentCardDragSourceElement = null;
-                }
-                e.Handled = true;
-            }
-
-            return;
-        }
-
         if (legacyGraphDraggingElement is null || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
 
         var position = e.GetPosition(LegacyGraphCanvas);
-        if (legacyGraphBlockDragPreview is null &&
+        if (!legacyGraphBlockDragStarted &&
             (Math.Abs(position.X - legacyGraphBlockDragStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance ||
              Math.Abs(position.Y - legacyGraphBlockDragStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance))
         {
+            legacyGraphBlockDragStarted = true;
             BeginLegacyGraphBlockVisualDrag(legacyGraphDraggingElement as FrameworkElement);
         }
 
-        UpdateLegacyGraphDragPreviewPosition(position);
-        e.Handled = true;
+        if (legacyGraphBlockDragStarted)
+        {
+            UpdateLegacyGraphDragPreviewPosition(position);
+            UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
+            e.Handled = true;
+        }
     }
 
     private void LegacyGraphBlock_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (FindLegacyGraphNodeInteraction(e.OriginalSource as DependencyObject) is not null)
+        if (legacyGraphDraggingElement is null)
         {
             return;
         }
 
+        var document = legacyGraphDocumentCardDragDocument;
+        var wasDragging = legacyGraphBlockDragStarted;
+        var windowPoint = e.GetPosition(this);
+        legacyGraphDraggingElement.ReleaseMouseCapture();
+        legacyGraphDraggingElement = null;
         legacyGraphDocumentCardDragDocument = null;
-        legacyGraphDocumentCardDragSourceElement?.ReleaseMouseCapture();
-        legacyGraphDocumentCardDragSourceElement = null;
+        legacyGraphBlockDragStarted = false;
+        ClearLegacyGraphBlockVisualDrag();
+        ClearLegacyGraphDropHighlight();
+        ClearLegacyGraphTrayDropHighlight();
 
-        if (legacyGraphDraggingElement is not null)
+        if (wasDragging && document is not null)
         {
-            legacyGraphDraggingElement.ReleaseMouseCapture();
-            legacyGraphDraggingElement = null;
-            ClearLegacyGraphBlockVisualDrag();
-            e.Handled = true;
+            HandleLegacyGraphDocumentBlockDrop(document, windowPoint);
         }
+
+        e.Handled = true;
     }
 
     private void BeginLegacyGraphBlockVisualDrag(FrameworkElement? source)
@@ -3993,7 +4020,6 @@ public partial class MainWindow : Window
         LegacyGraphDragPreviewCanvas.Width = LegacyGraphCanvas.Width;
         LegacyGraphDragPreviewCanvas.Height = LegacyGraphCanvas.Height;
         LegacyGraphDragPreviewCanvas.Children.Add(legacyGraphBlockDragPreview);
-        source.GiveFeedback += LegacyGraphBlockDragPreview_GiveFeedback;
         Panel.SetZIndex(legacyGraphBlockDragPreview, 100);
     }
 
@@ -4008,20 +4034,10 @@ public partial class MainWindow : Window
         Canvas.SetTop(legacyGraphBlockDragPreview, Math.Max(0, position.Y - legacyGraphDragOffset.Y));
     }
 
-    private void LegacyGraphBlockDragPreview_GiveFeedback(object sender, GiveFeedbackEventArgs e)
-    {
-        // プレビューと本体の座標系を常にキャンバスへ統一します。
-        // オーバーレイへ相対変換すると、スクロール中にブロックが飛ぶことがあります。
-        UpdateLegacyGraphDragPreviewPosition(Mouse.GetPosition(LegacyGraphCanvas));
-        e.UseDefaultCursors = true;
-        e.Handled = true;
-    }
-
     private void ClearLegacyGraphBlockVisualDrag()
     {
         if (legacyGraphBlockDragPreviewSource is not null)
         {
-            legacyGraphBlockDragPreviewSource.GiveFeedback -= LegacyGraphBlockDragPreview_GiveFeedback;
             legacyGraphBlockDragPreviewSource.Opacity = 1;
         }
 
@@ -4033,6 +4049,61 @@ public partial class MainWindow : Window
         legacyGraphBlockDragPreview = null;
         legacyGraphBlockDragPreviewSource = null;
     }
+
+    private void UpdateLegacyGraphBlockDropTarget(Point windowPoint)
+    {
+        ClearLegacyGraphDropHighlight();
+        ClearLegacyGraphTrayDropHighlight();
+        if (legacyGraphDocumentCardDragDocument is null)
+        {
+            return;
+        }
+
+        var hit = VisualTreeHelper.HitTest(this, windowPoint)?.VisualHit;
+        if (FindVisualAncestor<ListBox>(hit) is { } list &&
+            IsLegacyGraphUnresolvedDocumentList(list))
+        {
+            legacyGraphTrayDropHighlightList = list;
+            list.Opacity = 0.82;
+            return;
+        }
+
+        if (FindLegacyGraphBlock(hit) is Grid vehicleBlock &&
+            vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle)
+        {
+            SetLegacyGraphDropHighlight(vehicleBlock);
+        }
+    }
+
+    private void HandleLegacyGraphDocumentBlockDrop(
+        AbacusLegacyExportCandidateGraphDocument document,
+        Point windowPoint)
+    {
+        var hit = VisualTreeHelper.HitTest(this, windowPoint)?.VisualHit;
+        if (FindVisualAncestor<ListBox>(hit) is { } list &&
+            IsLegacyGraphUnresolvedDocumentList(list))
+        {
+            var key = GetLegacyDocumentKey(document);
+            legacyGraphManualDocumentLinks.Remove(key);
+            legacyGraphUnconnectedDocumentKeys.Remove(key);
+            legacyGraphTrayDocumentKeys.Add(key);
+            RefreshLegacyGraphAfterManualLink(document, null);
+            LegacyGraphStatusText.Text =
+                $"{document.Kind} {Fallback(document.DocumentNumber)} を未確定トレイへ戻しました。元データは変更していません。";
+            LegacyGraphStatusText.Foreground = ToBrush("#D97706");
+            return;
+        }
+
+        if (FindLegacyGraphBlock(hit) is Grid vehicleBlock &&
+            vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle vehicle)
+        {
+            ApplyLegacyGraphManualLink(document, vehicle.VehicleId);
+        }
+    }
+
+    private bool IsLegacyGraphUnresolvedDocumentList(ListBox list) =>
+        ReferenceEquals(list, LegacyGraphUnresolvedSalesList) ||
+        ReferenceEquals(list, LegacyGraphUnresolvedMaintenanceList);
 
     private void ResetLegacyCandidateGraph(string status)
     {
@@ -4053,9 +4124,9 @@ public partial class MainWindow : Window
         legacyGraphTrayDragDocument = null;
         legacyGraphHandleDragDocument = null;
         legacyGraphDocumentCardDragDocument = null;
-        legacyGraphDocumentCardDragSourceElement = null;
         legacyGraphNodeDragSource?.ReleaseMouseCapture();
         legacyGraphNodeDragSource = null;
+        StopLegacyGraphNodeAutoScroll();
         legacyGraphNodeDragStarted = false;
         legacyGraphNodeDragVehicle = null;
         legacyGraphCustomerDragSource = null;
