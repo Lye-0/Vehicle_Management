@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly AbacusClipboardImageExporter clipboardImageExporter = new();
     private readonly AbacusWindowCaptureService windowCaptureService = new();
     private readonly AbacusCaptureCropper captureCropper = new();
+    private readonly AbacusNavigationStateDetector abacusNavigationStateDetector = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportReader legacyExportReader = new();
@@ -68,6 +69,7 @@ public partial class MainWindow : Window
     private bool allowClose;
     private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
+    private AbacusNavigationSnapshot? lastAbacusNavigationSnapshot;
     private bool imageLinkMatchBusy;
     private bool imageLinkApprovalBusy;
     private bool imageRegistrationPreviewBusy;
@@ -5742,6 +5744,7 @@ public partial class MainWindow : Window
             var result = await session.InspectAbacusNativeWindowsAsync();
             abacusMayBeRunning = result.IsRunning;
             AbacusNativeWindowsGrid.ItemsSource = result.NativeWindows ?? [];
+            RenderAbacusNavigation(abacusNavigationStateDetector.Detect(result));
             AbacusNativeWindowsStatusText.Text = result.Message;
             AbacusNativeWindowsStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
                 result.Status == "native-windows-ready" ? "#17643A" : "#805B10")!;
@@ -5755,6 +5758,56 @@ public partial class MainWindow : Window
         {
             SetAbacusButtonsBusy(false);
         }
+    }
+
+    private async void InspectAbacusNavigationButton_Click(object sender, RoutedEventArgs e)
+    {
+        InspectAbacusNavigationButton.IsEnabled = false;
+        AbacusNavigationStateText.Text = "判定中…";
+        AbacusNavigationDetailText.Text = "ABACUSの表示状態を読み取っています。操作・編集・保存は行いません。";
+        AbacusNavigationObservedText.Text = "確認中の子ウィンドウ: -";
+        try
+        {
+            var result = await session.InspectAbacusNativeWindowsAsync();
+            abacusMayBeRunning = result.IsRunning;
+            RenderAbacusNavigation(abacusNavigationStateDetector.Detect(result));
+        }
+        catch (Exception exception)
+        {
+            AbacusNavigationStateText.Text = "判定に失敗しました";
+            AbacusNavigationStateText.Foreground = ToBrush("#A61B1B");
+            AbacusNavigationDetailText.Text = exception.Message;
+            AbacusNavigationObservedText.Text = "確認中の子ウィンドウ: -";
+        }
+        finally
+        {
+            SetAbacusButtonsBusy(false);
+        }
+    }
+
+    private void RenderAbacusNavigation(AbacusNavigationSnapshot snapshot)
+    {
+        lastAbacusNavigationSnapshot = snapshot;
+        var (foreground, background) = snapshot.State switch
+        {
+            AbacusNavigationState.MainMenu => ("#1E40AF", "#EAF2FF"),
+            AbacusNavigationState.VehicleList or AbacusNavigationState.VehicleDetail or AbacusNavigationState.ExpandedImage
+                => ("#17643A", "#EAF7EF"),
+            AbacusNavigationState.NotRunning => ("#52647A", "#E9EEF5"),
+            _ => ("#805B10", "#FFF4D6"),
+        };
+
+        AbacusNavigationStateText.Text = snapshot.Label;
+        AbacusNavigationStateText.Foreground = ToBrush(foreground);
+        AbacusNavigationStatePanel.Background = ToBrush(background);
+        AbacusNavigationDetailText.Text = snapshot.Detail;
+        var observed = snapshot.VisibleChildWindows.Count == 0
+            ? "なし（メニュー画面または子ウィンドウ未検出）"
+            : string.Join(
+                "、",
+                snapshot.VisibleChildWindows.Select(window =>
+                    string.IsNullOrWhiteSpace(window.Title) ? window.ClassName : window.Title));
+        AbacusNavigationObservedText.Text = $"確認中の子ウィンドウ: {observed}";
     }
 
     private async void InspectAbacusAutomationButton_Click(object sender, RoutedEventArgs e)
@@ -6939,6 +6992,7 @@ public partial class MainWindow : Window
         InspectImageUiButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusMenuButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusNativeWindowsButton.IsEnabled = !busy && abacusMayBeRunning;
+        InspectAbacusNavigationButton.IsEnabled = !busy && abacusMayBeRunning;
         InspectAbacusAutomationButton.IsEnabled = !busy && abacusMayBeRunning;
     }
 
