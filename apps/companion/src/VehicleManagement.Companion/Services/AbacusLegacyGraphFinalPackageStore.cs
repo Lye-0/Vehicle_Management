@@ -64,7 +64,9 @@ public sealed record AbacusLegacyGraphFinalPackageResult(
     int VehiclelessDocumentCount,
     int ExcludedDocumentCount,
     IReadOnlyList<AbacusLegacyGraphFinalCustomerPreview> Customers,
-    IReadOnlyList<AbacusLegacyGraphFinalDocumentPreview> Documents);
+    IReadOnlyList<AbacusLegacyGraphFinalDocumentPreview> Documents,
+    string? ImageAttachmentsPath = null,
+    int ImageCount = 0);
 
 /// <summary>
 /// グラフ画面での最終確定状態を、Web登録前に人が検証できるパッケージへ保存します。
@@ -78,10 +80,13 @@ public sealed class AbacusLegacyGraphFinalPackageStore
     private const string SalesFileName = "sales.csv";
     private const string MaintenanceFileName = "maintenance.csv";
     private const string DocumentLinksFileName = "document-links.json";
+    private const string ImageAttachmentsFileName = "image-attachments.json";
     private const long MaximumManifestBytes = 2L * 1024 * 1024;
     private const long MaximumDataFileBytes = 64L * 1024 * 1024;
     private const int MaximumDocumentCount = 20_000;
     private const int MaximumCustomerCount = 10_000;
+    private const int MaximumImageCount = 10_000;
+    private const long MaximumImageBytes = 256L * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -95,6 +100,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         AbacusLegacyExportCandidateGraphResult graph,
         AbacusLegacyGraphFinalizationSnapshot snapshot,
         string destinationParent,
+        string? imageRegistrationPreviewFolder = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(graph);
@@ -179,6 +185,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             .OrderBy(vehicle => vehicle.Group.CustomerId, StringComparer.Ordinal)
             .ThenBy(vehicle => vehicle.Vehicle.VehicleId, StringComparer.Ordinal)
             .ToArray();
+        var imageAttachments = string.IsNullOrWhiteSpace(imageRegistrationPreviewFolder)
+            ? Array.Empty<PreparedImageAttachment>()
+            : await ReadImageAttachmentsAsync(imageRegistrationPreviewFolder, vehicleRows, cancellationToken);
 
         var packagePath = CreateUniquePackageDirectory(destinationRoot);
         try
@@ -188,6 +197,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             var salesCsvPath = Path.Combine(packagePath, SalesFileName);
             var maintenanceCsvPath = Path.Combine(packagePath, MaintenanceFileName);
             var documentLinksPath = Path.Combine(packagePath, DocumentLinksFileName);
+            string? imageAttachmentsPath = null;
             await WriteAndVerifyAsync(customersCsvPath, BuildCustomersCsv(customerRows), cancellationToken);
             await WriteAndVerifyAsync(vehiclesCsvPath, BuildVehiclesCsv(vehicleRows), cancellationToken);
             await WriteAndVerifyAsync(salesCsvPath, BuildSalesCsv(finalDocuments.Where(document => document.Document.Kind == "販売書類")), cancellationToken);
@@ -211,10 +221,39 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 excludedKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
             await WriteAndVerifyAsync(documentLinksPath, JsonSerializer.SerializeToUtf8Bytes(linksDocument, JsonOptions), cancellationToken);
 
+            IReadOnlyList<OutputFile> imageFiles = Array.Empty<OutputFile>();
+            if (imageAttachments.Count > 0)
+            {
+                foreach (var image in imageAttachments)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var destinationPath = Path.Combine(packagePath, image.ImagePath.Replace('/', Path.DirectorySeparatorChar));
+                    await CopyAndVerifyImageAsync(image.SourcePath, destinationPath, image.ImageSha256, cancellationToken);
+                }
+
+                imageAttachmentsPath = Path.Combine(packagePath, ImageAttachmentsFileName);
+                var imageLinks = new ImageAttachmentsDocument(
+                    1,
+                    "abacus-web-import-image-attachments",
+                    "manual-upload-required",
+                    imageAttachments.Select(image => new ImageAttachment(
+                        image.CustomerId,
+                        image.VehicleId,
+                        image.ImagePath,
+                        image.ImageSha256,
+                        image.ContentType)).ToArray());
+                await WriteAndVerifyAsync(imageAttachmentsPath, JsonSerializer.SerializeToUtf8Bytes(imageLinks, JsonOptions), cancellationToken);
+                imageFiles = await Task.WhenAll(imageAttachments.Select(image =>
+                    DescribeImageFileAsync(
+                        Path.Combine(packagePath, image.ImagePath.Replace('/', Path.DirectorySeparatorChar)),
+                        image.ImagePath,
+                        cancellationToken)));
+            }
+
             var sourceManifestPath = Path.Combine(sourceRoot, ManifestFileName);
             var sourceManifestBytes = await ReadRequiredFileAsync(sourceManifestPath, MaximumManifestBytes, cancellationToken);
             var sourceManifestSha256 = Convert.ToHexString(SHA256.HashData(sourceManifestBytes));
-            IReadOnlyList<OutputFile> dataFiles = new OutputFile[]
+            var dataFileList = new List<OutputFile>
             {
                 await DescribeFileAsync(customersCsvPath, CustomersFileName, cancellationToken),
                 await DescribeFileAsync(vehiclesCsvPath, VehiclesFileName, cancellationToken),
@@ -222,6 +261,11 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 await DescribeFileAsync(maintenanceCsvPath, MaintenanceFileName, cancellationToken),
                 await DescribeFileAsync(documentLinksPath, DocumentLinksFileName, cancellationToken),
             };
+            if (imageAttachmentsPath is not null)
+            {
+                dataFileList.Add(await DescribeFileAsync(imageAttachmentsPath, ImageAttachmentsFileName, cancellationToken));
+            }
+            IReadOnlyList<OutputFile> dataFiles = dataFileList;
             var vehiclelessCount = finalDocuments.Count(document => document.Vehicle is null);
             var warnings = new List<string>
             {
@@ -229,6 +273,14 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 "未確定トレイに残した書類は最終確定時の除外指定に従い、今回のCSVへ出力していません。",
                 "顧客が一意に判定できる車両情報のない書類は顧客だけへ紐付き、vehicleIdを空欄としてdocument-links.jsonへ記録しています。次段階でWeb側の特例登録を実装します。",
             };
+            if (imageAttachments.Count > 0)
+            {
+                warnings.Add($"確認済み画像を{imageAttachments.Count:N0}件、車両識別子を再照合して同じ登録前パッケージへ含めました。Web登録後に画像アップロード対象になります。");
+            }
+            else
+            {
+                warnings.Add("画像登録前パッケージは指定されていません。画像が必要な場合は画像準備で作成してから、もう一度このパッケージを作成してください。");
+            }
             if (vehiclelessCount > 0)
             {
                 warnings.Add($"車両情報のない書類を{vehiclelessCount:N0}件出力しました。Web画面では車両を「なし」と表示する特例対象です。");
@@ -260,8 +312,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     finalDocuments.Count(document => document.Document.Kind == "販売書類"),
                     finalDocuments.Count(document => document.Document.Kind == "整備書類"),
                     vehiclelessCount,
-                    excludedKeys.Count),
+                    excludedKeys.Count,
+                    imageAttachments.Count),
                 dataFiles,
+                imageFiles,
                 warnings,
                 groups.Select(group => new ManifestGroup(
                     group.GroupKey,
@@ -314,7 +368,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     document.Vehicle?.VehicleName,
                     document.Vehicle is null,
                     document.Document.SourceLocation,
-                    false)).ToArray());
+                    false)).ToArray(),
+                imageAttachmentsPath,
+                imageAttachments.Count);
         }
         catch
         {
@@ -619,6 +675,198 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static string Truncate(string value) => value.Length <= 500 ? value : value[..500];
 
+    private static async Task<IReadOnlyList<PreparedImageAttachment>> ReadImageAttachmentsAsync(
+        string imageRegistrationPreviewFolder,
+        IReadOnlyList<FinalVehicle> vehicles,
+        CancellationToken cancellationToken)
+    {
+        var imageRoot = ValidateFolder(imageRegistrationPreviewFolder, "画像登録前パッケージ");
+        var manifestPath = Path.Combine(imageRoot, ManifestFileName);
+        var imageDirectory = Path.Combine(imageRoot, "images");
+        var imageDirectoryInfo = new DirectoryInfo(imageDirectory);
+        if (!imageDirectoryInfo.Exists || imageDirectoryInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidDataException("画像登録前パッケージのimagesフォルダーを安全に読み取れません。");
+        }
+        var manifestBytes = await ReadRequiredFileAsync(manifestPath, MaximumManifestBytes, cancellationToken);
+        var manifest = JsonSerializer.Deserialize<ImagePreviewManifest>(manifestBytes, JsonOptions);
+        if (manifest is null ||
+            manifest.Version != 1 ||
+            !string.Equals(manifest.Kind, "abacus-image-registration-preview", StringComparison.Ordinal) ||
+            !string.Equals(manifest.Status, "preview-only", StringComparison.Ordinal) ||
+            manifest.Candidates is null ||
+            manifest.Candidates.Count == 0 ||
+            manifest.Candidates.Count > MaximumImageCount)
+        {
+            throw new InvalidDataException("画像登録前パッケージのマニフェスト形式または件数が不正です。");
+        }
+
+        var result = new List<PreparedImageAttachment>(manifest.Candidates.Count);
+        var seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
+        var seenImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totalBytes = 0L;
+        foreach (var candidate in manifest.Candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidateId = RequiredText(candidate.CandidateId, "画像候補ID");
+            if (!seenCandidateIds.Add(candidateId))
+            {
+                throw new InvalidDataException($"画像候補IDが重複しています: {candidateId}");
+            }
+
+            var imagePath = NormalizeImagePath(candidate.PackageImageFileName);
+            if (!seenImagePaths.Add(imagePath))
+            {
+                throw new InvalidDataException($"画像パスが重複しています: {imagePath}");
+            }
+
+            var sourcePath = Path.Combine(imageRoot, imagePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!IsSameOrSubPath(sourcePath, imageRoot))
+            {
+                throw new InvalidDataException($"画像登録前パッケージの画像パスがパッケージ外を指しています: {imagePath}");
+            }
+            var imageInfo = ValidateRegularFile(sourcePath, "画像登録前パッケージの画像", MaximumImageBytes);
+            totalBytes = checked(totalBytes + imageInfo.Length);
+            if (totalBytes > 1L * 1024 * 1024 * 1024)
+            {
+                throw new InvalidDataException("画像登録前パッケージの合計サイズが上限を超えています。");
+            }
+
+            var imageSha256 = await CalculateSha256Async(sourcePath, cancellationToken);
+            var expectedSha256 = RequiredText(candidate.ImageSha256, "画像SHA-256");
+            if (!string.Equals(imageSha256, expectedSha256, StringComparison.OrdinalIgnoreCase) ||
+                expectedSha256.Length != 64 || !expectedSha256.All(Uri.IsHexDigit))
+            {
+                throw new InvalidDataException($"画像登録前パッケージの画像SHA-256が一致しません: {imagePath}");
+            }
+
+            var matches = vehicles
+                .Where(vehicle => IsImageVehicleIdentifierMatch(candidate, vehicle.Vehicle))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                var contextualMatches = matches
+                    .Where(vehicle =>
+                        string.Equals(candidate.CustomerName?.Trim() ?? "", vehicle.Vehicle.CustomerName.Trim(), StringComparison.Ordinal) &&
+                        string.Equals(candidate.VehicleName?.Trim() ?? "", vehicle.Vehicle.VehicleName.Trim(), StringComparison.Ordinal))
+                    .ToArray();
+                matches = contextualMatches.Length == 1 ? contextualMatches : matches;
+            }
+
+            if (matches.Length != 1)
+            {
+                throw new InvalidDataException(
+                    $"画像候補をグラフの車両へ一意に再照合できません: {imagePath}（候補 {matches.Length:N0}件）");
+            }
+
+            result.Add(new PreparedImageAttachment(
+                sourcePath,
+                imagePath,
+                imageSha256,
+                GetImageContentType(imagePath),
+                matches[0].Group.CustomerId,
+                matches[0].Vehicle.VehicleId));
+        }
+
+        return result;
+    }
+
+    private static bool IsImageVehicleIdentifierMatch(
+        ImagePreviewCandidate candidate,
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        var chassis = candidate.ChassisNumber?.Trim() ?? "";
+        var registration = candidate.RegistrationNumber?.Trim() ?? "";
+        if (chassis.Length == 0 && registration.Length == 0)
+        {
+            return false;
+        }
+
+        return (chassis.Length == 0 || string.Equals(chassis, vehicle.ChassisNumber.Trim(), StringComparison.Ordinal)) &&
+               (registration.Length == 0 || string.Equals(registration, vehicle.RegistrationNumber.Trim(), StringComparison.Ordinal));
+    }
+
+    private static string NormalizeImagePath(string value)
+    {
+        var path = (value ?? "").Trim().Replace('\\', '/');
+        if (!path.StartsWith("images/", StringComparison.Ordinal) ||
+            path.Contains("..", StringComparison.Ordinal) ||
+            path.Contains(':', StringComparison.Ordinal) ||
+            path.Split('/').Any(part => part.Length == 0) ||
+            path.Split('/').Length != 2 ||
+            path.Any(char.IsControl))
+        {
+            throw new InvalidDataException($"画像パスがパッケージ内の安全な相対パスではありません: {value}");
+        }
+
+        var extension = Path.GetExtension(path);
+        if (!string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"対応していない画像形式です: {path}");
+        }
+
+        return path;
+    }
+
+    private static string GetImageContentType(string imagePath) =>
+        Path.GetExtension(imagePath).Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetExtension(imagePath).Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            ? "image/jpeg"
+            : "image/png";
+
+    private static FileInfo ValidateRegularFile(string path, string label, long maximumBytes)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > maximumBytes)
+        {
+            throw new InvalidDataException($"{label}を読み取れません: {path}");
+        }
+
+        return info;
+    }
+
+    private static async Task CopyAndVerifyImageAsync(
+        string sourcePath,
+        string destinationPath,
+        string expectedSha256,
+        CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath)
+            ?? throw new InvalidDataException("画像コピー先を確認できません。");
+        Directory.CreateDirectory(destinationDirectory);
+        var temporaryPath = destinationPath + ".partial";
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var destination = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await source.CopyToAsync(destination, 1024 * 1024, cancellationToken);
+                await destination.FlushAsync(cancellationToken);
+            }
+
+            var copiedSha256 = await CalculateSha256Async(temporaryPath, cancellationToken);
+            if (!string.Equals(copiedSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"画像コピー後のSHA-256が一致しません: {Path.GetFileName(sourcePath)}");
+            }
+
+            File.Move(temporaryPath, destinationPath, overwrite: false);
+        }
+        catch
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            throw;
+        }
+    }
+
+    private static async Task<string> CalculateSha256Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+    }
+
     private static void AppendCsvRow(StringBuilder builder, IReadOnlyList<string> values)
     {
         for (var index = 0; index < values.Count; index++)
@@ -729,6 +977,18 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         return new OutputFile(relativePath, info.Length, Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
+    private static async Task<OutputFile> DescribeImageFileAsync(string path, string relativePath, CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > MaximumImageBytes)
+        {
+            throw new InvalidDataException($"出力画像を検証できません: {relativePath}");
+        }
+
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return new OutputFile(relativePath, info.Length, Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)));
+    }
+
     private static async Task WriteAndVerifyManifestAsync(string path, byte[] bytes, OutputManifest expected, CancellationToken cancellationToken)
     {
         if (bytes.LongLength > MaximumManifestBytes)
@@ -738,7 +998,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
         await WriteAndVerifyAsync(path, bytes, cancellationToken);
         var actual = JsonSerializer.Deserialize<OutputManifest>(await File.ReadAllBytesAsync(path, cancellationToken), JsonOptions);
-        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.DataFiles.Count != expected.DataFiles.Count)
+        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.DataFiles.Count != expected.DataFiles.Count || actual.ImageFiles.Count != expected.ImageFiles.Count || actual.Summary.ImageCount != expected.Summary.ImageCount)
         {
             throw new InvalidDataException("作成したグラフ確定マニフェストの再読込検証に失敗しました。");
         }
@@ -780,6 +1040,19 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string SourceLocation,
         string Warning);
 
+    private sealed record ImageAttachmentsDocument(
+        int Version,
+        string Kind,
+        string Status,
+        IReadOnlyList<ImageAttachment> Attachments);
+
+    private sealed record ImageAttachment(
+        string CustomerId,
+        string VehicleId,
+        string ImagePath,
+        string ImageSha256,
+        string ContentType);
+
     private sealed record OutputManifest(
         int Version,
         string Kind,
@@ -788,6 +1061,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         OutputSource Source,
         OutputSummary Summary,
         IReadOnlyList<OutputFile> DataFiles,
+        IReadOnlyList<OutputFile> ImageFiles,
         IReadOnlyList<string> Warnings,
         IReadOnlyList<ManifestGroup> Groups,
         IReadOnlyList<ManifestDocument> Documents,
@@ -801,9 +1075,33 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         int SalesRowCount,
         int MaintenanceRowCount,
         int VehiclelessDocumentCount,
-        int ExcludedDocumentCount);
+        int ExcludedDocumentCount,
+        int ImageCount);
 
     private sealed record OutputFile(string FileName, long SizeBytes, string Sha256);
+
+    private sealed record PreparedImageAttachment(
+        string SourcePath,
+        string ImagePath,
+        string ImageSha256,
+        string ContentType,
+        string CustomerId,
+        string VehicleId);
+
+    private sealed record ImagePreviewManifest(
+        int Version,
+        string Kind,
+        string Status,
+        IReadOnlyList<ImagePreviewCandidate> Candidates);
+
+    private sealed record ImagePreviewCandidate(
+        string CandidateId,
+        string PackageImageFileName,
+        string ImageSha256,
+        string CustomerName,
+        string VehicleName,
+        string ChassisNumber,
+        string RegistrationNumber);
 
     private sealed record ManifestGroup(
         string GroupKey,

@@ -1371,6 +1371,23 @@
                                         Content="確定内容から登録前パッケージを作成"
                                         IsEnabled="False"
                                         Click="LegacyGraphCreateFinalPackageButton_Click" />
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,8,10,0" Foreground="#52647A"
+                                               Text="画像登録前パッケージ（任意）" TextWrapping="Wrap" />
+                                    <TextBox x:Name="LegacyGraphImageRegistrationPreviewPathTextBox" Grid.Column="1"
+                                             MinHeight="34" Padding="8,5" IsReadOnly="True" />
+                                    <Button x:Name="LegacyGraphSelectImageRegistrationPreviewButton" Grid.Column="2"
+                                            Margin="10,0,0,0" Content="フォルダー選択"
+                                            Click="LegacyGraphSelectImageRegistrationPreviewButton_Click" />
+                                </Grid>
+                                <TextBlock x:Name="LegacyGraphImageRegistrationPreviewStatusText" Margin="0,6,0,0"
+                                           Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="画像を含める場合だけ、画像登録前パッケージを選択してください。未選択でもグラフ確定は実行できます。" />
                                 <Button x:Name="LegacyGraphOpenFinalPackageButton"
                                         Margin="10,0,0,0"
                                         HorizontalAlignment="Left"

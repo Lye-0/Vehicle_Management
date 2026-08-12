@@ -95,6 +95,7 @@ type GraphFinalManifest = {
   status?: unknown
   summary?: Record<string, unknown>
   dataFiles?: unknown
+  imageFiles?: unknown
   groups?: unknown
   documents?: unknown
   excludedDocumentKeys?: unknown
@@ -242,9 +243,19 @@ async function commitGraphFinalRegistration(
   const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes))
   const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes))
   const links = parseFinalDocumentLinks(await decodeUtf8(files.links.bytes))
+  const imageAttachments = files.imageAttachments
+    ? parseGraphFinalImageAttachments(await decodeUtf8(files.imageAttachments.bytes), files.imageDescriptors)
+    : []
+  const customerIds = new Set(customerRows.map((row) => row.id))
+  const vehiclesById = new Map(vehicleRows.map((row) => [row.id, row]))
+  for (const attachment of imageAttachments) {
+    const vehicle = vehiclesById.get(attachment.vehicleId)
+    if (!customerIds.has(attachment.customerId) || !vehicle || vehicle.customerId !== attachment.customerId) throw new HttpError(400, `画像対応表の顧客・車両参照が不正です: ${attachment.imagePath}`)
+  }
   const normalizedDocuments = normalizeGraphFinalDocumentNumbers(salesRows, maintenanceRows, links.documents)
   const normalizedLinks = { documents: normalizedDocuments.links, excludedDocumentKeys: links.excludedDocumentKeys }
   validateFinalPackage(manifest, customerRows, vehicleRows, normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks)
+  if (manifest.summary && manifest.summary.imageCount !== undefined && manifest.summary.imageCount !== imageAttachments.length) throw new HttpError(409, `マニフェストの画像件数が一致しません: ${manifest.summary.imageCount} / ${imageAttachments.length}`)
 
   const existingRows = await validateExistingRows(database, organizationId, customerRows, vehicleRows)
   const documentRows = buildFinalDocumentRows(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks.documents)
@@ -274,6 +285,7 @@ async function commitGraphFinalRegistration(
     excludedDocumentCount: Array.isArray(manifest.excludedDocumentKeys) ? manifest.excludedDocumentKeys.length : 0,
     numberAdjustedDocumentCount: normalizedDocuments.numberAdjustedDocumentCount,
     amountDefaultedDocumentCount: normalizedDocuments.amountDefaultedDocumentCount,
+    imageCount: imageAttachments.length,
     customers: { imported: existingRows.newCustomerCount, updated: existingRows.existingCustomerCount },
     vehicles: { imported: existingRows.newVehicleCount, updated: existingRows.existingVehicleCount },
     documents: { imported: existingDocuments.newDocumentCount, existing: existingDocuments.existingDocumentCount },
@@ -281,7 +293,7 @@ async function commitGraphFinalRegistration(
 }
 
 async function readGraphFinalFiles(formData: FormData, manifest: GraphFinalManifest) {
-  if (!Array.isArray(manifest.dataFiles) || manifest.dataFiles.length !== 5) throw new HttpError(400, 'Gate 8Aパッケージのファイル一覧が不正です。')
+  if (!Array.isArray(manifest.dataFiles) || (manifest.dataFiles.length !== 5 && manifest.dataFiles.length !== 6)) throw new HttpError(400, 'Gate 8Aパッケージのファイル一覧が不正です。')
   const descriptors = new Map<string, FileDescriptor>()
   for (const value of manifest.dataFiles) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'Gate 8Aパッケージのファイル記述が不正です。')
@@ -289,10 +301,13 @@ async function readGraphFinalFiles(formData: FormData, manifest: GraphFinalManif
     const fileName = normalizePackagePath(descriptor.fileName)
     const sizeBytes = descriptor.sizeBytes
     const sha256 = typeof descriptor.sha256 === 'string' ? descriptor.sha256.toUpperCase() : ''
-    if (!['customers.csv', 'vehicles.csv', 'sales.csv', 'maintenance.csv', 'document-links.json'].includes(fileName) || descriptors.has(fileName) || typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || !/^[0-9A-F]{64}$/u.test(sha256)) throw new HttpError(400, `Gate 8Aパッケージのファイル記述が不正です: ${fileName || '(空欄)'}`)
+    if (!['customers.csv', 'vehicles.csv', 'sales.csv', 'maintenance.csv', 'document-links.json', 'image-attachments.json'].includes(fileName) || descriptors.has(fileName) || typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || !/^[0-9A-F]{64}$/u.test(sha256)) throw new HttpError(400, `Gate 8Aパッケージのファイル記述が不正です: ${fileName || '(空欄)'}`)
     descriptors.set(fileName, { relativePath: fileName, sizeBytes, sha256 })
   }
-  const result = {} as Record<'customers' | 'vehicles' | 'sales' | 'maintenance' | 'links', { file: File; bytes: Uint8Array }>
+  const imageDescriptors = parseGraphFinalImageDescriptors(manifest.imageFiles)
+  const hasImageAttachments = descriptors.has('image-attachments.json')
+  if (hasImageAttachments !== (imageDescriptors.length > 0)) throw new HttpError(400, '画像対応表とマニフェストの画像一覧が一致しません。')
+  const result = {} as Record<'customers' | 'vehicles' | 'sales' | 'maintenance' | 'links', { file: File; bytes: Uint8Array }> & { imageAttachments?: { file: File; bytes: Uint8Array }; imageDescriptors: Map<string, FileDescriptor> }
   const names = { customers: ['customers', 'customers.csv'], vehicles: ['vehicles', 'vehicles.csv'], sales: ['sales', 'sales.csv'], maintenance: ['maintenance', 'maintenance.csv'], links: ['documentLinks', 'document-links.json'] } as const
   for (const [key, [formKey, path]] of Object.entries(names) as Array<[keyof typeof names, readonly [string, string]]>) {
     const file = requiredFile(formData, formKey)
@@ -302,6 +317,15 @@ async function readGraphFinalFiles(formData: FormData, manifest: GraphFinalManif
     if (await sha256Bytes(bytes) !== descriptor.sha256) throw new HttpError(409, `登録前パッケージのSHA-256が一致しません: ${path}`)
     result[key] = { file, bytes }
   }
+  if (hasImageAttachments) {
+    const file = requiredFile(formData, 'imageAttachments')
+    const descriptor = descriptors.get('image-attachments.json')
+    if (!descriptor || file.size !== descriptor.sizeBytes || file.size > maximumManifestBytes) throw new HttpError(409, '画像対応表のサイズが一致しません。')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (await sha256Bytes(bytes) !== descriptor.sha256) throw new HttpError(409, '画像対応表のSHA-256が一致しません。')
+    result.imageAttachments = { file, bytes }
+  }
+  result.imageDescriptors = new Map(imageDescriptors.map((descriptor) => [descriptor.relativePath, descriptor]))
   return result
 }
 
@@ -624,7 +648,7 @@ async function uploadRegistrationImage(request: Request, env: Env, database: Ret
   assertRequestContentLength(request, maximumAttachmentSize + 512 * 1024, { required: true })
   const formData = await readFormData(request, maximumAttachmentSize + 512 * 1024)
   const vehicleId = requiredIdentifier(textField(formData, 'vehicleId'), '車両ID', 'abacus-vehicle-')
-  const customerId = requiredIdentifier(textField(formData, 'customerId'), '顧客ID', 'abacus-customer-group-')
+  const customerId = requiredGraphOrLegacyCustomerIdentifier(textField(formData, 'customerId'), '顧客ID')
   const imagePath = requiredImagePath(textField(formData, 'imagePath'))
   const expectedSha256 = requiredSha256(textField(formData, 'imageSha256'), '画像SHA-256')
   const manifestSha256 = requiredSha256(textField(formData, 'manifestSha256'), 'マニフェストSHA-256')
@@ -797,6 +821,44 @@ function parseAttachments(text: string, imageFiles: Map<string, FileDescriptor>,
     if (!imageFiles.has(imagePath) || imageFiles.get(imagePath)?.sha256 !== imageSha256 || !['image/png', 'image/jpeg'].includes(contentType)) throw new HttpError(400, `画像対応表とマニフェストが一致しません: ${imagePath}`)
     paths.add(imagePath)
     return { customerId, vehicleId, imagePath, imageSha256, contentType } satisfies ImageAttachment
+  })
+}
+
+function parseGraphFinalImageDescriptors(value: unknown): FileDescriptor[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > maximumRows) throw new HttpError(400, 'グラフ確定パッケージの画像一覧が不正です。')
+  const paths = new Set<string>()
+  return value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `グラフ確定パッケージの画像記述${index + 1}件目が不正です。`)
+    const descriptor = item as Record<string, unknown>
+    const relativePath = requiredImagePath(textValue(descriptor.fileName))
+    const sizeBytes = descriptor.sizeBytes
+    const sha256 = typeof descriptor.sha256 === 'string' ? descriptor.sha256.toUpperCase() : ''
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > maximumAttachmentSize || !/^[0-9A-F]{64}$/u.test(sha256) || paths.has(relativePath)) throw new HttpError(400, `グラフ確定パッケージの画像記述${index + 1}件目が不正です。`)
+    paths.add(relativePath)
+    return { relativePath, sizeBytes, sha256 }
+  })
+}
+
+function parseGraphFinalImageAttachments(text: string, imageFiles: Map<string, FileDescriptor>): ImageAttachment[] {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { throw new HttpError(400, 'グラフ確定パッケージのimage-attachments.jsonが不正です。') }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'グラフ確定パッケージのimage-attachments.jsonが不正です。')
+  const document = value as Record<string, unknown>
+  if (document.version !== 1 || document.kind !== 'abacus-web-import-image-attachments' || document.status !== 'manual-upload-required' || !Array.isArray(document.attachments)) throw new HttpError(400, 'グラフ確定パッケージの画像対応表の種別が不正です。')
+  if (document.attachments.length !== imageFiles.size || document.attachments.length > maximumRows) throw new HttpError(400, 'グラフ確定パッケージの画像件数が一致しません。')
+  const paths = new Set<string>()
+  return document.attachments.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `グラフ確定パッケージの画像対応表${index + 1}件目が不正です。`)
+    const row = item as Record<string, unknown>
+    const customerId = requiredText(textValue(row.customerId), '画像対応表の顧客ID')
+    const vehicleId = requiredText(textValue(row.vehicleId), '画像対応表の車両ID')
+    const imagePath = requiredImagePath(textValue(row.imagePath))
+    const imageSha256 = requiredSha256(textValue(row.imageSha256), '画像SHA-256')
+    const contentType = textValue(row.contentType)
+    if (!imageFiles.has(imagePath) || imageFiles.get(imagePath)?.sha256 !== imageSha256 || (contentType !== 'image/png' && contentType !== 'image/jpeg') || paths.has(imagePath)) throw new HttpError(400, `グラフ確定パッケージの画像対応表参照が不正です: ${imagePath}`)
+    paths.add(imagePath)
+    return { customerId, vehicleId, imagePath, imageSha256, contentType }
   })
 }
 
@@ -975,6 +1037,12 @@ function requiredIdentifier(value: string, label: string, prefix: string) {
   return normalized
 }
 
+function requiredGraphOrLegacyCustomerIdentifier(value: string, label: string) {
+  const normalized = requiredText(value, label)
+  if (normalized.length > 200 || !['abacus-customer-group-', 'abacus-customer-', 'merge-preview:'].some((prefix) => normalized.startsWith(prefix)) || /[\\/\u0000]/u.test(normalized) || normalized.includes('..')) throw new HttpError(400, `${label}の形式が不正です。`)
+  return normalized
+}
+
 function requiredFinalIdentifier(value: string, label: string, prefixes: string[]) {
   const normalized = requiredText(value, label)
   if (normalized.length > 200 || !prefixes.some((prefix) => normalized.startsWith(prefix)) || /[\\/\u0000]/u.test(normalized) || normalized.includes('..')) throw new HttpError(400, `${label}の形式が不正です。`)
@@ -1008,7 +1076,7 @@ function requiredSha256(value: string, label: string) {
 
 function requiredImagePath(value: string) {
   const normalized = normalizePackagePath(value)
-  if (!normalized.startsWith('images/') || normalized.length > 240 || !/\.(?:png|jpe?g)$/iu.test(normalized)) throw new HttpError(400, '画像パスの形式が不正です。')
+  if (!normalized.startsWith('images/') || normalized.split('/').length !== 2 || normalized.length > 240 || !/\.(?:png|jpe?g)$/iu.test(normalized)) throw new HttpError(400, '画像パスの形式が不正です。')
   return normalized
 }
 

@@ -38,8 +38,10 @@ export type GraphFinalManifest = {
     maintenanceRowCount: number
     vehiclelessDocumentCount: number
     excludedDocumentCount: number
+    imageCount?: number
   }
   dataFiles: GraphFinalFileDescriptor[]
+  imageFiles?: GraphFinalFileDescriptor[]
   warnings: string[]
   groups: GraphFinalGroup[]
   documents: GraphFinalManifestDocument[]
@@ -60,6 +62,14 @@ export type GraphFinalDocumentLink = {
   warning: string
 }
 
+export type GraphFinalImageAttachment = {
+  customerId: string
+  vehicleId: string
+  imagePath: string
+  imageSha256: string
+  contentType: 'image/png' | 'image/jpeg'
+}
+
 export type GraphFinalPackageValidation = {
   format: 'graph-final'
   manifest: GraphFinalManifest
@@ -69,9 +79,10 @@ export type GraphFinalPackageValidation = {
   salesRows: string[][]
   maintenanceRows: string[][]
   documents: GraphFinalDocumentLink[]
+  imageAttachments: GraphFinalImageAttachment[]
   excludedDocumentKeys: string[]
   checkedFileCount: number
-  checkedImageCount: 0
+  checkedImageCount: number
   manifestSha256: string
 }
 
@@ -83,8 +94,10 @@ const vehicleHeaders = ['車両ID', '顧客ID', '顧客名', 'メーカー', '�
 const salesHeaders = ['書類ID', '書類番号', '書類種別', 'ステータス', '顧客名', '車名', '登録番号', '発行日', '支払期限', '税率', '小計', '消費税', '合計', '明細', '備考', '明細詳細']
 const maintenanceHeaders = ['書類ID', '書類番号', '書類種別', '入庫区分', 'ステータス', '顧客名', '車名', '登録番号', '入庫日', '出庫予定日', '支払期限', '税率', '小計', '消費税', '合計', '明細', '備考', '明細詳細']
 const requiredDataFiles = ['customers.csv', 'vehicles.csv', 'sales.csv', 'maintenance.csv', 'document-links.json']
+const optionalImageDataFile = 'image-attachments.json'
 const maximumManifestBytes = 2 * 1024 * 1024
 const maximumDataFileBytes = 64 * 1024 * 1024
+const maximumImageBytes = 20 * 1024 * 1024
 const maximumPackageBytes = 1024 * 1024 * 1024
 const maximumCustomers = 10_000
 const maximumVehicles = 10_000
@@ -104,17 +117,20 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
   validateManifestShape(manifest)
 
   const descriptors = manifest.dataFiles
+  const imageDescriptors = manifest.imageFiles ?? []
   const descriptorPaths = new Set<string>()
   let totalBytes = manifestFile.size
   for (const descriptor of descriptors) {
     const path = await verifyDescriptor(descriptor, files, descriptorPaths)
     totalBytes += descriptor.sizeBytes
-    if (!requiredDataFiles.includes(path)) throw validationError(`登録前パッケージに許可されていないファイルがあります: ${path}`)
+    if (!requiredDataFiles.includes(path) && path !== optionalImageDataFile) throw validationError(`登録前パッケージに許可されていないファイルがあります: ${path}`)
   }
-  if (descriptors.length !== requiredDataFiles.length || requiredDataFiles.some((path) => !descriptorPaths.has(path))) {
+  if (descriptors.length !== requiredDataFiles.length + (imageDescriptors.length > 0 ? 1 : 0) || requiredDataFiles.some((path) => !descriptorPaths.has(path)) || (imageDescriptors.length > 0) !== descriptorPaths.has(optionalImageDataFile)) {
     throw validationError('Gate 8Aの登録前パッケージには5つのデータファイルが必要です。')
   }
-  if (files.size !== descriptors.length + 1) throw validationError('登録前パッケージにマニフェストへ記載されていないファイルがあります。')
+  const verifiedImageDescriptors = await verifyImageDescriptors(imageDescriptors, files, new Set<string>(), totalBytes)
+  totalBytes += verifiedImageDescriptors.totalBytes
+  if (files.size !== descriptors.length + verifiedImageDescriptors.descriptors.length + 1) throw validationError('登録前パッケージにマニフェストへ記載されていないファイルがあります。')
   if (totalBytes > maximumPackageBytes) throw validationError('パッケージの合計サイズが上限を超えています。')
 
   const customersFile = requireFile(files, 'customers.csv')
@@ -128,9 +144,18 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
   const maintenanceRows = parseRows(await readUtf8(maintenanceFile), maintenanceHeaders, 'maintenance.csv', maximumDocuments)
   const parsedLinks = parseDocumentLinks(parseJson<unknown>(await readUtf8(linksFile), 'document-links.json'))
   const documentLinks = parsedLinks.documents
+  const imageAttachmentsFile = files.get(optionalImageDataFile)
 
   const customerIds = validateCustomers(customerRows)
   const vehicleIndex = validateVehicles(vehicleRows, customerIds)
+  if (verifiedImageDescriptors.descriptors.length > 0 && !imageAttachmentsFile) throw validationError('画像対応表がありません。')
+  const imageAttachments = verifiedImageDescriptors.descriptors.length > 0
+    ? parseGraphFinalImageAttachments(
+        parseJson<unknown>(await readUtf8(imageAttachmentsFile as File), optionalImageDataFile),
+        verifiedImageDescriptors.byPath,
+        customerIds,
+        vehicleIndex.customerByVehicleId)
+    : []
   const vehicleIds = vehicleIndex.ids
   for (const [index, row] of customerRows.entries()) {
     const expected = parseNonNegativeInteger(row[9])
@@ -143,6 +168,7 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
   validateManifestDocuments(manifest.documents, documentLinks)
   if (!sameStringSet(parsedLinks.excludedDocumentKeys, manifest.excludedDocumentKeys)) throw validationError('manifest.jsonとdocument-links.jsonの除外書類一覧が一致しません。')
   validateSummary(manifest.summary, customerRows, vehicleRows, salesRows, maintenanceRows, documentLinks, manifest.excludedDocumentKeys)
+  if (manifest.summary.imageCount !== undefined && manifest.summary.imageCount !== imageAttachments.length) throw validationError(`マニフェストの画像件数が一致しません: ${manifest.summary.imageCount} / ${imageAttachments.length}`)
 
   const excludedDocumentKeys = validateExcludedDocumentKeys(manifest.excludedDocumentKeys, documentLinks)
   return {
@@ -154,9 +180,10 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
     salesRows,
     maintenanceRows,
     documents: documentLinks,
+    imageAttachments,
     excludedDocumentKeys,
-    checkedFileCount: descriptors.length + 1,
-    checkedImageCount: 0,
+    checkedFileCount: descriptors.length + verifiedImageDescriptors.descriptors.length + 1,
+    checkedImageCount: verifiedImageDescriptors.descriptors.length,
     manifestSha256: await sha256(manifestFile),
   }
 }
@@ -164,8 +191,10 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
 function validateManifestShape(manifest: GraphFinalManifest) {
   if (manifest.version !== 1 || manifest.kind !== 'abacus-export-import-final-package' || manifest.status !== 'registration-preview') throw validationError('Gate 8Aのregistration-previewパッケージではありません。')
   if (!manifest.summary || !Number.isSafeInteger(manifest.summary.customerRowCount) || !Number.isSafeInteger(manifest.summary.vehicleRowCount) || !Number.isSafeInteger(manifest.summary.salesRowCount) || !Number.isSafeInteger(manifest.summary.maintenanceRowCount) || !Number.isSafeInteger(manifest.summary.vehiclelessDocumentCount) || !Number.isSafeInteger(manifest.summary.excludedDocumentCount)) throw validationError('マニフェストの集計情報が不正です。')
-  if (!Array.isArray(manifest.dataFiles) || !Array.isArray(manifest.groups) || !Array.isArray(manifest.documents) || !Array.isArray(manifest.excludedDocumentKeys) || !Array.isArray(manifest.warnings)) throw validationError('マニフェストの配列項目が不正です。')
+  if (manifest.summary.imageCount !== undefined && (!Number.isSafeInteger(manifest.summary.imageCount) || manifest.summary.imageCount < 0)) throw validationError('マニフェストの画像件数が不正です。')
+  if (!Array.isArray(manifest.dataFiles) || (manifest.imageFiles !== undefined && !Array.isArray(manifest.imageFiles)) || !Array.isArray(manifest.groups) || !Array.isArray(manifest.documents) || !Array.isArray(manifest.excludedDocumentKeys) || !Array.isArray(manifest.warnings)) throw validationError('マニフェストの配列項目が不正です。')
   if (manifest.groups.length === 0 || manifest.groups.length > maximumCustomers || manifest.documents.length > maximumDocuments || manifest.excludedDocumentKeys.length > maximumDocuments) throw validationError('マニフェストの件数が上限を超えています。')
+  if ((manifest.imageFiles?.length ?? 0) > maximumDocuments) throw validationError('マニフェストの画像件数が上限を超えています。')
 }
 
 async function verifyDescriptor(descriptor: GraphFinalFileDescriptor, files: PackageFileMap, checkedPaths: Set<string>) {
@@ -177,6 +206,45 @@ async function verifyDescriptor(descriptor: GraphFinalFileDescriptor, files: Pac
   if (!file) throw validationError(`パッケージ内に記載ファイルがありません: ${path}`)
   if (file.size !== descriptor.sizeBytes || file.size > maximumDataFileBytes) throw validationError(`ファイルサイズが一致しません: ${path}`)
   return verifySha256(file, descriptor.sha256, path)
+}
+
+async function verifyImageDescriptors(descriptors: GraphFinalFileDescriptor[], files: PackageFileMap, checkedPaths: Set<string>, initialBytes: number) {
+  let totalBytes = 0
+  const byPath = new Map<string, GraphFinalFileDescriptor>()
+  for (const descriptor of descriptors) {
+    if (!descriptor || typeof descriptor !== 'object' || typeof descriptor.fileName !== 'string' || !Number.isSafeInteger(descriptor.sizeBytes) || descriptor.sizeBytes <= 0 || descriptor.sizeBytes > maximumImageBytes || typeof descriptor.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(descriptor.sha256)) throw validationError('マニフェストの画像記述が不正です。')
+    const path = normalizePackagePath(descriptor.fileName)
+    if (!path.startsWith('images/') || path.split('/').length !== 2 || checkedPaths.has(path)) throw validationError(`マニフェストの画像記述が不正です: ${path || '(空欄)'}`)
+    checkedPaths.add(path)
+    const file = files.get(path)
+    if (!file) throw validationError(`パッケージ内に記載画像がありません: ${path}`)
+    if (file.size !== descriptor.sizeBytes || file.size > maximumImageBytes) throw validationError(`画像サイズが一致しません: ${path}`)
+    await verifySha256(file, descriptor.sha256, path)
+    totalBytes += file.size
+    if (initialBytes + totalBytes > maximumPackageBytes) throw validationError('パッケージの合計サイズが上限を超えています。')
+    byPath.set(path, { ...descriptor, fileName: path })
+  }
+  return { descriptors, byPath, totalBytes }
+}
+
+function parseGraphFinalImageAttachments(value: unknown, imageFiles: Map<string, GraphFinalFileDescriptor>, customerIds: Set<string>, customerByVehicleId: Map<string, string>) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw validationError('image-attachments.jsonの形式が不正です。')
+  const document = value as Record<string, unknown>
+  if (document.version !== 1 || document.kind !== 'abacus-web-import-image-attachments' || document.status !== 'manual-upload-required' || !Array.isArray(document.attachments)) throw validationError('image-attachments.jsonの種別または添付一覧が不正です。')
+  if (document.attachments.length !== imageFiles.size || document.attachments.length > maximumDocuments) throw validationError('画像対応表とマニフェストの画像件数が一致しません。')
+  const paths = new Set<string>()
+  return document.attachments.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw validationError(`画像対応表の${index + 1}件目が不正です。`)
+    const row = item as Record<string, unknown>
+    const customerId = textValue(row.customerId)
+    const vehicleId = textValue(row.vehicleId)
+    const imagePath = normalizePackagePath(row.imagePath)
+    const imageSha256 = textValue(row.imageSha256).toUpperCase()
+    const contentType = textValue(row.contentType)
+    if (!customerIds.has(customerId) || !customerByVehicleId.has(vehicleId) || customerByVehicleId.get(vehicleId) !== customerId || !imageFiles.has(imagePath) || imageFiles.get(imagePath)?.sha256.toUpperCase() !== imageSha256 || (contentType !== 'image/png' && contentType !== 'image/jpeg') || paths.has(imagePath)) throw validationError(`画像対応表の参照先が不正です: ${imagePath || '(空欄)'}`)
+    paths.add(imagePath)
+    return { customerId, vehicleId, imagePath, imageSha256, contentType } satisfies GraphFinalImageAttachment
+  })
 }
 
 async function verifySha256(file: File, expected: string, path: string) {

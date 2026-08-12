@@ -75,6 +75,7 @@ public partial class MainWindow : Window
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
     private string? legacyGraphFinalPackagePath;
+    private string? legacyGraphImageRegistrationPreviewPath;
     private CancellationTokenSource? legacyExportDetectionCancellation;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
@@ -3045,10 +3046,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var imagePackageSummary = string.IsNullOrWhiteSpace(legacyGraphImageRegistrationPreviewPath)
+            ? "画像登録前パッケージは指定しません。"
+            : $"画像登録前パッケージも車両識別子を再照合して含めます。\n{legacyGraphImageRegistrationPreviewPath}";
         var confirmation = MessageBox.Show(
             this,
             "確定した顧客統合・書類紐付けを登録前パッケージへ出力しますか？\n\n" +
             "顧客CSV・車両CSV・販売CSV・整備CSV・書類リンク・除外一覧を新規フォルダーへ保存します。\n" +
+            imagePackageSummary + "\n" +
             "Web API、D1、画像アップロード、元CSV・ABACUSフォルダーの変更は行いません。",
             "登録前パッケージの作成",
             MessageBoxButton.YesNo,
@@ -3073,9 +3078,12 @@ public partial class MainWindow : Window
             var result = await legacyGraphFinalPackageStore.CreateAsync(
                 legacyExportCandidateGraphResult,
                 snapshot,
-                dialog.FolderName);
+                dialog.FolderName,
+                legacyGraphImageRegistrationPreviewPath);
             LegacyGraphFinalPackageStatusText.Text =
-                "グラフ確定後の登録前パッケージを作成しました。Web API・DB・画像アップロードはまだ行っていません。";
+                result.ImageCount > 0
+                    ? "グラフ確定後の登録前パッケージを作成しました。画像も再検証して同梱済みです。Web API・DB・画像アップロードはまだ行っていません。"
+                    : "グラフ確定後の登録前パッケージを作成しました。Web API・DB・画像アップロードはまだ行っていません。";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#17643A");
             legacyGraphFinalPackagePath = result.PackagePath;
             LegacyGraphOpenFinalPackageButton.IsEnabled = true;
@@ -3090,9 +3098,10 @@ public partial class MainWindow : Window
                 $"販売CSV: {result.SalesCsvPath}\n" +
                 $"整備CSV: {result.MaintenanceCsvPath}\n" +
                 $"書類リンク: {result.DocumentLinksPath}\n" +
+                (result.ImageAttachmentsPath is null ? "" : $"画像対応表: {result.ImageAttachmentsPath}\n") +
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / " +
                 $"販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
-                $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件\n" +
+                $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
@@ -3143,6 +3152,43 @@ public partial class MainWindow : Window
         {
             LegacyGraphFinalPackageStatusText.Text = $"保存先フォルダーを開けません: {exception.Message}";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+        }
+    }
+
+    private void LegacyGraphSelectImageRegistrationPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "グラフ確定パッケージへ含める画像登録前パッケージを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dialog.FolderName));
+        if (!Directory.Exists(Path.Combine(folder, "images")) || !File.Exists(Path.Combine(folder, "manifest.json")))
+        {
+            LegacyGraphImageRegistrationPreviewStatusText.Text =
+                "画像登録前パッケージを確認できません。manifest.jsonとimagesフォルダーが必要です。";
+            LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#A61B1B");
+            return;
+        }
+
+        legacyGraphImageRegistrationPreviewPath = folder;
+        LegacyGraphImageRegistrationPreviewPathTextBox.Text = folder;
+        LegacyGraphImageRegistrationPreviewStatusText.Text =
+            "画像登録前パッケージを選択しました。グラフ確定時に車台番号・登録番号を再照合して同じパッケージへ含めます。";
+        LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#1E40AF");
+        legacyGraphFinalPackagePath = null;
+        LegacyGraphOpenFinalPackageButton.IsEnabled = false;
+        LegacyGraphFinalPackageResultText.Text = "";
+        if (legacyGraphImportConfirmed)
+        {
+            LegacyGraphFinalPackageStatusText.Text =
+                "画像登録前パッケージを変更しました。確定内容から登録前パッケージを作り直してください。";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#805B10");
         }
     }
 
@@ -5456,6 +5502,7 @@ public partial class MainWindow : Window
         legacyGraphImportConfirmed = false;
         legacyGraphFinalPackageBusy = false;
         legacyGraphFinalPackagePath = null;
+        legacyGraphImageRegistrationPreviewPath = null;
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -5522,6 +5569,10 @@ public partial class MainWindow : Window
             "次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。";
         LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
         LegacyGraphFinalPackageResultText.Text = "";
+        LegacyGraphImageRegistrationPreviewPathTextBox.Text = "";
+        LegacyGraphImageRegistrationPreviewStatusText.Text =
+            "画像を含める場合だけ、画像登録前パッケージを選択してください。未選択でもグラフ確定は実行できます。";
+        LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
@@ -6889,6 +6940,11 @@ public partial class MainWindow : Window
                 $"マニフェスト: {result.ManifestPath}\n" +
                 $"候補: {result.CandidateCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
+            legacyGraphImageRegistrationPreviewPath = result.PackagePath;
+            LegacyGraphImageRegistrationPreviewPathTextBox.Text = result.PackagePath;
+            LegacyGraphImageRegistrationPreviewStatusText.Text =
+                "画像登録前パッケージをグラフ確定へ自動設定しました。グラフ確定時に車両識別子を再照合して同梱します。";
+            LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#1E40AF");
             WebImportSourcePackageTextBox.Text = result.PackagePath;
             ResetWebImportPreview(clearPaths: false);
             WebImportPreviewStatusText.Text =

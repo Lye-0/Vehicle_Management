@@ -83,6 +83,7 @@ export function AbacusRegistrationPackagePanel() {
   const [registering, setRegistering] = useState(false)
   const [registration, setRegistration] = useState<RegistrationState | null>(null)
   const [finalRegistration, setFinalRegistration] = useState<AbacusGraphFinalRegistrationResult | null>(null)
+  const [finalImageFailures, setFinalImageFailures] = useState<string[]>([])
   const [registrationError, setRegistrationError] = useState('')
   const [imageProgress, setImageProgress] = useState({ completed: 0, total: 0 })
 
@@ -100,6 +101,7 @@ export function AbacusRegistrationPackagePanel() {
     setConfirmation('')
     setRegistration(null)
     setFinalRegistration(null)
+    setFinalImageFailures([])
     setRegistrationError('')
     setImageProgress({ completed: 0, total: 0 })
     setMessage('フォルダー内のマニフェスト・CSV・画像を検証しています…')
@@ -210,6 +212,7 @@ export function AbacusRegistrationPackagePanel() {
     const salesFile = finalValidation.files.get('sales.csv')
     const maintenanceFile = finalValidation.files.get('maintenance.csv')
     const linksFile = finalValidation.files.get('document-links.json')
+    const imageAttachmentsFile = finalValidation.files.get('image-attachments.json')
     if (!manifestFile || !customersFile || !vehiclesFile || !salesFile || !maintenanceFile || !linksFile) {
       setRegistrationError('グラフ確定後パッケージに登録用ファイルが揃っていません。')
       setRegistering(false)
@@ -223,11 +226,41 @@ export function AbacusRegistrationPackagePanel() {
       formData.append('sales', salesFile, 'sales.csv')
       formData.append('maintenance', maintenanceFile, 'maintenance.csv')
       formData.append('documentLinks', linksFile, 'document-links.json')
+      if (finalValidation.imageAttachments.length > 0 && imageAttachmentsFile) formData.append('imageAttachments', imageAttachmentsFile, 'image-attachments.json')
       formData.append('manifestSha256', finalValidation.manifestSha256)
       formData.append('confirmation', confirmation)
       const result = await commitAbacusGraphFinalRegistration(formData)
       setFinalRegistration(result)
-      setMessage(`顧客・車両・販売書類・整備書類の登録が完了しました。車両なし書類は${result.vehiclelessDocumentCount}件です。`)
+      const imageAttachments = finalValidation.imageAttachments
+      setImageProgress({ completed: 0, total: imageAttachments.length })
+      const failedImages: string[] = []
+      for (const attachment of imageAttachments) {
+        const imagePath = attachment.imagePath
+        const file = finalValidation.files.get(imagePath)
+        if (!file) {
+          failedImages.push(imagePath)
+          setImageProgress((current) => ({ ...current, completed: current.completed + 1 }))
+          continue
+        }
+        try {
+          await uploadAbacusRegistrationImage({
+            vehicleId: attachment.vehicleId,
+            customerId: attachment.customerId,
+            imagePath,
+            imageSha256: attachment.imageSha256,
+            manifestSha256: finalValidation.manifestSha256,
+            file,
+          })
+        } catch {
+          failedImages.push(imagePath)
+        } finally {
+          setImageProgress((current) => ({ ...current, completed: current.completed + 1 }))
+        }
+      }
+      setFinalImageFailures(failedImages)
+      setMessage(failedImages.length > 0
+        ? `顧客・車両・書類は登録済みです。画像は${imageAttachments.length - failedImages.length}/${imageAttachments.length}件まで処理しました。失敗分は同じ確認操作で再試行できます。`
+        : `顧客・車両・販売書類・整備書類の登録と画像処理が完了しました。車両なし書類は${result.vehiclelessDocumentCount}件です。`)
     } catch (reason: unknown) {
       setRegistrationError(reason instanceof Error ? reason.message : 'ABACUSのグラフ確定データを登録できませんでした。')
       setMessage('ABACUSのグラフ確定データを登録できませんでした。')
@@ -271,7 +304,7 @@ export function AbacusRegistrationPackagePanel() {
       {registration && <div className={`abacus-registration-result${registration.failedImages.length > 0 ? ' is-warning' : ''}`}><strong>{registration.failedImages.length > 0 ? '顧客・車両登録済み（一部画像要再試行）' : 'ABACUS登録が完了しました'}</strong><span>顧客: 新規{registration.commit.customers.imported}件 / 更新{registration.commit.customers.updated}件</span><span>車両: 新規{registration.commit.vehicles.imported}件 / 更新{registration.commit.vehicles.updated}件</span><span>画像: 新規{registration.uploadedImageCount}件 / 既存{registration.alreadyUploadedImageCount}件 / 失敗{registration.failedImages.length}件</span>{registration.failedImages.length > 0 && <small>{registration.failedImages.slice(0, 5).join('、')}</small>}</div>}
       <div className="abacus-package-no-commit"><ShieldCheck size={16} /><span>{registration ? 'このパッケージの顧客・車両登録と画像処理の結果を表示しています。' : '登録ボタンを押すまでは顧客・車両の登録、画像アップロード、Web APIのcommitは行いません。'}</span></div>
     </>}
-    {finalValidation && <GraphFinalPackagePreview validation={finalValidation} confirmation={confirmation} registering={registering} registration={finalRegistration} onConfirmationChange={setConfirmation} onRegister={() => void handleRegistration()} />}
+    {finalValidation && <GraphFinalPackagePreview validation={finalValidation} confirmation={confirmation} registering={registering} registration={finalRegistration} imageProgress={imageProgress} imageFailures={finalImageFailures} onConfirmationChange={setConfirmation} onRegister={() => void handleRegistration()} />}
   </section>
 }
 
@@ -279,7 +312,7 @@ function ApiPreviewSummary({ label, preview }: { label: string; preview: CsvImpo
   return <div className="abacus-package-api-card"><strong>{label}</strong><span>全 {preview.totalRows}行</span><span className={preview.errors.length ? 'is-warning' : 'is-success'}>{preview.errors.length ? `要確認 ${preview.errors.length}件` : '入力エラーなし'}</span>{preview.errors.slice(0, 3).map((error) => <small key={`${error.row}-${error.message}`}>{error.row}行目: {error.message}</small>)}</div>
 }
 
-function GraphFinalPackagePreview({ validation, confirmation, registering, registration, onConfirmationChange, onRegister }: { validation: GraphFinalPackageValidation; confirmation: string; registering: boolean; registration: AbacusGraphFinalRegistrationResult | null; onConfirmationChange: (value: string) => void; onRegister: () => void }) {
+function GraphFinalPackagePreview({ validation, confirmation, registering, registration, imageProgress, imageFailures, onConfirmationChange, onRegister }: { validation: GraphFinalPackageValidation; confirmation: string; registering: boolean; registration: AbacusGraphFinalRegistrationResult | null; imageProgress: { completed: number; total: number }; imageFailures: string[]; onConfirmationChange: (value: string) => void; onRegister: () => void }) {
   const { manifest, documents } = validation
   const customerVehicleCounts = new Map<string, number>()
   for (const row of validation.vehicleRows) customerVehicleCounts.set(row[1], (customerVehicleCounts.get(row[1]) ?? 0) + 1)
@@ -291,6 +324,7 @@ function GraphFinalPackagePreview({ validation, confirmation, registering, regis
       <span>整備書類 {formatCount(validation.maintenanceRows.length)}件</span>
       <span className="is-vehicleless">車両なし書類 {formatCount(documents.filter((document) => document.vehicleless).length)}件</span>
       <span className="is-excluded">除外書類 {formatCount(validation.excludedDocumentKeys.length)}件</span>
+      <span>画像 {formatCount(validation.checkedImageCount)}件</span>
       <span>検証ファイル {formatCount(validation.checkedFileCount)}件</span>
     </div>
     <div className="abacus-package-meta">
@@ -300,8 +334,8 @@ function GraphFinalPackagePreview({ validation, confirmation, registering, regis
     </div>
     <div className="abacus-package-groups"><h3>確定済み顧客グループ（先頭20件）</h3><div className="abacus-package-table graph-final-groups"><div className="abacus-package-row is-head"><span>顧客名</span><span>顧客ID</span><span>車両 / 起源</span></div>{manifest.groups.slice(0, 20).map((group) => <div className="abacus-package-row" key={group.groupKey}><span>{group.customerName}</span><span title={group.customerId}>{group.customerId}</span><span>{customerVehicleCounts.get(group.customerId) ?? 0}台 / {group.origin === 'single' ? '単独' : group.origin}</span></div>)}</div></div>
     <div className="abacus-package-groups"><h3>書類プレビュー（先頭30件）</h3><div className="abacus-package-table graph-final-documents"><div className="abacus-package-row is-head"><span>種別 / 番号</span><span>顧客</span><span>車両・出典</span></div>{documents.slice(0, 30).map((document) => <div className={`abacus-package-row${document.vehicleless ? ' is-vehicleless' : ''}`} key={document.documentId}><span>{document.documentKind} #{document.documentNumber}</span><span>{document.customerName}</span><span>{document.vehicleless ? '車両：なし' : `車両：${document.vehicleName || '未設定'}`} / {document.sourceLocation}</span></div>)}</div></div>
-    {!registration && <div className="abacus-registration-action"><h3>最終確認と登録</h3><p>確認済みの顧客・車両・販売書類・整備書類をWebへ登録します。車両情報のない書類は顧客だけに紐づき、画面上では「車両：なし」と表示されます。未確定トレイから除外した書類は登録されません。</p><label><span>確認文字列</span><input type="text" value={confirmation} onChange={(event) => onConfirmationChange(event.target.value)} placeholder={registrationConfirmationText} disabled={registering} /></label><button className="button button-primary" type="button" disabled={registering || confirmation !== registrationConfirmationText} onClick={onRegister}>{registering ? '登録中…' : '最終確認して登録を実行'}</button><small>実行には確認文字列「{registrationConfirmationText}」の入力が必要です。</small></div>}
-    {registration && <div className="abacus-registration-result"><strong>ABACUSグラフ確定データの登録が完了しました</strong><span>顧客: 新規{registration.customers.imported}件 / 既存{registration.customers.updated}件</span><span>車両: 新規{registration.vehicles.imported}件 / 既存{registration.vehicles.updated}件</span><span>販売書類: {registration.salesCount}件 / 整備書類: {registration.maintenanceCount}件 / 車両なし: {registration.vehiclelessDocumentCount}件</span><span>除外: {registration.excludedDocumentCount}件</span>{registration.numberAdjustedDocumentCount > 0 && <span>重複番号の枝番付与: {registration.numberAdjustedDocumentCount}件（元番号は備考に記録）</span>}{registration.amountDefaultedDocumentCount > 0 && <span>金額未設定を計算して登録: {registration.amountDefaultedDocumentCount}件（元データに金額なし）</span>}</div>}
+    {(!registration || imageFailures.length > 0) && <div className="abacus-registration-action"><h3>{registration ? '失敗した画像を再試行' : '最終確認と登録'}</h3><p>{registration ? '顧客・車両・書類は登録済みです。失敗した画像だけを、同じパッケージから再送信します。' : '確認済みの顧客・車両・販売書類・整備書類をWebへ登録します。車両情報のない書類は顧客だけに紐づき、画面上では「車両：なし」と表示されます。未確定トレイから除外した書類は登録されません。画像がある場合は顧客・車両登録後に同じパッケージからアップロードします。'}</p><label><span>確認文字列</span><input type="text" value={confirmation} onChange={(event) => onConfirmationChange(event.target.value)} placeholder={registrationConfirmationText} disabled={registering} /></label><button className="button button-primary" type="button" disabled={registering || confirmation !== registrationConfirmationText} onClick={onRegister}>{registering ? imageProgress.total > 0 ? `登録中…画像 ${imageProgress.completed}/${imageProgress.total}` : '登録中…' : registration ? '画像の再試行' : '最終確認して登録を実行'}</button><small>実行には確認文字列「{registrationConfirmationText}」の入力が必要です。</small></div>}
+    {registration && <div className={`abacus-registration-result${imageFailures.length > 0 ? ' is-warning' : ''}`}><strong>{imageFailures.length > 0 ? 'ABACUSグラフ確定データを登録（一部画像要再試行）' : 'ABACUSグラフ確定データの登録が完了しました'}</strong><span>顧客: 新規{registration.customers.imported}件 / 既存{registration.customers.updated}件</span><span>車両: 新規{registration.vehicles.imported}件 / 既存{registration.vehicles.updated}件</span><span>販売書類: {registration.salesCount}件 / 整備書類: {registration.maintenanceCount}件 / 車両なし: {registration.vehiclelessDocumentCount}件</span><span>画像: {registration.imageCount - imageFailures.length}/{registration.imageCount}件</span><span>除外: {registration.excludedDocumentCount}件</span>{registration.numberAdjustedDocumentCount > 0 && <span>重複番号の枝番付与: {registration.numberAdjustedDocumentCount}件（元番号は備考に記録）</span>}{registration.amountDefaultedDocumentCount > 0 && <span>金額未設定を計算して登録: {registration.amountDefaultedDocumentCount}件（元データに金額なし）</span>}{imageFailures.length > 0 && <small>{imageFailures.slice(0, 5).join('、')}</small>}</div>}
     <div className="abacus-package-no-commit"><ShieldCheck size={16} /><span>{registration ? 'このパッケージの顧客・車両・書類登録結果を表示しています。' : '登録ボタンを押すまでは顧客・車両・書類の登録、画像アップロード、Web APIのcommitは行いません。'}</span></div>
   </>
 }
