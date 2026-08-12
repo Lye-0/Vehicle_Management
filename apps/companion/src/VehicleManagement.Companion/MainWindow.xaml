@@ -940,8 +940,20 @@
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
-                                   Text="6B補足2. 顧客・車両・書類のグラフ型確認" />
+                        <Grid Margin="0,26,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                       VerticalAlignment="Center"
+                                       Text="6B補足2. 顧客・車両・書類のグラフ型確認" />
+                            <Button x:Name="LegacyGraphApproveAllMergeButton" Grid.Column="1"
+                                    Style="{StaticResource LegacyGraphApproveButton}"
+                                    Content="統合候補を一括承認" IsEnabled="False"
+                                    ToolTip="顧客情報プレビュー済みの候補をまとめてキャンバス承認します。未保存の候補は確認後に既定値で自動作成できます。"
+                                    Click="LegacyGraphApproveAllMergeButton_Click" />
+                        </Grid>
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
                                    Text="再検証済み候補パッケージを顧客・車両・書類の関係として表示します。実線は自動判定、点線は要確認・未一致・除外です。書類の手動仮紐付けは画面上で確認できますが、元CSVやABACUSフォルダーは変更しません。" />
                         <TextBlock x:Name="LegacyGraphStatusText" Foreground="#52647A" TextWrapping="Wrap"
