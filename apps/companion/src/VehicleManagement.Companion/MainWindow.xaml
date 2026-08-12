@@ -383,7 +383,7 @@
                                 <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                            Text="Gate 10. ABACUS画像を一括抽出・自動照合" />
                                 <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="選択中のABACUSフォルダー内にある標準PNG/JPEGをまとめて検証し、ファイル名の車台番号・登録番号を車両一覧CSVへ照合します。一意に一致した画像だけを登録前パッケージへ含め、複数候補・未照合・抽出不可は別レポートへ分離します。UCSコンテナの推測分割や原本への書き込みは行いません。" />
+                                           Text="選択中のABACUSフォルダー内にある標準PNG/JPEGをまとめて検証し、ファイル名の車台番号・登録番号を車両一覧CSVへ照合します。UCS内のJPEG候補は診断しますが、FileMaker内部ブロックをそのまま画像として保存しません。均一色の仮画像や壊れた候補は抽出不可としてレポートに残し、実画像の一括取得は画像表示画面のキャプチャまたは正式なコンテナ解析で行います。原本への書き込みは行いません。" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="180" />

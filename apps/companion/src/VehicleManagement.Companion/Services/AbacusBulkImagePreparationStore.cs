@@ -419,7 +419,9 @@ public sealed class AbacusBulkImagePreparationStore
 
             if (embeddedRejectedCount > 0)
             {
-                warnings.Add($"UCS内部JPEG候補のうち{embeddedRejectedCount:N0}件は画像として検証できず、登録前候補へ含めていません。");
+                warnings.Add(
+                    $"UCS内部JPEG候補のうち{embeddedRejectedCount:N0}件は実画像として検証できず、登録前候補へ含めていません。" +
+                    "灰色・均一色の仮画像を保存しないための安全措置です。実画像が必要な場合は画像表示画面のキャプチャ、または正式なFileMakerコンテナ解析を使用してください。");
             }
 
             if (duplicateCount > 0)
@@ -834,6 +836,8 @@ public sealed class AbacusBulkImagePreparationStore
         {
             throw new InvalidDataException("UCS内部JPEGの画素数が許容範囲を超えています。");
         }
+
+        DecodedImageContentValidator.EnsureHasVisualContent(frame, "UCS内部JPEG");
 
         return new ValidatedImage(
             segment.Length,

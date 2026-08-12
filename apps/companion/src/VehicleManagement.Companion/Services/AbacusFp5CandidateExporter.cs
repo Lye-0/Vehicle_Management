@@ -380,6 +380,8 @@ public sealed class AbacusFp5CandidateExporter
             throw new InvalidDataException("JPEG候補の画像寸法を確認できません。");
         }
 
+        DecodedImageContentValidator.EnsureHasVisualContent(frame, "JPEG候補");
+
         return (frame.PixelWidth, frame.PixelHeight);
     }
 
