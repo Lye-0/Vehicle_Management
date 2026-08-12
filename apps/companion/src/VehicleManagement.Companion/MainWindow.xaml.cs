@@ -2883,7 +2883,7 @@ public partial class MainWindow : Window
         EndLegacyGraphConnectionPreview();
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
-        LegacyGraphDragPreviewCanvas.Children.Clear();
+        LegacyGraphPageDragPreviewCanvas.Children.Clear();
         LegacyGraphBoardGrid.Width = 1120;
         LegacyGraphBoardGrid.Height = 720;
         LegacyGraphCanvas.Width = 1120;
@@ -3923,6 +3923,7 @@ public partial class MainWindow : Window
                                                frameworkElement.Tag is AbacusLegacyExportCandidateGraphDocument document
             ? document
             : null;
+        Mouse.OverrideCursor = null;
         UpdateLegacyGraphInspector(element is FrameworkElement selectedElement ? selectedElement.Tag : null);
         var position = e.GetPosition(LegacyGraphCanvas);
         legacyGraphBlockDragStartPoint = position;
@@ -3938,9 +3939,11 @@ public partial class MainWindow : Window
             elementTop = 0;
         }
 
+        var pageMousePoint = GetLegacyGraphPagePointFromGraph(position);
+        var pageElementPoint = GetLegacyGraphPagePointFromGraph(new Point(elementLeft, elementTop));
         legacyGraphDragOffset = new Point(
-            position.X - elementLeft,
-            position.Y - elementTop);
+            pageMousePoint.X - pageElementPoint.X,
+            pageMousePoint.Y - pageElementPoint.Y);
         element.CaptureMouse();
         e.Handled = true;
     }
@@ -3963,7 +3966,7 @@ public partial class MainWindow : Window
 
         if (legacyGraphBlockDragStarted)
         {
-            UpdateLegacyGraphDragPreviewPosition(position);
+            UpdateLegacyGraphDragPreviewPosition(e.GetPosition(this));
             UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
             e.Handled = true;
         }
@@ -3979,6 +3982,7 @@ public partial class MainWindow : Window
         var document = legacyGraphDocumentCardDragDocument;
         var wasDragging = legacyGraphBlockDragStarted;
         var windowPoint = e.GetPosition(this);
+        Mouse.OverrideCursor = null;
         legacyGraphDraggingElement.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
         legacyGraphDocumentCardDragDocument = null;
@@ -4017,25 +4021,38 @@ public partial class MainWindow : Window
             Opacity = 0.9,
             IsHitTestVisible = false,
         };
-        LegacyGraphDragPreviewCanvas.Width = LegacyGraphCanvas.Width;
-        LegacyGraphDragPreviewCanvas.Height = LegacyGraphCanvas.Height;
-        LegacyGraphDragPreviewCanvas.Children.Add(legacyGraphBlockDragPreview);
+        LegacyGraphPageDragPreviewCanvas.UpdateLayout();
+        LegacyGraphPageDragPreviewCanvas.Children.Add(legacyGraphBlockDragPreview);
         Panel.SetZIndex(legacyGraphBlockDragPreview, 100);
     }
 
-    private void UpdateLegacyGraphDragPreviewPosition(Point position)
+    private Point GetLegacyGraphPagePointFromGraph(Point graphPoint)
+    {
+        var screenPoint = LegacyGraphCanvas.PointToScreen(graphPoint);
+        return LegacyGraphPageDragPreviewCanvas.PointFromScreen(screenPoint);
+    }
+
+    private Point GetLegacyGraphPagePointFromWindow(Point windowPoint)
+    {
+        var screenPoint = PointToScreen(windowPoint);
+        return LegacyGraphPageDragPreviewCanvas.PointFromScreen(screenPoint);
+    }
+
+    private void UpdateLegacyGraphDragPreviewPosition(Point windowPoint)
     {
         if (legacyGraphBlockDragPreview is null)
         {
             return;
         }
 
-        Canvas.SetLeft(legacyGraphBlockDragPreview, Math.Max(0, position.X - legacyGraphDragOffset.X));
-        Canvas.SetTop(legacyGraphBlockDragPreview, Math.Max(0, position.Y - legacyGraphDragOffset.Y));
+        var pagePoint = GetLegacyGraphPagePointFromWindow(windowPoint);
+        Canvas.SetLeft(legacyGraphBlockDragPreview, pagePoint.X - legacyGraphDragOffset.X);
+        Canvas.SetTop(legacyGraphBlockDragPreview, pagePoint.Y - legacyGraphDragOffset.Y);
     }
 
     private void ClearLegacyGraphBlockVisualDrag()
     {
+        Mouse.OverrideCursor = null;
         if (legacyGraphBlockDragPreviewSource is not null)
         {
             legacyGraphBlockDragPreviewSource.Opacity = 1;
@@ -4043,7 +4060,7 @@ public partial class MainWindow : Window
 
         if (legacyGraphBlockDragPreview is not null)
         {
-            LegacyGraphDragPreviewCanvas.Children.Remove(legacyGraphBlockDragPreview);
+            LegacyGraphPageDragPreviewCanvas.Children.Remove(legacyGraphBlockDragPreview);
         }
 
         legacyGraphBlockDragPreview = null;
@@ -4056,6 +4073,7 @@ public partial class MainWindow : Window
         ClearLegacyGraphTrayDropHighlight();
         if (legacyGraphDocumentCardDragDocument is null)
         {
+            Mouse.OverrideCursor = null;
             return;
         }
 
@@ -4065,6 +4083,7 @@ public partial class MainWindow : Window
         {
             legacyGraphTrayDropHighlightList = list;
             list.Opacity = 0.82;
+            Mouse.OverrideCursor = Cursors.Hand;
             return;
         }
 
@@ -4072,7 +4091,11 @@ public partial class MainWindow : Window
             vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle)
         {
             SetLegacyGraphDropHighlight(vehicleBlock);
+            Mouse.OverrideCursor = Cursors.Hand;
+            return;
         }
+
+        Mouse.OverrideCursor = Cursors.Arrow;
     }
 
     private void HandleLegacyGraphDocumentBlockDrop(
@@ -4147,7 +4170,7 @@ public partial class MainWindow : Window
         LegacyGraphUnresolvedMaintenanceList.ItemsSource = null;
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
-        LegacyGraphDragPreviewCanvas.Children.Clear();
+        LegacyGraphPageDragPreviewCanvas.Children.Clear();
         LegacyGraphInspectorTitleText.Text = "顧客を選択してください";
         LegacyGraphInspectorStateText.Text = "";
         LegacyGraphInspectorStateBorder.Background = ToBrush("#F4F7FB");

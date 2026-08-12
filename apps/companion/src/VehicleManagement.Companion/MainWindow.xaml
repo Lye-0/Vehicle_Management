@@ -786,7 +786,8 @@
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Background="Transparent"
                               PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
-                    <StackPanel Margin="24">
+                    <Grid>
+                        <StackPanel x:Name="LegacyGraphPageContent" Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6A. 永続ローカル移行パッケージの準備" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
@@ -1048,8 +1049,6 @@
                                                 DragOver="LegacyGraphCanvas_DragOver"
                                                 DragLeave="LegacyGraphCanvas_DragLeave"
                                                 Drop="LegacyGraphCanvas_Drop" />
-                                            <Canvas x:Name="LegacyGraphDragPreviewCanvas" Width="1120" Height="720"
-                                                    IsHitTestVisible="False" Panel.ZIndex="20" />
                                     </Grid>
                                 </ScrollViewer>
                             </Border>
@@ -1353,7 +1352,11 @@
                             <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
                                        TextWrapping="Wrap" LineHeight="24" />
                         </Border>
-                    </StackPanel>
+                        </StackPanel>
+                        <Canvas x:Name="LegacyGraphPageDragPreviewCanvas"
+                                IsHitTestVisible="False"
+                                Panel.ZIndex="1000" />
+                    </Grid>
                 </ScrollViewer>
             </TabItem>
         </TabControl>
