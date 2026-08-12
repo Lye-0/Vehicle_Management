@@ -1333,9 +1333,18 @@
                                         Content="確定内容から登録前パッケージを作成"
                                         IsEnabled="False"
                                         Click="LegacyGraphCreateFinalPackageButton_Click" />
+                                <Button x:Name="LegacyGraphOpenFinalPackageButton"
+                                        Margin="10,0,0,0"
+                                        HorizontalAlignment="Left"
+                                        Content="作成したフォルダーを開く"
+                                        IsEnabled="False"
+                                        Click="LegacyGraphOpenFinalPackageButton_Click" />
                                 <TextBlock x:Name="LegacyGraphFinalPackageStatusText" Margin="0,8,0,0"
                                            Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="インポート内容を確定すると、確定済みのCSV・書類リンク・除外一覧をパッケージ化できます。" />
+                                           Text="①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。" />
+                                <TextBlock x:Name="LegacyGraphFinalPackageNextStepText" Margin="0,6,0,0"
+                                           Foreground="#1E40AF" TextWrapping="Wrap"
+                                           Text="次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。" />
                                 <Border Margin="0,8,0,0" Padding="10" Background="#FFFFFF" CornerRadius="5">
                                     <TextBlock x:Name="LegacyGraphFinalPackageResultText" Foreground="#36465A"
                                                LineHeight="22" TextWrapping="Wrap" />

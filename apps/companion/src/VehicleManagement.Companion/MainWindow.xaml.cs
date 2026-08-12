@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -73,6 +74,7 @@ public partial class MainWindow : Window
     private bool webImportMappingBusy;
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
+    private string? legacyGraphFinalPackagePath;
     private CancellationTokenSource? legacyExportDetectionCancellation;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
@@ -2899,10 +2901,14 @@ public partial class MainWindow : Window
         }
 
         legacyGraphFinalPackageBusy = true;
+        legacyGraphFinalPackagePath = null;
+        LegacyGraphOpenFinalPackageButton.IsEnabled = false;
         LegacyGraphCreateFinalPackageButton.IsEnabled = false;
         LegacyGraphFinalPackageResultText.Text = "";
         LegacyGraphFinalPackageStatusText.Text = "確定状態・書類リンク・除外一覧を再検証してパッケージを作成しています…";
         LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphFinalPackageNextStepText.Text = "処理中: ファイルの再検証とパッケージ作成が終わるまでお待ちください。";
+        LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#52647A");
         try
         {
             var snapshot = BuildLegacyGraphFinalizationSnapshot();
@@ -2913,6 +2919,11 @@ public partial class MainWindow : Window
             LegacyGraphFinalPackageStatusText.Text =
                 "グラフ確定後の登録前パッケージを作成しました。Web API・DB・画像アップロードはまだ行っていません。";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#17643A");
+            legacyGraphFinalPackagePath = result.PackagePath;
+            LegacyGraphOpenFinalPackageButton.IsEnabled = true;
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: Webアプリの「ABACUS登録前パッケージをプレビュー」で、このフォルダーを選択してください。確認文字列を入力するまでは登録されません。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
             LegacyGraphFinalPackageResultText.Text =
                 $"保存先: {result.PackagePath}\n" +
                 $"マニフェスト: {result.ManifestPath}\n" +
@@ -2934,11 +2945,46 @@ public partial class MainWindow : Window
             LegacyGraphFinalPackageStatusText.Text =
                 $"グラフ確定パッケージを作成できません: {exception.Message}";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: エラー内容を確認し、グラフを再検証してからもう一度パッケージを作成してください。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#A61B1B");
         }
         finally
         {
             legacyGraphFinalPackageBusy = false;
             UpdateLegacyGraphImportConfirmationButton();
+        }
+    }
+
+    private void LegacyGraphOpenFinalPackageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var packagePath = legacyGraphFinalPackagePath;
+        if (string.IsNullOrWhiteSpace(packagePath) || !Directory.Exists(packagePath))
+        {
+            LegacyGraphFinalPackageStatusText.Text =
+                "作成済みパッケージの保存先が見つかりません。もう一度パッケージを作成してください。";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+            LegacyGraphOpenFinalPackageButton.IsEnabled = false;
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = Path.GetFullPath(packagePath),
+                UseShellExecute = true,
+            });
+        }
+        catch (InvalidOperationException exception)
+        {
+            LegacyGraphFinalPackageStatusText.Text = $"保存先フォルダーを開けません: {exception.Message}";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            LegacyGraphFinalPackageStatusText.Text = $"保存先フォルダーを開けません: {exception.Message}";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
         }
     }
 
@@ -3005,7 +3051,8 @@ public partial class MainWindow : Window
     private void UpdateLegacyGraphImportConfirmationButton()
     {
         if (LegacyGraphFinalizeImportButton is null || LegacyGraphFinalizeImportStatusText is null ||
-            LegacyGraphApproveAllMergeButton is null)
+            LegacyGraphApproveAllMergeButton is null || LegacyGraphOpenFinalPackageButton is null ||
+            LegacyGraphFinalPackageNextStepText is null)
         {
             return;
         }
@@ -3018,7 +3065,11 @@ public partial class MainWindow : Window
                 "候補パッケージを読み込むと、顧客統合と書類・ノード操作の完了後に確定できます。";
             LegacyGraphCreateFinalPackageButton.IsEnabled = false;
             LegacyGraphFinalPackageStatusText.Text =
-                "インポート内容を確定すると、確定済みのCSV・書類リンク・除外一覧をパッケージ化できます。";
+                "①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。";
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: 候補パッケージを読み込み、顧客統合・書類・ノードの操作を完了してください。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
+            LegacyGraphOpenFinalPackageButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.Content = "統合候補を一括承認";
             return;
@@ -3033,11 +3084,16 @@ public partial class MainWindow : Window
             LegacyGraphApproveAllMergeButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.Content = "統合候補を一括承認済み";
             LegacyGraphCreateFinalPackageButton.IsEnabled = !legacyGraphFinalPackageBusy;
+            LegacyGraphOpenFinalPackageButton.IsEnabled = !string.IsNullOrWhiteSpace(legacyGraphFinalPackagePath) &&
+                                                           Directory.Exists(legacyGraphFinalPackagePath);
             if (!legacyGraphFinalPackageBusy && string.IsNullOrWhiteSpace(LegacyGraphFinalPackageResultText.Text))
             {
                 LegacyGraphFinalPackageStatusText.Text =
                     "確定内容を登録前パッケージへ保存できます。保存後もWeb API・DB・画像アップロードは行いません。";
                 LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+                LegacyGraphFinalPackageNextStepText.Text =
+                    "次の操作: 「確定内容から登録前パッケージを作成」を押し、保存先を選択してください。";
+                LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
             }
             return;
         }
@@ -3052,6 +3108,7 @@ public partial class MainWindow : Window
         LegacyGraphFinalizeImportButton.IsEnabled = pendingMergeGroupCount == 0 && pendingDocumentCount == 0;
         LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
         LegacyGraphCreateFinalPackageButton.IsEnabled = false;
+        LegacyGraphOpenFinalPackageButton.IsEnabled = false;
         if (pendingMergeGroupCount > 0 || pendingDocumentCount > 0)
         {
             var pendingDetails = new List<string>();
@@ -3068,12 +3125,18 @@ public partial class MainWindow : Window
             LegacyGraphFinalizeImportStatusText.Text =
                 $"確定前に完了してください: {string.Join(" / ", pendingDetails)}。" +
                 (trayCount > 0 ? $" 未確定トレイ {trayCount:N0}件は確定時に除外できます。" : "");
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: 表示された未完了項目を処理してから、「インポート内容を確定」を押してください。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
         }
         else
         {
             LegacyGraphFinalizeImportStatusText.Text = trayCount > 0
                 ? $"確定できます。未確定トレイ {trayCount:N0}件は確認後に今回のインポートから除外します。"
                 : "確定できます。未確定トレイの書類はありません。";
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: 「インポート内容を確定」を押してください。確認後に登録前パッケージ作成ボタンが有効になります。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
         }
     }
 
@@ -5234,6 +5297,7 @@ public partial class MainWindow : Window
         legacyGraphExcludedDocumentKeys.Clear();
         legacyGraphImportConfirmed = false;
         legacyGraphFinalPackageBusy = false;
+        legacyGraphFinalPackagePath = null;
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -5293,8 +5357,12 @@ public partial class MainWindow : Window
         LegacyGraphApproveAllMergeButton.Content = "統合候補を一括承認";
         LegacyGraphCreateFinalPackageButton.IsEnabled = false;
         LegacyGraphFinalPackageStatusText.Text =
-            "インポート内容を確定すると、確定済みのCSV・書類リンク・除外一覧をパッケージ化できます。";
+            "①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。";
         LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphOpenFinalPackageButton.IsEnabled = false;
+        LegacyGraphFinalPackageNextStepText.Text =
+            "次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。";
+        LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
         LegacyGraphFinalPackageResultText.Text = "";
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
