@@ -365,6 +365,7 @@ public sealed class AbacusFp5CandidateExporter
     private static (int Width, int Height) ValidateDecodedJpeg(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        DecodedImageContentValidator.EnsureNotFileMakerBlock(stream, "JPEG候補");
         var decoder = new JpegBitmapDecoder(
             stream,
             BitmapCreateOptions.PreservePixelFormat,

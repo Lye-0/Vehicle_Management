@@ -12,8 +12,59 @@ namespace VehicleManagement.Companion.Services;
 internal static class DecodedImageContentValidator
 {
     private const int MaximumSampleEdge = 96;
-    private const int MaximumDominantColorCount = 8;
-    private const double DominantColorRatio = 0.985;
+    private const double DominantColorRatio = 0.98;
+    private const int MinimumFileMakerBlockLabels = 8;
+
+    public static void EnsureNotFileMakerBlock(ReadOnlySpan<byte> encodedBytes, string sourceLabel)
+    {
+        var labels = CountFileMakerBlockLabels(encodedBytes);
+        if (labels >= MinimumFileMakerBlockLabels)
+        {
+            throw new InvalidDataException(
+                $"{sourceLabel}にFileMaker内部ブロックの反復ヘッダーを検出したため、標準JPEGとして採用できません。" +
+                "UCSの生バイト列をそのまま画像として保存しない安全措置です。");
+        }
+    }
+
+    public static void EnsureNotFileMakerBlock(Stream encodedStream, string sourceLabel)
+    {
+        ArgumentNullException.ThrowIfNull(encodedStream);
+        if (!encodedStream.CanSeek)
+        {
+            throw new InvalidDataException($"{sourceLabel}の形式を検証できません。");
+        }
+
+        var originalPosition = encodedStream.Position;
+        try
+        {
+            encodedStream.Position = 0;
+            var labels = 0;
+            var carry = Array.Empty<byte>();
+            var buffer = new byte[64 * 1024];
+            int read;
+            while ((read = encodedStream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                var combined = new byte[carry.Length + read];
+                carry.CopyTo(combined, 0);
+                Buffer.BlockCopy(buffer, 0, combined, carry.Length, read);
+                labels += CountFileMakerBlockLabels(combined);
+                if (labels >= MinimumFileMakerBlockLabels)
+                {
+                    throw new InvalidDataException(
+                        $"{sourceLabel}にFileMaker内部ブロックの反復ヘッダーを検出したため、標準JPEGとして採用できません。" +
+                        "UCSの生バイト列をそのまま画像として保存しない安全措置です。");
+                }
+
+                carry = combined.Length >= 3
+                    ? combined[^3..]
+                    : combined;
+            }
+        }
+        finally
+        {
+            encodedStream.Position = originalPosition;
+        }
+    }
 
     public static void EnsureHasVisualContent(BitmapSource source, string sourceLabel)
     {
@@ -50,8 +101,10 @@ internal static class DecodedImageContentValidator
         }
 
         var dominantCount = colorCounts.Values.Max();
-        if (colorCounts.Count <= MaximumDominantColorCount &&
-            dominantCount / (double)total >= DominantColorRatio)
+        // Invalid UCS block data often produces a single gray plane with a few
+        // compression/noise colors near its border. The exact color count is
+        // therefore not a reliable discriminator; the dominant-color ratio is.
+        if (dominantCount / (double)total >= DominantColorRatio)
         {
             throw new InvalidDataException(
                 $"{sourceLabel}は均一色のプレースホルダーとして復号されたため、実画像として採用できません。" +
@@ -76,5 +129,22 @@ internal static class DecodedImageContentValidator
             new ScaleTransform(scale, scale));
         transformed.Freeze();
         return transformed;
+    }
+
+    private static int CountFileMakerBlockLabels(ReadOnlySpan<byte> bytes)
+    {
+        var count = 0;
+        for (var index = 0; index <= bytes.Length - 4; index++)
+        {
+            if (bytes[index] == (byte)'J' &&
+                bytes[index + 1] == (byte)'P' &&
+                bytes[index + 2] == (byte)'E' &&
+                bytes[index + 3] == (byte)'G')
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }

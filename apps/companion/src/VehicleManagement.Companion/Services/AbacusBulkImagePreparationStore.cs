@@ -820,6 +820,8 @@ public sealed class AbacusBulkImagePreparationStore
             await stream.ReadExactlyAsync(bytes.AsMemory(), cancellationToken);
         }
 
+        DecodedImageContentValidator.EnsureNotFileMakerBlock(bytes, "UCS内部JPEG");
+
         using var imageStream = new MemoryStream(bytes, writable: false);
         var decoder = BitmapDecoder.Create(
             imageStream,
