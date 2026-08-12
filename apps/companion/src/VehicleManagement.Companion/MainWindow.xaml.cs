@@ -78,6 +78,8 @@ public partial class MainWindow : Window
     // 未接続はキャンバス上で確認中、トレイ移動済みはキャンバスから隠す状態です。
     private readonly HashSet<string> legacyGraphUnconnectedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> legacyGraphTrayDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
+    // 承認確認済みの未確定トレイ書類。トレイからキャンバスへ戻した場合は無効化します。
+    private readonly HashSet<string> legacyGraphExcludedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, LegacyGraphCustomerMergeDraft> legacyGraphCustomerMergeDrafts = new(StringComparer.Ordinal);
     private readonly HashSet<string> legacyGraphAppliedCustomerMergeKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> legacyGraphVirtualCustomerMergeKeys = new(StringComparer.Ordinal);
@@ -640,6 +642,7 @@ public partial class MainWindow : Window
                 legacyGraphManualDocumentLinks.Clear();
                 legacyGraphUnconnectedDocumentKeys.Clear();
                 legacyGraphTrayDocumentKeys.Clear();
+                legacyGraphExcludedDocumentKeys.Clear();
                 legacyGraphCustomerMergeDrafts.Clear();
                 legacyGraphAppliedCustomerMergeKeys.Clear();
                 legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -651,7 +654,7 @@ public partial class MainWindow : Window
                 RefreshLegacyGraphUnresolvedDocumentLists();
                 LegacyGraphStatusText.Text =
                     $"グラフを作成しました。顧客 {graph.Customers.Count:N0}件 / 車両 {graph.Customers.Sum(customer => customer.Vehicles.Count):N0}台 / 書類 {graph.AllDocuments.Count:N0}件。" +
-                    $"未確定車両 {graph.UnresolvedVehicleRows.Count:N0}件。" +
+                    $"未確定車両 {graph.UnresolvedVehicleRows.Count:N0}件 / 未確定トレイ {graph.AllDocuments.Count(IsLegacyGraphDocumentInTray):N0}件。" +
                     $"実線 {graph.SolidLinkCount:N0}件 / 要確認 {graph.ReviewLinkCount:N0}件 / 未確定 {graph.UnmatchedDocumentCount:N0}件。";
                 LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
                 LegacyGraphLegendText.Text =
@@ -1751,6 +1754,9 @@ public partial class MainWindow : Window
                 var hasMergeGroup = TryGetLegacyGraphMergeGroup(mergeKey, out var mergeGroup) &&
                                     mergeGroup.CustomerIds.Count > 1;
                 legacyGraphCustomerMergeDrafts.TryGetValue(mergeKey, out var mergeDraft);
+                var trayDocuments = GetLegacyGraphTrayDocuments(customer);
+                var excludedTrayDocumentCount = trayDocuments.Count(document =>
+                    legacyGraphExcludedDocumentKeys.Contains(GetLegacyDocumentKey(document)));
                 LegacyGraphMergeButton.IsEnabled = hasMergeGroup && !isAppliedMerge;
                 LegacyGraphMergeButton.Content = "顧客情報をプレビュー";
                 LegacyGraphApplyMergePreviewButton.IsEnabled = hasMergeDraft && !isAppliedMerge;
@@ -1785,7 +1791,10 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorStatusText.Text =
                     (isAppliedMerge ? "統合済みキャンバス（画面上のみ）\n" :
                         hasMergeGroup ? "統合候補キャンバス（画面上のみ）\n" : "") +
-                    $"顧客ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件";
+                    $"顧客ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件" +
+                    (trayDocuments.Count > 0
+                        ? $"\n未確定トレイ: {trayDocuments.Count:N0}件（{excludedTrayDocumentCount:N0}件は除外確定 / 残りは承認時に除外）"
+                        : "");
                 LegacyGraphInspectorDetailsText.Text =
                     $"顧客番号: {Fallback(customer.CustomerNumber)}\n" +
                     $"ふりがな: {Fallback(customer.NameKana)}\n" +
@@ -1843,7 +1852,7 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorStatusText.Text = isUnconnectedDocument
                     ? "判定: 未接続（画面上の一時状態）\n車両ノードへ接続するか、書類カードを未確定トレイへ移動してください。"
                     : isTrayDocument
-                        ? $"判定: 未確定トレイ\n候補車両: {document.CandidateSummary}"
+                        ? $"判定: 未確定トレイ\nインポート: {(legacyGraphExcludedDocumentKeys.Contains(GetLegacyDocumentKey(document)) ? "除外確定" : "承認時に除外")}\n候補車両: {document.CandidateSummary}"
                         : isCustomerDirectDocument
                             ? $"判定: 顧客に一意紐付け（車両未確定）\n候補車両: {document.CandidateSummary}\n車両ノードへ接続するか、未確定トレイへ移動してください。"
                         : manualVehicle is null
@@ -2368,6 +2377,7 @@ public partial class MainWindow : Window
         var displayCustomer = GetLegacyGraphDisplayCustomer(customer);
         var unconnectedDocuments = GetLegacyGraphUnconnectedDocuments(displayCustomer).ToArray();
         var vehicleUnresolvedDocuments = GetLegacyGraphCustomerDirectDocuments(displayCustomer).ToArray();
+        var trayDocuments = GetLegacyGraphTrayDocuments(displayCustomer).ToArray();
         if (unconnectedDocuments.Length > 0 || vehicleUnresolvedDocuments.Length > 0)
         {
             var warningCount = unconnectedDocuments.Length + vehicleUnresolvedDocuments.Length;
@@ -2390,6 +2400,33 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (trayDocuments.Length > 0)
+        {
+            var excludedSummary = string.Join(", ", trayDocuments
+                .GroupBy(document => document.Kind, StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => $"{group.Key}{group.Count():N0}件"));
+            var trayApproval = MessageBox.Show(
+                this,
+                $"未確定トレイに{trayDocuments.Length:N0}件の書類が残っています。\n" +
+                $"内訳: {excludedSummary}\n\n" +
+                "これらの書類は今回のインポート対象から除外されます。\n" +
+                "元のCSV・ABACUSフォルダーは変更されません。\n\n" +
+                "このまま統合候補を承認しますか？",
+                "未確定トレイの書類を除外",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (trayApproval != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            foreach (var document in trayDocuments)
+            {
+                legacyGraphExcludedDocumentKeys.Add(GetLegacyDocumentKey(document));
+            }
+        }
+
         legacyGraphAppliedCustomerMergeKeys.Add(mergeKey);
         var sourceCustomer = GetLegacyGraphSourceCustomer(customer);
         RefreshLegacyGraphCustomerList($"group:{mergeKey}");
@@ -2397,8 +2434,9 @@ public partial class MainWindow : Window
         legacyGraphSelectedItem = displayCustomer;
         UpdateLegacyGraphInspector(displayCustomer);
         RenderLegacyGraphCustomer(displayCustomer);
-        LegacyGraphStatusText.Text =
-            "統合候補を承認しました。顧客一覧を緑色で表示しています。元CSV・ABACUSフォルダーは変更していません。";
+        LegacyGraphStatusText.Text = trayDocuments.Length > 0
+            ? $"統合候補を承認しました。顧客一覧を青色で表示しています。未確定トレイの書類{trayDocuments.Length:N0}件は今回のインポートから除外します。元CSV・ABACUSフォルダーは変更していません。"
+            : "統合候補を承認しました。顧客一覧を青色で表示しています。元CSV・ABACUSフォルダーは変更していません。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
     }
 
@@ -2749,14 +2787,20 @@ public partial class MainWindow : Window
         }
 
         var documentKey = GetLegacyDocumentKey(document);
+        InvalidateLegacyGraphApprovalForDocument(document);
         if (vehicleId is null)
         {
             legacyGraphManualDocumentLinks.Remove(documentKey);
+            if (!legacyGraphTrayDocumentKeys.Contains(documentKey))
+            {
+                legacyGraphExcludedDocumentKeys.Remove(documentKey);
+            }
         }
         else
         {
             legacyGraphUnconnectedDocumentKeys.Remove(documentKey);
             legacyGraphTrayDocumentKeys.Remove(documentKey);
+            legacyGraphExcludedDocumentKeys.Remove(documentKey);
         }
 
         var targetCustomer = vehicleId is null
@@ -2787,6 +2831,7 @@ public partial class MainWindow : Window
         string vehicleId)
     {
         var key = GetLegacyDocumentKey(document);
+        InvalidateLegacyGraphApprovalForDocument(document);
         legacyGraphUnconnectedDocumentKeys.Remove(key);
         legacyGraphTrayDocumentKeys.Remove(key);
         var originalVehicle = FindOriginalVehicleForDocument(document);
@@ -2800,6 +2845,18 @@ public partial class MainWindow : Window
             legacyGraphManualDocumentLinks[key] = vehicleId;
         }
         RefreshLegacyGraphAfterManualLink(document, vehicleId);
+    }
+
+    private void InvalidateLegacyGraphApprovalForDocument(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var originalCustomer = FindOriginalCustomerForDocument(document);
+        if (originalCustomer is null)
+        {
+            return;
+        }
+
+        legacyGraphAppliedCustomerMergeKeys.Remove(GetLegacyCustomerMergeKey(originalCustomer));
     }
 
     private void RefreshLegacyGraphUnresolvedDocumentLists()
@@ -2878,6 +2935,26 @@ public partial class MainWindow : Window
             .Where(IsLegacyGraphDocumentUnconnected)
             .Where(document => FindOriginalCustomerForDocument(document) is { } original &&
                                sourceCustomerIds.Contains(original.CustomerId))
+            .ToArray();
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyGraphTrayDocuments(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [];
+        }
+
+        var sourceCustomerIds = GetLegacyGraphCustomerMergeCandidates(customer)
+            .Select(candidate => candidate.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        return legacyExportCandidateGraphResult.AllDocuments
+            .Where(IsLegacyGraphDocumentInTray)
+            .Where(document => FindOriginalCustomerForDocument(document) is { } original &&
+                               sourceCustomerIds.Contains(original.CustomerId))
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
             .ToArray();
     }
 
@@ -4266,6 +4343,7 @@ public partial class MainWindow : Window
         legacyGraphManualDocumentLinks.Clear();
         legacyGraphUnconnectedDocumentKeys.Clear();
         legacyGraphTrayDocumentKeys.Clear();
+        legacyGraphExcludedDocumentKeys.Clear();
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();

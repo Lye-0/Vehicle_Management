@@ -948,7 +948,7 @@
                                    Text="候補パッケージを再検証すると、ここにグラフを表示します。" />
                         <Border Margin="0,10,0,0" Padding="12" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
-                                       Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。" />
+                                       Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。未確定トレイに残した書類は、キャンバス承認時に警告を表示したうえで今回のインポートから除外します。" />
                         </Border>
                         <Grid Margin="0,14,0,0" Height="820">
                             <Grid.ColumnDefinitions>
@@ -1168,7 +1168,7 @@
                         <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="未確定トレイ" />
                         <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="車両・販売書類・整備書類を分けて表示します。中央の書類ブロックをトレイへドラッグすると、元の自動紐付けも一時的に未確定へ戻せます。" />
+                                   Text="車両・販売書類・整備書類を分けて表示します。中央の書類ブロックをトレイへドラッグすると、元の自動紐付けも一時的に未確定へ戻せます。トレイに残した書類は承認時に件数と内訳を確認し、承認後は今回のインポートから除外します。" />
                         <Grid Height="250">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
