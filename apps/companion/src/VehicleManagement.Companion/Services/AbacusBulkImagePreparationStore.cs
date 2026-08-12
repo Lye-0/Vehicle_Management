@@ -44,10 +44,11 @@ public sealed record AbacusBulkImagePreparationResult(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// ABACUSフォルダー内の標準画像と、読み取り対象のabx-*.ucsに埋め込まれた
-/// JPEG候補を一括で検査し、ファイル名またはUCS周辺の車台番号を車両一覧CSVへ
-/// 読み取り専用で照合します。照合が一意な画像だけを既存の画像登録前パッケージへ
-/// まとめ、UCS原本は推測分割・書換えしません。
+/// ABACUSフォルダー内の標準画像を一括で検査し、ファイル名に含まれる車台番号・
+/// 登録番号を車両一覧CSVへ読み取り専用で照合します。UCS内部のJPEG候補は診断レポート
+/// に残しますが、FileMakerコンテナの生データを画像として保存・登録することはありません。
+/// UCS原本は推測分割・書換えせず、実画像の取得は画面キャプチャまたは正式なコンテナ解析
+/// の経路へ分離します。
 /// </summary>
 public sealed class AbacusBulkImagePreparationStore
 {
@@ -222,7 +223,12 @@ public sealed class AbacusBulkImagePreparationStore
                 ValidatedImage validated;
                 try
                 {
-                    validated = await ValidateEmbeddedImageAsync(containerPath, segment, cancellationToken);
+                    // UCS 内部の JPEG 候補は FileMaker のコンテナ内部にある生データです。
+                    // 小さなサムネイルや壊れた境界が偶然 WPF で復号できても、実画像である
+                    // 保証はなく、車両との対応付けを誤る危険があるため Gate 10 では保存しません。
+                    // 将来、正式なコンテナ解析または画面キャプチャ経路を実装した時だけ、
+                    // この分岐を実画像の検証・保存へ置き換えます。
+                    validated = RejectEmbeddedImage();
                 }
                 catch (OperationCanceledException)
                 {
@@ -368,13 +374,13 @@ public sealed class AbacusBulkImagePreparationStore
                 "abacus-image-registration-preview",
                 "preview-only",
                 DateTime.UtcNow,
-                new BulkPreviewSource(sourceRoot, vehicleRoot, "filename-and-ucs-record-identifier-bulk-match"),
+                new BulkPreviewSource(sourceRoot, vehicleRoot, "standard-image-filename-bulk-match"),
                 new BulkPreviewSummary(
                     accepted.Count,
                     candidates.Count(item => item.Status == "review"),
                     candidates.Count(item => item.Status == "not-found"),
                     standardRejectedCount + embeddedRejectedCount,
-                    "標準画像のファイル名、またはUCSレコード領域の車台番号が車両一覧CSVの1行へ一意に一致した画像だけを登録前候補に含めています。"),
+                    "標準PNG/JPEGのファイル名が車両一覧CSVの1行へ一意に一致した画像だけを登録前候補に含めています。UCS内部JPEG候補は診断のみで保存していません。"),
                 accepted.Select(prepared => new BulkPreviewCandidate(
                     prepared.Candidate.CandidateId,
                     prepared.Candidate.PackageImageFileName,
@@ -408,20 +414,16 @@ public sealed class AbacusBulkImagePreparationStore
 
             var reportPath = Path.Combine(packagePath, "image-batch-report.json");
             await WriteAtomicallyAsync(reportPath, reportBytes, cancellationToken);
-            if (sourceFiles.Count == 0 && embeddedImageCount == 0)
+            if (sourceFiles.Count == 0)
             {
-                warnings.Add("ABACUSフォルダー内に標準PNG/JPEG、または検証可能なUCS内部JPEGがありません。原本を変更せず、画像表示キャプチャまたは別形式の解析が必要です。");
-            }
-            else if (embeddedImageCount > 0)
-            {
-                warnings.Add($"UCSコンテナから検証可能なJPEGを{embeddedImageCount:N0}件読み取りました。原本は変更していません。識別子が一意な画像だけを登録前候補へ含めています。");
+                warnings.Add("ABACUSフォルダー内に標準PNG/JPEGがありません。UCS内部JPEG候補は診断のみで保存していないため、実画像が必要な場合は画像表示キャプチャまたは正式なコンテナ解析を使用してください。");
             }
 
             if (embeddedRejectedCount > 0)
             {
                 warnings.Add(
-                    $"UCS内部JPEG候補のうち{embeddedRejectedCount:N0}件は実画像として検証できず、登録前候補へ含めていません。" +
-                    "灰色・均一色の仮画像を保存しないための安全措置です。実画像が必要な場合は画像表示画面のキャプチャ、または正式なFileMakerコンテナ解析を使用してください。");
+                    $"UCS内部JPEG候補{embeddedRejectedCount:N0}件はFileMaker内部コンテナの生データのため、画像として保存・登録していません。" +
+                    "灰色・均一色・ノイズ画像を誤登録しないための安全措置です。実画像が必要な場合は画像表示画面のキャプチャ、または正式なFileMakerコンテナ解析を使用してください。");
             }
 
             if (duplicateCount > 0)
@@ -797,56 +799,8 @@ public sealed class AbacusBulkImagePreparationStore
         marker is 0xC0 or 0xC1 or 0xC2 or 0xC3 or 0xC5 or 0xC6 or 0xC7 or
             0xC9 or 0xCA or 0xCB or 0xCD or 0xCE or 0xCF;
 
-    private static async Task<ValidatedImage> ValidateEmbeddedImageAsync(
-        string path,
-        EmbeddedJpegSegment segment,
-        CancellationToken cancellationToken)
-    {
-        if (segment.Length <= 0 || segment.Length > MaximumImageBytes || segment.Offset < 0)
-        {
-            throw new InvalidDataException("UCS内部JPEGのサイズが許容範囲外です。");
-        }
-
-        var bytes = new byte[checked((int)segment.Length)];
-        await using (var stream = new FileStream(
-                         path,
-                         FileMode.Open,
-                         FileAccess.Read,
-                         FileShare.Read,
-                         1024 * 1024,
-                         FileOptions.Asynchronous | FileOptions.RandomAccess))
-        {
-            stream.Position = segment.Offset;
-            await stream.ReadExactlyAsync(bytes.AsMemory(), cancellationToken);
-        }
-
-        DecodedImageContentValidator.EnsureNotFileMakerBlock(bytes, "UCS内部JPEG");
-
-        using var imageStream = new MemoryStream(bytes, writable: false);
-        var decoder = BitmapDecoder.Create(
-            imageStream,
-            BitmapCreateOptions.PreservePixelFormat,
-            BitmapCacheOption.OnLoad);
-        if (decoder.Frames.Count != 1)
-        {
-            throw new InvalidDataException("UCS内部JPEGを1枚としてデコードできません。");
-        }
-
-        var frame = decoder.Frames[0];
-        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0 ||
-            (long)frame.PixelWidth * frame.PixelHeight > MaximumPixels)
-        {
-            throw new InvalidDataException("UCS内部JPEGの画素数が許容範囲を超えています。");
-        }
-
-        DecodedImageContentValidator.EnsureHasVisualContent(frame, "UCS内部JPEG");
-
-        return new ValidatedImage(
-            segment.Length,
-            frame.PixelWidth,
-            frame.PixelHeight,
-            Convert.ToHexString(SHA256.HashData(bytes)));
-    }
+    private static ValidatedImage RejectEmbeddedImage() => throw new InvalidDataException(
+        "UCS内部JPEGはFileMaker内部コンテナの生データのため、Gate 10では画像として保存しません。正式なコンテナ解析または画面キャプチャが必要です。");
 
     private static async Task<List<VehicleMatch>> FindEmbeddedVehicleMatchesAsync(
         string path,

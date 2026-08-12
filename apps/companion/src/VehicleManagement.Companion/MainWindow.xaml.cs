@@ -398,7 +398,7 @@ public partial class MainWindow : Window
 
         bulkImagePreparationBusy = true;
         UpdateBulkImagePreparationButtonState();
-        BulkImageStatusText.Text = "標準画像とABACUSのUCS内部JPEGを検証し、車両一覧CSVとの一意照合を行っています…";
+        BulkImageStatusText.Text = "標準PNG/JPEGを検証し、UCS内部JPEG候補は保存せず診断レポートへ記録しています…";
         BulkImageStatusText.Foreground = ToBrush("#52647A");
         BulkImageCandidatesGrid.ItemsSource = null;
         try
@@ -421,7 +421,7 @@ public partial class MainWindow : Window
                 ? string.Empty
                 : $"\n注意: {string.Join("\n", result.Warnings)}";
             BulkImageStatusText.Text =
-                $"一括画像パッケージを作成しました。標準画像 {result.SourceImageCount:N0}件 / UCS抽出 {result.EmbeddedImageCount:N0}件 / " +
+                $"一括画像パッケージを作成しました。標準画像 {result.SourceImageCount:N0}件 / UCS保存 {result.EmbeddedImageCount:N0}件 / " +
                 $"一意照合 {result.MatchedCount:N0}件 / 要確認 {result.ReviewCount:N0}件 / " +
                 $"未照合 {result.NotFoundCount:N0}件 / 重複除外 {result.DuplicateCount:N0}件 / 抽出不可 {result.RejectedCount:N0}件。\n" +
                 $"登録前パッケージ: {result.PackagePath}\n" +
