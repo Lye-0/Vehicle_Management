@@ -59,7 +59,7 @@ export type MaintenanceDocument = {
   customerName: string
   phone: string
   customerDetails: MaintenanceCustomerDetails
-  vehicleId: string
+  vehicleId: string | null
   vehicle: string
   plate: string
   mileage: string

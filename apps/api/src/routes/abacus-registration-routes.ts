@@ -1,5 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm'
-import { customers, vehicleFiles, vehicles } from '@vehicle-management/database'
+import { customers, maintenanceDocuments, maintenanceItems, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { requireAdminOrganizationContext } from '../auth/organization'
 import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -12,16 +12,20 @@ import { createB2Storage } from '../storage/b2'
 const registrationCommitPath = '/api/import/abacus-registration/commit'
 const registrationImagePath = '/api/import/abacus-registration/image'
 const confirmationText = 'ABACUS登録を実行'
-const maximumRegistrationBodyBytes = 12 * 1024 * 1024
+const maximumRegistrationBodyBytes = 64 * 1024 * 1024
 const maximumManifestBytes = 1 * 1024 * 1024
-const maximumCsvBytes = 5 * 1024 * 1024
+const maximumCsvBytes = 64 * 1024 * 1024
 const maximumRows = 5_000
 const maximumAttachmentSize = 20 * 1024 * 1024
 const maximumTextCharacters = 500
 const maximumBatchRows = 50
+// maintenance_documents は1行あたり21パラメータを使うため、SQLiteの変数上限（999）を超えない単位にする。
+const maximumMaintenanceDocumentRows = 40
 
 const customerHeaders = ['顧客ID', '顧客番号', '顧客名', 'ふりがな', '電話番号', 'メールアドレス', '郵便番号', '住所', 'メモ', '車両台数']
 const vehicleHeaders = ['車両ID', '顧客ID', '顧客名', 'メーカー', '車名', '型式', '登録番号', '車台番号', '年式', '車検満了日', '走行距離', '車体色', '排気量', 'ミッション', '記録簿', '備考']
+const finalSalesHeaders = ['書類ID', '書類番号', '書類種別', 'ステータス', '顧客名', '車名', '登録番号', '発行日', '支払期限', '税率', '小計', '消費税', '合計', '明細', '備考', '明細詳細']
+const finalMaintenanceHeaders = ['書類ID', '書類番号', '書類種別', '入庫区分', 'ステータス', '顧客名', '車名', '登録番号', '入庫日', '出庫予定日', '支払期限', '税率', '小計', '消費税', '合計', '明細', '備考', '明細詳細']
 
 type RegistrationManifest = {
   version?: unknown
@@ -79,6 +83,72 @@ type ImageAttachment = {
   contentType: string
 }
 
+type GraphFinalManifest = {
+  version?: unknown
+  kind?: unknown
+  status?: unknown
+  summary?: Record<string, unknown>
+  dataFiles?: unknown
+  groups?: unknown
+  documents?: unknown
+  excludedDocumentKeys?: unknown
+}
+
+type GraphFinalDocumentLink = {
+  documentKey: string
+  documentId: string
+  documentKind: '販売書類' | '整備書類'
+  documentNumber: string
+  customerId: string
+  customerName: string
+  vehicleId: string | null
+  vehicleName: string | null
+  vehicleless: boolean
+  sourceLocation: string
+  warning: string
+}
+
+type FinalSalesRow = {
+  id: string
+  number: string
+  type: string
+  status: string
+  customerName: string
+  vehicleName: string
+  registrationNumber: string
+  issuedAt: string
+  dueDate: string | null
+  taxRate: number
+  subtotal: number
+  tax: number
+  total: number
+  itemDescription: string
+  note: string | null
+  details: string
+}
+
+type FinalMaintenanceRow = {
+  id: string
+  number: string
+  type: string
+  category: string
+  status: string
+  customerName: string
+  vehicleName: string
+  registrationNumber: string
+  intakeDate: string | null
+  plannedReleaseDate: string | null
+  dueDate: string | null
+  issuedAt: string
+  taxRate: number
+  subtotal: number
+  tax: number
+  total: number
+  itemDescription: string
+  note: string | null
+  details: string
+}
+
 export async function handleAbacusRegistrationRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/u, '') || '/'
   if (pathname !== registrationCommitPath && pathname !== registrationImagePath) return null
@@ -104,15 +174,17 @@ async function commitRegistration(request: Request, env: Env, database: ReturnTy
   if (textField(formData, 'confirmation') !== confirmationText) throw new HttpError(400, '登録確認文字列が一致しません。')
 
   const manifestFile = requiredFile(formData, 'manifest')
-  const customersFile = requiredFile(formData, 'customers')
-  const vehiclesFile = requiredFile(formData, 'vehicles')
-  const attachmentsFile = requiredFile(formData, 'attachments')
   const requestedManifestSha256 = requiredSha256(textField(formData, 'manifestSha256'), 'マニフェストSHA-256')
   const manifestBytes = new Uint8Array(await manifestFile.arrayBuffer())
   if (manifestBytes.byteLength === 0 || manifestBytes.byteLength > maximumManifestBytes) throw new HttpError(413, 'マニフェストが大きすぎます。')
   const manifestSha256 = await sha256Bytes(manifestBytes)
   if (manifestSha256 !== requestedManifestSha256) throw new HttpError(409, 'マニフェストが画面確認後に変更されています。もう一度読み込んでください。')
   const manifest = parseManifest(await decodeUtf8(manifestBytes))
+  if (isGraphFinalManifest(manifest)) return commitGraphFinalRegistration(formData, env, database, organizationId, manifest, manifestSha256)
+
+  const customersFile = requiredFile(formData, 'customers')
+  const vehiclesFile = requiredFile(formData, 'vehicles')
+  const attachmentsFile = requiredFile(formData, 'attachments')
   const descriptors = validateManifest(manifest)
   await verifyManifestFile(descriptors, customersFile, 'customers.csv')
   await verifyManifestFile(descriptors, vehiclesFile, 'vehicles.csv')
@@ -145,6 +217,340 @@ async function commitRegistration(request: Request, env: Env, database: ReturnTy
     customers: { imported: existing.newCustomerCount, updated: existing.existingCustomerCount },
     vehicles: { imported: existing.newVehicleCount, updated: existing.existingVehicleCount },
   }, 200, env)
+}
+
+async function commitGraphFinalRegistration(
+  formData: FormData,
+  env: Env,
+  database: ReturnType<typeof createDatabase>,
+  organizationId: string,
+  manifest: GraphFinalManifest,
+  manifestSha256: string,
+) {
+  const files = await readGraphFinalFiles(formData, manifest)
+  const customerRows = await normalizeFinalCustomerNumbers(parseFinalCustomers(await decodeUtf8(files.customers.bytes)))
+  const vehicleRows = parseFinalVehicles(await decodeUtf8(files.vehicles.bytes), customerRows)
+  validateVehicleCounts(customerRows, vehicleRows)
+  const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes))
+  const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes))
+  const links = parseFinalDocumentLinks(await decodeUtf8(files.links.bytes))
+  validateFinalPackage(manifest, customerRows, vehicleRows, salesRows, maintenanceRows, links)
+
+  const existingRows = await validateExistingRows(database, organizationId, customerRows, vehicleRows)
+  const documentRows = buildFinalDocumentRows(salesRows, maintenanceRows, links.documents)
+  const existingDocuments = await validateExistingFinalDocuments(database, organizationId, documentRows)
+  const now = new Date().toISOString()
+  const statements = [
+    ...createCustomerStatements(database, organizationId, customerRows, now),
+    ...createVehicleStatements(database, organizationId, vehicleRows, now),
+    ...(await createFinalDocumentStatements(database, organizationId, documentRows, now)),
+  ]
+  assertD1BatchStatementCount(statements.length)
+  try {
+    await database.$client.batch(statements as [D1PreparedStatement, ...D1PreparedStatement[]])
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'D1への登録に失敗しました。'
+    throw new HttpError(409, `ABACUSの顧客・車両・書類を登録できませんでした。変更は反映されていません。${message.slice(0, 180)}`)
+  }
+
+  return jsonResponse({
+    status: 'committed',
+    manifestSha256,
+    customerCount: customerRows.length,
+    vehicleCount: vehicleRows.length,
+    salesCount: salesRows.length,
+    maintenanceCount: maintenanceRows.length,
+    vehiclelessDocumentCount: links.documents.filter((link) => link.vehicleless).length,
+    excludedDocumentCount: Array.isArray(manifest.excludedDocumentKeys) ? manifest.excludedDocumentKeys.length : 0,
+    customers: { imported: existingRows.newCustomerCount, updated: existingRows.existingCustomerCount },
+    vehicles: { imported: existingRows.newVehicleCount, updated: existingRows.existingVehicleCount },
+    documents: { imported: existingDocuments.newDocumentCount, existing: existingDocuments.existingDocumentCount },
+  }, 200, env)
+}
+
+async function readGraphFinalFiles(formData: FormData, manifest: GraphFinalManifest) {
+  if (!Array.isArray(manifest.dataFiles) || manifest.dataFiles.length !== 5) throw new HttpError(400, 'Gate 8Aパッケージのファイル一覧が不正です。')
+  const descriptors = new Map<string, FileDescriptor>()
+  for (const value of manifest.dataFiles) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'Gate 8Aパッケージのファイル記述が不正です。')
+    const descriptor = value as Record<string, unknown>
+    const fileName = normalizePackagePath(descriptor.fileName)
+    const sizeBytes = descriptor.sizeBytes
+    const sha256 = typeof descriptor.sha256 === 'string' ? descriptor.sha256.toUpperCase() : ''
+    if (!['customers.csv', 'vehicles.csv', 'sales.csv', 'maintenance.csv', 'document-links.json'].includes(fileName) || descriptors.has(fileName) || typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || !/^[0-9A-F]{64}$/u.test(sha256)) throw new HttpError(400, `Gate 8Aパッケージのファイル記述が不正です: ${fileName || '(空欄)'}`)
+    descriptors.set(fileName, { relativePath: fileName, sizeBytes, sha256 })
+  }
+  const result = {} as Record<'customers' | 'vehicles' | 'sales' | 'maintenance' | 'links', { file: File; bytes: Uint8Array }>
+  const names = { customers: ['customers', 'customers.csv'], vehicles: ['vehicles', 'vehicles.csv'], sales: ['sales', 'sales.csv'], maintenance: ['maintenance', 'maintenance.csv'], links: ['documentLinks', 'document-links.json'] } as const
+  for (const [key, [formKey, path]] of Object.entries(names) as Array<[keyof typeof names, readonly [string, string]]>) {
+    const file = requiredFile(formData, formKey)
+    const descriptor = descriptors.get(path)
+    if (!descriptor || file.size !== descriptor.sizeBytes || file.size > maximumCsvBytes) throw new HttpError(409, `登録前パッケージのサイズが一致しません: ${path}`)
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (await sha256Bytes(bytes) !== descriptor.sha256) throw new HttpError(409, `登録前パッケージのSHA-256が一致しません: ${path}`)
+    result[key] = { file, bytes }
+  }
+  return result
+}
+
+async function normalizeFinalCustomerNumbers(rows: CustomerRegistrationRow[]) {
+  const counts = new Map<string, number>()
+  for (const row of rows) counts.set(row.customerNumber, (counts.get(row.customerNumber) ?? 0) + 1)
+  const used = new Set<string>()
+  return Promise.all(rows.map(async (row) => {
+    const needsGeneratedNumber = (counts.get(row.customerNumber) ?? 0) > 1 || /^ABACUS-CUSTOMER-NUMBER-?$/u.test(row.customerNumber)
+    let customerNumber = needsGeneratedNumber ? `ABACUS-GRAPH-${(await stableFileId(row.id)).slice(0, 24)}` : row.customerNumber
+    let suffix = 1
+    while (used.has(customerNumber)) customerNumber = `${customerNumber.slice(0, 48)}-${suffix++}`
+    used.add(customerNumber)
+    return { ...row, customerNumber }
+  }))
+}
+
+function parseFinalCustomers(text: string) {
+  const rows = parseFinalRows(text, customerHeaders, 'customers.csv', maximumRows, false)
+  const ids = new Set<string>()
+  return rows.map((row, index) => {
+    const id = requiredFinalIdentifier(row[0], '顧客ID', ['abacus-customer-', 'merge-preview:'])
+    const customerNumber = requiredText(row[1], '顧客番号')
+    const name = requiredText(row[2], '顧客名')
+    if (ids.has(id)) throw new HttpError(400, `customers.csv ${index + 2}行目の顧客IDが重複しています。`)
+    ids.add(id)
+    return { id, customerNumber, name, nameKana: nullableText(row[3], 'ふりがな'), phone: nullableText(row[4], '電話番号'), email: nullableText(row[5], 'メールアドレス'), postalCode: nullableText(row[6], '郵便番号'), address: nullableText(row[7], '住所'), memo: nullableText(row[8], 'メモ'), vehicleCount: nonNegativeInteger(row[9], '車両台数') } satisfies CustomerRegistrationRow
+  })
+}
+
+function parseFinalVehicles(text: string, customersRows: CustomerRegistrationRow[]) {
+  const rows = parseFinalRows(text, vehicleHeaders, 'vehicles.csv', maximumRows, true)
+  const ids = new Set<string>()
+  return rows.map((row, index) => {
+    const id = requiredFinalIdentifier(row[0], '車両ID', ['abacus-vehicle-'])
+    const customerId = requiredFinalIdentifier(row[1], '顧客ID', ['abacus-customer-', 'merge-preview:'])
+    const customer = customersRows.find((candidate) => candidate.id === customerId)
+    if (!customer) throw new HttpError(400, `vehicles.csv ${index + 2}行目の顧客IDがcustomers.csvにありません。`)
+    if (row[2].trim() !== customer.name) throw new HttpError(409, `vehicles.csv ${index + 2}行目の顧客名がcustomers.csvと一致しません。`)
+    if (ids.has(id)) throw new HttpError(400, `vehicles.csv ${index + 2}行目の車両IDが重複しています。`)
+    ids.add(id)
+    return { id, customerId, customerName: requiredText(row[2], '顧客名'), maker: nullableText(row[3], 'メーカー'), name: requiredText(row[4], '車名'), model: nullableText(row[5], '型式'), registrationNumber: nullableText(row[6], '登録番号'), chassisNumber: nullableText(row[7], '車台番号'), modelYear: optionalInteger(row[8], '年式'), inspectionDate: optionalDate(row[9], '車検満了日'), mileage: optionalInteger(row[10], '走行距離'), bodyColor: nullableText(row[11], '車体色'), displacement: optionalInteger(row[12], '排気量'), transmission: nullableText(row[13], 'ミッション'), inspectionRecordAvailable: parseInspectionRecord(row[14]), memo: nullableText(row[15], '備考') } satisfies VehicleRegistrationRow
+  })
+}
+
+function parseFinalSales(text: string) {
+  const rows = parseFinalRows(text, finalSalesHeaders, 'sales.csv', maximumRows, true)
+  const ids = new Set<string>()
+  const numbers = new Set<string>()
+  return rows.map((row, index) => {
+    const id = requiredFinalIdentifier(row[0], '販売書類ID', ['abacus-sales-'])
+    const number = requiredText(row[1], '販売書類番号')
+    if (ids.has(id) || numbers.has(number)) throw new HttpError(400, `sales.csv ${index + 2}行目の識別子または書類番号が重複しています。`)
+    ids.add(id); numbers.add(number)
+    return { id, number, type: requiredText(row[2], '書類種別'), status: normalizeImportedStatus(row[3]), customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: requiredDate(row[7], '発行日'), dueDate: optionalDate(row[8], '支払期限'), taxRate: nonNegativeInteger(row[9], '税率'), subtotal: nonNegativeInteger(row[10], '小計'), tax: nonNegativeInteger(row[11], '消費税'), total: nonNegativeInteger(row[12], '合計'), itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考'), details: row[15].trim() } satisfies FinalSalesRow
+  })
+}
+
+function parseFinalMaintenance(text: string) {
+  const rows = parseFinalRows(text, finalMaintenanceHeaders, 'maintenance.csv', maximumRows, true)
+  const ids = new Set<string>()
+  const numbers = new Set<string>()
+  return rows.map((row, index) => {
+    const id = requiredFinalIdentifier(row[0], '整備書類ID', ['abacus-maintenance-'])
+    const number = requiredText(row[1], '整備書類番号')
+    if (ids.has(id) || numbers.has(number)) throw new HttpError(400, `maintenance.csv ${index + 2}行目の識別子または書類番号が重複しています。`)
+    ids.add(id); numbers.add(number)
+    const intakeDate = optionalDate(row[8], '入庫日')
+    return { id, number, type: requiredText(row[2], '書類種別'), category: normalizeMaintenanceCategory(row[3]), status: normalizeImportedStatus(row[4]), customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate, plannedReleaseDate: optionalDate(row[9], '出庫予定日'), dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), subtotal: nonNegativeInteger(row[12], '小計'), tax: nonNegativeInteger(row[13], '消費税'), total: nonNegativeInteger(row[14], '合計'), itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考'), details: row[17].trim() } satisfies FinalMaintenanceRow
+  })
+}
+
+function parseFinalRows(text: string, expectedHeaders: string[], label: string, maximum: number, allowEmpty: boolean) {
+  const rows = parseCsv(text, label)
+  if (rows.length === 0 || rows[0].length !== expectedHeaders.length || rows[0].some((value, index) => value !== expectedHeaders[index])) throw new HttpError(400, `${label}の見出し行がGate 8A形式と一致しません。`)
+  const dataRows = rows.slice(1).filter((row) => row.some((value) => value.trim()))
+  if ((!allowEmpty && dataRows.length === 0) || dataRows.length > maximum || dataRows.some((row) => row.length !== expectedHeaders.length)) throw new HttpError(400, `${label}の行形式が不正です。`)
+  return dataRows
+}
+
+function parseFinalDocumentLinks(text: string) {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { throw new HttpError(400, 'document-links.jsonのJSONが不正です。') }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'document-links.jsonの形式が不正です。')
+  const document = value as Record<string, unknown>
+  if (document.version !== 1 || document.kind !== 'abacus-export-import-document-links' || document.status !== 'finalization-preview' || !Array.isArray(document.documents) || !Array.isArray(document.excludedDocumentKeys)) throw new HttpError(400, 'document-links.jsonの種別または一覧が不正です。')
+  const documents = document.documents.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `document-links.json ${index + 1}件目が不正です。`)
+    const row = item as Record<string, unknown>
+    const documentKind = textValue(row.documentKind)
+    if (documentKind !== '販売書類' && documentKind !== '整備書類') throw new HttpError(400, `document-links.json ${index + 1}件目の種別が不正です。`)
+    return {
+      documentKey: requiredText(textValue(row.documentKey), '書類キー'),
+      documentId: requiredFinalIdentifier(textValue(row.documentId), '書類ID', documentKind === '販売書類' ? ['abacus-sales-'] : ['abacus-maintenance-']),
+      documentKind,
+      documentNumber: requiredText(textValue(row.documentNumber), '書類番号'),
+      customerId: requiredFinalIdentifier(textValue(row.customerId), '顧客ID', ['abacus-customer-', 'merge-preview:']),
+      customerName: requiredText(textValue(row.customerName), '顧客名'),
+      vehicleId: textValue(row.vehicleId) ? requiredFinalIdentifier(textValue(row.vehicleId), '車両ID', ['abacus-vehicle-']) : null,
+      vehicleName: textValue(row.vehicleName) || null,
+      vehicleless: row.vehicleless === true,
+      sourceLocation: requiredText(textValue(row.sourceLocation), '出典'),
+      warning: nullableText(textValue(row.warning), '警告') ?? '',
+    } satisfies GraphFinalDocumentLink
+  })
+  const excludedDocumentKeys = document.excludedDocumentKeys.map((item) => requiredText(textValue(item), '除外書類キー'))
+  if (new Set(documents.map((item) => item.documentKey)).size !== documents.length) throw new HttpError(400, '書類キーが重複しています。')
+  if (new Set(documents.map((item) => item.documentId)).size !== documents.length) throw new HttpError(400, '書類IDが重複しています。')
+  if (new Set(excludedDocumentKeys).size !== excludedDocumentKeys.length) throw new HttpError(400, '除外書類キーが重複しています。')
+  return { documents, excludedDocumentKeys }
+}
+
+function validateFinalPackage(
+  manifest: GraphFinalManifest,
+  customersRows: CustomerRegistrationRow[],
+  vehicleRows: VehicleRegistrationRow[],
+  salesRows: FinalSalesRow[],
+  maintenanceRows: FinalMaintenanceRow[],
+  links: { documents: GraphFinalDocumentLink[]; excludedDocumentKeys: string[] },
+) {
+  if (!isGraphFinalManifest(manifest)) throw new HttpError(400, 'Gate 8Aの登録前パッケージではありません。')
+  const summary = manifest.summary
+  const expectedSummary = {
+    customerRowCount: customersRows.length,
+    vehicleRowCount: vehicleRows.length,
+    salesRowCount: salesRows.length,
+    maintenanceRowCount: maintenanceRows.length,
+    vehiclelessDocumentCount: links.documents.filter((document) => document.vehicleless).length,
+    excludedDocumentCount: links.excludedDocumentKeys.length,
+  }
+  for (const [key, expected] of Object.entries(expectedSummary)) if (summary?.[key] !== expected) throw new HttpError(409, `マニフェストの集計が一致しません: ${key}`)
+  if (!Array.isArray(manifest.groups) || manifest.groups.length !== customersRows.length) throw new HttpError(400, 'マニフェストの顧客グループがcustomers.csvと一致しません。')
+  if (!Array.isArray(manifest.documents) || manifest.documents.length !== links.documents.length) throw new HttpError(400, 'マニフェストの書類一覧が対応表と一致しません。')
+  const customerIds = new Set(customersRows.map((row) => row.id))
+  const customerNames = new Map(customersRows.map((row) => [row.id, row.name]))
+  const vehicleById = new Map(vehicleRows.map((row) => [row.id, row]))
+  const documentIds = new Set<string>()
+  for (const row of [...salesRows, ...maintenanceRows]) documentIds.add(row.id)
+  const linkIds = new Set<string>()
+  for (const link of links.documents) {
+    if (linkIds.has(link.documentId) || !documentIds.has(link.documentId) || !customerIds.has(link.customerId) || customerNames.get(link.customerId) !== link.customerName) throw new HttpError(409, `書類対応表の顧客またはIDがCSVと一致しません: ${link.documentId}`)
+    const csvRow = [...salesRows, ...maintenanceRows].find((row) => row.id === link.documentId)
+    if (!csvRow || link.vehicleless !== (!csvRow.vehicleName && !csvRow.registrationNumber) || link.vehicleName !== (csvRow.vehicleName || null)) throw new HttpError(409, `車両なし判定とCSVの車両欄が一致しません: ${link.documentId}`)
+    if (link.vehicleless !== !link.vehicleId) throw new HttpError(409, `車両なし判定と車両IDが一致しません: ${link.documentId}`)
+    if (link.vehicleId) {
+      const vehicle = vehicleById.get(link.vehicleId)
+      if (!vehicle || vehicle.customerId !== link.customerId) throw new HttpError(409, `書類対応表の車両と顧客が一致しません: ${link.documentId}`)
+    }
+    linkIds.add(link.documentId)
+  }
+  if (linkIds.size !== documentIds.size) throw new HttpError(409, '販売・整備CSVと書類対応表の件数が一致しません。')
+  const groupIds = new Set<string>()
+  for (const group of manifest.groups) {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) throw new HttpError(400, 'マニフェストの顧客グループが不正です。')
+    const row = group as Record<string, unknown>
+    const customerId = textValue(row.customerId)
+    if (!customerIds.has(customerId) || row.approved !== true || groupIds.has(customerId) || !Array.isArray(row.sourceCustomerIds) || row.sourceCustomerIds.length === 0 || row.sourceCustomerIds.some((value) => typeof value !== 'string' || !value.trim())) throw new HttpError(400, 'マニフェストの顧客グループが不正です。')
+    groupIds.add(customerId)
+  }
+  if (groupIds.size !== customerIds.size) throw new HttpError(400, 'マニフェストの顧客グループがcustomers.csvを網羅していません。')
+  const manifestExcluded = Array.isArray(manifest.excludedDocumentKeys) ? manifest.excludedDocumentKeys.map((value) => textValue(value)).sort() : []
+  if (manifestExcluded.join('\u0000') !== links.excludedDocumentKeys.slice().sort().join('\u0000')) throw new HttpError(409, 'マニフェストと書類対応表の除外一覧が一致しません。')
+  const manifestDocumentIds = new Set<string>()
+  for (const item of manifest.documents) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, 'マニフェストの書類一覧が不正です。')
+    const row = item as Record<string, unknown>
+    const id = textValue(row.documentId)
+    const link = links.documents.find((candidate) => candidate.documentId === id)
+    if (!link || textValue(row.documentKey) !== link.documentKey || textValue(row.kind) !== link.documentKind || textValue(row.customerId) !== link.customerId || textValue(row.sourceLocation) !== link.sourceLocation || Boolean(row.vehicleless) !== link.vehicleless || textValue(row.vehicleId) !== (link.vehicleId ?? '')) throw new HttpError(409, `マニフェストと書類対応表が一致しません: ${id}`)
+    manifestDocumentIds.add(id)
+  }
+  if (manifestDocumentIds.size !== links.documents.length) throw new HttpError(409, 'マニフェストの書類IDが重複または不足しています。')
+}
+
+function buildFinalDocumentRows(salesRows: FinalSalesRow[], maintenanceRows: FinalMaintenanceRow[], links: GraphFinalDocumentLink[]) {
+  const linksById = new Map(links.map((link) => [link.documentId, link]))
+  const result: Array<{ kind: 'sales' | 'maintenance'; link: GraphFinalDocumentLink; row: FinalSalesRow | FinalMaintenanceRow }> = []
+  for (const row of salesRows) {
+    const link = linksById.get(row.id)
+    if (!link || link.documentKind !== '販売書類' || link.documentNumber !== row.number || link.customerName !== row.customerName) throw new HttpError(409, `販売書類と対応表が一致しません: ${row.id}`)
+    result.push({ kind: 'sales', link, row })
+  }
+  for (const row of maintenanceRows) {
+    const link = linksById.get(row.id)
+    if (!link || link.documentKind !== '整備書類' || link.documentNumber !== row.number || link.customerName !== row.customerName) throw new HttpError(409, `整備書類と対応表が一致しません: ${row.id}`)
+    result.push({ kind: 'maintenance', link, row })
+  }
+  return result
+}
+
+async function validateExistingFinalDocuments(database: ReturnType<typeof createDatabase>, organizationId: string, rows: Array<{ kind: 'sales' | 'maintenance'; link: GraphFinalDocumentLink; row: FinalSalesRow | FinalMaintenanceRow }>) {
+  const sales = rows.filter((row): row is { kind: 'sales'; link: GraphFinalDocumentLink; row: FinalSalesRow } => row.kind === 'sales')
+  const maintenance = rows.filter((row): row is { kind: 'maintenance'; link: GraphFinalDocumentLink; row: FinalMaintenanceRow } => row.kind === 'maintenance')
+  const existingSales: Array<typeof salesDocuments.$inferSelect> = []
+  const existingMaintenance: Array<typeof maintenanceDocuments.$inferSelect> = []
+  const existingSalesByNumber: Array<typeof salesDocuments.$inferSelect> = []
+  const existingMaintenanceByNumber: Array<typeof maintenanceDocuments.$inferSelect> = []
+  for (const chunk of chunked(sales.map((row) => row.row.id), 500)) if (chunk.length > 0) existingSales.push(...await database.select().from(salesDocuments).where(inArray(salesDocuments.id, chunk)).all())
+  for (const chunk of chunked(maintenance.map((row) => row.row.id), 500)) if (chunk.length > 0) existingMaintenance.push(...await database.select().from(maintenanceDocuments).where(inArray(maintenanceDocuments.id, chunk)).all())
+  for (const chunk of chunked(sales.map((row) => row.row.number), 500)) if (chunk.length > 0) existingSalesByNumber.push(...await database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), inArray(salesDocuments.number, chunk))).all())
+  for (const chunk of chunked(maintenance.map((row) => row.row.number), 500)) if (chunk.length > 0) existingMaintenanceByNumber.push(...await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), inArray(maintenanceDocuments.number, chunk))).all())
+  let existingDocumentCount = 0
+  for (const item of sales) {
+    const existing = existingSales.find((candidate) => candidate.id === item.row.id)
+    if (existing && existing.organizationId !== organizationId) throw new HttpError(409, `販売書類IDが別組織です: ${item.row.id}`)
+    const sameNumber = existingSalesByNumber.find((candidate) => candidate.number === item.row.number)
+    if (sameNumber && sameNumber.id !== item.row.id) throw new HttpError(409, `販売書類番号が既存書類と競合します: ${item.row.number}`)
+    if (existing) {
+      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存販売書類の内容が登録前パッケージと異なります: ${item.row.id}`)
+      existingDocumentCount += 1
+    }
+  }
+  for (const item of maintenance) {
+    const existing = existingMaintenance.find((candidate) => candidate.id === item.row.id)
+    if (existing && existing.organizationId !== organizationId) throw new HttpError(409, `整備書類IDが別組織です: ${item.row.id}`)
+    const sameNumber = existingMaintenanceByNumber.find((candidate) => candidate.number === item.row.number)
+    if (sameNumber && sameNumber.id !== item.row.id) throw new HttpError(409, `整備書類番号が既存書類と競合します: ${item.row.number}`)
+    if (existing) {
+      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存整備書類の内容が登録前パッケージと異なります: ${item.row.id}`)
+      existingDocumentCount += 1
+    }
+  }
+  return { existingDocumentCount, newDocumentCount: rows.length - existingDocumentCount }
+}
+
+async function createFinalDocumentStatements(database: ReturnType<typeof createDatabase>, organizationId: string, rows: Array<{ kind: 'sales' | 'maintenance'; link: GraphFinalDocumentLink; row: FinalSalesRow | FinalMaintenanceRow }>, now: string) {
+  const statements: D1PreparedStatement[] = []
+  const salesRows = rows.filter((row): row is { kind: 'sales'; link: GraphFinalDocumentLink; row: FinalSalesRow } => row.kind === 'sales')
+  const maintenanceRows = rows.filter((row): row is { kind: 'maintenance'; link: GraphFinalDocumentLink; row: FinalMaintenanceRow } => row.kind === 'maintenance')
+  for (const chunk of chunked(salesRows, maximumBatchRows)) {
+    const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
+    const values = chunk.flatMap(({ link, row }) => [row.id, organizationId, row.number, row.type, row.status, link.customerId, link.vehicleId, row.issuedAt, row.dueDate, row.taxRate, '切り捨て', row.subtotal, row.tax, row.total, row.note, JSON.stringify({ abacusImport: { documentKey: link.documentKey, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless }, sourceDetails: row.details }), now])
+    statements.push(database.$client.prepare(`INSERT INTO sales_documents (id, organization_id, number, type, status, customer_id, vehicle_id, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
+  }
+  for (const chunk of chunked(maintenanceRows, maximumMaintenanceDocumentRows)) {
+    const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
+    const values = chunk.flatMap(({ link, row }) => [row.id, organizationId, row.number, row.type, row.category, row.status, link.customerId, link.vehicleId, row.intakeDate, row.plannedReleaseDate, null, row.issuedAt, row.dueDate, row.taxRate, '切り捨て', row.subtotal, row.tax, row.total, row.note, JSON.stringify({ abacusImport: { documentKey: link.documentKey, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless }, sourceDetails: row.details }), now])
+    statements.push(database.$client.prepare(`INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, intake_date, planned_release_date, completion_date, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
+  }
+  const items = await Promise.all(rows.map(async ({ kind, link, row }) => ({ kind, link, row, id: await stableFileId(`${organizationId}\u0000${row.id}\u0000item`) })))
+  for (const chunk of chunked(items, maximumBatchRows)) {
+    const salesItems = chunk.filter((item) => item.kind === 'sales')
+    if (salesItems.length > 0) {
+      const placeholders = salesItems.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
+      const values = salesItems.flatMap((item) => { const row = item.row as FinalSalesRow; return [item.id, organizationId, row.id, 'その他', row.itemDescription || `ABACUS販売書類 #${row.number}`, 1, '式', row.subtotal, '課税', 0, '', row.subtotal, 0] })
+      statements.push(database.$client.prepare(`INSERT INTO sales_document_items (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, tax_category, other_amount, summary, amount, sort_order) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
+    }
+    const maintenanceItemsForChunk = chunk.filter((item) => item.kind === 'maintenance')
+    if (maintenanceItemsForChunk.length > 0) {
+      const placeholders = maintenanceItemsForChunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
+      const values = maintenanceItemsForChunk.flatMap((item) => { const row = item.row as FinalMaintenanceRow; return [item.id, organizationId, row.id, '作業', row.itemDescription || `ABACUS整備書類 #${row.number}`, 1, '式', row.subtotal, 0, '', row.subtotal, 0] })
+      statements.push(database.$client.prepare(`INSERT INTO maintenance_items (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, technical_fee, summary, amount, sort_order) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
+    }
+  }
+  return statements
+}
+
+function isGraphFinalManifest(value: unknown): value is GraphFinalManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const manifest = value as Record<string, unknown>
+  return manifest.version === 1 && manifest.kind === 'abacus-export-import-final-package' && manifest.status === 'registration-preview'
 }
 
 async function uploadRegistrationImage(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
@@ -471,8 +877,8 @@ function bytesToHex(value: ArrayBuffer) {
   return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
 }
 
-function parseManifest(text: string) {
-  try { return JSON.parse(text) as RegistrationManifest } catch { throw new HttpError(400, 'manifest.jsonのJSONが不正です。') }
+function parseManifest(text: string): RegistrationManifest | GraphFinalManifest {
+  try { return JSON.parse(text) as RegistrationManifest | GraphFinalManifest } catch { throw new HttpError(400, 'manifest.jsonのJSONが不正です。') }
 }
 
 function textField(formData: FormData, key: string) {
@@ -500,6 +906,31 @@ function requiredIdentifier(value: string, label: string, prefix: string) {
   const normalized = requiredText(value, label)
   if (!normalized.startsWith(prefix) || !isSafePathSegment(normalized)) throw new HttpError(400, `${label}の形式が不正です。`)
   return normalized
+}
+
+function requiredFinalIdentifier(value: string, label: string, prefixes: string[]) {
+  const normalized = requiredText(value, label)
+  if (normalized.length > 200 || !prefixes.some((prefix) => normalized.startsWith(prefix)) || /[\\/\u0000]/u.test(normalized) || normalized.includes('..')) throw new HttpError(400, `${label}の形式が不正です。`)
+  return normalized
+}
+
+function requiredDate(value: string, label: string) {
+  const normalized = optionalDate(value, label)
+  if (!normalized) throw new HttpError(400, `${label}を入力してください。`)
+  return normalized
+}
+
+function normalizeImportedStatus(value: string) {
+  const normalized = requiredText(value, 'ステータス')
+  if (normalized === '発行済み' || normalized === '受付中' || normalized === '作業中') return normalized === '発行済み' ? '完了' : '下書き'
+  if (!['下書き', '入金待ち', '完了', 'アーカイブ済み'].includes(normalized)) throw new HttpError(400, `ステータスが不正です: ${normalized}`)
+  return normalized
+}
+
+function normalizeMaintenanceCategory(value: string) {
+  const normalized = requiredText(value, '入庫区分')
+  if (normalized === '車検' || normalized === '板金' || normalized === '一般整備') return normalized
+  return '一般整備'
 }
 
 function requiredSha256(value: string, label: string) {

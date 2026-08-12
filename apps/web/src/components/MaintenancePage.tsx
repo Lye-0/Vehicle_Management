@@ -1147,7 +1147,7 @@ function toMaintenanceInput(document: MaintenanceDocument, mileageSync?: Mainten
     status: document.status,
     category: document.category,
     customerId: document.customerId,
-    vehicleId: document.vehicleId,
+    vehicleId: document.vehicleId ?? undefined,
     issuedAt: document.issuedAt,
     intakeDate: document.intakeDate,
     plannedReleaseDate: document.plannedReleaseDate,

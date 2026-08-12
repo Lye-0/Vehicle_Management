@@ -13,6 +13,10 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  await env.DB.prepare('DELETE FROM sales_document_items WHERE organization_id = ?').bind(testOrganizationId).run()
+  await env.DB.prepare('DELETE FROM maintenance_items WHERE organization_id = ?').bind(testOrganizationId).run()
+  await env.DB.prepare('DELETE FROM sales_documents WHERE organization_id = ?').bind(testOrganizationId).run()
+  await env.DB.prepare('DELETE FROM maintenance_documents WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM vehicle_files WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM vehicles WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM customers WHERE organization_id = ?').bind(testOrganizationId).run()
@@ -51,6 +55,26 @@ describe('ABACUS registration', () => {
     expect(await countRows('customers')).toBe(1)
     expect(await countRows('vehicles')).toBe(1)
   })
+
+  it('commits the graph-final package and preserves vehicleless documents', async () => {
+    const packageFiles = await createGraphFinalPackage()
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+
+    expect(response.status).toBe(200)
+    const responseBody = await response.json()
+    expect(responseBody).toMatchObject({
+      status: 'committed',
+      customerCount: 1,
+      vehicleCount: 0,
+      salesCount: 1,
+      maintenanceCount: 1,
+      vehiclelessDocumentCount: 2,
+      excludedDocumentCount: 0,
+    })
+    const maintenance = await env.DB.prepare('SELECT vehicle_id AS vehicleId FROM maintenance_documents WHERE id = ? AND organization_id = ?').bind('abacus-maintenance-finaltest', testOrganizationId).first<{ vehicleId: string | null }>()
+    expect(maintenance?.vehicleId ?? null).toBeNull()
+    expect(await countRows('customers')).toBe(1)
+  })
 })
 
 async function createPackage(options: { vehicleCount: string }) {
@@ -86,6 +110,47 @@ async function postRegistration(packageFiles: Awaited<ReturnType<typeof createPa
   formData.append('customers', new File([packageFiles.customersCsv], 'customers.csv', { type: 'text/csv' }))
   formData.append('vehicles', new File([packageFiles.vehiclesCsv], 'vehicles.csv', { type: 'text/csv' }))
   formData.append('attachments', new File([packageFiles.attachmentsJson], 'image-attachments.json', { type: 'application/json' }))
+  formData.append('manifestSha256', packageFiles.manifestSha256)
+  formData.append('confirmation', confirmation)
+  const probe = new Request('https://example.com/api/import/abacus-registration/commit', { method: 'POST', headers: authHeaders(), body: formData })
+  const body = await probe.arrayBuffer()
+  const headers = new Headers(probe.headers)
+  headers.set('Content-Length', String(body.byteLength))
+  return SELF.fetch(new Request(probe.url, { method: 'POST', headers, body }))
+}
+
+async function createGraphFinalPackage() {
+  const customer = 'merge-preview:same-name:最終登録テスト'
+  const customerName = '最終登録テスト顧客'
+  const salesId = 'abacus-sales-finaltest'
+  const maintenanceId = 'abacus-maintenance-finaltest'
+  const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', [customer, 'ABACUS-CUSTOMER-NUMBER-', customerName, '', '', '', '', '', '', '0'].join(',')].join('\n')
+  const vehiclesCsv = '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考'
+  const salesCsv = ['書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [salesId, '9001', '請求書', '下書き', customerName, '', '', '2026-01-02', '', '10', '1000', '0', '1000', '移行販売', 'ABACUSテスト', ''].join(',')].join('\n')
+  const maintenanceCsv = ['書類ID,書類番号,書類種別,入庫区分,ステータス,顧客名,車名,登録番号,入庫日,出庫予定日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [maintenanceId, '9002', '整備請求書', '一般整備', '下書き', customerName, '', '', '', '', '', '10', '2000', '0', '2000', '移行整備', 'ABACUSテスト', ''].join(',')].join('\n')
+  const linksJson = JSON.stringify({ version: 1, kind: 'abacus-export-import-document-links', status: 'finalization-preview', documents: [
+    { documentKey: '販売書類|final|9001', documentId: salesId, documentKind: '販売書類', documentNumber: '9001', customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'hanbai.csv #1', warning: '' },
+    { documentKey: '整備書類|final|9002', documentId: maintenanceId, documentKind: '整備書類', documentNumber: '9002', customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'seibi.csv #1', warning: '' },
+  ], excludedDocumentKeys: [] })
+  const files = [
+    ['customers.csv', customersCsv],
+    ['vehicles.csv', vehiclesCsv],
+    ['sales.csv', salesCsv],
+    ['maintenance.csv', maintenanceCsv],
+    ['document-links.json', linksJson],
+  ] as const
+  const dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
+  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: 0, salesRowCount: 1, maintenanceRowCount: 1, vehiclelessDocumentCount: 2, excludedDocumentCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
+    { documentKey: '販売書類|final|9001', documentId: salesId, kind: '販売書類', customerId: customer, vehicleId: null, sourceLocation: 'hanbai.csv #1', vehicleless: true },
+    { documentKey: '整備書類|final|9002', documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
+  ], excludedDocumentKeys: [] })
+  return { manifest, manifestSha256: await sha256(manifest), files }
+}
+
+async function postGraphFinalRegistration(packageFiles: Awaited<ReturnType<typeof createGraphFinalPackage>>, confirmation: string) {
+  const formData = new FormData()
+  formData.append('manifest', new File([packageFiles.manifest], 'manifest.json', { type: 'application/json' }))
+  for (const [fileName, content] of packageFiles.files) formData.append(fileName === 'document-links.json' ? 'documentLinks' : fileName.replace('.csv', ''), new File([content], fileName, { type: 'text/plain' }))
   formData.append('manifestSha256', packageFiles.manifestSha256)
   formData.append('confirmation', confirmation)
   const probe = new Request('https://example.com/api/import/abacus-registration/commit', { method: 'POST', headers: authHeaders(), body: formData })

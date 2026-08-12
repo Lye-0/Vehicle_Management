@@ -646,7 +646,7 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   return documentRows.filter((document) => includeArchived || !document.archivedAt).map((document) => serializeMaintenanceDocument(
     document,
     customersById.get(document.customerId),
-    vehiclesById.get(document.vehicleId),
+    document.vehicleId ? vehiclesById.get(document.vehicleId) : undefined,
     itemsByDocument.get(document.id) ?? [],
   ))
 }
@@ -754,10 +754,10 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
       employer: customerEmployer,
     },
     vehicleId: document.vehicleId,
-    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
+    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
     plate: vehicle?.registrationNumber ?? '',
-    mileage: normalizeMileage(vehicle?.mileage),
-    vehicleDetails: {
+    mileage: vehicle ? normalizeMileage(vehicle.mileage) : '',
+    vehicleDetails: vehicle ? {
       maker: vehicle?.maker ?? '',
       name: vehicle?.name ?? '',
       modelType: vehicle?.model ?? '',
@@ -770,7 +770,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
       displacement: normalizeDisplacement(vehicle?.displacement),
       transmission: vehicle?.transmission ?? '',
       inspectionRecordAvailable: vehicle?.inspectionRecordAvailable ?? false,
-    },
+    } : null,
     intakeDate: document.intakeDate,
     plannedReleaseDate: document.plannedReleaseDate ?? document.completionDate,
     completionDate: document.completionDate,

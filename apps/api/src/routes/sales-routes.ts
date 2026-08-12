@@ -523,7 +523,7 @@ function serializeSalesDocument(
       contactPhone: '',
     },
     vehicleId: document.vehicleId,
-    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
+    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
     plate: vehicle?.registrationNumber ?? '',
     vehicleDetails: vehicle ? {
       maker: vehicle.maker ?? '',

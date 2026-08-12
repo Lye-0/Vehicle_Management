@@ -33,6 +33,20 @@ export type AbacusRegistrationImageResult = {
   file: { id: string; name: string; type: string; contentType: string; size: number; createdAt: string } | null
 }
 
+export type AbacusGraphFinalRegistrationResult = {
+  status: 'committed'
+  manifestSha256: string
+  customerCount: number
+  vehicleCount: number
+  salesCount: number
+  maintenanceCount: number
+  vehiclelessDocumentCount: number
+  excludedDocumentCount: number
+  customers: { imported: number; updated: number }
+  vehicles: { imported: number; updated: number }
+  documents: { imported: number; existing: number }
+}
+
 export async function previewCsvImport(resource: CsvImportResource, file: File) {
   return apiFetch<CsvImportPreview>(`/api/import/${resource}/preview`, { method: 'POST', body: createFormData(file) })
 }
@@ -43,6 +57,10 @@ export async function commitCsvImport(resource: CsvImportResource, file: File) {
 
 export async function commitAbacusRegistration(formData: FormData) {
   return apiFetch<AbacusRegistrationCommitResult>('/api/import/abacus-registration/commit', { method: 'POST', body: formData })
+}
+
+export async function commitAbacusGraphFinalRegistration(formData: FormData) {
+  return apiFetch<AbacusGraphFinalRegistrationResult>('/api/import/abacus-registration/commit', { method: 'POST', body: formData })
 }
 
 export async function uploadAbacusRegistrationImage(input: { vehicleId: string; customerId: string; imagePath: string; imageSha256: string; manifestSha256: string; file: File }) {
