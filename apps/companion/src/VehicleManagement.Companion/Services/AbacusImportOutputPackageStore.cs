@@ -78,9 +78,15 @@ public sealed class AbacusImportOutputPackageStore
             Directory.CreateDirectory(Path.Combine(readyPath, "images"));
             Directory.CreateDirectory(Path.Combine(readyPath, "reports"));
 
-            var fingerprint = string.IsNullOrWhiteSpace(sourceFingerprint)
+            var fingerprintBeforeCopy = string.IsNullOrWhiteSpace(sourceFingerprint)
                 ? await CalculateMetadataFingerprintAsync(sourceRoot, cancellationToken)
                 : sourceFingerprint.Trim();
+            await CopySourceSnapshotAsync(sourceRoot, workAbacusCopyPath, cancellationToken);
+            var fingerprint = await CalculateMetadataFingerprintAsync(sourceRoot, cancellationToken);
+            if (!string.Equals(fingerprintBeforeCopy, fingerprint, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("ABACUSフォルダーのコピー中に原本の指紋が変化しました。処理を中止しました。");
+            }
             var method = NormalizeImageMethod(imageAcquisitionMethod);
             var session = new AbacusImportOutputPackageSession(
                 packageId,
@@ -103,11 +109,12 @@ public sealed class AbacusImportOutputPackageStore
                 JsonSerializer.Serialize(new
                 {
                     version = 1,
-                    status = "created",
+                    status = "copied",
                     packageId,
                     updatedAtUtc = DateTime.UtcNow,
                     sourceFingerprint = fingerprint,
                     imageAcquisitionMethod = method,
+                    abacusCopyPath = "../abacus-copy",
                 }, JsonOptions),
                 cancellationToken);
             await WriteTextFileAsync(
@@ -248,6 +255,10 @@ public sealed class AbacusImportOutputPackageStore
             updatedAtUtc = DateTime.UtcNow,
             source = new { path = session.SourcePath, fingerprint = session.SourceFingerprint },
             workPath = "work",
+            workAbacusCopy = "work/abacus-copy",
+            workIntermediate = "work/intermediate",
+            workCheckpoints = "work/checkpoints",
+            workLogs = "work/logs",
             readyPath = "ready",
             readyManifest = "ready/manifest.json",
             imageAcquisitionMethod = session.ImageAcquisitionMethod,
@@ -291,6 +302,45 @@ public sealed class AbacusImportOutputPackageStore
         await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         await input.CopyToAsync(output, cancellationToken);
         await output.FlushAsync(cancellationToken);
+    }
+
+    private static async Task CopySourceSnapshotAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+        var destinationRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
+        foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sourceInfo = new FileInfo(file);
+            if (sourceInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(sourceRoot, file);
+            var destinationPath = Path.Combine(destinationRoot, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            await using (var input = new FileStream(
+                file,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                1024 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var output = new FileStream(
+                destinationPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                1024 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+
+            File.SetLastWriteTimeUtc(destinationPath, sourceInfo.LastWriteTimeUtc);
+        }
     }
 
     private static async Task WriteTextFileAsync(string path, string contents, CancellationToken cancellationToken)

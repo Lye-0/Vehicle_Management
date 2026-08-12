@@ -173,6 +173,7 @@ public partial class App : Application
             var outputReadyManifestText = await File.ReadAllTextAsync(outputPackageSession.ReadyManifestPath);
             var outputPackageStructureValid =
                 Directory.Exists(outputPackageSession.WorkAbacusCopyPath) &&
+                Directory.EnumerateFiles(outputPackageSession.WorkAbacusCopyPath, "*", SearchOption.AllDirectories).Any() &&
                 Directory.Exists(outputPackageSession.WorkIntermediatePath) &&
                 Directory.Exists(outputPackageSession.WorkCheckpointsPath) &&
                 Directory.Exists(outputPackageSession.WorkLogsPath) &&
