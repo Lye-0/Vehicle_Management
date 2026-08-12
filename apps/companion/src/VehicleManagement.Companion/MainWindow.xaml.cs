@@ -131,6 +131,21 @@ public partial class MainWindow : Window
         Render(session.Snapshot);
     }
 
+    private void MainWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        // マウスキャプチャ中は元の要素以外の領域でもWindowまでイベントが届くため、
+        // ここでドロップ先判定とカーソルを最後に再適用します。
+        if (legacyGraphBlockDragStarted && legacyGraphDocumentCardDragDocument is not null)
+        {
+            UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
+        }
+
+        if (legacyGraphNodeDragStarted)
+        {
+            UpdateLegacyGraphNodeDragFrame();
+        }
+    }
+
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -1087,7 +1102,34 @@ public partial class MainWindow : Window
         var payload = new LegacyGraphDocumentDragPayload(document, "unresolved-tray");
         var data = new DataObject();
         data.SetData(typeof(LegacyGraphDocumentDragPayload), payload);
-        DragDrop.DoDragDrop(sender as DependencyObject ?? this, data, DragDropEffects.Link);
+        var dragSource = sender as UIElement;
+        if (dragSource is not null)
+        {
+            dragSource.GiveFeedback += LegacyGraphDocumentDrag_GiveFeedback;
+        }
+
+        try
+        {
+            DragDrop.DoDragDrop(dragSource ?? this, data, DragDropEffects.Link);
+        }
+        finally
+        {
+            if (dragSource is not null)
+            {
+                dragSource.GiveFeedback -= LegacyGraphDocumentDrag_GiveFeedback;
+            }
+
+            Mouse.OverrideCursor = null;
+            Cursor = null;
+        }
+        e.Handled = true;
+    }
+
+    private void LegacyGraphDocumentDrag_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        Mouse.OverrideCursor = Cursors.Hand;
+        Cursor = Cursors.Hand;
+        e.UseDefaultCursors = false;
         e.Handled = true;
     }
 
@@ -3637,29 +3679,36 @@ public partial class MainWindow : Window
             return;
         }
 
-        var pointer = Mouse.GetPosition(LegacyGraphScrollViewer);
-        var viewportHeight = LegacyGraphScrollViewer.ViewportHeight > 0
-            ? LegacyGraphScrollViewer.ViewportHeight
-            : LegacyGraphScrollViewer.ActualHeight;
-        var viewportWidth = LegacyGraphScrollViewer.ViewportWidth > 0
-            ? LegacyGraphScrollViewer.ViewportWidth
-            : LegacyGraphScrollViewer.ActualWidth;
-        var nearCanvas = pointer.X >= 0 && pointer.X <= viewportWidth;
         var edge = 64d;
+        var pointerScreen = PointToScreen(Mouse.GetPosition(this));
+        var viewportScreenOrigin = LegacyGraphScrollViewer.PointToScreen(new Point(0, 0));
+        var viewportWidth = LegacyGraphScrollViewer.ActualWidth;
+        var viewportHeight = LegacyGraphScrollViewer.ActualHeight;
+        var viewportScreenRight = viewportScreenOrigin.X + viewportWidth;
+        var viewportScreenBottom = viewportScreenOrigin.Y + viewportHeight;
+        // ScrollViewerの境界上でも判定できるよう、左右方向には少し余白を持たせます。
+        var nearCanvas = pointerScreen.X >= viewportScreenOrigin.X - 32 &&
+                         pointerScreen.X <= viewportScreenRight + 32;
         // 40ms間隔で急激に移動しないよう、1 tickあたりの移動量を小さくします。
         var step = 8d;
-        var delta = nearCanvas && pointer.Y < edge
-            ? -step
-            : nearCanvas && pointer.Y > viewportHeight - edge
-                ? step
-                : 0;
+        var direction = !nearCanvas
+            ? 0
+            : pointerScreen.Y < viewportScreenOrigin.Y + edge
+                ? -1
+                : pointerScreen.Y > viewportScreenBottom - edge
+                    ? 1
+                    : 0;
+        var delta = direction * step;
         if (delta != 0)
         {
             LegacyGraphScrollViewer.UpdateLayout();
+            var effectiveScrollableHeight = Math.Max(
+                LegacyGraphScrollViewer.ScrollableHeight,
+                Math.Max(0, LegacyGraphBoardGrid.ActualHeight - viewportHeight));
             var nextOffset = Math.Clamp(
                 LegacyGraphScrollViewer.VerticalOffset + delta,
                 0,
-                LegacyGraphScrollViewer.ScrollableHeight);
+                effectiveScrollableHeight);
             if (Math.Abs(nextOffset - LegacyGraphScrollViewer.VerticalOffset) > double.Epsilon)
             {
                 LegacyGraphScrollViewer.ScrollToVerticalOffset(nextOffset);
@@ -4077,6 +4126,7 @@ public partial class MainWindow : Window
     private void SetLegacyGraphDocumentDragCursor(Cursor cursor)
     {
         Mouse.OverrideCursor = cursor;
+        Cursor = cursor;
         if (legacyGraphDraggingElement is FrameworkElement element)
         {
             element.Cursor = cursor;
@@ -4086,6 +4136,7 @@ public partial class MainWindow : Window
     private void RestoreLegacyGraphBlockDragCursor()
     {
         Mouse.OverrideCursor = null;
+        Cursor = null;
         if (legacyGraphDraggingElement is FrameworkElement element)
         {
             element.Cursor = legacyGraphBlockDragOriginalCursor;
