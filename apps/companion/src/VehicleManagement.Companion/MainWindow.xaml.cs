@@ -78,8 +78,11 @@ public partial class MainWindow : Window
     // 未接続はキャンバス上で確認中、トレイ移動済みはキャンバスから隠す状態です。
     private readonly HashSet<string> legacyGraphUnconnectedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> legacyGraphTrayDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
-    // 承認確認済みの未確定トレイ書類。トレイからキャンバスへ戻した場合は無効化します。
+    // インポート全体の最終確定で除外確定した未確定トレイ書類です。
+    // トレイからキャンバスへ戻した場合は最終確定状態とともに無効化します。
     private readonly HashSet<string> legacyGraphExcludedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
+    // 顧客統合・書類紐付けを含む、グラフ全体の最終確定状態です。
+    private bool legacyGraphImportConfirmed;
     private readonly Dictionary<string, LegacyGraphCustomerMergeDraft> legacyGraphCustomerMergeDrafts = new(StringComparer.Ordinal);
     private readonly HashSet<string> legacyGraphAppliedCustomerMergeKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> legacyGraphVirtualCustomerMergeKeys = new(StringComparer.Ordinal);
@@ -643,6 +646,7 @@ public partial class MainWindow : Window
                 legacyGraphUnconnectedDocumentKeys.Clear();
                 legacyGraphTrayDocumentKeys.Clear();
                 legacyGraphExcludedDocumentKeys.Clear();
+                legacyGraphImportConfirmed = false;
                 legacyGraphCustomerMergeDrafts.Clear();
                 legacyGraphAppliedCustomerMergeKeys.Clear();
                 legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -658,7 +662,8 @@ public partial class MainWindow : Window
                     $"実線 {graph.SolidLinkCount:N0}件 / 要確認 {graph.ReviewLinkCount:N0}件 / 未確定 {graph.UnmatchedDocumentCount:N0}件。";
                 LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
                 LegacyGraphLegendText.Text =
-                    "車両右側と書類左側の●が接続ノードです。緑の実線は自動確定、青の点線は仮紐付け、赤の点線は未接続です。顧客・書類カードはドラッグできます。";
+                    "車両右側と書類左側の●が接続ノードです。緑の実線は自動確定、青の点線は仮紐付け、赤の点線は未接続です。顧客・書類カードはドラッグできます。すべての操作が終わったら、下部の「インポート内容を確定」を押してください。";
+                UpdateLegacyGraphImportConfirmationButton();
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException)
             {
@@ -1605,6 +1610,7 @@ public partial class MainWindow : Window
         if (entries.Count == 0)
         {
             LegacyGraphCustomersList.SelectedIndex = -1;
+            UpdateLegacyGraphImportConfirmationButton();
             return;
         }
 
@@ -1612,6 +1618,7 @@ public partial class MainWindow : Window
             ? entries[0]
             : entries.FirstOrDefault(entry => string.Equals(entry.EntryId, selectedEntryId, StringComparison.Ordinal));
         LegacyGraphCustomersList.SelectedItem = selectedEntry ?? entries[0];
+        UpdateLegacyGraphImportConfirmationButton();
     }
 
     private IReadOnlyList<LegacyGraphCustomerListEntry> BuildLegacyGraphCustomerListEntries()
@@ -1793,7 +1800,7 @@ public partial class MainWindow : Window
                         hasMergeGroup ? "統合候補キャンバス（画面上のみ）\n" : "") +
                     $"顧客ID: {customer.CustomerId}\n車両 {customer.Vehicles.Count:N0}台 / 書類 {customer.Documents:N0}件" +
                     (trayDocuments.Count > 0
-                        ? $"\n未確定トレイ: {trayDocuments.Count:N0}件（{excludedTrayDocumentCount:N0}件は除外確定 / 残りは承認時に除外）"
+                        ? $"\n未確定トレイ: {trayDocuments.Count:N0}件（{excludedTrayDocumentCount:N0}件は除外確定 / 残りはインポート確定時に除外）"
                         : "");
                 LegacyGraphInspectorDetailsText.Text =
                     $"顧客番号: {Fallback(customer.CustomerNumber)}\n" +
@@ -1852,7 +1859,7 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorStatusText.Text = isUnconnectedDocument
                     ? "判定: 未接続（画面上の一時状態）\n車両ノードへ接続するか、書類カードを未確定トレイへ移動してください。"
                     : isTrayDocument
-                        ? $"判定: 未確定トレイ\nインポート: {(legacyGraphExcludedDocumentKeys.Contains(GetLegacyDocumentKey(document)) ? "除外確定" : "承認時に除外")}\n候補車両: {document.CandidateSummary}"
+                        ? $"判定: 未確定トレイ\nインポート: {(legacyGraphExcludedDocumentKeys.Contains(GetLegacyDocumentKey(document)) ? "除外確定" : "インポート確定時に除外")}\n候補車両: {document.CandidateSummary}"
                         : isCustomerDirectDocument
                             ? $"判定: 顧客に一意紐付け（車両未確定）\n候補車両: {document.CandidateSummary}\n車両ノードへ接続するか、未確定トレイへ移動してください。"
                         : manualVehicle is null
@@ -2337,6 +2344,7 @@ public partial class MainWindow : Window
                 fieldSelections,
                 selectedValues,
                 DateTimeOffset.UtcNow);
+            InvalidateLegacyGraphImportConfirmation();
             dialog.DialogResult = true;
         };
         cancelButton.Click += (_, _) => dialog.DialogResult = false;
@@ -2377,7 +2385,6 @@ public partial class MainWindow : Window
         var displayCustomer = GetLegacyGraphDisplayCustomer(customer);
         var unconnectedDocuments = GetLegacyGraphUnconnectedDocuments(displayCustomer).ToArray();
         var vehicleUnresolvedDocuments = GetLegacyGraphCustomerDirectDocuments(displayCustomer).ToArray();
-        var trayDocuments = GetLegacyGraphTrayDocuments(displayCustomer).ToArray();
         if (unconnectedDocuments.Length > 0 || vehicleUnresolvedDocuments.Length > 0)
         {
             var warningCount = unconnectedDocuments.Length + vehicleUnresolvedDocuments.Length;
@@ -2400,33 +2407,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (trayDocuments.Length > 0)
-        {
-            var excludedSummary = string.Join(", ", trayDocuments
-                .GroupBy(document => document.Kind, StringComparer.Ordinal)
-                .OrderBy(group => group.Key, StringComparer.Ordinal)
-                .Select(group => $"{group.Key}{group.Count():N0}件"));
-            var trayApproval = MessageBox.Show(
-                this,
-                $"未確定トレイに{trayDocuments.Length:N0}件の書類が残っています。\n" +
-                $"内訳: {excludedSummary}\n\n" +
-                "これらの書類は今回のインポート対象から除外されます。\n" +
-                "元のCSV・ABACUSフォルダーは変更されません。\n\n" +
-                "このまま統合候補を承認しますか？",
-                "未確定トレイの書類を除外",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-            if (trayApproval != MessageBoxResult.Yes)
-            {
-                return;
-            }
-
-            foreach (var document in trayDocuments)
-            {
-                legacyGraphExcludedDocumentKeys.Add(GetLegacyDocumentKey(document));
-            }
-        }
-
         legacyGraphAppliedCustomerMergeKeys.Add(mergeKey);
         var sourceCustomer = GetLegacyGraphSourceCustomer(customer);
         RefreshLegacyGraphCustomerList($"group:{mergeKey}");
@@ -2434,10 +2414,153 @@ public partial class MainWindow : Window
         legacyGraphSelectedItem = displayCustomer;
         UpdateLegacyGraphInspector(displayCustomer);
         RenderLegacyGraphCustomer(displayCustomer);
-        LegacyGraphStatusText.Text = trayDocuments.Length > 0
-            ? $"統合候補を承認しました。顧客一覧を青色で表示しています。未確定トレイの書類{trayDocuments.Length:N0}件は今回のインポートから除外します。元CSV・ABACUSフォルダーは変更していません。"
-            : "統合候補を承認しました。顧客一覧を青色で表示しています。元CSV・ABACUSフォルダーは変更していません。";
+        LegacyGraphStatusText.Text =
+            "統合候補を承認しました。顧客一覧を青色で表示しています。インポート全体の確定はまだ行っていません。元CSV・ABACUSフォルダーは変更していません。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+        UpdateLegacyGraphImportConfirmationButton();
+    }
+
+    private void LegacyGraphFinalizeImportButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyExportCandidateGraphResult is null || legacyGraphImportConfirmed)
+        {
+            return;
+        }
+
+        var pendingMergeGroupCount = GetLegacyGraphPendingMergeGroupCount();
+        var pendingDocumentCount = GetLegacyGraphPendingDocumentCount();
+        if (pendingMergeGroupCount > 0 || pendingDocumentCount > 0)
+        {
+            var pendingDetails = new List<string>();
+            if (pendingMergeGroupCount > 0)
+            {
+                pendingDetails.Add($"未承認の統合候補 {pendingMergeGroupCount:N0}件");
+            }
+
+            if (pendingDocumentCount > 0)
+            {
+                pendingDetails.Add($"車両未接続の書類 {pendingDocumentCount:N0}件");
+            }
+
+            MessageBox.Show(
+                this,
+                "次の操作が残っているため、インポート内容を確定できません。\n\n" +
+                string.Join("\n", pendingDetails) +
+                "\n\n統合候補の承認、書類ノードの車両接続、または未確定トレイへの移動を完了してください。",
+                "操作が残っています",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            UpdateLegacyGraphImportConfirmationButton();
+            return;
+        }
+
+        var trayDocuments = GetLegacyGraphTrayDocuments();
+        var excludedSummary = trayDocuments.Count == 0
+            ? "未確定トレイに残っている書類はありません。"
+            : "未確定トレイに残っている次の書類は、今回のインポートから除外されます。\n" +
+              string.Join(
+                  "、",
+                  trayDocuments
+                      .GroupBy(document => document.Kind, StringComparer.Ordinal)
+                      .OrderBy(group => group.Key, StringComparer.Ordinal)
+                      .Select(group => $"{group.Key}{group.Count():N0}件"));
+        var confirmation = MessageBox.Show(
+            this,
+            "顧客統合、書類紐付け、ノード操作を完了した状態としてインポート内容を確定します。\n\n" +
+            excludedSummary +
+            "\n\n確定後に操作を変更した場合は、もう一度この確認が必要です。\n元のCSV・ABACUSフォルダーは変更されません。\n\nインポート内容を確定しますか？",
+            "インポート内容を確定",
+            MessageBoxButton.YesNo,
+            trayDocuments.Count == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        legacyGraphExcludedDocumentKeys.Clear();
+        foreach (var document in trayDocuments)
+        {
+            legacyGraphExcludedDocumentKeys.Add(GetLegacyDocumentKey(document));
+        }
+
+        legacyGraphImportConfirmed = true;
+        UpdateLegacyGraphImportConfirmationButton();
+        LegacyGraphStatusText.Text = trayDocuments.Count == 0
+            ? "インポート内容を確定しました。未確定トレイの書類はありません。元CSV・ABACUSフォルダーは変更していません。"
+            : $"インポート内容を確定しました。未確定トレイの書類{trayDocuments.Count:N0}件は今回のインポートから除外します。元CSV・ABACUSフォルダーは変更していません。";
+        LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private int GetLegacyGraphPendingMergeGroupCount() =>
+        legacyGraphCustomerMergeGroups.Values.Count(group =>
+            group.CustomerIds.Count > 1 &&
+            !legacyGraphAppliedCustomerMergeKeys.Contains(group.GroupId));
+
+    private int GetLegacyGraphPendingDocumentCount()
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return 0;
+        }
+
+        return legacyExportCandidateGraphResult.AllDocuments.Count(document =>
+            !IsLegacyGraphDocumentInTray(document) &&
+            (IsLegacyGraphDocumentUnconnected(document) || IsLegacyGraphCustomerDirectDocument(document)));
+    }
+
+    private void UpdateLegacyGraphImportConfirmationButton()
+    {
+        if (LegacyGraphFinalizeImportButton is null || LegacyGraphFinalizeImportStatusText is null)
+        {
+            return;
+        }
+
+        if (legacyExportCandidateGraphResult is null)
+        {
+            LegacyGraphFinalizeImportButton.IsEnabled = false;
+            LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
+            LegacyGraphFinalizeImportStatusText.Text =
+                "候補パッケージを読み込むと、顧客統合と書類・ノード操作の完了後に確定できます。";
+            return;
+        }
+
+        if (legacyGraphImportConfirmed)
+        {
+            LegacyGraphFinalizeImportButton.IsEnabled = false;
+            LegacyGraphFinalizeImportButton.Content = "インポート内容を確定済み";
+            LegacyGraphFinalizeImportStatusText.Text =
+                $"インポート内容を確定済みです。除外確定: {legacyGraphExcludedDocumentKeys.Count:N0}件。操作を変更すると確定が解除されます。";
+            return;
+        }
+
+        var pendingMergeGroupCount = GetLegacyGraphPendingMergeGroupCount();
+        var pendingDocumentCount = GetLegacyGraphPendingDocumentCount();
+        var trayCount = GetLegacyGraphTrayDocuments().Count;
+        LegacyGraphFinalizeImportButton.IsEnabled = pendingMergeGroupCount == 0 && pendingDocumentCount == 0;
+        LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
+        if (pendingMergeGroupCount > 0 || pendingDocumentCount > 0)
+        {
+            var pendingDetails = new List<string>();
+            if (pendingMergeGroupCount > 0)
+            {
+                pendingDetails.Add($"統合候補 {pendingMergeGroupCount:N0}件");
+            }
+
+            if (pendingDocumentCount > 0)
+            {
+                pendingDetails.Add($"車両未接続書類 {pendingDocumentCount:N0}件");
+            }
+
+            LegacyGraphFinalizeImportStatusText.Text =
+                $"確定前に完了してください: {string.Join(" / ", pendingDetails)}。" +
+                (trayCount > 0 ? $" 未確定トレイ {trayCount:N0}件は確定時に除外できます。" : "");
+        }
+        else
+        {
+            LegacyGraphFinalizeImportStatusText.Text = trayCount > 0
+                ? $"確定できます。未確定トレイ {trayCount:N0}件は確認後に今回のインポートから除外します。"
+                : "確定できます。未確定トレイの書類はありません。";
+        }
     }
 
     private AbacusLegacyExportCandidateGraphCustomer GetLegacyGraphSourceCustomer(
@@ -2510,6 +2633,7 @@ public partial class MainWindow : Window
 
     private void InvalidateLegacyGraphMergeGroupState(string groupKey)
     {
+        InvalidateLegacyGraphImportConfirmation();
         legacyGraphCustomerMergeDrafts.Remove(groupKey);
         legacyGraphAppliedCustomerMergeKeys.Remove(groupKey);
         foreach (var virtualCustomerId in legacyGraphVirtualCustomerMergeKeys
@@ -2850,6 +2974,7 @@ public partial class MainWindow : Window
     private void InvalidateLegacyGraphApprovalForDocument(
         AbacusLegacyExportCandidateGraphDocument document)
     {
+        InvalidateLegacyGraphImportConfirmation();
         var originalCustomer = FindOriginalCustomerForDocument(document);
         if (originalCustomer is null)
         {
@@ -2857,6 +2982,19 @@ public partial class MainWindow : Window
         }
 
         legacyGraphAppliedCustomerMergeKeys.Remove(GetLegacyCustomerMergeKey(originalCustomer));
+    }
+
+    private void InvalidateLegacyGraphImportConfirmation()
+    {
+        if (!legacyGraphImportConfirmed && legacyGraphExcludedDocumentKeys.Count == 0)
+        {
+            UpdateLegacyGraphImportConfirmationButton();
+            return;
+        }
+
+        legacyGraphImportConfirmed = false;
+        legacyGraphExcludedDocumentKeys.Clear();
+        UpdateLegacyGraphImportConfirmationButton();
     }
 
     private void RefreshLegacyGraphUnresolvedDocumentLists()
@@ -2953,6 +3091,20 @@ public partial class MainWindow : Window
             .Where(IsLegacyGraphDocumentInTray)
             .Where(document => FindOriginalCustomerForDocument(document) is { } original &&
                                sourceCustomerIds.Contains(original.CustomerId))
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyGraphTrayDocuments()
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [];
+        }
+
+        return legacyExportCandidateGraphResult.AllDocuments
+            .Where(IsLegacyGraphDocumentInTray)
             .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
@@ -4344,6 +4496,7 @@ public partial class MainWindow : Window
         legacyGraphUnconnectedDocumentKeys.Clear();
         legacyGraphTrayDocumentKeys.Clear();
         legacyGraphExcludedDocumentKeys.Clear();
+        legacyGraphImportConfirmed = false;
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -4395,6 +4548,10 @@ public partial class MainWindow : Window
         LegacyGraphCustomerMergeStatusText.Text = "";
         LegacyGraphRemoveCustomerFromMergeButton.IsEnabled = false;
         LegacyGraphDissolveCustomerMergeButton.IsEnabled = false;
+        LegacyGraphFinalizeImportButton.IsEnabled = false;
+        LegacyGraphFinalizeImportButton.Content = "インポート内容を確定";
+        LegacyGraphFinalizeImportStatusText.Text =
+            "顧客統合と書類・ノード操作を完了すると、インポート内容を確定できます。";
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
