@@ -156,11 +156,6 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 ? groupBySourceCustomerId[vehiclesById[linkedVehicleId].CustomerId]
                 : ResolveCustomerOnlyGroup(document, key, snapshot, sourceCustomers, groupBySourceCustomerId, groupByKey);
             var vehicle = linkedVehicleId is null ? null : vehiclesById[linkedVehicleId];
-            if (linkedVehicleId is null && !snapshot.ManualDocumentCustomerGroupLinks.ContainsKey(key))
-            {
-                throw new InvalidDataException($"書類が顧客にも車両にも確定していません: {document.SourceLocation}");
-            }
-
             finalDocuments.Add(new FinalDocument(
                 document,
                 key,
@@ -227,7 +222,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 "このパッケージはグラフ確定後のregistration-previewです。Web API、D1、Object Storage、画像アップロードは行っていません。",
                 "未確定トレイに残した書類は最終確定時の除外指定に従い、今回のCSVへ出力していません。",
-                "顧客名・車両情報のない書類は顧客だけへ紐付き、vehicleIdを空欄としてdocument-links.jsonへ記録しています。次段階でWeb側の特例登録を実装します。",
+                "顧客が一意に判定できる車両情報のない書類は顧客だけへ紐付き、vehicleIdを空欄としてdocument-links.jsonへ記録しています。次段階でWeb側の特例登録を実装します。",
             };
             if (vehiclelessCount > 0)
             {

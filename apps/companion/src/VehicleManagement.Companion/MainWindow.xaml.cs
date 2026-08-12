@@ -1951,7 +1951,7 @@ public partial class MainWindow : Window
                         : isManualCustomerDocument
                             ? "判定: 顧客へ手動仮紐付け（車両なし）\nキャンバス承認前の画面上の一時状態です。"
                         : isCustomerDirectDocument
-                            ? $"判定: 顧客に一意紐付け（車両未確定）\n候補車両: {document.CandidateSummary}\n車両ノードへ接続するか、未確定トレイへ移動してください。"
+                            ? $"判定: 顧客に一意紐付け（車両情報なしの特例）\n候補車両: {document.CandidateSummary}\nこのまま確定すると顧客だけへ保存します。必要なら車両ノードへ接続できます。"
                         : manualVehicle is null
                             ? $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}"
                     : $"判定: 手動仮紐付け（未登録）\n紐付け先: {manualVehicle.DisplayName}";
@@ -1967,7 +1967,7 @@ public partial class MainWindow : Window
                     : isManualCustomerDocument
                         ? "\n車両情報がない書類を顧客へ直接仮紐付けしています。必要なら車両ノードへ接続するか、未確定トレイへ戻してください。"
                     : isCustomerDirectDocument
-                        ? "\n顧客には一意に紐付いていますが、車両は未確定です。車両ノードへ接続するか、未確定トレイへ移動してください。"
+                        ? "\n顧客には一意に紐付いています。車両ノードへ接続しない場合は、車両情報なしの互換特例として顧客だけへ保存します。"
                     : manualVehicle is null
                         ? ""
                     : $"\n手動で選択した車両ID: {manualVehicle.VehicleId}\nこの変更は画面上の仮紐付けです。元CSV・ABACUSフォルダーは変更していません。";
@@ -2738,7 +2738,7 @@ public partial class MainWindow : Window
 
         return legacyExportCandidateGraphResult.AllDocuments.Count(document =>
             !IsLegacyGraphDocumentInTray(document) &&
-            (IsLegacyGraphDocumentUnconnected(document) || IsLegacyGraphCustomerDirectDocument(document)));
+            IsLegacyGraphDocumentUnconnected(document));
     }
 
     private void UpdateLegacyGraphImportConfirmationButton()
