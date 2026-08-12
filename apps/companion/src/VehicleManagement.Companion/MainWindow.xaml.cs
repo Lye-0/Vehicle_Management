@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly AbacusWindowCaptureService windowCaptureService = new();
     private readonly AbacusCaptureCropper captureCropper = new();
     private readonly AbacusNavigationStateDetector abacusNavigationStateDetector = new();
+    private readonly AbacusScreenStateClassifier abacusScreenStateClassifier = new();
     private readonly AbacusDataAnalyzer dataAnalyzer = new(new AbacusTabParser());
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportReader legacyExportReader = new();
@@ -5744,7 +5745,7 @@ public partial class MainWindow : Window
             var result = await session.InspectAbacusNativeWindowsAsync();
             abacusMayBeRunning = result.IsRunning;
             AbacusNativeWindowsGrid.ItemsSource = result.NativeWindows ?? [];
-            RenderAbacusNavigation(abacusNavigationStateDetector.Detect(result));
+            RenderAbacusNavigation(CreateAbacusNavigationSnapshot(result));
             AbacusNativeWindowsStatusText.Text = result.Message;
             AbacusNativeWindowsStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString(
                 result.Status == "native-windows-ready" ? "#17643A" : "#805B10")!;
@@ -5770,7 +5771,7 @@ public partial class MainWindow : Window
         {
             var result = await session.InspectAbacusNativeWindowsAsync();
             abacusMayBeRunning = result.IsRunning;
-            RenderAbacusNavigation(abacusNavigationStateDetector.Detect(result));
+            RenderAbacusNavigation(CreateAbacusNavigationSnapshot(result));
         }
         catch (Exception exception)
         {
@@ -5791,7 +5792,8 @@ public partial class MainWindow : Window
         var (foreground, background) = snapshot.State switch
         {
             AbacusNavigationState.MainMenu => ("#1E40AF", "#EAF2FF"),
-            AbacusNavigationState.VehicleList or AbacusNavigationState.VehicleManagement or AbacusNavigationState.ExpandedImage
+            AbacusNavigationState.VehicleList or AbacusNavigationState.VehicleDetail or
+                AbacusNavigationState.VehicleManagement or AbacusNavigationState.ExpandedImage
                 => ("#17643A", "#EAF7EF"),
             AbacusNavigationState.NotRunning => ("#52647A", "#E9EEF5"),
             _ => ("#805B10", "#FFF4D6"),
@@ -5808,6 +5810,25 @@ public partial class MainWindow : Window
                 snapshot.VisibleChildWindows.Select(window =>
                     string.IsNullOrWhiteSpace(window.Title) ? window.ClassName : window.Title));
         AbacusNavigationObservedText.Text = $"確認中の子ウィンドウ: {observed}";
+    }
+
+    private AbacusNavigationSnapshot CreateAbacusNavigationSnapshot(AbacusRuntimeSnapshot result)
+    {
+        AbacusScreenVisualResult? visual = null;
+        if (result.ProcessId.HasValue && result.WindowHandle.HasValue)
+        {
+            try
+            {
+                var capture = windowCaptureService.Capture(result.WindowHandle.Value, result.ProcessId.Value);
+                visual = abacusScreenStateClassifier.Classify(capture);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+            {
+                // キャプチャ不能時も、従来の読み取り専用子ウィンドウ診断へ安全にフォールバックします。
+            }
+        }
+
+        return abacusNavigationStateDetector.Detect(result, visual);
     }
 
     private async void InspectAbacusAutomationButton_Click(object sender, RoutedEventArgs e)

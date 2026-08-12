@@ -3,14 +3,15 @@ using VehicleManagement.LocalProtocol;
 namespace VehicleManagement.Companion.Services;
 
 /// <summary>
-/// ABACUSの画面遷移を、LegacyHostから取得した読み取り専用の子ウィンドウ情報だけで分類します。
-/// この分類は操作を実行せず、画像やCSVの内容も読み取りません。
+/// ABACUSの画面遷移を、メインウィンドウの読み取り専用キャプチャと
+/// LegacyHostから取得した子ウィンドウ情報で分類します。ABACUSへの操作は実行しません。
 /// </summary>
 public enum AbacusNavigationState
 {
     NotRunning,
     MainMenu,
     VehicleList,
+    VehicleDetail,
     VehicleManagement,
     ExpandedImage,
     Unknown,
@@ -30,7 +31,9 @@ public sealed record AbacusNavigationSnapshot(
 
 public sealed class AbacusNavigationStateDetector
 {
-    public AbacusNavigationSnapshot Detect(AbacusRuntimeSnapshot runtime)
+    public AbacusNavigationSnapshot Detect(
+        AbacusRuntimeSnapshot runtime,
+        AbacusScreenVisualResult? visual = null)
     {
         if (!runtime.ProcessId.HasValue ||
             runtime.Status is "abacus-not-running" or "abacus-exited")
@@ -46,6 +49,22 @@ public sealed class AbacusNavigationStateDetector
         var visibleWindows = (runtime.NativeWindows ?? [])
             .Where(window => window.IsVisible && window.NativeWindowHandle != 0)
             .ToArray();
+
+        if (visual is not null)
+        {
+            var visualSnapshot = CreateFromVisualState(visual, runtime, visibleWindows);
+            if (visualSnapshot is not null)
+            {
+                return visualSnapshot;
+            }
+
+            return Create(
+                AbacusNavigationState.Unknown,
+                "画面を判定できません",
+                $"画面内容を取得しましたが既知の4状態に一致しませんでした。{FormatMetrics(visual)}",
+                runtime,
+                visibleWindows);
+        }
 
         if (visibleWindows.Length == 0)
         {
@@ -109,6 +128,50 @@ public sealed class AbacusNavigationStateDetector
 
     private static bool IsWindow(LegacyNativeWindowInfo window, string title) =>
         string.Equals(window.Title.Trim(), title, StringComparison.OrdinalIgnoreCase);
+
+    private static AbacusNavigationSnapshot? CreateFromVisualState(
+        AbacusScreenVisualResult? visual,
+        AbacusRuntimeSnapshot runtime,
+        IReadOnlyList<LegacyNativeWindowInfo> visibleWindows)
+    {
+        if (visual is null || visual.State is AbacusScreenVisualState.Unknown)
+        {
+            return null;
+        }
+
+        var metrics = FormatMetrics(visual);
+        return visual.State switch
+        {
+            AbacusScreenVisualState.MainMenu => Create(
+                AbacusNavigationState.MainMenu,
+                "ABACUSメニュー",
+                $"ABACUSのメインメニューを表示しています。{metrics}",
+                runtime,
+                visibleWindows),
+            AbacusScreenVisualState.VehicleList => Create(
+                AbacusNavigationState.VehicleList,
+                "車両一覧",
+                $"車両管理の一覧を表示しています。対象行を1回クリックして移動できます。{metrics}",
+                runtime,
+                visibleWindows),
+            AbacusScreenVisualState.VehicleDetail => Create(
+                AbacusNavigationState.VehicleDetail,
+                "車両詳細",
+                $"顧客・車両情報と右側の画像領域を表示しています。{metrics}",
+                runtime,
+                visibleWindows),
+            AbacusScreenVisualState.ExpandedImage => Create(
+                AbacusNavigationState.ExpandedImage,
+                "拡大画像",
+                $"車検証画像を拡大表示しています。{metrics}",
+                runtime,
+                visibleWindows),
+            _ => null,
+        };
+    }
+
+    private static string FormatMetrics(AbacusScreenVisualResult visual) =>
+        $"画面内容の特徴値: 青 {visual.BlueRatio:P1} / 暗色 {visual.DarkRatio:P1} / 灰色罫線 {visual.GrayInkRatio:P1}";
 
     private static AbacusNavigationSnapshot Create(
         AbacusNavigationState state,

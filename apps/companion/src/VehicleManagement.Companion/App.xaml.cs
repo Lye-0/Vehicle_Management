@@ -89,6 +89,14 @@ public partial class App : Application
                 return 5;
             }
 
+            if (AbacusScreenStateClassifier.ClassifyRatios(0.10, 0.01, 0.04) is not AbacusScreenVisualState.MainMenu ||
+                AbacusScreenStateClassifier.ClassifyRatios(0.06, 0.05, 0.07) is not AbacusScreenVisualState.VehicleList ||
+                AbacusScreenStateClassifier.ClassifyRatios(0.05, 0.03, 0.07) is not AbacusScreenVisualState.VehicleDetail ||
+                AbacusScreenStateClassifier.ClassifyRatios(0.005, 0.06, 0.15) is not AbacusScreenVisualState.ExpandedImage)
+            {
+                return 9;
+            }
+
             return await RunFolderSelfTestAsync() ? 0 : 3;
         }
         catch

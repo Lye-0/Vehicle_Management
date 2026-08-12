@@ -224,7 +224,7 @@
                                            Foreground="#52647A" Text="画面遷移状態は未診断です。" />
                                 <TextBlock x:Name="AbacusNavigationDetailText" Margin="0,5,0,0"
                                            Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="「画面遷移状態を診断」を押すと、メニュー・車両管理画面・拡大画像のどこにいるかを確認できます。車両一覧と詳細の区別は次段階で行います。" />
+                                           Text="「画面遷移状態を診断」を押すと、ABACUSメニュー・車両一覧・車両詳細・拡大画像のどこにいるかを画面内容から確認できます。" />
                                 <TextBlock x:Name="AbacusNavigationObservedText" Margin="0,5,0,0"
                                            Foreground="#52647A" TextWrapping="Wrap"
                                            Text="確認中の子ウィンドウ: -" />
