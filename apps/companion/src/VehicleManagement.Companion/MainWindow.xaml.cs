@@ -89,6 +89,7 @@ public partial class MainWindow : Window
     private Point legacyGraphDragOffset;
     private Point legacyGraphBlockDragStartPoint;
     private bool legacyGraphBlockDragStarted;
+    private Cursor? legacyGraphBlockDragOriginalCursor;
     private bool legacyGraphPanning;
     private Point legacyGraphPanStartPoint;
     private double legacyGraphPanStartHorizontalOffset;
@@ -3121,6 +3122,8 @@ public partial class MainWindow : Window
             width,
             height,
             statusLabel);
+        // 書類ブロックは車両・未確定トレイへ移動できることを常時示します。
+        block.Cursor = Cursors.Hand;
         if (block.Children.OfType<StackPanel>().FirstOrDefault() is { } content)
         {
             // 左右のノード・切断ボタンと本文が重ならないように余白を確保します。
@@ -3643,7 +3646,8 @@ public partial class MainWindow : Window
             : LegacyGraphScrollViewer.ActualWidth;
         var nearCanvas = pointer.X >= 0 && pointer.X <= viewportWidth;
         var edge = 64d;
-        var step = 24d;
+        // 40ms間隔で急激に移動しないよう、1 tickあたりの移動量を小さくします。
+        var step = 8d;
         var delta = nearCanvas && pointer.Y < edge
             ? -step
             : nearCanvas && pointer.Y > viewportHeight - edge
@@ -3923,6 +3927,9 @@ public partial class MainWindow : Window
                                                frameworkElement.Tag is AbacusLegacyExportCandidateGraphDocument document
             ? document
             : null;
+        legacyGraphBlockDragOriginalCursor = element is FrameworkElement cursorElement
+            ? cursorElement.Cursor
+            : null;
         Mouse.OverrideCursor = null;
         UpdateLegacyGraphInspector(element is FrameworkElement selectedElement ? selectedElement.Tag : null);
         var position = e.GetPosition(LegacyGraphCanvas);
@@ -3982,7 +3989,7 @@ public partial class MainWindow : Window
         var document = legacyGraphDocumentCardDragDocument;
         var wasDragging = legacyGraphBlockDragStarted;
         var windowPoint = e.GetPosition(this);
-        Mouse.OverrideCursor = null;
+        RestoreLegacyGraphBlockDragCursor();
         legacyGraphDraggingElement.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
         legacyGraphDocumentCardDragDocument = null;
@@ -4052,7 +4059,7 @@ public partial class MainWindow : Window
 
     private void ClearLegacyGraphBlockVisualDrag()
     {
-        Mouse.OverrideCursor = null;
+        RestoreLegacyGraphBlockDragCursor();
         if (legacyGraphBlockDragPreviewSource is not null)
         {
             legacyGraphBlockDragPreviewSource.Opacity = 1;
@@ -4067,13 +4074,33 @@ public partial class MainWindow : Window
         legacyGraphBlockDragPreviewSource = null;
     }
 
+    private void SetLegacyGraphDocumentDragCursor(Cursor cursor)
+    {
+        Mouse.OverrideCursor = cursor;
+        if (legacyGraphDraggingElement is FrameworkElement element)
+        {
+            element.Cursor = cursor;
+        }
+    }
+
+    private void RestoreLegacyGraphBlockDragCursor()
+    {
+        Mouse.OverrideCursor = null;
+        if (legacyGraphDraggingElement is FrameworkElement element)
+        {
+            element.Cursor = legacyGraphBlockDragOriginalCursor;
+        }
+
+        legacyGraphBlockDragOriginalCursor = null;
+    }
+
     private void UpdateLegacyGraphBlockDropTarget(Point windowPoint)
     {
         ClearLegacyGraphDropHighlight();
         ClearLegacyGraphTrayDropHighlight();
         if (legacyGraphDocumentCardDragDocument is null)
         {
-            Mouse.OverrideCursor = null;
+            RestoreLegacyGraphBlockDragCursor();
             return;
         }
 
@@ -4083,7 +4110,7 @@ public partial class MainWindow : Window
         {
             legacyGraphTrayDropHighlightList = list;
             list.Opacity = 0.82;
-            Mouse.OverrideCursor = Cursors.Hand;
+            SetLegacyGraphDocumentDragCursor(Cursors.Hand);
             return;
         }
 
@@ -4091,11 +4118,11 @@ public partial class MainWindow : Window
             vehicleBlock.Tag is AbacusLegacyExportCandidateGraphVehicle)
         {
             SetLegacyGraphDropHighlight(vehicleBlock);
-            Mouse.OverrideCursor = Cursors.Hand;
+            SetLegacyGraphDocumentDragCursor(Cursors.Hand);
             return;
         }
 
-        Mouse.OverrideCursor = Cursors.Arrow;
+        SetLegacyGraphDocumentDragCursor(Cursors.Arrow);
     }
 
     private void HandleLegacyGraphDocumentBlockDrop(
