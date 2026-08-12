@@ -963,6 +963,9 @@
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
                                     <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="LegacyGraphCurrentCustomerSelectionText" Margin="0,7,0,0"
+                                               Foreground="#1D4ED8" FontSize="12" FontWeight="SemiBold"
+                                               Text="現在の選択: なし" TextWrapping="Wrap" />
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
@@ -983,6 +986,15 @@
                                             <Style TargetType="ListBoxItem">
                                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                                 <Setter Property="Padding" Value="0" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="2" />
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#2563EB" />
+                                                        <Setter Property="Background" Value="#DBEAFE" />
+                                                    </Trigger>
+                                                </Style.Triggers>
                                             </Style>
                                         </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
@@ -1027,6 +1039,8 @@
                                                        Text="統合解除\nここへ顧客をドロップ" />
                                         </Border>
                                     </Grid>
+                                    <Button x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
+                                            Content="現在の選択に戻る" Click="LegacyGraphReturnToCurrentSelectionButton_Click" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
