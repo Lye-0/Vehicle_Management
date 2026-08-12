@@ -33,6 +33,7 @@ public sealed record AbacusBulkImagePreparationResult(
     string ReportPath,
     string ManifestSha256,
     int SourceImageCount,
+    int EmbeddedImageCount,
     int MatchedCount,
     int ReviewCount,
     int NotFoundCount,
@@ -42,10 +43,10 @@ public sealed record AbacusBulkImagePreparationResult(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// ABACUSフォルダー内に既に存在する標準画像を一括で検査し、ファイル名に含まれる
-/// 車台番号・登録番号を車両一覧CSVへ読み取り専用で照合します。
-/// FileMakerのUCSコンテナを推測して書き換えることはせず、照合が一意な画像だけを
-/// 既存の画像登録前パッケージ形式へまとめます。
+/// ABACUSフォルダー内の標準画像と、読み取り対象のabx-*.ucsに埋め込まれた
+/// JPEG候補を一括で検査し、ファイル名またはUCS周辺の車台番号を車両一覧CSVへ
+/// 読み取り専用で照合します。照合が一意な画像だけを既存の画像登録前パッケージへ
+/// まとめ、UCS原本は推測分割・書換えしません。
 /// </summary>
 public sealed class AbacusBulkImagePreparationStore
 {
@@ -55,6 +56,10 @@ public sealed class AbacusBulkImagePreparationStore
     private const int MaximumSourceImages = 5_000;
     private const int MaximumManifestBytes = 4 * 1024 * 1024;
     private const int MaximumReportBytes = 16 * 1024 * 1024;
+    private const long MaximumEmbeddedContainerBytes = 1L * 1024 * 1024 * 1024;
+    private const int MaximumEmbeddedSegments = 5_000;
+    private const int EmbeddedIdentifierWindowBytes = 2 * 1024 * 1024;
+    private const int MaximumEmbeddedRejectedReports = 5_000;
     private static readonly string[] SupportedExtensions = [".png", ".jpg", ".jpeg"];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -63,6 +68,7 @@ public sealed class AbacusBulkImagePreparationStore
         WriteIndented = true,
     };
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
+    private static readonly Encoding AbacusEncoding = CreateAbacusEncoding();
 
     private readonly AbacusVehicleExportReader vehicleExportReader = new();
 
@@ -98,8 +104,10 @@ public sealed class AbacusBulkImagePreparationStore
 
         var candidates = new List<AbacusBulkImageCandidate>(sourceFiles.Count);
         var warnings = new List<string>();
+        var packagedImages = new List<PreparedImage>();
         var accepted = new List<PreparedImage>();
         var totalBytes = 0L;
+        var standardRejectedCount = 0;
         for (var index = 0; index < sourceFiles.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -130,9 +138,7 @@ public sealed class AbacusBulkImagePreparationStore
                 };
                 var match = matches.Count == 1 ? matches[0] : null;
                 var candidateId = CreateCandidateId(relativePath, validated.ImageSha256);
-                var packageImagePath = match is null
-                    ? string.Empty
-                    : $"images/{candidateId}{Path.GetExtension(sourcePath).ToLowerInvariant()}";
+                var packageImagePath = $"images/{candidateId}{Path.GetExtension(sourcePath).ToLowerInvariant()}";
                 var reason = status switch
                 {
                     "matched" => $"ファイル名から{(match!.UsedChassis ? "車台番号" : "登録番号")}を検出し、車両一覧の1行へ一致しました。",
@@ -157,9 +163,10 @@ public sealed class AbacusBulkImagePreparationStore
                     validated.ImageSha256,
                     reason);
                 candidates.Add(candidate);
+                packagedImages.Add(new PreparedImage(sourcePath, null, 0, 0, candidate));
                 if (match is not null)
                 {
-                    accepted.Add(new PreparedImage(sourcePath, candidate));
+                    accepted.Add(packagedImages[^1]);
                 }
             }
             catch (OperationCanceledException)
@@ -169,6 +176,7 @@ public sealed class AbacusBulkImagePreparationStore
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                                InvalidDataException or NotSupportedException)
             {
+                standardRejectedCount++;
                 var candidateId = CreateCandidateId(relativePath, index.ToString());
                 candidates.Add(new AbacusBulkImageCandidate(
                     candidateId,
@@ -190,19 +198,154 @@ public sealed class AbacusBulkImagePreparationStore
             }
         }
 
-        AddContainerWarning(sourceRoot, sourceFiles.Count, warnings);
+        var embeddedImageCount = 0;
+        var embeddedRejectedCount = 0;
+        var embeddedContainers = EnumerateEmbeddedContainers(sourceRoot).ToList();
+        foreach (var containerPath in embeddedContainers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var containerRelativePath = Path.GetRelativePath(sourceRoot, containerPath).Replace('\\', '/');
+            var segments = await FindJpegSegmentsAsync(containerPath, cancellationToken);
+            foreach (var segment in segments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (embeddedImageCount >= MaximumSourceImages)
+                {
+                    warnings.Add($"UCS内部JPEGの検証件数が上限{MaximumSourceImages:N0}件に達したため、残りは要確認として扱っていません。");
+                    break;
+                }
+
+                ValidatedImage validated;
+                try
+                {
+                    validated = await ValidateEmbeddedImageAsync(containerPath, segment, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (exception is IOException or InvalidDataException or
+                                                   NotSupportedException or ArgumentException or
+                                                   System.Runtime.InteropServices.COMException or
+                                                   System.IO.FileFormatException)
+                {
+                    embeddedRejectedCount++;
+                    if (embeddedRejectedCount <= MaximumEmbeddedRejectedReports)
+                    {
+                        var rejectedId = CreateCandidateId(
+                            $"{containerRelativePath}@{segment.Offset:N0}",
+                            exception.Message);
+                        candidates.Add(new AbacusBulkImageCandidate(
+                            rejectedId,
+                            $"{containerRelativePath}@{segment.Offset:N0}",
+                            string.Empty,
+                            "rejected",
+                            "抽出不可",
+                            "ucs-jpeg",
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            segment.Length,
+                            0,
+                            0,
+                            string.Empty,
+                            $"UCS内部JPEG候補を画像として検証できませんでした: {exception.Message}"));
+                    }
+
+                    continue;
+                }
+
+                embeddedImageCount++;
+                totalBytes = checked(totalBytes + validated.FileSize);
+                if (totalBytes > MaximumTotalImageBytes)
+                {
+                    throw new InvalidDataException(
+                        $"一括画像の合計サイズが上限{MaximumTotalImageBytes:N0} bytesを超えています。");
+                }
+                var imageRelativePath = $"{containerRelativePath}@{segment.Offset:N0}";
+                var embeddedMatches = await FindEmbeddedVehicleMatchesAsync(
+                    containerPath,
+                    segment.Offset,
+                    vehicleExport.Rows,
+                    cancellationToken);
+                var match = embeddedMatches.Count == 1 && embeddedMatches[0].UsedChassis
+                    ? embeddedMatches[0]
+                    : null;
+                var status = match is not null
+                    ? "matched"
+                    : embeddedMatches.Count > 0 ? "review" : "not-found";
+                var statusLabel = status switch
+                {
+                    "matched" => "一意に照合",
+                    "review" => "要確認（複数候補）",
+                    _ => "未照合",
+                };
+                var candidateId = CreateCandidateId(imageRelativePath, validated.ImageSha256);
+                var packageImagePath = $"images/{candidateId}.jpg";
+                var reason = status switch
+                {
+                    "matched" => $"{containerRelativePath}からJPEGを読み取り、UCS周辺の車台番号が車両一覧の1行へ一意に一致しました。",
+                    "review" => $"{containerRelativePath}からJPEGを読み取りましたが、周辺に{embeddedMatches.Count:N0}件の車両候補があるため自動登録しません。",
+                    _ => $"{containerRelativePath}からJPEGを読み取りましたが、周辺に車両一覧と一致する強い識別子がありません。",
+                };
+                var candidate = new AbacusBulkImageCandidate(
+                    candidateId,
+                    imageRelativePath,
+                    packageImagePath,
+                    status,
+                    statusLabel,
+                    match is null ? "ucs-nearby-identifier" : "ucs-nearby-chassis",
+                    match?.Identifier ?? string.Empty,
+                    match?.Row.CustomerName ?? string.Empty,
+                    match?.Row.VehicleName ?? string.Empty,
+                    match?.Row.ChassisNumber ?? string.Empty,
+                    match?.Row.RegistrationNumber ?? string.Empty,
+                    validated.FileSize,
+                    validated.PixelWidth,
+                    validated.PixelHeight,
+                    validated.ImageSha256,
+                    reason);
+                candidates.Add(candidate);
+                packagedImages.Add(new PreparedImage(null, containerPath, segment.Offset, segment.Length, candidate));
+                if (match is not null)
+                {
+                    accepted.Add(packagedImages[^1]);
+                }
+            }
+        }
+
+        AddContainerWarning(sourceRoot, sourceFiles.Count, embeddedContainers.Count, embeddedImageCount, embeddedRejectedCount, warnings);
         var packagePath = CreateUniquePackageDirectory(destinationRoot);
         var imagesPath = Path.Combine(packagePath, "images");
         Directory.CreateDirectory(imagesPath);
         try
         {
-            foreach (var prepared in accepted)
+            foreach (var prepared in packagedImages)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var destinationPath = Path.Combine(
                     packagePath,
                     prepared.Candidate.PackageImageFileName.Replace('/', Path.DirectorySeparatorChar));
-                await CopyAndVerifyAsync(prepared.SourcePath, destinationPath, prepared.Candidate.ImageSha256, cancellationToken);
+                if (prepared.ContainerPath is not null)
+                {
+                    await CopySegmentAndVerifyAsync(
+                        prepared.ContainerPath,
+                        prepared.SourceOffset,
+                        prepared.SourceLength,
+                        destinationPath,
+                        prepared.Candidate.ImageSha256,
+                        cancellationToken);
+                }
+                else
+                {
+                    await CopyAndVerifyAsync(
+                        prepared.SourcePath!,
+                        destinationPath,
+                        prepared.Candidate.ImageSha256,
+                        cancellationToken);
+                }
             }
 
             var manifest = new BulkPreviewManifest(
@@ -210,13 +353,13 @@ public sealed class AbacusBulkImagePreparationStore
                 "abacus-image-registration-preview",
                 "preview-only",
                 DateTime.UtcNow,
-                new BulkPreviewSource(sourceRoot, vehicleRoot, "filename-identifier-bulk-match"),
+                new BulkPreviewSource(sourceRoot, vehicleRoot, "filename-and-ucs-nearby-identifier-bulk-match"),
                 new BulkPreviewSummary(
                     accepted.Count,
                     candidates.Count(item => item.Status == "review"),
                     candidates.Count(item => item.Status == "not-found"),
-                    candidates.Count(item => item.Status == "rejected"),
-                    "ファイル名に含まれる識別子が車両一覧CSVの1行へ一意に一致した画像だけを登録前候補に含めています。"),
+                    standardRejectedCount + embeddedRejectedCount,
+                    "標準画像のファイル名、またはUCS内部JPEG周辺の車台番号が車両一覧CSVの1行へ一意に一致した画像だけを登録前候補に含めています。"),
                 accepted.Select(prepared => new BulkPreviewCandidate(
                     prepared.Candidate.CandidateId,
                     prepared.Candidate.PackageImageFileName,
@@ -250,14 +393,23 @@ public sealed class AbacusBulkImagePreparationStore
 
             var reportPath = Path.Combine(packagePath, "image-batch-report.json");
             await WriteAtomicallyAsync(reportPath, reportBytes, cancellationToken);
-            if (sourceFiles.Count == 0)
+            if (sourceFiles.Count == 0 && embeddedImageCount == 0)
             {
-                warnings.Add("ABACUSフォルダー内にPNG/JPEGファイルがありません。UCSコンテナの推測抽出は行わず、原本を変更しません。画像表示キャプチャまたは専用形式解析が必要です。");
+                warnings.Add("ABACUSフォルダー内に標準PNG/JPEG、または検証可能なUCS内部JPEGがありません。原本を変更せず、画像表示キャプチャまたは別形式の解析が必要です。");
+            }
+            else if (embeddedImageCount > 0)
+            {
+                warnings.Add($"UCSコンテナから検証可能なJPEGを{embeddedImageCount:N0}件読み取りました。原本は変更していません。識別子が一意な画像だけを登録前候補へ含めています。");
+            }
+
+            if (embeddedRejectedCount > 0)
+            {
+                warnings.Add($"UCS内部JPEG候補のうち{embeddedRejectedCount:N0}件は画像として検証できず、登録前候補へ含めていません。");
             }
 
             if (candidates.Any(item => item.Status is "review" or "not-found" or "rejected"))
             {
-                warnings.Add("要確認・未照合・抽出不可の画像は登録前候補へ含めていません。image-batch-report.jsonで一覧を確認し、必要な画像だけ既存の確認済み経路へ回してください。");
+                warnings.Add("要確認・未照合の検証済み画像は一括パッケージへ保存しますが、登録前候補へは含めていません。image-batch-report.jsonで一覧を確認し、必要な画像だけ既存の確認済み経路へ回してください。抽出不可画像は保存していません。");
             }
 
             return new AbacusBulkImagePreparationResult(
@@ -268,10 +420,11 @@ public sealed class AbacusBulkImagePreparationStore
                 reportPath,
                 Convert.ToHexString(SHA256.HashData(manifestBytes)),
                 sourceFiles.Count,
+                embeddedImageCount,
                 candidates.Count(item => item.Status == "matched"),
                 candidates.Count(item => item.Status == "review"),
                 candidates.Count(item => item.Status == "not-found"),
-                candidates.Count(item => item.Status == "rejected"),
+                standardRejectedCount + embeddedRejectedCount,
                 accepted.Count,
                 candidates,
                 warnings);
@@ -285,6 +438,241 @@ public sealed class AbacusBulkImagePreparationStore
 
             throw;
         }
+    }
+
+    private static IEnumerable<string> EnumerateEmbeddedContainers(string root)
+    {
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(root, "*.ucs", SearchOption.TopDirectoryOnly);
+        }
+        catch (IOException)
+        {
+            yield break;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            yield break;
+        }
+
+        foreach (var file in files)
+        {
+            var name = Path.GetFileName(file);
+            if (!name.StartsWith("abx-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var include = false;
+            try
+            {
+                var info = new FileInfo(file);
+                include = info.Exists && !info.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+                          info.Length > 0 && info.Length <= MaximumEmbeddedContainerBytes;
+            }
+            catch (IOException)
+            {
+                // 読み取り中に消えたコンテナは安全側に無視します。
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 権限のないコンテナは安全側に無視します。
+            }
+
+            if (include)
+            {
+                yield return file;
+            }
+        }
+    }
+
+    private static async Task<List<EmbeddedJpegSegment>> FindJpegSegmentsAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        return await Task.Run(() =>
+        {
+            var result = new List<EmbeddedJpegSegment>();
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                1024 * 1024,
+                FileOptions.SequentialScan);
+            var buffer = new byte[1024 * 1024];
+            long position = 0;
+            long start = -1;
+            var previous = (byte)0;
+            var hasPrevious = false;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = stream.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                for (var index = 0; index < read; index++, position++)
+                {
+                    var current = buffer[index];
+                    if (start < 0)
+                    {
+                        if (hasPrevious && previous == 0xFF && current == 0xD8)
+                        {
+                            start = position - 1;
+                        }
+                    }
+                    else if (hasPrevious && previous == 0xFF && current == 0xD8)
+                    {
+                        // 入れ子のSOIは先頭候補を破棄し、最も内側のJPEGを検証します。
+                        start = position - 1;
+                    }
+                    else if (hasPrevious && previous == 0xFF && current == 0xD9)
+                    {
+                        var length = checked(position - start + 1);
+                        result.Add(new EmbeddedJpegSegment(start, length));
+                        if (result.Count >= MaximumEmbeddedSegments)
+                        {
+                            return result;
+                        }
+
+                        start = -1;
+                    }
+
+                    previous = current;
+                    hasPrevious = true;
+                }
+            }
+
+            return result;
+        }, cancellationToken);
+    }
+
+    private static async Task<ValidatedImage> ValidateEmbeddedImageAsync(
+        string path,
+        EmbeddedJpegSegment segment,
+        CancellationToken cancellationToken)
+    {
+        if (segment.Length <= 0 || segment.Length > MaximumImageBytes || segment.Offset < 0)
+        {
+            throw new InvalidDataException("UCS内部JPEGのサイズが許容範囲外です。");
+        }
+
+        var bytes = new byte[checked((int)segment.Length)];
+        await using (var stream = new FileStream(
+                         path,
+                         FileMode.Open,
+                         FileAccess.Read,
+                         FileShare.Read,
+                         1024 * 1024,
+                         FileOptions.Asynchronous | FileOptions.RandomAccess))
+        {
+            stream.Position = segment.Offset;
+            await stream.ReadExactlyAsync(bytes.AsMemory(), cancellationToken);
+        }
+
+        using var imageStream = new MemoryStream(bytes, writable: false);
+        var decoder = BitmapDecoder.Create(
+            imageStream,
+            BitmapCreateOptions.PreservePixelFormat,
+            BitmapCacheOption.OnLoad);
+        if (decoder.Frames.Count != 1)
+        {
+            throw new InvalidDataException("UCS内部JPEGを1枚としてデコードできません。");
+        }
+
+        var frame = decoder.Frames[0];
+        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0 ||
+            (long)frame.PixelWidth * frame.PixelHeight > MaximumPixels)
+        {
+            throw new InvalidDataException("UCS内部JPEGの画素数が許容範囲を超えています。");
+        }
+
+        return new ValidatedImage(
+            segment.Length,
+            frame.PixelWidth,
+            frame.PixelHeight,
+            Convert.ToHexString(SHA256.HashData(bytes)));
+    }
+
+    private static async Task<List<VehicleMatch>> FindEmbeddedVehicleMatchesAsync(
+        string path,
+        long imageOffset,
+        IReadOnlyList<AbacusVehicleExportRow> rows,
+        CancellationToken cancellationToken)
+    {
+        var windowStart = Math.Max(0, imageOffset - EmbeddedIdentifierWindowBytes);
+        var windowLength = checked((int)(imageOffset - windowStart));
+        if (windowLength == 0)
+        {
+            return [];
+        }
+
+        var bytes = new byte[windowLength];
+        await using (var stream = new FileStream(
+                         path,
+                         FileMode.Open,
+                         FileAccess.Read,
+                         FileShare.Read,
+                         1024 * 1024,
+                         FileOptions.Asynchronous | FileOptions.RandomAccess))
+        {
+            stream.Position = windowStart;
+            await stream.ReadExactlyAsync(bytes.AsMemory(), cancellationToken);
+        }
+
+        var text = AbacusEncoding.GetString(bytes);
+        var normalizedText = Normalize(text);
+        var matches = new List<VehicleMatch>();
+        foreach (var row in rows)
+        {
+            var chassis = row.ChassisNumber.Trim();
+            var registration = row.RegistrationNumber.Trim();
+            var chassisHit = FindEmbeddedIdentifier(text, normalizedText, chassis);
+            var registrationHit = FindEmbeddedIdentifier(text, normalizedText, registration);
+            if (chassisHit < 0 && registrationHit < 0)
+            {
+                continue;
+            }
+
+            if (chassisHit >= 0 && IsStrongChassis(Normalize(chassis)))
+            {
+                matches.Add(new VehicleMatch(row, chassis, true));
+            }
+            else if (registrationHit >= 0 && IsStrongIdentifier(Normalize(registration)))
+            {
+                // 登録番号だけの近傍一致は候補には残しますが、自動紐付けの強い根拠にはしません。
+                matches.Add(new VehicleMatch(row, registration, false));
+            }
+        }
+
+        return matches
+            .GroupBy(match => $"{match.Row.FileName}:{match.Row.RowNumber}", StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static int FindEmbeddedIdentifier(string text, string normalizedText, string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return -1;
+        }
+
+        var direct = text.IndexOf(trimmed, StringComparison.Ordinal);
+        if (direct >= 0)
+        {
+            return direct;
+        }
+
+        var normalized = Normalize(trimmed);
+        return normalized.Length >= 4
+            ? normalizedText.IndexOf(normalized, StringComparison.Ordinal)
+            : -1;
     }
 
     private static IEnumerable<string> EnumerateImageFiles(string root)
@@ -442,18 +830,37 @@ public sealed class AbacusBulkImagePreparationStore
             .Where(char.IsLetterOrDigit))
         .ToUpperInvariant();
 
+    private static Encoding CreateAbacusEncoding()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding(
+            932,
+            EncoderFallback.ReplacementFallback,
+            DecoderFallback.ReplacementFallback);
+    }
+
     private static string CreateCandidateId(string relativePath, string value) =>
         $"bulk-image-{Convert.ToHexString(SHA256.HashData(StrictUtf8.GetBytes($"{relativePath}\n{value}"))).ToLowerInvariant()[..24]}";
 
-    private static void AddContainerWarning(string sourceRoot, int sourceImageCount, ICollection<string> warnings)
+    private static void AddContainerWarning(
+        string sourceRoot,
+        int sourceImageCount,
+        int embeddedContainerCount,
+        int embeddedImageCount,
+        int embeddedRejectedCount,
+        ICollection<string> warnings)
     {
         var containerFiles = Directory.EnumerateFiles(sourceRoot, "*.*", SearchOption.TopDirectoryOnly)
             .Where(path => Path.GetExtension(path).Equals(".ucs", StringComparison.OrdinalIgnoreCase) ||
                            Path.GetExtension(path).Equals(".fp5", StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        if (containerFiles.Length > 0 && sourceImageCount == 0)
+        if (containerFiles.Length > 0 && sourceImageCount == 0 && embeddedContainerCount == 0)
         {
-            warnings.Add("ABACUSのUCS/FP5コンテナはFileMaker内部形式のため、一括処理では標準画像ファイルだけを対象にしました。原本を推測分割・書換えせず、画像がない場合は手動表示キャプチャまたは専用形式解析へ分離しています。");
+            warnings.Add("ABACUSのUCS/FP5コンテナを確認しましたが、読み取り対象のabx-*.ucsが見つかりません。原本を推測分割・書換えせず、画像表示キャプチャまたは専用形式解析へ分離しています。");
+        }
+        else if (embeddedContainerCount > 0 && embeddedImageCount == 0 && embeddedRejectedCount == 0)
+        {
+            warnings.Add("abx-*.ucsコンテナを確認しましたが、検証可能なJPEG終端を見つけられませんでした。原本は変更していません。");
         }
     }
 
@@ -506,27 +913,97 @@ public sealed class AbacusBulkImagePreparationStore
         var temporaryPath = destinationPath + ".partial";
         try
         {
-            await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await using var destination = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[1024 * 1024];
-            while (true)
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var destination = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                var read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
-                if (read == 0)
+                var buffer = new byte[1024 * 1024];
+                while (true)
                 {
-                    break;
+                    var read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    hash.AppendData(buffer, 0, read);
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 }
 
-                hash.AppendData(buffer, 0, read);
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                await destination.FlushAsync(cancellationToken);
             }
 
-            await destination.FlushAsync(cancellationToken);
             var actual = Convert.ToHexString(hash.GetHashAndReset());
             if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException($"画像のSHA-256が一致しません: {Path.GetFileName(sourcePath)}");
+            }
+
+            File.Move(temporaryPath, destinationPath, overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static async Task CopySegmentAndVerifyAsync(
+        string sourcePath,
+        long sourceOffset,
+        long sourceLength,
+        string destinationPath,
+        string expectedSha256,
+        CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath)
+            ?? throw new InvalidDataException("画像コピー先を確認できません。");
+        Directory.CreateDirectory(destinationDirectory);
+        var temporaryPath = destinationPath + ".partial";
+        try
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            await using (var source = new FileStream(
+                             sourcePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             1024 * 1024,
+                             FileOptions.Asynchronous | FileOptions.RandomAccess))
+            await using (var destination = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             1024 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                source.Position = sourceOffset;
+                var buffer = new byte[1024 * 1024];
+                var remaining = sourceLength;
+                while (remaining > 0)
+                {
+                    var requested = (int)Math.Min(buffer.Length, remaining);
+                    var read = await source.ReadAsync(buffer.AsMemory(0, requested), cancellationToken);
+                    if (read == 0)
+                    {
+                        throw new InvalidDataException("UCS内部JPEGの読み取り中に終端へ到達しました。");
+                    }
+
+                    hash.AppendData(buffer, 0, read);
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    remaining -= read;
+                }
+
+                await destination.FlushAsync(cancellationToken);
+            }
+
+            var actual = Convert.ToHexString(hash.GetHashAndReset());
+            if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("UCS内部JPEGのSHA-256が一致しません。");
             }
 
             File.Move(temporaryPath, destinationPath, overwrite: false);
@@ -568,7 +1045,14 @@ public sealed class AbacusBulkImagePreparationStore
 
     private sealed record VehicleMatch(AbacusVehicleExportRow Row, string Identifier, bool UsedChassis);
 
-    private sealed record PreparedImage(string SourcePath, AbacusBulkImageCandidate Candidate);
+    private sealed record EmbeddedJpegSegment(long Offset, long Length);
+
+    private sealed record PreparedImage(
+        string? SourcePath,
+        string? ContainerPath,
+        long SourceOffset,
+        long SourceLength,
+        AbacusBulkImageCandidate Candidate);
 
     private sealed record BulkPreviewManifest(
         int Version,
