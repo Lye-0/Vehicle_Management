@@ -960,18 +960,25 @@
                             </Grid.ColumnDefinitions>
                             <Border Grid.Column="0" Padding="10" Background="#F4F7FB" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">
-                                <StackPanel>
-                                    <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
-                                    <TextBlock x:Name="LegacyGraphCurrentCustomerSelectionText" Margin="0,7,0,0"
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
+                                    <TextBlock Grid.Row="1" Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="2" x:Name="LegacyGraphCurrentCustomerSelectionText" Margin="0,7,0,0"
                                                Foreground="#1D4ED8" FontSize="12" FontWeight="SemiBold"
                                                Text="現在の選択: なし" TextWrapping="Wrap" />
-                                    <Grid Margin="0,8,0,0">
+                                    <Grid Grid.Row="3" Margin="0,8,0,0" MinHeight="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition x:Name="LegacyGraphCustomerUngroupDropColumn" Width="0" />
                                         </Grid.ColumnDefinitions>
-                                        <ListBox x:Name="LegacyGraphCustomersList" Height="685"
+                                        <ListBox x:Name="LegacyGraphCustomersList" VerticalAlignment="Stretch"
                                                  Padding="0,0,14,0"
                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                                  AllowDrop="True"
@@ -1039,9 +1046,9 @@
                                                        Text="統合解除\nここへ顧客をドロップ" />
                                         </Border>
                                     </Grid>
-                                    <Button x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
+                                    <Button Grid.Row="4" x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
                                             Content="現在の選択に戻る" Click="LegacyGraphReturnToCurrentSelectionButton_Click" />
-                                </StackPanel>
+                                </Grid>
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">
