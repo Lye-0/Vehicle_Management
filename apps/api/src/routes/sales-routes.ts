@@ -9,6 +9,7 @@ import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -287,6 +288,10 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
 
   const currentItems = await loadSalesItems(database, documentId, organizationId)
   const body = await readJson(request)
+  const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
+  if (current.vehicleId && !requestedVehicleId) {
+    throw new HttpError(400, '通常の販売書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
+  }
   const masterSyncRaw = body.masterSync
 
   const input = await parseSalesDocumentInput({
@@ -502,6 +507,7 @@ function serializeSalesDocument(
   items: Array<typeof salesDocumentItems.$inferSelect>,
 ) {
   const details = parseSalesDetails(document.detailsJson)
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
   const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
@@ -524,6 +530,7 @@ function serializeSalesDocument(
     },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
+    abacusImport,
     plate: vehicle?.registrationNumber ?? '',
     vehicleDetails: vehicle ? {
       maker: vehicle.maker ?? '',

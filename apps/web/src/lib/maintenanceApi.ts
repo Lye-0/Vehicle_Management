@@ -1,4 +1,5 @@
 import { apiFetch } from './api'
+import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
 
 export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
 export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -62,6 +63,8 @@ export type MaintenanceDocument = {
   vehicleId: string | null
   vehicle: string
   plate: string
+  /** ABACUSグラフ登録が付与する互換表示用メタデータ。通常書類では未設定です。 */
+  abacusImport?: AbacusDocumentImportMetadata | null
   mileage: string
   vehicleDetails: MaintenanceVehicleDetails | null
   details: MaintenanceDocumentDetails

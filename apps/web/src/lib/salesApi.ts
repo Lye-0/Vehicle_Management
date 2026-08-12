@@ -1,4 +1,5 @@
 import { apiFetch } from './api'
+import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
 
 export type SalesDocumentType = '見積書' | '請求書'
 export type SalesStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -115,6 +116,8 @@ export type SalesDocument = {
   vehicleId: string | null
   vehicle: string
   plate: string
+  /** ABACUSグラフ登録が付与する互換表示用メタデータ。通常書類では未設定です。 */
+  abacusImport?: AbacusDocumentImportMetadata | null
   customerDetails: SalesCustomerDetails
   vehicleDetails: SalesVehicleDetails | null
   details: SalesDocumentDetails

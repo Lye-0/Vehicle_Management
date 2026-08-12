@@ -9,6 +9,7 @@ import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -357,6 +358,10 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
 
   const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
+  const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
+  if (current.vehicleId && !requestedVehicleId) {
+    throw new HttpError(400, '通常の整備書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
+  }
   const mileageSync = parseMileageSync(body)
   const masterSyncRaw = body.masterSync
 
@@ -732,6 +737,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const adjustment = extractAdjustment(rows)
   const items = rows.filter((item) => item.itemType === '作業' || item.itemType === '部品')
   const details = parseMaintenanceDetails(parseDetailsJson(document.detailsJson))
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
   const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
@@ -755,6 +761,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     },
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
+    abacusImport,
     plate: vehicle?.registrationNumber ?? '',
     mileage: vehicle ? normalizeMileage(vehicle.mileage) : '',
     vehicleDetails: vehicle ? {

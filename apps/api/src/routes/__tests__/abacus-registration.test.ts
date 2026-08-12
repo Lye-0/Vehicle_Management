@@ -80,6 +80,16 @@ describe('ABACUS registration', () => {
     expect(duplicateMaintenance?.total).toBe(0)
     expect(duplicateMaintenance?.detailsJson).toContain('ABACUS金額未設定')
     expect(await countRows('customers')).toBe(1)
+
+    const salesResponse = await SELF.fetch(new Request('https://example.com/api/sales-documents', { headers: authHeaders() }))
+    expect(salesResponse.status).toBe(200)
+    const salesBody = await salesResponse.json() as { documents: Array<{ number: string; vehicle: string; vehicleId: string | null; abacusImport?: { vehicleless: boolean; sourceLocation: string } | null }> }
+    expect(salesBody.documents.find((document) => document.number === '9001')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true, sourceLocation: 'hanbai.csv #1' } })
+
+    const maintenanceResponse = await SELF.fetch(new Request('https://example.com/api/maintenance-documents', { headers: authHeaders() }))
+    expect(maintenanceResponse.status).toBe(200)
+    const maintenanceBody = await maintenanceResponse.json() as { documents: Array<{ number: string; vehicle: string; vehicleId: string | null; abacusImport?: { vehicleless: boolean; sourceLocation: string } | null }> }
+    expect(maintenanceBody.documents.find((document) => document.number === '9002')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true } })
   })
 
   it('chunks graph-final existing-row lookups below the D1 bound-variable limit', async () => {
