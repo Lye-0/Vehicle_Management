@@ -61,7 +61,7 @@
                        Text="Windows上でのみ実行できるABACUS連携処理を、Webアプリから分離して担当します。" />
         </StackPanel>
 
-        <TabControl Grid.Row="2" Background="White" BorderBrush="#D8E1EC"
+        <TabControl x:Name="MainTabControl" Grid.Row="2" Background="White" BorderBrush="#D8E1EC"
                     HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
             <TabItem Header="接続状態">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -374,7 +374,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="画像抽出準備">
+            <TabItem x:Name="ImagePreparationTab" Header="画像抽出準備">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
@@ -1389,6 +1389,14 @@
                                 </Border>
                             </StackPanel>
                         </Border>
+
+                        <Expander x:Name="UnifiedImagePreparationExpander" Margin="0,18,0,0"
+                                  Header="画像・Web登録準備（必要な場合のみ）" IsExpanded="False">
+                            <Border Margin="0,8,0,0" Padding="8" Background="#FFFFFF"
+                                    BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="6">
+                                <ContentControl x:Name="UnifiedImagePreparationHost" />
+                            </Border>
+                        </Expander>
 
                         <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="6C. 全車両一覧エクスポート導線の診断" />

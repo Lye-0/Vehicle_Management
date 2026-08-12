@@ -139,11 +139,29 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        MoveImagePreparationIntoUnifiedPage();
         workspaceService = new AbacusWorkspaceService(folderInspector);
         migrationPreviewStore = new AbacusMigrationPreviewStore(dataAnalyzer, linkagePlanner);
         session.StateChanged += Session_StateChanged;
         Closing += MainWindow_Closing;
         Render(session.Snapshot);
+    }
+
+    private void MoveImagePreparationIntoUnifiedPage()
+    {
+        if (ImagePreparationTab.Content is not ScrollViewer imageScrollViewer ||
+            imageScrollViewer.Content is not UIElement imageContent)
+        {
+            return;
+        }
+
+        // 画像準備の既存コントロールを同じWindow内の統合ページへ移し、
+        // 画像処理だけ別タブへ移動する必要をなくします。コントロールと
+        // イベントハンドラーは再利用し、処理の安全境界は変更しません。
+        imageScrollViewer.Content = null;
+        ImagePreparationTab.Content = null;
+        UnifiedImagePreparationHost.Content = imageContent;
+        ImagePreparationTab.Visibility = Visibility.Collapsed;
     }
 
     private void MainWindow_PreviewMouseMove(object sender, MouseEventArgs e)
