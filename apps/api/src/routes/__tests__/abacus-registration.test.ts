@@ -59,7 +59,6 @@ describe('ABACUS registration', () => {
   it('commits the graph-final package, preserves vehicleless documents, and normalizes duplicate numbers', async () => {
     const packageFiles = await createGraphFinalPackage()
     const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
-
     expect(response.status).toBe(200)
     const responseBody = await response.json()
     expect(responseBody).toMatchObject({
@@ -81,6 +80,15 @@ describe('ABACUS registration', () => {
     expect(duplicateMaintenance?.total).toBe(0)
     expect(duplicateMaintenance?.detailsJson).toContain('ABACUS金額未設定')
     expect(await countRows('customers')).toBe(1)
+  })
+
+  it('chunks graph-final existing-row lookups below the D1 bound-variable limit', async () => {
+    const packageFiles = await createLargeGraphFinalPackage(120)
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ status: 'committed', customerCount: 120, vehicleCount: 0, salesCount: 0, maintenanceCount: 0 })
+    expect(await countRows('customers')).toBeGreaterThanOrEqual(120)
   })
 })
 
@@ -154,6 +162,24 @@ async function createGraphFinalPackage() {
     { documentKey: '整備書類|final|9002', documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002|2', documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
   ], excludedDocumentKeys: [] })
+  return { manifest, manifestSha256: await sha256(manifest), files }
+}
+
+async function createLargeGraphFinalPackage(customerCount: number) {
+  const customerRows = Array.from({ length: customerCount }, (_, index) => {
+    const id = `abacus-customer-large-${index + 1}`
+    return { id, number: `ABACUS-LARGE-${index + 1}`, name: `大規模登録テスト顧客${index + 1}`, sourceId: `source-large-${index + 1}` }
+  })
+  const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', ...customerRows.map((row) => [row.id, row.number, row.name, '', '', '', '', '', '', '0'].join(','))].join('\n')
+  const files = [
+    ['customers.csv', customersCsv],
+    ['vehicles.csv', '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考'],
+    ['sales.csv', '書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細'],
+    ['maintenance.csv', '書類ID,書類番号,書類種別,入庫区分,ステータス,顧客名,車名,登録番号,入庫日,出庫予定日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細'],
+    ['document-links.json', JSON.stringify({ version: 1, kind: 'abacus-export-import-document-links', status: 'finalization-preview', documents: [], excludedDocumentKeys: [] })],
+  ] as const
+  const dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
+  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: customerCount, vehicleRowCount: 0, salesRowCount: 0, maintenanceRowCount: 0, vehiclelessDocumentCount: 0, excludedDocumentCount: 0 }, dataFiles, warnings: [], groups: customerRows.map((row) => ({ groupKey: row.id, origin: 'single', approved: true, sourceCustomerIds: [row.sourceId], customerId: row.id, customerName: row.name })), documents: [], excludedDocumentKeys: [] })
   return { manifest, manifestSha256: await sha256(manifest), files }
 }
 

@@ -18,9 +18,15 @@ const maximumCsvBytes = 64 * 1024 * 1024
 const maximumRows = 5_000
 const maximumAttachmentSize = 20 * 1024 * 1024
 const maximumTextCharacters = 500
-const maximumBatchRows = 50
-// maintenance_documents は1行あたり21パラメータを使うため、SQLiteの変数上限（999）を超えない単位にする。
-const maximumMaintenanceDocumentRows = 40
+// Cloudflare D1の1クエリあたりのバインド変数上限は100。組織IDなどの固定条件分を残すため90件単位にする。
+const maximumQueryValues = 90
+// INSERTも1クエリ100変数以内に収める。余裕を持たせて90変数以下とする。
+const maximumCustomerBatchRows = 8 // 11変数/行
+const maximumVehicleBatchRows = 5 // 17変数/行
+const maximumSalesDocumentBatchRows = 5 // 17変数/行
+const maximumMaintenanceDocumentRows = 4 // 21変数/行
+const maximumSalesItemBatchRows = 6 // 13変数/行
+const maximumMaintenanceItemBatchRows = 7 // 12変数/行
 
 const customerHeaders = ['顧客ID', '顧客番号', '顧客名', 'ふりがな', '電話番号', 'メールアドレス', '郵便番号', '住所', 'メモ', '車両台数']
 const vehicleHeaders = ['車両ID', '顧客ID', '顧客名', 'メーカー', '車名', '型式', '登録番号', '車台番号', '年式', '車検満了日', '走行距離', '車体色', '排気量', 'ミッション', '記録簿', '備考']
@@ -548,10 +554,10 @@ async function validateExistingFinalDocuments(database: ReturnType<typeof create
   const existingMaintenance: Array<typeof maintenanceDocuments.$inferSelect> = []
   const existingSalesByNumber: Array<typeof salesDocuments.$inferSelect> = []
   const existingMaintenanceByNumber: Array<typeof maintenanceDocuments.$inferSelect> = []
-  for (const chunk of chunked(sales.map((row) => row.row.id), 500)) if (chunk.length > 0) existingSales.push(...await database.select().from(salesDocuments).where(inArray(salesDocuments.id, chunk)).all())
-  for (const chunk of chunked(maintenance.map((row) => row.row.id), 500)) if (chunk.length > 0) existingMaintenance.push(...await database.select().from(maintenanceDocuments).where(inArray(maintenanceDocuments.id, chunk)).all())
-  for (const chunk of chunked(sales.map((row) => row.row.number), 500)) if (chunk.length > 0) existingSalesByNumber.push(...await database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), inArray(salesDocuments.number, chunk))).all())
-  for (const chunk of chunked(maintenance.map((row) => row.row.number), 500)) if (chunk.length > 0) existingMaintenanceByNumber.push(...await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), inArray(maintenanceDocuments.number, chunk))).all())
+  for (const chunk of chunked(sales.map((row) => row.row.id), maximumQueryValues)) if (chunk.length > 0) existingSales.push(...await database.select().from(salesDocuments).where(inArray(salesDocuments.id, chunk)).all())
+  for (const chunk of chunked(maintenance.map((row) => row.row.id), maximumQueryValues)) if (chunk.length > 0) existingMaintenance.push(...await database.select().from(maintenanceDocuments).where(inArray(maintenanceDocuments.id, chunk)).all())
+  for (const chunk of chunked(sales.map((row) => row.row.number), maximumQueryValues)) if (chunk.length > 0) existingSalesByNumber.push(...await database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), inArray(salesDocuments.number, chunk))).all())
+  for (const chunk of chunked(maintenance.map((row) => row.row.number), maximumQueryValues)) if (chunk.length > 0) existingMaintenanceByNumber.push(...await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), inArray(maintenanceDocuments.number, chunk))).all())
   let existingDocumentCount = 0
   for (const item of sales) {
     const existing = existingSales.find((candidate) => candidate.id === item.row.id)
@@ -580,7 +586,7 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
   const statements: D1PreparedStatement[] = []
   const salesRows = rows.filter((row): row is { kind: 'sales'; link: GraphFinalDocumentLink; row: FinalSalesRow } => row.kind === 'sales')
   const maintenanceRows = rows.filter((row): row is { kind: 'maintenance'; link: GraphFinalDocumentLink; row: FinalMaintenanceRow } => row.kind === 'maintenance')
-  for (const chunk of chunked(salesRows, maximumBatchRows)) {
+  for (const chunk of chunked(salesRows, maximumSalesDocumentBatchRows)) {
     const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
     const values = chunk.flatMap(({ link, row }) => [row.id, organizationId, row.number, row.type, row.status, link.customerId, link.vehicleId, row.issuedAt, row.dueDate, row.taxRate, '切り捨て', row.subtotal, row.tax, row.total, row.note, JSON.stringify({ abacusImport: { documentKey: link.documentKey, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless }, sourceDetails: row.details }), now])
     statements.push(database.$client.prepare(`INSERT INTO sales_documents (id, organization_id, number, type, status, customer_id, vehicle_id, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
@@ -591,7 +597,7 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
     statements.push(database.$client.prepare(`INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, intake_date, planned_release_date, completion_date, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
   }
   const items = await Promise.all(rows.map(async ({ kind, link, row }) => ({ kind, link, row, id: await stableFileId(`${organizationId}\u0000${row.id}\u0000item`) })))
-  for (const chunk of chunked(items, maximumBatchRows)) {
+  for (const chunk of chunked(items, Math.min(maximumSalesItemBatchRows, maximumMaintenanceItemBatchRows))) {
     const salesItems = chunk.filter((item) => item.kind === 'sales')
     if (salesItems.length > 0) {
       const placeholders = salesItems.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
@@ -842,7 +848,7 @@ async function validateExistingRows(database: ReturnType<typeof createDatabase>,
 
 async function loadCustomersByIds(database: ReturnType<typeof createDatabase>, ids: string[]) {
   const rows: Array<typeof customers.$inferSelect> = []
-  for (const chunk of chunked(ids, 500)) {
+  for (const chunk of chunked(ids, maximumQueryValues)) {
     if (chunk.length === 0) continue
     rows.push(...await database.select().from(customers).where(inArray(customers.id, chunk)).all())
   }
@@ -851,7 +857,7 @@ async function loadCustomersByIds(database: ReturnType<typeof createDatabase>, i
 
 async function loadVehiclesByIds(database: ReturnType<typeof createDatabase>, ids: string[]) {
   const rows: Array<typeof vehicles.$inferSelect> = []
-  for (const chunk of chunked(ids, 500)) {
+  for (const chunk of chunked(ids, maximumQueryValues)) {
     if (chunk.length === 0) continue
     rows.push(...await database.select().from(vehicles).where(inArray(vehicles.id, chunk)).all())
   }
@@ -860,7 +866,7 @@ async function loadVehiclesByIds(database: ReturnType<typeof createDatabase>, id
 
 async function loadByNumbers<T extends typeof customers>(database: ReturnType<typeof createDatabase>, table: T, organizationId: string, values: string[]) {
   const rows: Array<typeof customers.$inferSelect> = []
-  for (const chunk of chunked(values, 500)) {
+  for (const chunk of chunked(values, maximumQueryValues)) {
     if (chunk.length === 0) continue
     rows.push(...await database.select().from(table).where(and(eq(table.organizationId, organizationId), inArray(table.customerNumber, chunk))).all())
   }
@@ -868,7 +874,7 @@ async function loadByNumbers<T extends typeof customers>(database: ReturnType<ty
 }
 
 function createCustomerStatements(database: ReturnType<typeof createDatabase>, organizationId: string, rows: CustomerRegistrationRow[], updatedAt: string) {
-  return chunked(rows, maximumBatchRows).map((chunk) => {
+  return chunked(rows, maximumCustomerBatchRows).map((chunk) => {
     const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?)').join(',')
     const values = chunk.flatMap((row) => [row.id, organizationId, row.customerNumber, row.name, row.nameKana, row.postalCode, row.address, row.phone, row.email, row.memo, updatedAt])
     return database.$client.prepare(`INSERT INTO customers (id, organization_id, customer_number, name, name_kana, postal_code, address, phone, email, memo, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO UPDATE SET customer_number=excluded.customer_number, name=excluded.name, name_kana=excluded.name_kana, postal_code=excluded.postal_code, address=excluded.address, phone=excluded.phone, email=excluded.email, memo=excluded.memo, updated_at=excluded.updated_at`).bind(...values)
@@ -876,7 +882,7 @@ function createCustomerStatements(database: ReturnType<typeof createDatabase>, o
 }
 
 function createVehicleStatements(database: ReturnType<typeof createDatabase>, organizationId: string, rows: VehicleRegistrationRow[], updatedAt: string) {
-  return chunked(rows, maximumBatchRows).map((chunk) => {
+  return chunked(rows, maximumVehicleBatchRows).map((chunk) => {
     const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
     const values = chunk.flatMap((row) => [row.id, organizationId, row.customerId, row.maker, row.name, row.model, row.chassisNumber, row.registrationNumber, row.modelYear, row.inspectionDate, row.mileage, row.bodyColor, row.displacement, row.transmission, row.inspectionRecordAvailable ? 1 : 0, row.memo, updatedAt])
     return database.$client.prepare(`INSERT INTO vehicles (id, organization_id, customer_id, maker, name, model, chassis_number, registration_number, model_year, inspection_date, mileage, body_color, displacement, transmission, inspection_record_available, memo, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO UPDATE SET customer_id=excluded.customer_id, maker=excluded.maker, name=excluded.name, model=excluded.model, chassis_number=excluded.chassis_number, registration_number=excluded.registration_number, model_year=excluded.model_year, inspection_date=excluded.inspection_date, mileage=excluded.mileage, body_color=excluded.body_color, displacement=excluded.displacement, transmission=excluded.transmission, inspection_record_available=excluded.inspection_record_available, memo=excluded.memo, updated_at=excluded.updated_at`).bind(...values)
