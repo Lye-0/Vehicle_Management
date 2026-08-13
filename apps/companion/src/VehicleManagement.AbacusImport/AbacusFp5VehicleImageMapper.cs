@@ -55,6 +55,7 @@ public sealed record AbacusFp5VehicleImageMappingResult(
 
     public bool IsFullyMatched =>
         IsValid &&
+        InScopeVehicleRecordCount > 0 &&
         MatchedImageCount + NoImageCount == InScopeVehicleRecordCount &&
         ReviewCount == 0 &&
         UnmatchedCount == 0 &&
