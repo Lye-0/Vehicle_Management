@@ -809,7 +809,7 @@
 .sales-detail-title .abacus-detail-summary-row span { padding: 5px; }
 .maintenance-detail-title .abacus-detail-notice { width: 100%; max-width: none; margin: 10px 0 0; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary),
-.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) { grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr); column-gap: 12px; align-items: start; }
+.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) { grid-template-columns: minmax(240px, 0.71fr) minmax(0, 1.29fr); column-gap: 12px; align-items: start; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .sales-detail-badges,
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > h2,
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > small,
