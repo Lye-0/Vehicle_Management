@@ -21,14 +21,17 @@ export type MaintenanceStatementSvgOptions = {
 export function calculateMaintenanceStatementTotals(
   document: MaintenanceDocumentLike,
 ): MaintenanceStatementTotals {
-  const partsSubtotal = document.items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice), 0)
-  const technicalSubtotal = document.items.reduce((sum, item) => sum + item.technicalFee, 0)
-  const taxableSubtotal = Math.max(0, partsSubtotal + technicalSubtotal)
-  const taxValue = taxableSubtotal * document.taxRate
-  const tax = document.taxRounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
+  const rows = statementRows(document)
+  const partsSubtotal = rows.reduce((sum, item) => sum + (item.partAmount ?? (item.quantity ?? 0) * (item.unitPrice ?? 0)), 0)
+  const technicalSubtotal = rows.reduce((sum, item) => sum + (item.technicalFee ?? 0), 0)
+  const calculatedTaxableSubtotal = Math.max(0, partsSubtotal + technicalSubtotal)
+  const taxValue = calculatedTaxableSubtotal * document.taxRate
+  const calculatedTax = document.taxRounding === '四捨五入' ? Math.round(taxValue) : Math.floor(taxValue)
+  const taxableSubtotal = document.abacusAmounts?.subtotal ?? calculatedTaxableSubtotal
+  const tax = document.abacusAmounts?.tax ?? calculatedTax
   const workTotal = taxableSubtotal + tax
   const feesTotal = Object.values(document.fees).reduce((sum, fee) => sum + fee, 0) + document.adjustment
-  return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: workTotal + feesTotal }
+  return { partsSubtotal, technicalSubtotal, taxableSubtotal, tax, workTotal, feesTotal, total: document.abacusAmounts?.total ?? workTotal + feesTotal }
 }
 
 export function buildMaintenanceStatementSvg(document: MaintenanceDocumentLike, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
@@ -222,10 +225,26 @@ function shopBox(settings: AppSettings) {
   ${infoLines.map((line, index) => valueText(infoX, 1292 + index * 19, line, 'start', 12)).join('')}`
 }
 
-type StatementRow = MaintenanceLineItem & { partAmount: number }
+type StatementRow = Omit<MaintenanceLineItem, 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'> & {
+  quantity: number | null
+  unit: string | null
+  unitPrice: number | null
+  technicalFee: number | null
+  summary: string | null
+  partAmount: number | null
+}
 
 function statementRows(document: MaintenanceDocumentLike): StatementRow[] {
-  const rows = document.items.map((item) => ({ ...item, partAmount: Math.round(item.quantity * item.unitPrice) }))
+  const rows = document.items.map((item) => {
+    const detail = item.abacusDetail
+    const quantity = detail ? detail.quantity : item.quantity
+    const unit = detail ? detail.unit : item.unit
+    const unitPrice = detail ? detail.unitPrice : item.unitPrice
+    const technicalFee = detail ? detail.technicalFees : item.technicalFee
+    const summary = detail ? detail.summary : item.summary
+    const partAmount = detail ? detail.partAmount : Math.round(item.quantity * item.unitPrice)
+    return { ...item, description: detail ? detail.description ?? '' : item.description, quantity, unit, unitPrice, technicalFee, summary, partAmount }
+  })
   return rows.slice(0, 18)
 }
 
@@ -247,11 +266,11 @@ function suffix(value: string, unit: string) {
 }
 
 function displayQuantity(item: StatementRow) {
-  return item.description || item.unitPrice || item.technicalFee ? String(item.quantity) : ''
+  return item.description || item.unitPrice !== null || item.partAmount !== null || item.technicalFee !== null ? (item.quantity === null ? '' : String(item.quantity)) : ''
 }
 
-function statementValue(value: string | number, hideEditableValues: boolean) {
-  return hideEditableValues ? '' : value
+function statementValue(value: string | number | null | undefined, hideEditableValues: boolean) {
+  return hideEditableValues ? '' : value ?? ''
 }
 
 function number(value: number) {

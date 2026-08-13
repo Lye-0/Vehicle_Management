@@ -261,7 +261,7 @@ public sealed class AbacusFp5ImageRestorer
         }
     }
 
-    private static SectorCatalog ReadSectorCatalog(FileStream stream, CancellationToken cancellationToken)
+    internal static SectorCatalog ReadSectorCatalog(FileStream stream, CancellationToken cancellationToken)
     {
         var header = new byte[SectorBytes];
         ReadExactlyAt(stream, 0, header);
@@ -353,7 +353,7 @@ public sealed class AbacusFp5ImageRestorer
             counts);
     }
 
-    private static IReadOnlyList<long> OrderDataSectors(
+    internal static IReadOnlyList<long> OrderDataSectors(
         FileStream stream,
         SectorCatalog catalog,
         CancellationToken cancellationToken)
@@ -471,7 +471,7 @@ public sealed class AbacusFp5ImageRestorer
         return BinaryPrimitives.ReadUInt32BigEndian(bytes[2..]);
     }
 
-    private static void ParseImageNodes(
+    internal static void ParseImageNodes(
         FileStream stream,
         IReadOnlyList<long> dataSectorPositions,
         Action<byte[], long, ReadOnlyMemory<byte>> onImage,
@@ -479,7 +479,8 @@ public sealed class AbacusFp5ImageRestorer
         ISet<string> gifImageIds,
         IDictionary<byte, byte[]> vehicleFieldNames,
         bool collectVehicleMapping,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<AbacusFp5RawToken>? onToken = null)
     {
         var path = new List<byte[]>();
         ImageNodeBuilder? image = null;
@@ -553,6 +554,12 @@ public sealed class AbacusFp5ImageRestorer
                             vehicleFieldNames);
                     }
 
+                    onToken?.Invoke(new AbacusFp5RawToken(
+                        path.Select(component => component.ToArray()).ToArray(),
+                        payload.AsSpan(cursor + 1, referenceLength).ToArray(),
+                        payload.AsSpan(dataStart, dataLength).ToArray(),
+                        null));
+
                     cursor = dataStart + dataLength;
                     continue;
                 }
@@ -589,6 +596,12 @@ public sealed class AbacusFp5ImageRestorer
                             payload.AsSpan(dataStart, dataLength),
                             vehicleFieldNames);
                     }
+
+                    onToken?.Invoke(new AbacusFp5RawToken(
+                        path.Select(component => component.ToArray()).ToArray(),
+                        reference,
+                        payload.AsSpan(dataStart, dataLength).ToArray(),
+                        null));
 
                     cursor = dataStart + dataLength;
                     continue;
@@ -704,6 +717,12 @@ public sealed class AbacusFp5ImageRestorer
                     {
                         image.AppendSegment(counter, payload.AsSpan(dataStart, dataLength));
                     }
+
+                    onToken?.Invoke(new AbacusFp5RawToken(
+                        path.Select(component => component.ToArray()).ToArray(),
+                        [],
+                        payload.AsSpan(dataStart, dataLength).ToArray(),
+                        counter));
 
                     cursor = dataStart + dataLength;
                     continue;
@@ -834,7 +853,7 @@ public sealed class AbacusFp5ImageRestorer
         return (frame.PixelWidth, frame.PixelHeight);
     }
 
-    private static SectorHeader ReadSectorHeader(FileStream stream, long position)
+    internal static SectorHeader ReadSectorHeader(FileStream stream, long position)
     {
         Span<byte> bytes = stackalloc byte[SectorHeaderBytes];
         ReadExactlyAt(stream, position, bytes);
@@ -853,7 +872,7 @@ public sealed class AbacusFp5ImageRestorer
             payloadLength);
     }
 
-    private static void ReadExactlyAt(FileStream stream, long position, Span<byte> destination)
+    internal static void ReadExactlyAt(FileStream stream, long position, Span<byte> destination)
     {
         stream.Position = position;
         stream.ReadExactly(destination);
@@ -976,14 +995,14 @@ public sealed class AbacusFp5ImageRestorer
         candidatePath.Equals(rootPath, StringComparison.OrdinalIgnoreCase) ||
         candidatePath.StartsWith($"{rootPath}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
 
-    private sealed record SectorCatalog(
+    internal sealed record SectorCatalog(
         int BlockChainLevels,
         uint LargestBlockId,
         long[] PreviousIdToPosition,
         long[] FirstPositions,
         int[] Counts);
 
-    private sealed record SectorHeader(
+    internal sealed record SectorHeader(
         byte DeletedFlag,
         byte Level,
         uint PreviousId,

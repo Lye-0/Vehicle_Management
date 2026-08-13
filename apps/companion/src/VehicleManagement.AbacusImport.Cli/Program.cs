@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using VehicleManagement.AbacusImport;
 
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 if ((args.Length == 4 || args.Length == 5) && args[0].Equals("--fp5-map", StringComparison.OrdinalIgnoreCase))
 {
     var result = await new AbacusFp5VehicleImageMapper().MapAsync(
@@ -63,6 +65,106 @@ if (args.Length == 3 && args[0].Equals("--fp5-images", StringComparison.OrdinalI
         WriteIndented = true,
     }));
     return result.IsValid ? 0 : 1;
+}
+
+if (args.Length == 2 && args[0].Equals("--fp5-tokens", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5RawTokenReader().ReadAsync(args[1]);
+    var encoding = Encoding.GetEncoding(932);
+    var groups = result.Tokens
+        .GroupBy(token => string.Join('/', token.Path.Select(Convert.ToHexString)), StringComparer.Ordinal)
+        .OrderByDescending(group => group.Count())
+        .Take(300)
+        .Select(group => new
+        {
+            Path = group.Key,
+            Count = group.Count(),
+            Samples = group.Take(5).Select(token => new
+            {
+                Reference = Convert.ToHexString(token.Reference),
+                DataHex = Convert.ToHexString(token.Data.AsSpan(0, Math.Min(token.Data.Length, 64))),
+                Text = encoding.GetString(token.Data).Replace("\0", "", StringComparison.Ordinal),
+                token.SegmentCounter,
+            }),
+        });
+    Console.WriteLine(JsonSerializer.Serialize(new { result.SourceFilePath, result.SectorCount, result.DataSectorCount, TokenCount = result.Tokens.Count, Groups = groups }, new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return 0;
+}
+
+if (args.Length == 3 && args[0].Equals("--fp5-record", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5RawTokenReader().ReadAsync(args[1]);
+    var encoding = Encoding.GetEncoding(932);
+    var expectedPath = args[2].Trim().Replace('/', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var tokens = result.Tokens.Where(token => token.Path.Count == expectedPath.Length && token.Path.Select(Convert.ToHexString).SequenceEqual(expectedPath, StringComparer.OrdinalIgnoreCase));
+    Console.WriteLine(JsonSerializer.Serialize(tokens.Select(token => new
+    {
+        Path = string.Join('/', token.Path.Select(Convert.ToHexString)),
+        Reference = Convert.ToHexString(token.Reference),
+        DataHex = Convert.ToHexString(token.Data),
+        Text = encoding.GetString(token.Data).Replace("\0", "", StringComparison.Ordinal),
+        token.SegmentCounter,
+    }), new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return 0;
+}
+
+if (args.Length == 3 && args[0].Equals("--fp5-find", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5RawTokenReader().ReadAsync(args[1]);
+    var encoding = Encoding.GetEncoding(932);
+    var needle = args[2];
+    Console.WriteLine(JsonSerializer.Serialize(result.Tokens
+        .Select(token => new { token, Text = encoding.GetString(token.Data).Replace("\0", "", StringComparison.Ordinal) })
+        .Where(item => item.Text.Contains(needle, StringComparison.OrdinalIgnoreCase))
+        .Select(item => new
+        {
+            Path = string.Join('/', item.token.Path.Select(Convert.ToHexString)),
+            Reference = Convert.ToHexString(item.token.Reference),
+            DataHex = Convert.ToHexString(item.token.Data),
+            item.Text,
+            item.token.SegmentCounter,
+        }), new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return 0;
+}
+
+if (args.Length == 2 && args[0].Equals("--fp5-details", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5DetailReader().ReadFolderAsync(args[1]);
+    Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return 0;
+}
+
+if (args.Length == 2 && args[0].Equals("--fp5-metadata", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5RawTokenReader().ReadAsync(args[1]);
+    var encoding = Encoding.GetEncoding(932);
+    var values = result.Tokens
+        .Where(token => token.Path.Count == 3 && token.Path[0].Length == 1 && token.Path[0][0] == 0x03 && token.Path[1].Length == 1 && token.Path[1][0] == 0x05 && token.Reference.Length == 1 && token.Reference[0] == 0x01)
+        .GroupBy(token => string.Join('/', token.Path.Select(Convert.ToHexString)), StringComparer.Ordinal)
+        .Select(group => new { Path = group.Key, Text = encoding.GetString(group.First().Data).Replace("\0", "", StringComparison.Ordinal) })
+        .OrderBy(item => item.Path, StringComparer.Ordinal);
+    Console.WriteLine(JsonSerializer.Serialize(values, new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return 0;
 }
 
 if (args.Length == 2 && args[0].Equals("--legacy-export", StringComparison.OrdinalIgnoreCase))
@@ -127,6 +229,11 @@ if (args.Length != 1)
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --legacy-export <CSV folder>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --legacy-subset <CSV folder> <customer name> <destination parent>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-images <FP5/UCS file> <output parent folder>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-tokens <FP5/UCS file>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-record <FP5/UCS file> <path e.g. 05/record>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-find <FP5/UCS file> <text>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-details <ABACUS folder>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-metadata <FP5/UCS file>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-map <FP5/UCS file> <CSV folder> <output parent folder>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-map <FP5/UCS file> <CSV folder> <output parent folder> --partial");
     return 2;

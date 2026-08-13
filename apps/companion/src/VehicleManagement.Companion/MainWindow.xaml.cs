@@ -1374,6 +1374,7 @@ public partial class MainWindow : Window
                 $"マニフェスト: {result.ManifestPath}\n" +
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / 販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
                 $"顧客名空欄で無視: {result.SkippedBlankCustomerRows:N0}行 / 整備書類の車両未確定で除外: {result.SkippedMaintenanceWithoutVehicleRows:N0}行 / 要確認の車両紐付け: {result.AmbiguousVehicleRows:N0}行\n" +
+                $"Gate 19明細: 対応付け済み {result.DetailMappedDocumentCount:N0}件 / 要確認 {result.DetailReviewDocumentCount:N0}件 / 未対応 {result.DetailUnsupportedDocumentCount:N0}件 / 除外行 {result.DetailExcludedRowCount:N0}件 / 金額のみ行 {result.AmountOnlyDetailRowCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
             LegacyExportPackagePathTextBox.Text = result.PackagePath;
             ReadLegacyExportPackageButton.IsEnabled = true;

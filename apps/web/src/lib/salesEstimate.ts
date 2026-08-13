@@ -69,10 +69,11 @@ const legalFeeKeywords = ['自動車税', '取得税', '環境性能割', '重�
 const nonTaxableFeeKeywords = ['証紙', '預託金']
 const taxableFeeKeywords = ['車庫証明', '登録費用', '登録代行', '登録手続', '検査', '納車', '手数料', '査定料']
 
-export function calculateSalesLineAmount(item: Pick<SalesLineItem, 'quantity' | 'unitPrice' | 'otherAmount'>) {
-  const quantity = Number.isFinite(item.quantity) ? item.quantity : 0
-  const unitPrice = Number.isFinite(item.unitPrice) ? item.unitPrice : 0
-  const otherAmount = Number.isFinite(item.otherAmount) ? item.otherAmount : 0
+export function calculateSalesLineAmount(item: Pick<SalesLineItem, 'quantity' | 'unitPrice' | 'otherAmount' | 'abacusDetail'>) {
+  const imported = item.abacusDetail
+  const quantity = imported ? imported.quantity ?? 0 : Number.isFinite(item.quantity) ? item.quantity : 0
+  const unitPrice = imported ? imported.unitPrice ?? 0 : Number.isFinite(item.unitPrice) ? item.unitPrice : 0
+  const otherAmount = imported ? (imported.partAmount ?? 0) + (imported.technicalFees ?? 0) - Math.round(quantity * unitPrice) : Number.isFinite(item.otherAmount) ? item.otherAmount : 0
   return Math.round(quantity * unitPrice) + Math.round(otherAmount)
 }
 
@@ -100,8 +101,9 @@ export function calculateSalesEstimateTotals(document: SalesDocumentLike): Sales
   const tradeInPrice = sum(sections.tradeIns)
   const downPayment = Math.max(0, Number.isFinite(document.details.downPayment) ? document.details.downPayment : 0)
 
+  const originalAmounts = document.abacusAmounts
   return {
-    subtotal,
+    subtotal: originalAmounts?.subtotal ?? subtotal,
     lineItemsSubtotal,
     vehicleBasePrice,
     discount,
@@ -119,9 +121,9 @@ export function calculateSalesEstimateTotals(document: SalesDocumentLike): Sales
     recycleFee: findRecycleFee(sections),
     tradeInPrice,
     downPayment,
-    tax,
-    total,
-    remainingPayment: total - tradeInPrice - downPayment,
+    tax: originalAmounts?.tax ?? tax,
+    total: originalAmounts?.total ?? total,
+    remainingPayment: (originalAmounts?.total ?? total) - tradeInPrice - downPayment,
   }
 }
 
@@ -155,8 +157,8 @@ export function buildSalesEstimateSections(document: SalesDocumentLike): SalesEs
   return sections
 }
 
-export function salesLineLabel(item: Pick<SalesLineItem, 'itemType' | 'description'>) {
-  return item.description.trim() || item.itemType.trim() || 'その他'
+export function salesLineLabel(item: Pick<SalesLineItem, 'itemType' | 'description' | 'abacusDetail'>) {
+  return item.abacusDetail?.description?.trim() || item.description.trim() || item.itemType.trim() || 'その他'
 }
 
 export function emptySalesDocumentDetails(): SalesDocumentDetails {
@@ -181,7 +183,7 @@ export function emptySalesDocumentDetails(): SalesDocumentDetails {
 
 function classifySalesItem(item: SalesLineItem): SalesItemBucket {
   const itemType = item.itemType.trim()
-  const label = `${itemType} ${item.description}`
+  const label = `${itemType} ${item.abacusDetail?.description ?? item.description}`
   if (itemType === '法定費用') return 'legalNonTaxable'
   if (itemType === '手続代行費用') return 'taxableFees'
   if (itemType === '実費・預託金') return 'nonTaxableFees'
@@ -201,8 +203,8 @@ function classifySalesItem(item: SalesLineItem): SalesItemBucket {
   return 'taxableFees'
 }
 
-function isRecycleItem(item: Pick<SalesLineItem, 'itemType' | 'description'>) {
-  return `${item.itemType} ${item.description}`.includes('リサイクル')
+function isRecycleItem(item: Pick<SalesLineItem, 'itemType' | 'description' | 'abacusDetail'>) {
+  return `${item.itemType} ${item.abacusDetail?.description ?? item.description}`.includes('リサイクル')
 }
 
 function findRecycleFee(sections: SalesEstimateSections) {

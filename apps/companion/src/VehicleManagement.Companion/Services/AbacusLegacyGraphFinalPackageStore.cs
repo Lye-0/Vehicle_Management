@@ -287,6 +287,16 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             }
             IReadOnlyList<OutputFile> dataFiles = dataFileList;
             var vehiclelessCount = finalDocuments.Count(document => document.Vehicle is null);
+            var detailDocuments = finalDocuments
+                .Select(document => ParseDetailJson(document.Document.DetailsJson))
+                .Where(document => document is not null)
+                .Cast<AbacusDetailJsonDocument>()
+                .ToArray();
+            var detailMappedCount = detailDocuments.Count(document => string.Equals(document.MatchStatus, "matched", StringComparison.Ordinal));
+            var detailReviewCount = detailDocuments.Count(document => string.Equals(document.MatchStatus, "review", StringComparison.Ordinal));
+            var detailUnsupportedCount = detailDocuments.Count(document => string.Equals(document.MatchStatus, "unmatched", StringComparison.Ordinal));
+            var detailExcludedRowCount = detailDocuments.Sum(document => document.ExcludedDetailCount);
+            var amountOnlyDetailRowCount = detailDocuments.Sum(document => document.AmountOnlyRowCount);
             var warnings = new List<string>
             {
                 "このパッケージはグラフ確定後のregistration-previewです。Web API、D1、Object Storage、画像アップロードは行っていません。",
@@ -323,6 +333,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 warnings.Add($"ABACUSで金額が未設定の{amountDefaultedDocumentCount:N0}件は、小計・合計を0として登録用CSVへ出力しています。元データに金額がないことは備考へ記録しています。");
             }
+            warnings.Add($"Gate 19明細: 対応付け済み{detailMappedCount:N0}件 / 要確認{detailReviewCount:N0}件 / 未対応{detailUnsupportedCount:N0}件 / 除外行{detailExcludedRowCount:N0}件 / 金額のみ行{amountOnlyDetailRowCount:N0}件。");
 
             var manifest = new OutputManifest(
                 1,
@@ -337,7 +348,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     finalDocuments.Count(document => document.Document.Kind == "整備書類"),
                     vehiclelessCount,
                     excludedKeys.Count,
-                    imageAttachments.Count),
+                    imageAttachments.Count,
+                    detailMappedCount,
+                    detailReviewCount,
+                    detailUnsupportedCount,
+                    detailExcludedRowCount,
+                    amountOnlyDetailRowCount),
                 dataFiles,
                 imageFiles,
                 warnings,
@@ -631,7 +647,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 total,
                 "",
                 memo,
-                "",
+                document.DetailsJson,
             ]
             : [
                 finalDocument.DocumentId,
@@ -649,12 +665,25 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 total,
                 "",
                 memo,
-                "",
+                document.DetailsJson,
             ];
     }
 
     private static string GetDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
         string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
+
+    private static AbacusDetailJsonDocument? ParseDetailJson(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<AbacusDetailJsonDocument>(value, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static IReadOnlyList<FinalDocument> AssignImportDocumentNumbers(IReadOnlyList<FinalDocument> documents)
     {
@@ -1193,7 +1222,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         int MaintenanceRowCount,
         int VehiclelessDocumentCount,
         int ExcludedDocumentCount,
-        int ImageCount);
+        int ImageCount,
+        int DetailMappedDocumentCount = 0,
+        int DetailReviewDocumentCount = 0,
+        int DetailUnsupportedDocumentCount = 0,
+        int DetailExcludedRowCount = 0,
+        int AmountOnlyDetailRowCount = 0);
 
     private sealed record OutputFile(string FileName, long SizeBytes, string Sha256);
 

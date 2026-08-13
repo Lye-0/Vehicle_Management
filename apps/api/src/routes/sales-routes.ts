@@ -10,6 +10,7 @@ import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
+import { parseAbacusDetailEnvelope } from '../lib/abacus-detail-metadata'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -508,6 +509,8 @@ function serializeSalesDocument(
 ) {
   const details = parseSalesDetails(document.detailsJson)
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
+  const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
   const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
   const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
@@ -531,6 +534,8 @@ function serializeSalesDocument(
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
     abacusImport,
+    isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
+    abacusDetailReport: abacusDetails?.report ?? null,
     plate: vehicle?.registrationNumber ?? '',
     vehicleDetails: vehicle ? {
       maker: vehicle.maker ?? '',
@@ -571,6 +576,9 @@ function serializeSalesDocument(
       otherAmount: item.otherAmount,
       summary: item.summary,
       amount: item.amount,
+      sourceRowIndex: item.sortOrder,
+      abacusDetail: abacusLines.get(item.sortOrder) ?? null,
+      isAbacusMigration: Boolean(abacusDetails),
     })),
   }
 }

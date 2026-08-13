@@ -290,7 +290,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     const nextValue = field === 'description' || field === 'itemType' || field === 'unit' || field === 'taxCategory' || field === 'summary' ? value : Number(value)
     replaceActiveDocument((document) => ({
       ...document,
-      items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue } : item),
+      items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue, abacusDetail: null, isAbacusMigration: false } : item),
     }))
     markDirty()
   }
@@ -316,6 +316,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
           ...document,
           items: document.items.map((item) => item.id === line.id ? {
             ...item,
+            abacusDetail: null,
+            isAbacusMigration: false,
             itemType: defaults.itemType,
             description: nextLabel,
             quantity: 1,
@@ -1007,6 +1009,7 @@ function SalesEstimateExactPreview({ document, isDraft, customers, onUpdateHeade
         {isDraft ? <small>未保存書類では添付画像を選択できません。</small> : !imageAttachments.length && <small>画像ファイルが登録されていません。</small>}
       </div>
     </div>
+    {document.isAbacusMigration && <AbacusDetailSummary document={document} />}
     <div className="sales-estimate-sheet-frame">
       <div className="sales-estimate-sheet" dangerouslySetInnerHTML={{ __html: sheetSvg }} />
       <SalesEstimateSheetEditor
@@ -1020,6 +1023,29 @@ function SalesEstimateExactPreview({ document, isDraft, customers, onUpdateHeade
       />
     </div>
   </div>
+}
+
+function AbacusDetailSummary({ document }: { document: SalesDocumentLike }) {
+  const rows = document.items
+  const report = document.abacusDetailReport
+  return <section className="abacus-detail-summary" aria-label="ABACUS移行明細">
+    <div className="abacus-detail-summary-header"><strong>ABACUS移行明細</strong><span>未入力項目は空欄のまま表示しています。</span>{report?.amountOnlyRowCount ? <span>金額のみの行：{report.amountOnlyRowCount}件</span> : null}</div>
+    <div className="abacus-detail-summary-table">
+      <div className="abacus-detail-summary-row is-head"><span>行</span><span>品名</span><span>数量</span><span>単位</span><span>部品単価</span><span>部品金額</span><span>技術料・他</span><span>摘要</span></div>
+      {rows.map((item, index) => {
+        const detail = item.abacusDetail
+        const quantity = detail ? detail.quantity : item.quantity
+        const unit = detail ? detail.unit : item.unit
+        const unitPrice = detail ? detail.unitPrice : item.unitPrice
+        const partAmount = detail ? detail.partAmount : calculateSalesLineAmount(item)
+        const technicalFees = detail ? detail.technicalFees : item.otherAmount
+        const description = detail ? detail.description : item.description
+        const summary = detail ? detail.summary : item.summary
+        return <div className="abacus-detail-summary-row" key={item.id}><span>{detail?.sourceRowIndex ?? index + 1}</span><span>{description ?? ''}</span><span>{quantity ?? ''}</span><span>{unit ?? ''}</span><span>{unitPrice ?? ''}</span><span>{partAmount ?? ''}</span><span>{technicalFees ?? ''}</span><span>{summary ?? ''}</span></div>
+      })}
+    </div>
+    {report?.warning && <p className="abacus-detail-summary-warning">{report.warning}</p>}
+  </section>
 }
 
 type SheetLinePosition = {

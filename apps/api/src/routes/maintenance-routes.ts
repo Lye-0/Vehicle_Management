@@ -10,6 +10,7 @@ import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
+import { parseAbacusDetailEnvelope } from '../lib/abacus-detail-metadata'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -738,6 +739,8 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const items = rows.filter((item) => item.itemType === '作業' || item.itemType === '部品')
   const details = parseMaintenanceDetails(parseDetailsJson(document.detailsJson))
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
+  const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
   const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
   const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
@@ -762,6 +765,8 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     vehicleId: document.vehicleId,
     vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
     abacusImport,
+    isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
+    abacusDetailReport: abacusDetails?.report ?? null,
     plate: vehicle?.registrationNumber ?? '',
     mileage: vehicle ? normalizeMileage(vehicle.mileage) : '',
     vehicleDetails: vehicle ? {
@@ -797,7 +802,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     archivedBy: document.archivedBy,
     purgeAt: document.purgeAt,
     keepForever: document.keepForever,
-    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary })),
+    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary, sourceRowIndex: item.sortOrder, abacusDetail: abacusLines.get(item.sortOrder) ?? null, isAbacusMigration: Boolean(abacusDetails) })),
   }
 }
 

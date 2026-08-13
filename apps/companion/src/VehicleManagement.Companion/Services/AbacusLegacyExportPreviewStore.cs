@@ -30,7 +30,12 @@ public sealed record AbacusLegacyExportPreviewResult(
     int SkippedBlankCustomerRows,
     int SkippedMaintenanceWithoutVehicleRows,
     int AmbiguousVehicleRows,
-    IReadOnlyList<AbacusLegacyExportPreviewRow> PreviewRows);
+    IReadOnlyList<AbacusLegacyExportPreviewRow> PreviewRows,
+    int DetailMappedDocumentCount = 0,
+    int DetailReviewDocumentCount = 0,
+    int DetailUnsupportedDocumentCount = 0,
+    int DetailExcludedRowCount = 0,
+    int AmountOnlyDetailRowCount = 0);
 
 /// <summary>
 /// ABACUSの販売・整備・車両一覧CSVを、既存Web CSV形式の登録前候補へ変換します。
@@ -80,6 +85,17 @@ public sealed class AbacusLegacyExportPreviewStore
         {
             throw new InvalidDataException("固定列CSVの診断に合格していないため、登録前候補を作成できません。先に診断結果を確認してください。");
         }
+
+        var detailRoot = FindDetailRoot(sourceRoot);
+        var detailRead = detailRoot is null
+            ? new AbacusUcsDetailReadResult(sourceRoot, [], 2, ["abx-cs-hb.ucs / abx-cs-sb.ucs が見つからないため、UCS明細を抽出していません。"])
+            : await new AbacusFp5DetailReader().ReadFolderAsync(detailRoot, cancellationToken);
+        var detailMapper = new AbacusDetailMapper(detailRead.Documents);
+        var detailMappedDocumentCount = 0;
+        var detailReviewDocumentCount = 0;
+        var detailUnsupportedDocumentCount = 0;
+        var detailExcludedRowCount = 0;
+        var amountOnlyDetailRowCount = 0;
 
         var vehicleFiles = input.Files.Where(file => file.Kind == "車両一覧").ToList();
         if (vehicleFiles.Count != 1)
@@ -241,6 +257,9 @@ public sealed class AbacusLegacyExportPreviewStore
                 NormalizeCalendarDate(Text(source, 0)),
                 NormalizeNonNegativeInteger(Text(source, 31)),
                 $"ABACUS={row.FileName}#{row.RowNumber}; 区分原文={Text(source, 3)}; 金額は合計欄のみで税・明細は未確定。{warning}");
+            var detailMatch = detailMapper.Match("販売書類", document.Number, customerName, document.VehicleName, Text(source, 22), Text(source, 21));
+            document = document with { DetailsJson = AbacusDetailMapper.Serialize(detailMatch) };
+            CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             sales.Add(document);
             previewRows.Add(new AbacusLegacyExportPreviewRow("販売書類", row.FileName, row.RowNumber, customer.Name, document.VehicleName, document.Number, match.StatusLabel, warning));
         }
@@ -293,6 +312,9 @@ public sealed class AbacusLegacyExportPreviewStore
                 NormalizeCalendarDate(Text(source, 0)),
                 NormalizeNonNegativeInteger(Text(source, 27)),
                 $"ABACUS={row.FileName}#{row.RowNumber}; 備考原文={Text(source, 24)}; 金額は合計欄のみで税・明細は未確定。車両一致: 車台/登録番号。" );
+            var detailMatch = detailMapper.Match("整備書類", document.Number, customerName, document.VehicleName, Text(source, 20), Text(source, 19));
+            document = document with { DetailsJson = AbacusDetailMapper.Serialize(detailMatch) };
+            CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             document = document with
             {
                 Category = "一般整備",
@@ -343,6 +365,9 @@ public sealed class AbacusLegacyExportPreviewStore
             {
                 warnings.Add($"複数候補または顧客競合のある書類{ambiguousVehicleRows:N0}行は車両への自動紐付けを保留しました。");
             }
+            warnings.Add(detailRoot is null
+                ? "ABACUSのhb/sb UCSが見つからないため、書類明細は未対応として出力しました。"
+                : $"Gate 19明細: 対応付け{detailMappedDocumentCount:N0}件 / 要確認{detailReviewDocumentCount:N0}件 / 未対応{detailUnsupportedDocumentCount:N0}件 / 除外行{detailExcludedRowCount:N0}件 / 金額のみ行{amountOnlyDetailRowCount:N0}件。");
 
             var manifest = new OutputManifest(
                 Version: 1,
@@ -357,7 +382,12 @@ public sealed class AbacusLegacyExportPreviewStore
                     maintenance.Count,
                     skippedBlankCustomerRows,
                     skippedMaintenanceWithoutVehicleRows,
-                    ambiguousVehicleRows),
+                    ambiguousVehicleRows,
+                    detailMappedDocumentCount,
+                    detailReviewDocumentCount,
+                    detailUnsupportedDocumentCount,
+                    detailExcludedRowCount,
+                    amountOnlyDetailRowCount),
                 DataFiles: outputFiles,
                 Warnings: warnings,
                 Rows: previewRows);
@@ -378,7 +408,12 @@ public sealed class AbacusLegacyExportPreviewStore
                 skippedBlankCustomerRows,
                 skippedMaintenanceWithoutVehicleRows,
                 ambiguousVehicleRows,
-                previewRows);
+                previewRows,
+                detailMappedDocumentCount,
+                detailReviewDocumentCount,
+                detailUnsupportedDocumentCount,
+                detailExcludedRowCount,
+                amountOnlyDetailRowCount);
         }
         catch
         {
@@ -457,6 +492,7 @@ public sealed class AbacusLegacyExportPreviewStore
             total,
             memo,
             kind == "整備書類" ? "一般整備" : "",
+            "",
             "",
             "");
     }
@@ -652,7 +688,7 @@ public sealed class AbacusLegacyExportPreviewStore
                 candidate.Total,
                 "",
                 candidate.Memo,
-                "",
+                candidate.DetailsJson,
             ]);
         }
 
@@ -686,7 +722,7 @@ public sealed class AbacusLegacyExportPreviewStore
                 candidate.Total,
                 "",
                 candidate.Memo,
-                "",
+                candidate.DetailsJson,
             ]);
         }
 
@@ -822,6 +858,35 @@ public sealed class AbacusLegacyExportPreviewStore
     private static string NormalizeIdentifier(string? value) =>
         string.Concat(CleanText(value).Normalize(NormalizationForm.FormKC).Where(character => !char.IsWhiteSpace(character) && character != '-')).ToUpperInvariant();
 
+    private static void CountDetailMatch(
+        AbacusDetailMatch match,
+        ref int mapped,
+        ref int review,
+        ref int unsupported,
+        ref int excluded,
+        ref int amountOnly)
+    {
+        if (match.IsMapped && match.Document is not null)
+        {
+            mapped++;
+            excluded += match.Document.ExcludedDetailCount;
+            amountOnly += match.Document.Lines.Count(line => line.IsAmountOnly);
+        }
+        else if (string.Equals(match.Status, "review", StringComparison.Ordinal)) review++;
+        else unsupported++;
+    }
+
+    private static string? FindDetailRoot(string sourceRoot)
+    {
+        var current = new DirectoryInfo(sourceRoot);
+        for (var depth = 0; current is not null && depth < 3; depth++, current = current.Parent)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "abx-cs-hb.ucs")) || File.Exists(Path.Combine(current.FullName, "abx-cs-sb.ucs"))) return current.FullName;
+        }
+
+        return null;
+    }
+
     private static string NormalizePostalCode(string value) =>
         string.Concat(value.Normalize(NormalizationForm.FormKC).Where(char.IsDigit));
 
@@ -930,7 +995,8 @@ public sealed class AbacusLegacyExportPreviewStore
         string Memo,
         string Category,
         string IntakeDate,
-        string CompletionDate)
+        string CompletionDate,
+        string DetailsJson)
     {
         public string Number { get; } = string.IsNullOrEmpty(DocumentNumber) ? DocumentId : DocumentNumber;
         public string NumberForDisplay => Number;
@@ -947,6 +1013,6 @@ public sealed class AbacusLegacyExportPreviewStore
     private sealed record SourceFile(string FileName, string Kind, string Sha256, int TotalRows, int ValidRows);
     private sealed record OutputFile(string FileName, long SizeBytes, string Sha256);
     private sealed record OutputSource(string FolderPath, IReadOnlyList<SourceFile> Files, string Fingerprint);
-    private sealed record OutputSummary(int CustomerRows, int VehicleRows, int SalesRows, int MaintenanceRows, int SkippedBlankCustomerRows, int SkippedMaintenanceWithoutVehicleRows, int AmbiguousVehicleRows);
+    private sealed record OutputSummary(int CustomerRows, int VehicleRows, int SalesRows, int MaintenanceRows, int SkippedBlankCustomerRows, int SkippedMaintenanceWithoutVehicleRows, int AmbiguousVehicleRows, int DetailMappedDocumentCount, int DetailReviewDocumentCount, int DetailUnsupportedDocumentCount, int DetailExcludedRowCount, int AmountOnlyDetailRowCount);
     private sealed record OutputManifest(int Version, string Kind, string Status, DateTime CreatedAtUtc, OutputSource Source, OutputSummary Summary, IReadOnlyList<OutputFile> DataFiles, IReadOnlyList<string> Warnings, IReadOnlyList<AbacusLegacyExportPreviewRow> Rows);
 }
