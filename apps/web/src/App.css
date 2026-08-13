@@ -937,7 +937,7 @@
 .maintenance-statement-remove { position: absolute; display: grid; place-items: center; padding: 0; color: #073c87; border: 1px solid #86a5d0; border-radius: 4px; background: rgba(255, 255, 255, 0.92); opacity: 0.35; pointer-events: auto; cursor: pointer; }
 .maintenance-statement-remove:hover, .maintenance-statement-remove:focus { z-index: 30; opacity: 1; color: var(--danger); border-color: var(--danger); }
 .maintenance-statement-add { position: absolute; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 7px; color: #073c87; border: 1px solid #fff; border-radius: 4px; background: #fff; font-size: clamp(6px, 1.05vw, 12px); font-weight: 800; white-space: nowrap; pointer-events: auto; cursor: pointer; }
-.abacus-detail-notice { position: absolute; z-index: 3; top: 8px; left: 16px; max-width: 78%; padding: 5px 8px; color: #7b5a1a; border: 1px solid #efd28c; border-radius: 5px; background: #fff9e8; font-size: 10px; line-height: 1.4; pointer-events: none; }
+.abacus-detail-notice { box-sizing: border-box; width: 100%; max-width: 1122px; margin: 0 auto; padding: 8px 12px; color: #7b5a1a; border: 1px solid #efd28c; border-radius: 7px; background: #fff9e8; font-size: 11px; line-height: 1.5; pointer-events: none; }
 .maintenance-statement-add:hover { color: #06377d; background: #eaf3ff; }
 .maintenance-statement-add:disabled { opacity: 0.45; cursor: not-allowed; }
 .maintenance-parameter-panel { margin-bottom: 22px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }

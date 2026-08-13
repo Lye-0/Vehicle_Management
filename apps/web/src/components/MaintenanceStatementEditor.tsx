@@ -53,7 +53,6 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   }
 
   return <div className="maintenance-statement-editor" aria-label="整備帳票のプレビュー編集">
-    {document.isAbacusMigration && <div className="abacus-detail-notice" role="status">ABACUS移行明細：元データの未入力項目は空欄で表示しています。{document.abacusDetailReport?.amountOnlyRowCount ? ` 金額のみの行 ${document.abacusDetailReport.amountOnlyRowCount}件。` : ''}{document.abacusDetailReport?.warning ? ` ${document.abacusDetailReport.warning}` : ''}</div>}
     <button className="maintenance-statement-add" type="button" aria-label="作業内容・部品明細を追加" style={controlStyle(942, 516, 132, 28)} disabled={document.items.length >= 18} onClick={onAddItem}><Plus size={12} aria-hidden="true" />明細を追加</button>
 
     <StatementTextControl ariaLabel="書類日付" value={document.issuedAt} className="is-document-number" x={611} y={44} width={118} height={32} centered onChange={(value) => onUpdateHeader('issuedAt', value)} />
