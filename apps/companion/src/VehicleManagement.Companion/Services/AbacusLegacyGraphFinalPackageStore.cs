@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using VehicleManagement.AbacusImport;
 
 namespace VehicleManagement.Companion.Services;
 
@@ -96,11 +97,28 @@ public sealed class AbacusLegacyGraphFinalPackageStore
     private static readonly Encoding Utf8WithBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    public async Task<AbacusLegacyGraphFinalPackageResult> CreateAsync(
+    public Task<AbacusLegacyGraphFinalPackageResult> CreateAsync(
         AbacusLegacyExportCandidateGraphResult graph,
         AbacusLegacyGraphFinalizationSnapshot snapshot,
         string destinationParent,
         string? imageRegistrationPreviewFolder = null,
+        CancellationToken cancellationToken = default) =>
+        CreateAsyncCore(graph, snapshot, destinationParent, imageRegistrationPreviewFolder, null, cancellationToken);
+
+    public Task<AbacusLegacyGraphFinalPackageResult> CreateAsync(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusLegacyGraphFinalizationSnapshot snapshot,
+        string destinationParent,
+        AbacusFp5VehicleImageMappingResult fp5VehicleImageMapping,
+        CancellationToken cancellationToken = default) =>
+        CreateAsyncCore(graph, snapshot, destinationParent, null, fp5VehicleImageMapping, cancellationToken);
+
+    private async Task<AbacusLegacyGraphFinalPackageResult> CreateAsyncCore(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusLegacyGraphFinalizationSnapshot snapshot,
+        string destinationParent,
+        string? imageRegistrationPreviewFolder,
+        AbacusFp5VehicleImageMappingResult? fp5VehicleImageMapping,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(graph);
@@ -185,9 +203,11 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             .OrderBy(vehicle => vehicle.Group.CustomerId, StringComparer.Ordinal)
             .ThenBy(vehicle => vehicle.Vehicle.VehicleId, StringComparer.Ordinal)
             .ToArray();
-        var imageAttachments = string.IsNullOrWhiteSpace(imageRegistrationPreviewFolder)
-            ? Array.Empty<PreparedImageAttachment>()
-            : await ReadImageAttachmentsAsync(imageRegistrationPreviewFolder, vehicleRows, cancellationToken);
+        var imageAttachments = fp5VehicleImageMapping is not null
+            ? await ReadFp5ImageAttachmentsAsync(fp5VehicleImageMapping, vehicleRows, cancellationToken)
+            : string.IsNullOrWhiteSpace(imageRegistrationPreviewFolder)
+                ? Array.Empty<PreparedImageAttachment>()
+                : await ReadImageAttachmentsAsync(imageRegistrationPreviewFolder, vehicleRows, cancellationToken);
 
         var packagePath = CreateUniquePackageDirectory(destinationRoot);
         try
@@ -276,6 +296,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             if (imageAttachments.Count > 0)
             {
                 warnings.Add($"確認済み画像を{imageAttachments.Count:N0}件、車両識別子を再照合して同じ登録前パッケージへ含めました。Web登録後に画像アップロード対象になります。");
+            }
+            else if (fp5VehicleImageMapping is not null)
+            {
+                warnings.Add("Gate 14のFP5車両対応付けを検証しました。画像なし車両のみで、同梱対象の画像はありません。画像対応付けレポートを保存しています。");
             }
             else
             {
@@ -675,6 +699,83 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static string Truncate(string value) => value.Length <= 500 ? value : value[..500];
 
+    private static async Task<IReadOnlyList<PreparedImageAttachment>> ReadFp5ImageAttachmentsAsync(
+        AbacusFp5VehicleImageMappingResult mapping,
+        IReadOnlyList<FinalVehicle> vehicles,
+        CancellationToken cancellationToken)
+    {
+        if (!mapping.IsValid || !mapping.IsFullyMatched)
+        {
+            throw new InvalidDataException("Gate 14のFP5車両画像対応付けが検証済みではありません。");
+        }
+
+        var imageRoot = ValidateFolder(mapping.OutputFolderPath, "Gate 14画像復元フォルダー");
+        var result = new List<PreparedImageAttachment>(mapping.MatchedImageCount);
+        var seenImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in mapping.Mappings.Where(item => string.Equals(item.Status, "matched", StringComparison.Ordinal)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(candidate.ImageRelativePath) ||
+                string.IsNullOrWhiteSpace(candidate.ImageSha256) ||
+                string.IsNullOrWhiteSpace(candidate.ChassisNumber) ||
+                string.IsNullOrWhiteSpace(candidate.RegistrationNumber))
+            {
+                throw new InvalidDataException($"Gate 14画像対応付けの必須項目がありません: {candidate.RecordIdHex}");
+            }
+
+            var imagePath = NormalizeImagePath(candidate.ImageRelativePath);
+            if (!seenImagePaths.Add(imagePath))
+            {
+                throw new InvalidDataException($"Gate 14画像パスが重複しています: {imagePath}");
+            }
+
+            var sourcePath = Path.Combine(imageRoot, imagePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!IsSameOrSubPath(sourcePath, imageRoot))
+            {
+                throw new InvalidDataException($"Gate 14画像パスが復元フォルダー外を指しています: {imagePath}");
+            }
+
+            var imageInfo = ValidateRegularFile(sourcePath, "Gate 14復元画像", MaximumImageBytes);
+            var imageSha256 = await CalculateSha256Async(sourcePath, cancellationToken);
+            if (!string.Equals(imageSha256, candidate.ImageSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Gate 14復元画像のSHA-256が一致しません: {imagePath}");
+            }
+
+            var matches = vehicles
+                .Where(vehicle =>
+                    string.Equals(
+                        NormalizeVehicleIdentifier(candidate.ChassisNumber),
+                        NormalizeVehicleIdentifier(vehicle.Vehicle.ChassisNumber),
+                        StringComparison.Ordinal) &&
+                    string.Equals(
+                        NormalizeVehicleIdentifier(candidate.RegistrationNumber),
+                        NormalizeVehicleIdentifier(vehicle.Vehicle.RegistrationNumber),
+                        StringComparison.Ordinal))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                throw new InvalidDataException(
+                    $"Gate 14画像をグラフの車両へ一意に再照合できません: {imagePath}（候補 {matches.Length:N0}件）");
+            }
+
+            result.Add(new PreparedImageAttachment(
+                sourcePath,
+                imagePath,
+                imageSha256,
+                GetImageContentType(imagePath),
+                matches[0].Group.CustomerId,
+                matches[0].Vehicle.VehicleId));
+        }
+
+        if (result.Count != mapping.MatchedImageCount)
+        {
+            throw new InvalidDataException("Gate 14画像対応付けの件数と同梱対象画像の件数が一致しません。");
+        }
+
+        return result;
+    }
+
     private static async Task<IReadOnlyList<PreparedImageAttachment>> ReadImageAttachmentsAsync(
         string imageRegistrationPreviewFolder,
         IReadOnlyList<FinalVehicle> vehicles,
@@ -775,15 +876,31 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         ImagePreviewCandidate candidate,
         AbacusLegacyExportCandidateGraphVehicle vehicle)
     {
-        var chassis = candidate.ChassisNumber?.Trim() ?? "";
-        var registration = candidate.RegistrationNumber?.Trim() ?? "";
+        var chassis = NormalizeVehicleIdentifier(candidate.ChassisNumber);
+        var registration = NormalizeVehicleIdentifier(candidate.RegistrationNumber);
         if (chassis.Length == 0 && registration.Length == 0)
         {
             return false;
         }
 
-        return (chassis.Length == 0 || string.Equals(chassis, vehicle.ChassisNumber.Trim(), StringComparison.Ordinal)) &&
-               (registration.Length == 0 || string.Equals(registration, vehicle.RegistrationNumber.Trim(), StringComparison.Ordinal));
+        return (chassis.Length == 0 || string.Equals(chassis, NormalizeVehicleIdentifier(vehicle.ChassisNumber), StringComparison.Ordinal)) &&
+               (registration.Length == 0 || string.Equals(registration, NormalizeVehicleIdentifier(vehicle.RegistrationNumber), StringComparison.Ordinal));
+    }
+
+    private static string NormalizeVehicleIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        // ABACUS/FP5側と候補CSV側で、登録番号の区切りが半角空白・全角空白
+        // として異なることがあります。候補グラフと同じく、識別子として意味を
+        // 持たない空白・ハイフンをUnicode互換正規化後に除去して比較します。
+        return string.Concat(
+                value.Normalize(NormalizationForm.FormKC)
+                    .Where(character => !char.IsWhiteSpace(character) && character != '-'))
+            .ToUpperInvariant();
     }
 
     private static string NormalizeImagePath(string value)

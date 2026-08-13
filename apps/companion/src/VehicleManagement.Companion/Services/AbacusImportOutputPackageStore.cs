@@ -147,6 +147,7 @@ public sealed class AbacusImportOutputPackageStore
     public async Task<AbacusImportOutputPackageReadyResult> CompleteAsync(
         AbacusImportOutputPackageSession session,
         AbacusLegacyGraphFinalPackageResult finalPackage,
+        string? imageAcquisitionReportPath = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -196,10 +197,24 @@ public sealed class AbacusImportOutputPackageStore
                 JsonSerializer.Serialize(new
                 {
                     method = session.ImageAcquisitionMethod,
-                    status = finalPackage.ImageCount > 0 ? "completed" : "not-selected",
+                    status = imageAcquisitionReportPath is not null
+                        ? "gate14-verified"
+                        : finalPackage.ImageCount > 0 ? "completed" : "not-selected",
                     imageCount = finalPackage.ImageCount,
                 }, JsonOptions),
                 cancellationToken);
+            if (!string.IsNullOrWhiteSpace(imageAcquisitionReportPath))
+            {
+                if (!IsSameOrSubPath(imageAcquisitionReportPath, session.WorkPath))
+                {
+                    throw new InvalidDataException("画像対応付けレポートが作業用フォルダー外を指しています。");
+                }
+
+                await CopyFileAsync(
+                    imageAcquisitionReportPath,
+                    Path.Combine(reportsPath, "fp5-vehicle-image-mapping-report.json"),
+                    cancellationToken);
+            }
 
             var readyFiles = await DescribeFilesAsync(stagingPath, cancellationToken);
             var readyManifest = new
@@ -410,8 +425,7 @@ public sealed class AbacusImportOutputPackageStore
 
     private static string NormalizeImageMethod(string value) => value switch
     {
-        "screen-navigation" => value,
-        "fast-experimental" => value,
+        "fp5-vehicle-record" => value,
         _ => throw new ArgumentException("画像取得方式が不正です。", nameof(value)),
     };
 

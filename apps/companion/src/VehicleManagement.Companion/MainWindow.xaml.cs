@@ -22,6 +22,7 @@ namespace VehicleManagement.Companion;
 
 public partial class MainWindow : Window
 {
+    private const string Gate14ImageAcquisitionMethod = "fp5-vehicle-record";
     private readonly LegacyHostSession session = new();
     private readonly AbacusFolderInspector folderInspector = new();
     private readonly AbacusWorkspaceService workspaceService;
@@ -50,6 +51,7 @@ public partial class MainWindow : Window
     private readonly AbacusWebImportRegistrationPackageStore webImportRegistrationPackageStore = new();
     private readonly AbacusLegacyGraphFinalPackageStore legacyGraphFinalPackageStore = new();
     private readonly AbacusImportOutputPackageStore importOutputPackageStore = new();
+    private readonly AbacusFp5VehicleImageMapper fp5VehicleImageMapper = new();
     private readonly IAbacusMigrationPreviewStore migrationPreviewStore;
     private CancellationTokenSource? operationCancellation;
     private AbacusFolderReport? sourceReport;
@@ -68,6 +70,7 @@ public partial class MainWindow : Window
     private string? lastImageCaptureWorkspaceFingerprint;
     private AbacusLinkagePlan? linkagePlan;
     private AbacusFp5Inspection? fp5Inspection;
+    private AbacusFp5VehicleImageMappingResult? fp5VehicleImageMapping;
     private bool allowClose;
     private bool closeVerificationInProgress;
     private bool abacusMayBeRunning;
@@ -80,9 +83,11 @@ public partial class MainWindow : Window
     private bool webImportMappingBusy;
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
+    // パッケージ生成中に発生したエラーを、状態更新処理で既定メッセージへ
+    // 上書きしないための画面状態です。
+    private bool legacyGraphFinalPackageHasError;
     private string? legacyGraphFinalPackagePath;
     private AbacusImportOutputPackageSession? unifiedImportOutputSession;
-    private string? legacyGraphImageRegistrationPreviewPath;
     private AbacusBulkImagePreparationResult? bulkImagePreparationResult;
     private CancellationTokenSource? legacyExportDetectionCancellation;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
@@ -148,30 +153,12 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        MoveImagePreparationIntoUnifiedPage();
         workspaceService = new AbacusWorkspaceService(folderInspector);
         migrationPreviewStore = new AbacusMigrationPreviewStore(dataAnalyzer, linkagePlanner);
         session.StateChanged += Session_StateChanged;
         Closing += MainWindow_Closing;
         Render(session.Snapshot);
         MainTabControl.SelectedItem = UnifiedImportTab;
-    }
-
-    private void MoveImagePreparationIntoUnifiedPage()
-    {
-        if (ImagePreparationTab.Content is not ScrollViewer imageScrollViewer ||
-            imageScrollViewer.Content is not UIElement imageContent)
-        {
-            return;
-        }
-
-        // 画像準備の既存コントロールを同じWindow内の統合ページへ移し、
-        // 画像処理だけ別タブへ移動する必要をなくします。コントロールと
-        // イベントハンドラーは再利用し、処理の安全境界は変更しません。
-        imageScrollViewer.Content = null;
-        ImagePreparationTab.Content = null;
-        UnifiedImagePreparationHost.Content = imageContent;
-        ImagePreparationTab.Visibility = Visibility.Collapsed;
     }
 
     private void MainWindow_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -256,6 +243,11 @@ public partial class MainWindow : Window
         LinkagePathTextBox.Text = folderPath;
         MigrationSourcePathTextBox.Text = folderPath;
         ResetLegacyExportImportState();
+        fp5VehicleImageMapping = null;
+        UnifiedImportImageMappingStatusText.Text =
+            "解析を開始すると、FP5内の車検証画像を自動復元して車両へ対応付けます。";
+        UnifiedImportImageMappingStatusText.Foreground = ToBrush("#52647A");
+        UnifiedImportImageMappingSummaryText.Text = "";
         Fp5InspectionStatusText.Text = "未診断";
         Fp5InspectionResultText.Text = "";
         Fp5CandidatesGrid.ItemsSource = null;
@@ -342,20 +334,6 @@ public partial class MainWindow : Window
         UpdateUnifiedImportEntryState();
     }
 
-    private void UnifiedImportImageMethodComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (UnifiedImportImageMethodStatusText is null || UnifiedImportImageMethodComboBox.SelectedItem is not ComboBoxItem item)
-        {
-            return;
-        }
-
-        var method = item.Tag as string;
-        UnifiedImportImageMethodStatusText.Text = method == "fast-experimental"
-            ? "高速方式を選択中。検証中のため、失敗時は画面移動型を使用してください。"
-            : "画面移動型を選択中。画像準備で一括取得できます。";
-        UnifiedImportImageMethodStatusText.Foreground = ToBrush(method == "fast-experimental" ? "#805B10" : "#52647A");
-    }
-
     private async void UnifiedImportCreateCanvasButton_Click(object sender, RoutedEventArgs e)
     {
         var folderPath = UnifiedImportFolderPathTextBox.Text.Trim();
@@ -365,7 +343,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (legacyExportCandidateGraphResult is not null)
+        if (legacyExportCandidateGraphResult is not null && fp5VehicleImageMapping?.IsFullyMatched == true)
         {
             if (!await EnsureUnifiedImportOutputSessionAsync(folderPath))
             {
@@ -377,7 +355,7 @@ public partial class MainWindow : Window
         }
 
         UnifiedImportCreateCanvasButton.IsEnabled = false;
-        UnifiedImportStatusText.Text = "CSVを診断し、キャンパス表示用の候補を準備しています…";
+        UnifiedImportStatusText.Text = "CSVを診断し、FP5画像を復元・対応付けしてキャンバス表示用の候補を準備しています…";
         UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         try
         {
@@ -396,10 +374,15 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if (!await RunGate14ImageMappingAsync())
+            {
+                return;
+            }
+
             await CreateLegacyExportPreviewAsync(unifiedImportOutputSession!.WorkIntermediatePath);
             if (legacyExportCandidateGraphResult is not null)
             {
-                UnifiedImportStatusText.Text = "キャンパスを表示しました。顧客統合・書類紐付け・ノード操作を確認できます。";
+                UnifiedImportStatusText.Text = "解析と画像対応付けが完了しました。キャンバスで顧客統合・書類紐付け・ノード操作を確認できます。";
                 UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
                 ShowUnifiedImportGraph();
             }
@@ -426,10 +409,14 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var method = GetUnifiedImageAcquisitionMethod();
+        var method = Gate14ImageAcquisitionMethod;
         if (unifiedImportOutputSession is not null &&
             string.Equals(unifiedImportOutputSession.SourcePath, Path.GetFullPath(sourceFolder), StringComparison.OrdinalIgnoreCase) &&
             string.Equals(unifiedImportOutputSession.ImageAcquisitionMethod, method, StringComparison.Ordinal) &&
+            string.Equals(
+                Path.GetDirectoryName(unifiedImportOutputSession.RootPath),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(destinationParent)),
+                StringComparison.OrdinalIgnoreCase) &&
             Directory.Exists(unifiedImportOutputSession.RootPath))
         {
             return true;
@@ -459,8 +446,90 @@ public partial class MainWindow : Window
         }
     }
 
-    private string GetUnifiedImageAcquisitionMethod() =>
-        (UnifiedImportImageMethodComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "screen-navigation";
+    private async Task<bool> RunGate14ImageMappingAsync()
+    {
+        if (unifiedImportOutputSession is null)
+        {
+            UnifiedImportImageMappingStatusText.Text = "生成物セッションがありません。先に保存先を選択してください。";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+            return false;
+        }
+
+        var sourceRoot = Path.GetFullPath(UnifiedImportFolderPathTextBox.Text.Trim());
+        var vehicleExportPath = Path.GetFullPath(LegacyExportPathTextBox.Text.Trim());
+        if (!Directory.Exists(vehicleExportPath))
+        {
+            UnifiedImportImageMappingStatusText.Text = "車両一覧CSVフォルダーを自動検出できませんでした。詳細調査で確認してください。";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+            return false;
+        }
+
+        var workspaceVehicleExportPath = IsSameOrSubPath(vehicleExportPath, sourceRoot)
+            ? Path.Combine(
+                unifiedImportOutputSession.WorkAbacusCopyPath,
+                Path.GetRelativePath(sourceRoot, vehicleExportPath))
+            // CSVフォルダーを詳細診断から別に選択した場合は、選択済みの
+            // フォルダーを読み取り専用で使います。ABACUSコピーのルートへ
+            // 置き換えると、CSVが原本の外側にある構成で対応付けできません。
+            : vehicleExportPath;
+        if (!Directory.Exists(workspaceVehicleExportPath))
+        {
+            UnifiedImportImageMappingStatusText.Text = "車両一覧CSVフォルダーが見つかりません。詳細診断で選択内容を確認してください。";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+            return false;
+        }
+        var fp5SourcePath = Directory.EnumerateFiles(
+                unifiedImportOutputSession.WorkAbacusCopyPath,
+                "abx-cs-sk.ucs",
+                SearchOption.TopDirectoryOnly)
+            .SingleOrDefault();
+        if (fp5SourcePath is null)
+        {
+            UnifiedImportImageMappingStatusText.Text = "画像データベース abx-cs-sk.ucs が作業用コピーにありません。";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+            return false;
+        }
+
+        var outputParent = Path.Combine(unifiedImportOutputSession.WorkIntermediatePath, "fp5-image-restoration");
+        Directory.CreateDirectory(outputParent);
+        UnifiedImportImageMappingStatusText.Text = "FP5セクターを解析し、車両レコードと画像を対応付けています…";
+        UnifiedImportImageMappingStatusText.Foreground = ToBrush("#52647A");
+        UnifiedImportImageMappingSummaryText.Text = "";
+        try
+        {
+            fp5VehicleImageMapping = await fp5VehicleImageMapper.MapAsync(
+                fp5SourcePath,
+                workspaceVehicleExportPath,
+                outputParent);
+            UnifiedImportImageMappingSummaryText.Text =
+                $"車両レコード: {fp5VehicleImageMapping.InternalVehicleRecordCount:N0}件 / " +
+                $"JPEG: {fp5VehicleImageMapping.JpegImageCount:N0}件 / " +
+                $"対応付け: {fp5VehicleImageMapping.MatchedImageCount:N0}件 / " +
+                $"画像なし: {fp5VehicleImageMapping.NoImageCount:N0}件 / " +
+                $"要確認: {fp5VehicleImageMapping.ReviewCount + fp5VehicleImageMapping.UnmatchedCount + fp5VehicleImageMapping.MultipleCandidateCount + fp5VehicleImageMapping.UnknownImageReferenceCount:N0}件";
+            if (!fp5VehicleImageMapping.IsFullyMatched)
+            {
+                UnifiedImportImageMappingStatusText.Text =
+                    "FP5画像の復元は完了しましたが、車両への対応付けに要確認項目があります。パッケージ作成を停止しました。";
+                UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+                return false;
+            }
+
+            UnifiedImportImageMappingStatusText.Text =
+                "Gate 14の検証済み方式で画像を復元し、車両へ自動対応付けしました。";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#17643A");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            fp5VehicleImageMapping = null;
+            UnifiedImportImageMappingStatusText.Text = $"FP5画像の復元・対応付けに失敗しました: {exception.Message}";
+            UnifiedImportImageMappingStatusText.Foreground = ToBrush("#A61B1B");
+            UnifiedImportImageMappingSummaryText.Text = "";
+            return false;
+        }
+    }
 
     private void UnifiedImportOpenDiagnosticsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -533,12 +602,6 @@ public partial class MainWindow : Window
                 destinationParent);
             bulkImagePreparationResult = result;
             BulkImageCandidatesGrid.ItemsSource = result.Candidates;
-            LegacyGraphImageRegistrationPreviewPathTextBox.Text = result.ImageCount > 0
-                ? result.PackagePath
-                : string.Empty;
-            legacyGraphImageRegistrationPreviewPath = result.ImageCount > 0
-                ? result.PackagePath
-                : null;
             OpenBulkImagePackageButton.IsEnabled = true;
 
             var warningText = result.Warnings.Count == 0
@@ -600,7 +663,7 @@ public partial class MainWindow : Window
     {
         var hasOutputParent = !string.IsNullOrWhiteSpace(UnifiedImportOutputParentPathTextBox.Text) &&
                               Directory.Exists(UnifiedImportOutputParentPathTextBox.Text.Trim());
-        if (legacyExportCandidateGraphResult is not null)
+        if (legacyExportCandidateGraphResult is not null && fp5VehicleImageMapping?.IsFullyMatched == true)
         {
             UnifiedImportCreateCanvasButton.IsEnabled = true;
             UnifiedImportCreateCanvasButton.Content = "キャンパスを表示";
@@ -610,11 +673,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
+        UnifiedImportCreateCanvasButton.Content = "解析を開始";
         UnifiedImportCreateCanvasButton.IsEnabled = CreateLegacyExportPreviewButton.IsEnabled && hasOutputParent;
         UnifiedImportStatusText.Text = CreateLegacyExportPreviewButton.IsEnabled
             ? hasOutputParent
-                ? "CSVの固定列診断に合格しました。解析してキャンパスを表示できます。"
+                ? "CSVの固定列診断に合格しました。解析を開始するとFP5画像の復元・対応付けも実行します。"
                 : "CSVの固定列診断に合格しました。先に生成物の保存先を選択してください。"
             : "CSVを検出または診断できていません。必要な場合は詳細診断を開いて確認してください。";
         UnifiedImportStatusText.Foreground = ToBrush(CreateLegacyExportPreviewButton.IsEnabled && hasOutputParent ? "#17643A" : "#805B10");
@@ -930,11 +993,16 @@ public partial class MainWindow : Window
         LegacyExportPackageRowsGrid.ItemsSource = null;
         ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
         unifiedImportOutputSession = null;
+        fp5VehicleImageMapping = null;
         UnifiedImportCreateCanvasButton.IsEnabled = false;
-        UnifiedImportCreateCanvasButton.Content = "解析してキャンパスを表示";
+        UnifiedImportCreateCanvasButton.Content = "解析を開始";
         UnifiedImportStatusText.Text = "ABACUSフォルダーを選択してください。";
         UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         UnifiedImportSummaryText.Text = "";
+        UnifiedImportImageMappingStatusText.Text =
+            "解析を開始すると、FP5内の車検証画像を自動復元して車両へ対応付けます。";
+        UnifiedImportImageMappingStatusText.Foreground = ToBrush("#52647A");
+        UnifiedImportImageMappingSummaryText.Text = "";
     }
 
     private void SelectLegacyExportFolderButton_Click(object sender, RoutedEventArgs e)
@@ -3296,34 +3364,23 @@ public partial class MainWindow : Window
             return;
         }
 
-        string destinationFolder;
-        if (unifiedImportOutputSession is not null)
+        if (unifiedImportOutputSession is null || fp5VehicleImageMapping is null || !fp5VehicleImageMapping.IsFullyMatched)
         {
-            destinationFolder = unifiedImportOutputSession.WorkIntermediatePath;
-        }
-        else
-        {
-            var dialog = new OpenFolderDialog
-            {
-                Title = "グラフ確定パッケージの保存先を選択",
-                Multiselect = false,
-            };
-            if (dialog.ShowDialog(this) != true)
-            {
-                return;
-            }
-
-            destinationFolder = dialog.FolderName;
+            legacyGraphFinalPackageHasError = true;
+            LegacyGraphFinalPackageStatusText.Text =
+                "Gate 14画像対応付けが完了していないため、登録前パッケージを作成できません。先に解析を完了してください。";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: ABACUSフォルダーを選び直し、解析を再実行してください。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#A61B1B");
+            return;
         }
 
-        var imagePackageSummary = string.IsNullOrWhiteSpace(legacyGraphImageRegistrationPreviewPath)
-            ? "画像登録前パッケージは指定しません。"
-            : $"画像登録前パッケージも車両識別子を再照合して含めます。\n{legacyGraphImageRegistrationPreviewPath}";
         var confirmation = MessageBox.Show(
             this,
             "確定した顧客統合・書類紐付けを登録前パッケージへ出力しますか？\n\n" +
-            "顧客CSV・車両CSV・販売CSV・整備CSV・書類リンク・除外一覧を新規フォルダーへ保存します。\n" +
-            imagePackageSummary + "\n" +
+            "顧客CSV・車両CSV・販売CSV・整備CSV・書類リンク・除外一覧を保存し、Gate 14で対応付けた画像も自動で同梱します。\n" +
+            $"画像: {fp5VehicleImageMapping.MatchedImageCount:N0}件 / 画像なし車両: {fp5VehicleImageMapping.NoImageCount:N0}件\n" +
             "Web API、D1、画像アップロード、元CSV・ABACUSフォルダーの変更は行いません。",
             "登録前パッケージの作成",
             MessageBoxButton.YesNo,
@@ -3334,6 +3391,7 @@ public partial class MainWindow : Window
         }
 
         legacyGraphFinalPackageBusy = true;
+        legacyGraphFinalPackageHasError = false;
         legacyGraphFinalPackagePath = null;
         LegacyGraphOpenFinalPackageButton.IsEnabled = false;
         LegacyGraphCreateFinalPackageButton.IsEnabled = false;
@@ -3348,13 +3406,14 @@ public partial class MainWindow : Window
             var result = await legacyGraphFinalPackageStore.CreateAsync(
                 legacyExportCandidateGraphResult,
                 snapshot,
-                destinationFolder,
-                legacyGraphImageRegistrationPreviewPath);
-            AbacusImportOutputPackageReadyResult? readyResult = null;
-            if (unifiedImportOutputSession is not null)
-            {
-                readyResult = await importOutputPackageStore.CompleteAsync(unifiedImportOutputSession, result);
-            }
+                unifiedImportOutputSession.WorkIntermediatePath,
+                fp5VehicleImageMapping);
+            LegacyGraphFinalPackageStatusText.Text =
+                "グラフ確定パッケージを検証しました。readyフォルダーへ完成品を移しています…";
+            var readyResult = await importOutputPackageStore.CompleteAsync(
+                unifiedImportOutputSession,
+                result,
+                fp5VehicleImageMapping.ReportPath);
             LegacyGraphFinalPackageStatusText.Text =
                 result.ImageCount > 0
                     ? "グラフ確定後の登録前パッケージを作成しました。画像も再検証して同梱済みです。Web API・DB・画像アップロードはまだ行っていません。"
@@ -3379,13 +3438,17 @@ public partial class MainWindow : Window
                 $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
-                                           InvalidDataException or JsonException or ArgumentException or
-                                           NotSupportedException)
+        catch (Exception exception)
         {
+            // async void のイベントハンドラーから例外を外へ出すと、画面には
+            // 「何も起きなかった」ように見え、ready配下には作成開始時の
+            // 空フォルダーだけが残ります。ここでは想定外の例外も含めて
+            // 必ず画面へ表示し、再試行可能な状態へ戻します。
+            legacyGraphFinalPackageHasError = true;
             LegacyGraphFinalPackageResultText.Text = "";
             LegacyGraphFinalPackageStatusText.Text =
-                $"グラフ確定パッケージを作成できません: {exception.Message}";
+                $"グラフ確定パッケージを作成できません: {exception.Message}" +
+                $"（{exception.GetType().Name}）";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
             LegacyGraphFinalPackageNextStepText.Text =
                 "次の操作: エラー内容を確認し、グラフを再検証してからもう一度パッケージを作成してください。";
@@ -3427,43 +3490,6 @@ public partial class MainWindow : Window
         {
             LegacyGraphFinalPackageStatusText.Text = $"保存先フォルダーを開けません: {exception.Message}";
             LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
-        }
-    }
-
-    private void LegacyGraphSelectImageRegistrationPreviewButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFolderDialog
-        {
-            Title = "グラフ確定パッケージへ含める画像登録前パッケージを選択",
-            Multiselect = false,
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dialog.FolderName));
-        if (!Directory.Exists(Path.Combine(folder, "images")) || !File.Exists(Path.Combine(folder, "manifest.json")))
-        {
-            LegacyGraphImageRegistrationPreviewStatusText.Text =
-                "画像登録前パッケージを確認できません。manifest.jsonとimagesフォルダーが必要です。";
-            LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#A61B1B");
-            return;
-        }
-
-        legacyGraphImageRegistrationPreviewPath = folder;
-        LegacyGraphImageRegistrationPreviewPathTextBox.Text = folder;
-        LegacyGraphImageRegistrationPreviewStatusText.Text =
-            "画像登録前パッケージを選択しました。グラフ確定時に車台番号・登録番号を再照合して同じパッケージへ含めます。";
-        LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#1E40AF");
-        legacyGraphFinalPackagePath = null;
-        LegacyGraphOpenFinalPackageButton.IsEnabled = false;
-        LegacyGraphFinalPackageResultText.Text = "";
-        if (legacyGraphImportConfirmed)
-        {
-            LegacyGraphFinalPackageStatusText.Text =
-                "画像登録前パッケージを変更しました。確定内容から登録前パッケージを作り直してください。";
-            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#805B10");
         }
     }
 
@@ -3543,6 +3569,7 @@ public partial class MainWindow : Window
             LegacyGraphFinalizeImportStatusText.Text =
                 "候補パッケージを読み込むと、顧客統合と書類・ノード操作の完了後に確定できます。";
             LegacyGraphCreateFinalPackageButton.IsEnabled = false;
+            legacyGraphFinalPackageHasError = false;
             LegacyGraphFinalPackageStatusText.Text =
                 "①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。";
             LegacyGraphFinalPackageNextStepText.Text =
@@ -3562,17 +3589,23 @@ public partial class MainWindow : Window
                 $"インポート内容を確定済みです。除外確定: {legacyGraphExcludedDocumentKeys.Count:N0}件。操作を変更すると確定が解除されます。";
             LegacyGraphApproveAllMergeButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.Content = "統合候補を一括承認済み";
-            LegacyGraphCreateFinalPackageButton.IsEnabled = !legacyGraphFinalPackageBusy;
+            var gate14Ready = unifiedImportOutputSession is not null &&
+                              fp5VehicleImageMapping?.IsFullyMatched == true;
+            LegacyGraphCreateFinalPackageButton.IsEnabled = gate14Ready && !legacyGraphFinalPackageBusy;
             LegacyGraphOpenFinalPackageButton.IsEnabled = !string.IsNullOrWhiteSpace(legacyGraphFinalPackagePath) &&
                                                            Directory.Exists(legacyGraphFinalPackagePath);
-            if (!legacyGraphFinalPackageBusy && string.IsNullOrWhiteSpace(LegacyGraphFinalPackageResultText.Text))
+            if (!legacyGraphFinalPackageBusy && string.IsNullOrWhiteSpace(LegacyGraphFinalPackageResultText.Text) &&
+                !legacyGraphFinalPackageHasError)
             {
-                LegacyGraphFinalPackageStatusText.Text =
-                    "確定内容を登録前パッケージへ保存できます。保存後もWeb API・DB・画像アップロードは行いません。";
+                LegacyGraphFinalPackageStatusText.Text = gate14Ready
+                    ? "確定内容を登録前パッケージへ保存できます。保存後もWeb API・DB・画像アップロードは行いません。"
+                    : "Gate 14画像対応付けが未完了です。上部の「解析を開始」を実行してから、確定内容をパッケージ化してください。";
                 LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
                 LegacyGraphFinalPackageNextStepText.Text =
-                    "次の操作: 「確定内容から登録前パッケージを作成」を押し、保存先を選択してください。";
-                LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
+                    gate14Ready
+                        ? "次の操作: 「確定内容から登録前パッケージを作成」を押してください。"
+                        : "次の操作: ABACUSフォルダーを選び直し、Gate 14解析を完了してください。";
+                LegacyGraphFinalPackageNextStepText.Foreground = ToBrush(gate14Ready ? "#1E40AF" : "#A61B1B");
             }
             return;
         }
@@ -5776,8 +5809,8 @@ public partial class MainWindow : Window
         legacyGraphExcludedDocumentKeys.Clear();
         legacyGraphImportConfirmed = false;
         legacyGraphFinalPackageBusy = false;
+        legacyGraphFinalPackageHasError = false;
         legacyGraphFinalPackagePath = null;
-        legacyGraphImageRegistrationPreviewPath = null;
         legacyGraphCustomerMergeDrafts.Clear();
         legacyGraphAppliedCustomerMergeKeys.Clear();
         legacyGraphVirtualCustomerMergeKeys.Clear();
@@ -5844,10 +5877,6 @@ public partial class MainWindow : Window
             "次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。";
         LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");
         LegacyGraphFinalPackageResultText.Text = "";
-        LegacyGraphImageRegistrationPreviewPathTextBox.Text = "";
-        LegacyGraphImageRegistrationPreviewStatusText.Text =
-            "画像を含める場合だけ、画像登録前パッケージを選択してください。未選択でもグラフ確定は実行できます。";
-        LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphStatusText.Text = status;
         LegacyGraphStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphLegendText.Text = "青い顧客ブロックから車両、書類へ読み進めます。候補パッケージを再検証すると表示できます。";
@@ -7213,8 +7242,6 @@ public partial class MainWindow : Window
         OpenBulkImagePackageButton.IsEnabled = false;
         BulkImageStatusText.Text = "先にABACUSインポート画面で保存用フォルダーを選択してください。";
         BulkImageStatusText.Foreground = ToBrush("#52647A");
-        LegacyGraphImageRegistrationPreviewPathTextBox.Clear();
-        legacyGraphImageRegistrationPreviewPath = null;
     }
 
     private void UpdateBulkImagePreparationButtonState()
@@ -7309,11 +7336,6 @@ public partial class MainWindow : Window
                 $"マニフェスト: {result.ManifestPath}\n" +
                 $"候補: {result.CandidateCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
-            legacyGraphImageRegistrationPreviewPath = result.PackagePath;
-            LegacyGraphImageRegistrationPreviewPathTextBox.Text = result.PackagePath;
-            LegacyGraphImageRegistrationPreviewStatusText.Text =
-                "画像登録前パッケージをグラフ確定へ自動設定しました。グラフ確定時に車両識別子を再照合して同梱します。";
-            LegacyGraphImageRegistrationPreviewStatusText.Foreground = ToBrush("#1E40AF");
             WebImportSourcePackageTextBox.Text = result.PackagePath;
             ResetWebImportPreview(clearPaths: false);
             WebImportPreviewStatusText.Text =

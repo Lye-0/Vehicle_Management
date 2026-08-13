@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace VehicleManagement.AbacusImport;
 
@@ -12,7 +13,11 @@ public sealed record AbacusFp5VehicleImageMapping(
     string? VehicleFileName,
     int? VehicleRowNumber,
     string Status,
-    string Evidence);
+    string Evidence,
+    [property: JsonIgnore] string? CustomerName,
+    [property: JsonIgnore] string? VehicleName,
+    [property: JsonIgnore] string? RegistrationNumber,
+    [property: JsonIgnore] string? ChassisNumber);
 
 public sealed record AbacusFp5VehicleImageMappingResult(
     string OutputFolderPath,
@@ -182,7 +187,11 @@ public sealed class AbacusFp5VehicleImageMapper
                 vehicle?.FileName,
                 vehicle?.RowNumber,
                 status,
-                evidence));
+                evidence,
+                vehicle?.CustomerName,
+                vehicle?.VehicleName,
+                vehicle?.RegistrationNumber,
+                vehicle?.ChassisNumber));
         }
 
         var duplicateReferenceCount = imageReferenceCounts.Values.Count(count => count > 1);

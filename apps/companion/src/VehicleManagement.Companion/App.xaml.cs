@@ -170,7 +170,7 @@ public partial class App : Application
                 outputPackageDestination,
                 source,
                 before.FolderFingerprint,
-                "screen-navigation");
+                "fp5-vehicle-record");
             var fp5RestorationParent = Path.Combine(testRoot, "fp5-restoration");
             Directory.CreateDirectory(fp5RestorationParent);
             var fp5Restoration = await new AbacusFp5ImageRestorer().RestoreAsync(
@@ -408,7 +408,7 @@ public partial class App : Application
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "seibi.csv"), string.Join(',', maintenanceExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou2.csv"), string.Join(',', vehicleExportFields), shiftJis);
-            var fp5MappingParent = Path.Combine(testRoot, "fp5-mapping");
+            var fp5MappingParent = Path.Combine(outputPackageSession.WorkIntermediatePath, "fp5-mapping");
             var fp5MappingExportFolder = Path.Combine(testRoot, "fp5-mapping-export");
             Directory.CreateDirectory(fp5MappingParent);
             Directory.CreateDirectory(fp5MappingExportFolder);
@@ -438,6 +438,54 @@ public partial class App : Application
             var legacyPreviewMaintenanceText = await File.ReadAllTextAsync(Path.Combine(legacyPreview.PackagePath, "maintenance.csv"));
             var legacyPackageRead = await new AbacusLegacyExportPreviewPackageReader().ReadAsync(legacyPreview.PackagePath);
             var legacyCandidateGraph = await new AbacusLegacyExportCandidateGraphService().BuildAsync(legacyPackageRead);
+            var gate14FinalPackageParent = Path.Combine(testRoot, "gate14-final-packages");
+            Directory.CreateDirectory(gate14FinalPackageParent);
+            // Gate 14のFP5/CSV側に全角空白が残っていても、候補グラフ側の
+            // 正規化済み識別子へ再照合できることを検証します。
+            var gate14MappingWithCompatibilitySpacing = fp5Mapping with
+            {
+                Mappings = fp5Mapping.Mappings
+                    .Select(mapping => mapping with
+                    {
+                        RegistrationNumber = mapping.RegistrationNumber?.Replace(' ', '\u3000')
+                    })
+                    .ToArray()
+            };
+            var gate14FinalizationSnapshot = new AbacusLegacyGraphFinalizationSnapshot(
+                legacyCandidateGraph.Customers
+                    .Select(customer => new AbacusLegacyGraphFinalCustomerGroup(
+                        $"self-test-{customer.CustomerId}",
+                        "self-test",
+                        true,
+                        [customer.CustomerId],
+                        customer.CustomerId,
+                        customer.CustomerNumber,
+                        customer.CustomerName,
+                        customer.NameKana,
+                        customer.PhoneNumber,
+                        customer.EmailAddress,
+                        customer.PostalCode,
+                        customer.Address,
+                        customer.Memo))
+                    .ToArray(),
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                Array.Empty<string>(),
+                true);
+            var gate14FinalPackage = await new AbacusLegacyGraphFinalPackageStore().CreateAsync(
+                legacyCandidateGraph,
+                gate14FinalizationSnapshot,
+                gate14FinalPackageParent,
+                gate14MappingWithCompatibilitySpacing);
+            var gate14ReadyPackage = await outputPackageStore.CompleteAsync(
+                outputPackageSession,
+                gate14FinalPackage,
+                gate14MappingWithCompatibilitySpacing.ReportPath);
+            var gate14ReadyManifestText = await File.ReadAllTextAsync(gate14ReadyPackage.ReadyManifestPath);
+            var gate14ImageMapping = fp5Mapping.Mappings.Single(mapping => mapping.Status == "matched");
+            var gate14ReadyImagePath = Path.Combine(
+                gate14ReadyPackage.ReadyPath,
+                gate14ImageMapping.ImageRelativePath!.Replace('/', Path.DirectorySeparatorChar));
             var tamperedLegacyPackagePath = Path.Combine(testRoot, "legacy-preview-tampered");
             Directory.CreateDirectory(tamperedLegacyPackagePath);
             foreach (var packageFile in Directory.EnumerateFiles(legacyPreview.PackagePath))
@@ -673,10 +721,17 @@ public partial class App : Application
                 fp5Mapping.UnknownImageReferenceCount == 0 &&
                 fp5Mapping.DuplicateImageReferenceCount == 0 &&
                 fp5Mapping.DuplicateImageSha256Count == 0 &&
-                fp5Mapping.UnreferencedImageCount == 0 &&
-                fp5MappingReportText.Contains("gate14-verified", StringComparison.Ordinal) &&
-                fp5MappingReportText.Contains("fp5-record-image-reference+exact-chassis-registration", StringComparison.Ordinal) &&
-                analysis.IsStructurallyValid &&
+                 fp5Mapping.UnreferencedImageCount == 0 &&
+                 fp5MappingReportText.Contains("gate14-verified", StringComparison.Ordinal) &&
+                 fp5MappingReportText.Contains("fp5-record-image-reference+exact-chassis-registration", StringComparison.Ordinal) &&
+                 gate14FinalPackage.ImageCount == fp5Mapping.MatchedImageCount &&
+                 gate14FinalPackage.ImageAttachmentsPath is not null &&
+                 File.Exists(gate14FinalPackage.ImageAttachmentsPath) &&
+                 gate14ReadyPackage.ReadyPath == outputPackageSession.ReadyPath &&
+                 File.Exists(gate14ReadyImagePath) &&
+                 File.Exists(Path.Combine(gate14ReadyPackage.ReadyPath, "reports", "fp5-vehicle-image-mapping-report.json")) &&
+                 gate14ReadyManifestText.Contains("fp5-vehicle-image-mapping-report.json", StringComparison.Ordinal) &&
+                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&
                 linkage.IsValid &&

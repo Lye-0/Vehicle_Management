@@ -389,7 +389,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem x:Name="ImagePreparationTab" Header="画像抽出準備">
+            <TabItem x:Name="ImagePreparationTab" Header="画像抽出準備" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="24">
                         <Border Padding="14" Background="#EAF2FF" BorderBrush="#B9D2F2" BorderThickness="1"
@@ -862,8 +862,8 @@
                             <StackPanel>
                                 <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="#10233F"
                                            Text="ABACUSインポート（完成タブ）" />
-                                <TextBlock Margin="0,6,0,14" Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="ABACUSフォルダーと生成物の保存先を選ぶと、解析・紐付け・画像準備・完成品作成をこのページで行えます。元のABACUSフォルダーとCSVは変更しません。" />
+                                 <TextBlock Margin="0,6,0,14" Foreground="#52647A" TextWrapping="Wrap"
+                                            Text="ABACUSフォルダーと生成物の保存先を選ぶと、CSV解析・FP5画像復元・車両対応付け・完成品作成をこのページで行えます。元のABACUSフォルダーとCSVは変更しません。" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -889,37 +889,32 @@
                                             Margin="10,0,0,0" Content="保存先を選択"
                                             Click="UnifiedImportSelectOutputParentButton_Click" />
                                 </Grid>
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="150" />
-                                        <ColumnDefinition Width="260" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Margin="0,10,10,0" Foreground="#52647A"
-                                               Text="画像取得方式" />
-                                    <ComboBox x:Name="UnifiedImportImageMethodComboBox" Grid.Column="1"
-                                              MinHeight="34" SelectedIndex="0" SelectionChanged="UnifiedImportImageMethodComboBox_SelectionChanged">
-                                        <ComboBoxItem Content="画面移動型（推奨）" Tag="screen-navigation" />
-                                        <ComboBoxItem Content="高速方式（検証中）" Tag="fast-experimental" />
-                                    </ComboBox>
-                                    <TextBlock x:Name="UnifiedImportImageMethodStatusText" Grid.Column="2"
-                                               Margin="12,9,0,0" Foreground="#52647A" TextWrapping="Wrap"
-                                               Text="画面移動型を選択中。画像準備で一括取得できます。" />
-                                </Grid>
-                                <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
-                                    <Button x:Name="UnifiedImportCreateCanvasButton"
-                                            Content="解析してキャンパスを表示" IsEnabled="False"
-                                            Click="UnifiedImportCreateCanvasButton_Click" />
-                                    <Button x:Name="UnifiedImportOpenDiagnosticsButton"
-                                            Content="詳細調査を表示" Click="UnifiedImportOpenDiagnosticsButton_Click" />
-                                </StackPanel>
-                                <TextBlock x:Name="UnifiedImportStatusText" Margin="0,12,0,0"
-                                           Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="ABACUSフォルダーを選択してください。" />
-                                <TextBlock x:Name="UnifiedImportSummaryText" Margin="0,6,0,0"
-                                           Foreground="#36465A" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
+                                 <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
+                                     <Button x:Name="UnifiedImportCreateCanvasButton"
+                                             Content="解析を開始" IsEnabled="False"
+                                             Click="UnifiedImportCreateCanvasButton_Click" />
+                                     <Button x:Name="UnifiedImportOpenDiagnosticsButton"
+                                             Content="詳細調査を表示" Click="UnifiedImportOpenDiagnosticsButton_Click" />
+                                 </StackPanel>
+                                 <TextBlock x:Name="UnifiedImportStatusText" Margin="0,12,0,0"
+                                            Foreground="#52647A" TextWrapping="Wrap"
+                                            Text="ABACUSフォルダーを選択してください。" />
+                                 <TextBlock x:Name="UnifiedImportSummaryText" Margin="0,6,0,0"
+                                            Foreground="#36465A" TextWrapping="Wrap" />
+                                 <Border Margin="0,12,0,0" Padding="12" Background="#FFFFFF"
+                                         BorderBrush="#C7D8F2" BorderThickness="1" CornerRadius="6">
+                                     <StackPanel>
+                                         <TextBlock FontWeight="SemiBold" Foreground="#10233F"
+                                                    Text="Gate 14画像取得・車両対応付け" />
+                                         <TextBlock x:Name="UnifiedImportImageMappingStatusText" Margin="0,5,0,0"
+                                                    Foreground="#52647A" TextWrapping="Wrap"
+                                                    Text="解析を開始すると、FP5内の車検証画像を自動復元して車両へ対応付けます。" />
+                                         <TextBlock x:Name="UnifiedImportImageMappingSummaryText" Margin="0,4,0,0"
+                                                    Foreground="#36465A" TextWrapping="Wrap" />
+                                     </StackPanel>
+                                 </Border>
+                             </StackPanel>
+                         </Border>
 
                         <Expander x:Name="LegacyPreparationExpander" Margin="0,18,0,0"
                                   Header="詳細診断（必要な場合のみ）" IsExpanded="False">
@@ -1087,7 +1082,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="LegacyGraphSectionTitle" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
                                        VerticalAlignment="Center"
-                                       Text="6B補足2. 顧客・車両・書類のグラフ型確認" />
+                                       Text="顧客・車両・書類のグラフ型確認" />
                             <Button x:Name="LegacyGraphApproveAllMergeButton" Grid.Column="1"
                                     Style="{StaticResource LegacyGraphApproveButton}"
                                     Content="統合候補を一括承認" IsEnabled="False"
@@ -1471,52 +1466,35 @@
                                         Content="確定内容から登録前パッケージを作成"
                                         IsEnabled="False"
                                         Click="LegacyGraphCreateFinalPackageButton_Click" />
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="190" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Margin="0,8,10,0" Foreground="#52647A"
-                                               Text="画像登録前パッケージ（任意）" TextWrapping="Wrap" />
-                                    <TextBox x:Name="LegacyGraphImageRegistrationPreviewPathTextBox" Grid.Column="1"
-                                             MinHeight="34" Padding="8,5" IsReadOnly="True" />
-                                    <Button x:Name="LegacyGraphSelectImageRegistrationPreviewButton" Grid.Column="2"
-                                            Margin="10,0,0,0" Content="フォルダー選択"
-                                            Click="LegacyGraphSelectImageRegistrationPreviewButton_Click" />
-                                </Grid>
-                                <TextBlock x:Name="LegacyGraphImageRegistrationPreviewStatusText" Margin="0,6,0,0"
-                                           Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="画像を含める場合だけ、画像登録前パッケージを選択してください。未選択でもグラフ確定は実行できます。" />
-                                <Button x:Name="LegacyGraphOpenFinalPackageButton"
-                                        Margin="10,0,0,0"
-                                        HorizontalAlignment="Left"
-                                        Content="作成したフォルダーを開く"
-                                        IsEnabled="False"
-                                        Click="LegacyGraphOpenFinalPackageButton_Click" />
-                                <TextBlock x:Name="LegacyGraphFinalPackageStatusText" Margin="0,8,0,0"
-                                           Foreground="#52647A" TextWrapping="Wrap"
-                                           Text="①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。" />
-                                <TextBlock x:Name="LegacyGraphFinalPackageNextStepText" Margin="0,6,0,0"
-                                           Foreground="#1E40AF" TextWrapping="Wrap"
-                                           Text="次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。" />
-                                <Border Margin="0,8,0,0" Padding="10" Background="#FFFFFF" CornerRadius="5">
-                                    <TextBlock x:Name="LegacyGraphFinalPackageResultText" Foreground="#36465A"
-                                               LineHeight="22" TextWrapping="Wrap" />
-                                </Border>
-                            </StackPanel>
-                        </Border>
+                                 <Button x:Name="LegacyGraphOpenFinalPackageButton"
+                                         Margin="0,10,0,0"
+                                         HorizontalAlignment="Left"
+                                         Content="作成したフォルダーを開く"
+                                         IsEnabled="False"
+                                         Click="LegacyGraphOpenFinalPackageButton_Click" />
+                                 <TextBlock x:Name="LegacyGraphFinalPackageStatusText" Margin="0,8,0,0"
+                                            Foreground="#52647A" TextWrapping="Wrap"
+                                            Text="確定内容から登録前パッケージを作成します。" />
+                                 <Border Margin="0,8,0,0" Padding="10" Background="#FFFFFF" CornerRadius="5">
+                                     <TextBlock x:Name="LegacyGraphFinalPackageResultText" Foreground="#36465A"
+                                                LineHeight="22" TextWrapping="Wrap" />
+                                 </Border>
+                             </StackPanel>
+                         </Border>
 
-                        <Expander x:Name="UnifiedImagePreparationExpander" Margin="0,18,0,0"
-                                  Header="画像・Web登録準備（必要な場合のみ）" IsExpanded="False">
-                            <Border Margin="0,8,0,0" Padding="8" Background="#FFFFFF"
-                                    BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="6">
-                                <ContentControl x:Name="UnifiedImagePreparationHost" />
-                            </Border>
-                        </Expander>
+                         <Border Margin="0,10,0,0" Padding="12" Background="#EAF2FF"
+                                 BorderBrush="#B9D2F5" BorderThickness="1" CornerRadius="6">
+                             <StackPanel>
+                                 <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="次の操作" />
+                                 <TextBlock x:Name="LegacyGraphFinalPackageNextStepText" Margin="0,6,0,0"
+                                            Foreground="#1E40AF" TextWrapping="Wrap"
+                                            Text="グラフの操作を終えたら「インポート内容を確定」を押してください。" />
+                             </StackPanel>
+                         </Border>
 
-                        <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
-                                   Text="6C. 全車両一覧エクスポート導線の診断" />
+                         <StackPanel x:Name="LegacyUnifiedDiagnosticsPanel" Visibility="Collapsed">
+                         <TextBlock Margin="0,26,0,0" FontSize="18" FontWeight="SemiBold" Foreground="#10233F"
+                                    Text="6C. 全車両一覧エクスポート導線の診断" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
                                    Text="コピー側ABACUSの標準Windowsメニューを読み取り、全車両一覧を出力できる導線があるか確認します。メニューのクリック、データの編集、保存、エクスポートは行いません。" />
                         <Button x:Name="InspectAbacusMenuButton" HorizontalAlignment="Left"
@@ -1587,11 +1565,12 @@
                                 Click="ExtractFp5CandidateButton_Click" />
                         <TextBlock x:Name="Fp5CandidateExportStatusText" Margin="0,10,0,0" Foreground="#52647A"
                                    Text="候補を選択すると、標準JPEG構造を再検証してから1件だけ出力します。内部ブロックと判定した場合は保存しません。" TextWrapping="Wrap" />
-                        <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
-                            <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
-                                       TextWrapping="Wrap" LineHeight="24" />
-                        </Border>
-                        </StackPanel>
+                         <Border Margin="0,14,0,0" Padding="14" Background="#FFF4D6" CornerRadius="8">
+                             <TextBlock x:Name="Fp5InspectionResultText" Foreground="#805B10"
+                                        TextWrapping="Wrap" LineHeight="24" />
+                         </Border>
+                         </StackPanel>
+                         </StackPanel>
                         <Canvas x:Name="LegacyGraphPageDragPreviewCanvas"
                                 IsHitTestVisible="False"
                                 Panel.ZIndex="1000" />
