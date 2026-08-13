@@ -1361,7 +1361,7 @@
                         <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="未確定トレイ" />
                         <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="車両・販売書類・整備書類を分けて表示します。中央の書類ブロックをトレイへドラッグすると、元の自動紐付けも一時的に未確定へ戻せます。トレイに残した書類は、画面下部のインポート確定時に件数と内訳を確認し、その時点で今回のインポートから除外します。" />
+                                   Text="車両・販売書類・整備書類を分けて表示します。中央の車両・書類ブロックをトレイへドラッグすると、元の自動紐付けも一時的に未確定へ戻せます。車両を戻すと関連書類も未確定になります。トレイに残した項目は、画面下部のインポート確定時に今回のインポートから除外します。" />
                         <Grid Height="250">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -1391,7 +1391,7 @@
                                                         <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
                                                                    Text="{Binding IdentifierSummary}" TextWrapping="Wrap" />
                                                         <TextBlock Margin="0,4,0,0" Foreground="#8A5A00" FontSize="10"
-                                                                   Text="顧客カードへドラッグして手動接続" TextWrapping="Wrap" />
+                                                                   Text="顧客カードへドラッグして手動接続／車両カードをここへドラッグして除外" TextWrapping="Wrap" />
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

@@ -30,7 +30,8 @@ public sealed record AbacusLegacyGraphFinalizationSnapshot(
     bool ImportConfirmed,
     IReadOnlyDictionary<string, string>? DocumentLinkMethods = null,
     IReadOnlyDictionary<string, string>? DocumentLinkReasons = null,
-    IReadOnlyDictionary<string, string>? ManualVehicleCustomerLinks = null);
+    IReadOnlyDictionary<string, string>? ManualVehicleCustomerLinks = null,
+    IReadOnlyCollection<string>? TrayVehicleIds = null);
 
 public static class AbacusLinkMethods
 {
@@ -172,12 +173,24 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             .ToArray();
         var manualVehicleCustomerLinks = snapshot.ManualVehicleCustomerLinks ??
             new Dictionary<string, string>(StringComparer.Ordinal);
-        ValidateManualVehicleCustomerLinks(manualVehicleCustomerLinks, allSourceVehicles, sourceCustomers);
+        var trayVehicleIds = (snapshot.TrayVehicleIds ?? Array.Empty<string>())
+            .Select(value => value.Trim())
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        if (trayVehicleIds.Any(vehicleId => allSourceVehicles.All(vehicle =>
+                !string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal))))
+        {
+            throw new InvalidDataException("未確定車両トレイに存在しない車両が含まれています。グラフを再読込してください。");
+        }
+
+        ValidateManualVehicleCustomerLinks(manualVehicleCustomerLinks, allSourceVehicles, sourceCustomers, trayVehicleIds);
         var sourceVehicles = allSourceVehicles
-            .Where(vehicle => vehicle.HasCustomer || manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId))
+            .Where(vehicle => !trayVehicleIds.Contains(vehicle.VehicleId) &&
+                              (vehicle.HasCustomer || manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)))
             .ToArray();
         var excludedVehicles = allSourceVehicles
-            .Where(vehicle => !vehicle.HasCustomer && !manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId))
+            .Where(vehicle => trayVehicleIds.Contains(vehicle.VehicleId) ||
+                              (!vehicle.HasCustomer && !manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)))
             .ToArray();
         var vehiclesById = sourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         var documents = graph.AllDocuments
@@ -193,6 +206,17 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         {
             throw new InvalidDataException("除外指定に存在しない書類が含まれています。グラフを再読込してください。");
         }
+
+        // UI側で関連書類をトレイへ移動し忘れた場合でも、未確定車両の書類が
+        // 顧客直結書類として誤って出力されないよう、元の車両リンクを最終段階で再確認します。
+        var vehicleTrayDocumentKeys = documents
+            .Where(document =>
+                (document.LinkedVehicleId is not null && trayVehicleIds.Contains(document.LinkedVehicleId)) ||
+                (snapshot.ManualDocumentVehicleLinks.TryGetValue(GetDocumentKey(document), out var manualVehicleId) &&
+                 trayVehicleIds.Contains(manualVehicleId)))
+            .Select(GetDocumentKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        excludedKeys.UnionWith(vehicleTrayDocumentKeys);
 
         ValidateManualLinks(snapshot, documentByKey, vehiclesById, groupByKey);
         var finalDocumentCandidates = new List<FinalDocument>(documents.Length - excludedKeys.Count);
@@ -361,7 +385,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             }
             if (excludedVehicles.Length > 0)
             {
-                warnings.Add($"顧客へ接続されなかった未確定車両{excludedVehicles.Length:N0}件は、顧客未確定のためvehicles.csvへ出力していません。");
+                var trayExcludedVehicleCount = excludedVehicles.Count(vehicle => trayVehicleIds.Contains(vehicle.VehicleId));
+                var customerUnresolvedVehicleCount = excludedVehicles.Length - trayExcludedVehicleCount;
+                warnings.Add($"未確定車両{excludedVehicles.Length:N0}件はvehicles.csvへ出力していません（トレイ移動{trayExcludedVehicleCount:N0}件 / 顧客未確定{customerUnresolvedVehicleCount:N0}件）。");
             }
             if (excludedVehicleImageCount > 0)
             {
@@ -370,6 +396,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             if (excludedKeys.Count > 0)
             {
                 warnings.Add($"未確定トレイ等の除外指定{excludedKeys.Count:N0}件は出力していません。");
+            }
+            if (vehicleTrayDocumentKeys.Count > 0)
+            {
+                warnings.Add($"未確定車両に元々紐付いていた書類{vehicleTrayDocumentKeys.Count:N0}件は、車両トレイ移動に連動して出力していません。");
             }
             var renumberedDocumentCount = finalDocuments.Count(document => !string.Equals(document.ImportDocumentNumber, document.Document.DocumentNumber, StringComparison.Ordinal));
             if (renumberedDocumentCount > 0)
@@ -429,7 +459,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 excludedVehicles.Select(vehicle => new ManifestExcludedVehicle(
                     vehicle.VehicleId,
                     vehicle.SourceLocation,
-                    "顧客未接続のため最終パッケージから除外")).ToArray(),
+                    trayVehicleIds.Contains(vehicle.VehicleId)
+                        ? "ユーザーが未確定車両トレイへ移動したため最終パッケージから除外"
+                        : "顧客未接続のため最終パッケージから除外")).ToArray(),
                 manualVehicleCustomerLinks);
             var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
             var manifestPath = Path.Combine(packagePath, ManifestFileName);
@@ -582,12 +614,13 @@ public sealed class AbacusLegacyGraphFinalPackageStore
     private static void ValidateManualVehicleCustomerLinks(
         IReadOnlyDictionary<string, string> links,
         IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> vehicles,
-        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> customers)
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> customers,
+        IReadOnlySet<string> trayVehicleIds)
     {
         var vehiclesById = vehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         foreach (var pair in links)
         {
-            if (!vehiclesById.TryGetValue(pair.Key, out var vehicle) || vehicle.HasCustomer)
+            if (!vehiclesById.TryGetValue(pair.Key, out var vehicle) || vehicle.HasCustomer || trayVehicleIds.Contains(pair.Key))
             {
                 throw new InvalidDataException("未確定車両の手動接続が現在のグラフを参照していません。");
             }

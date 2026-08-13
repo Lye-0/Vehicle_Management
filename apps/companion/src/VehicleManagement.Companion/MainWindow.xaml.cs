@@ -113,6 +113,9 @@ public partial class MainWindow : Window
     // インポート全体の最終確定で除外確定した未確定トレイ書類です。
     // トレイからキャンバスへ戻した場合は最終確定状態とともに無効化します。
     private readonly HashSet<string> legacyGraphExcludedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
+    // キャンバス上の車両を未確定トレイへ戻した一時状態です。
+    // 元の顧客IDは保持したまま、最終パッケージでは車両と関連書類を除外します。
+    private readonly HashSet<string> legacyGraphTrayVehicleIds = new(StringComparer.OrdinalIgnoreCase);
     // 顧客統合・書類紐付けを含む、グラフ全体の最終確定状態です。
     private bool legacyGraphImportConfirmed;
     private readonly Dictionary<string, LegacyGraphCustomerMergeDraft> legacyGraphCustomerMergeDrafts = new(StringComparer.Ordinal);
@@ -143,6 +146,7 @@ public partial class MainWindow : Window
     private AbacusLegacyExportCandidateGraphDocument? legacyGraphHandleDragDocument;
     private Point legacyGraphHandleDragStartPoint;
     private AbacusLegacyExportCandidateGraphDocument? legacyGraphDocumentCardDragDocument;
+    private AbacusLegacyExportCandidateGraphVehicle? legacyGraphVehicleCardDragVehicle;
     private Border? legacyGraphBlockDragPreview;
     private FrameworkElement? legacyGraphBlockDragPreviewSource;
     private Line? legacyGraphActiveConnectionLine;
@@ -176,7 +180,8 @@ public partial class MainWindow : Window
     {
         // マウスキャプチャ中は元の要素以外の領域でもWindowまでイベントが届くため、
         // ここでドロップ先判定とカーソルを最後に再適用します。
-        if (legacyGraphBlockDragStarted && legacyGraphDocumentCardDragDocument is not null)
+        if (legacyGraphBlockDragStarted &&
+            (legacyGraphDocumentCardDragDocument is not null || legacyGraphVehicleCardDragVehicle is not null))
         {
             UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
         }
@@ -1483,6 +1488,7 @@ public partial class MainWindow : Window
                 legacyGraphUnconnectedDocumentKeys.Clear();
                 legacyGraphTrayDocumentKeys.Clear();
                 legacyGraphExcludedDocumentKeys.Clear();
+                legacyGraphTrayVehicleIds.Clear();
                 legacyGraphImportConfirmed = false;
                 legacyGraphCustomerMergeDrafts.Clear();
                 legacyGraphAppliedCustomerMergeKeys.Clear();
@@ -1739,7 +1745,7 @@ public partial class MainWindow : Window
     {
         if (GetLegacyGraphUnresolvedVehicleDragPayload(e.Data) is { } vehiclePayload &&
             FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is { } unresolvedVehicle &&
-            !unresolvedVehicle.HasCustomer)
+            (!unresolvedVehicle.HasCustomer || legacyGraphTrayVehicleIds.Contains(unresolvedVehicle.VehicleId)))
         {
             var vehicleTargetItem = FindVisualAncestor<ListBoxItem>(e.OriginalSource as DependencyObject);
             if (vehicleTargetItem?.DataContext is LegacyGraphCustomerListEntry vehicleTargetEntry)
@@ -1796,7 +1802,7 @@ public partial class MainWindow : Window
         ClearLegacyGraphCustomerDropHighlight();
         if (GetLegacyGraphUnresolvedVehicleDragPayload(e.Data) is { } vehiclePayload &&
             FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is { } unresolvedVehicle &&
-            !unresolvedVehicle.HasCustomer)
+            (!unresolvedVehicle.HasCustomer || legacyGraphTrayVehicleIds.Contains(unresolvedVehicle.VehicleId)))
         {
             var vehicleTargetItem = FindVisualAncestor<ListBoxItem>(e.OriginalSource as DependencyObject);
             if (vehicleTargetItem?.DataContext is LegacyGraphCustomerListEntry vehicleTargetEntry)
@@ -2025,8 +2031,33 @@ public partial class MainWindow : Window
     }
 
     private int GetLegacyGraphUnresolvedVehicleCount() =>
-        legacyExportCandidateGraphResult?.UnresolvedVehicleRows.Count(vehicle =>
-            !legacyGraphManualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)) ?? 0;
+        GetLegacyGraphUnresolvedVehicles().Count;
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> GetLegacyGraphAllVehicles()
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [];
+        }
+
+        return legacyExportCandidateGraphResult.Customers
+            .SelectMany(customer => customer.Vehicles)
+            .Concat(legacyExportCandidateGraphResult.UnresolvedVehicleRows)
+            .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> GetLegacyGraphUnresolvedVehicles()
+    {
+        return GetLegacyGraphAllVehicles()
+            .Where(vehicle => legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId) ||
+                              (!vehicle.HasCustomer &&
+                               !legacyGraphManualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)))
+            .OrderBy(vehicle => vehicle.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .ToArray();
+    }
 
     private void RefreshLegacyGraphUnresolvedVehicleList()
     {
@@ -2036,9 +2067,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        LegacyGraphUnresolvedVehicleList.ItemsSource = legacyExportCandidateGraphResult.UnresolvedVehicleRows
-            .Where(vehicle => !legacyGraphManualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId))
-            .ToArray();
+        LegacyGraphUnresolvedVehicleList.ItemsSource = GetLegacyGraphUnresolvedVehicles();
     }
 
     private void LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -2099,41 +2128,117 @@ public partial class MainWindow : Window
 
     private AbacusLegacyExportCandidateGraphVehicle? FindLegacyGraphVehicleById(string vehicleId)
     {
-        if (legacyExportCandidateGraphResult is null)
-        {
-            return null;
-        }
-
-        return legacyExportCandidateGraphResult.Customers
-            .SelectMany(customer => customer.Vehicles)
-            .Concat(legacyExportCandidateGraphResult.UnresolvedVehicleRows)
-            .FirstOrDefault(vehicle => string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
+        return GetLegacyGraphAllVehicles().FirstOrDefault(vehicle =>
+            string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
     }
 
     private void ApplyLegacyGraphManualVehicleCustomerLink(
         AbacusLegacyExportCandidateGraphVehicle vehicle,
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
+        var targetCustomer = GetLegacyGraphSourceCustomer(customer);
         if (vehicle.HasCustomer)
         {
-            LegacyGraphStatusText.Text = "顧客へ接続済みの車両は、未確定車両トレイから再割当できません。";
-            LegacyGraphStatusText.Foreground = ToBrush("#805B10");
+            if (!legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId))
+            {
+                LegacyGraphStatusText.Text = "顧客へ接続済みの車両は、未確定車両トレイから再割当できません。";
+                LegacyGraphStatusText.Foreground = ToBrush("#805B10");
+                return;
+            }
+
+            var targetCustomerIds = GetLegacyGraphCustomerMergeCandidates(customer)
+                .Select(candidate => candidate.CustomerId)
+                .ToHashSet(StringComparer.Ordinal);
+            if (!targetCustomerIds.Contains(vehicle.CustomerId))
+            {
+                LegacyGraphStatusText.Text = "この車両は元の顧客カードへ戻してください。別の顧客へ変更する場合は、車両情報を確認してから手動で判断してください。";
+                LegacyGraphStatusText.Foreground = ToBrush("#805B10");
+                return;
+            }
+
+            legacyGraphTrayVehicleIds.Remove(vehicle.VehicleId);
+            InvalidateLegacyGraphImportConfirmation();
+            RefreshLegacyGraphUnresolvedVehicleList();
+            RefreshLegacyGraphCustomerList(GetLegacyGraphCustomerListEntryId(targetCustomer));
+            var displayCustomer = GetLegacyGraphDisplayCustomer(targetCustomer);
+            legacyGraphSelectedItem = displayCustomer;
+            UpdateLegacyGraphInspector(displayCustomer);
+            RenderLegacyGraphCustomer(displayCustomer);
+            LegacyGraphStatusText.Text =
+                $"未確定車両 {vehicle.DisplayName} を元の顧客 {targetCustomer.DisplayName} へ戻しました。";
+            LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
             return;
         }
 
-        var targetCustomer = GetLegacyGraphSourceCustomer(customer);
+        legacyGraphTrayVehicleIds.Remove(vehicle.VehicleId);
         legacyGraphManualVehicleCustomerLinks[vehicle.VehicleId] = targetCustomer.CustomerId;
         InvalidateLegacyGraphImportConfirmation();
         legacyGraphAppliedCustomerMergeKeys.Remove(GetLegacyCustomerMergeKey(targetCustomer));
         RefreshLegacyGraphUnresolvedVehicleList();
         RefreshLegacyGraphCustomerList(GetLegacyGraphCustomerListEntryId(targetCustomer));
-        var displayCustomer = GetLegacyGraphDisplayCustomer(targetCustomer);
-        legacyGraphSelectedItem = displayCustomer;
-        UpdateLegacyGraphInspector(displayCustomer);
-        RenderLegacyGraphCustomer(displayCustomer);
+        var assignedDisplayCustomer = GetLegacyGraphDisplayCustomer(targetCustomer);
+        legacyGraphSelectedItem = assignedDisplayCustomer;
+        UpdateLegacyGraphInspector(assignedDisplayCustomer);
+        RenderLegacyGraphCustomer(assignedDisplayCustomer);
         LegacyGraphStatusText.Text =
             $"未確定車両 {vehicle.DisplayName} を顧客 {targetCustomer.DisplayName} へ手動接続しました。顧客へ接続しない車両は最終パッケージから除外されます。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private void MoveLegacyGraphVehicleToTray(
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        var targetCustomerId = legacyGraphManualVehicleCustomerLinks.TryGetValue(
+            vehicle.VehicleId,
+            out var manualCustomerId)
+            ? manualCustomerId
+            : vehicle.HasCustomer
+                ? vehicle.CustomerId
+                : null;
+        var selectedCustomer = GetLegacyGraphListSelectedDisplayCustomer();
+
+        InvalidateLegacyGraphImportConfirmation();
+        legacyGraphManualVehicleCustomerLinks.Remove(vehicle.VehicleId);
+        legacyGraphTrayVehicleIds.Add(vehicle.VehicleId);
+
+        // 車両を未確定へ戻した場合、その車両に属する書類も同時に未確定へ戻します。
+        // 元のCSVやABACUSフォルダーは変更せず、画面上の一時状態だけを更新します。
+        var relatedDocumentKeys = GetLegacyGraphAllVehicles()
+            .Where(candidate => string.Equals(candidate.VehicleId, vehicle.VehicleId, StringComparison.Ordinal))
+            .SelectMany(candidate => candidate.Documents)
+            .Concat(legacyExportCandidateGraphResult?.AllDocuments.Where(document =>
+                legacyGraphManualDocumentLinks.TryGetValue(GetLegacyDocumentKey(document), out var linkedVehicleId) &&
+                string.Equals(linkedVehicleId, vehicle.VehicleId, StringComparison.Ordinal)) ?? [])
+            .Select(GetLegacyDocumentKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var documentKey in relatedDocumentKeys)
+        {
+            legacyGraphManualDocumentLinks.Remove(documentKey);
+            legacyGraphManualDocumentCustomerLinks.Remove(documentKey);
+            legacyGraphDocumentLinkMethods.Remove(documentKey);
+            legacyGraphDocumentLinkReasons.Remove(documentKey);
+            legacyGraphUnconnectedDocumentKeys.Remove(documentKey);
+            legacyGraphTrayDocumentKeys.Add(documentKey);
+        }
+
+        ClearLegacyGraphBlockVisualDrag();
+        RefreshLegacyGraphUnresolvedVehicleList();
+        RefreshLegacyGraphUnresolvedDocumentLists();
+        var customer = selectedCustomer ??
+            (targetCustomerId is null ? null : FindLegacyGraphCustomerById(targetCustomerId));
+        if (customer is not null)
+        {
+            RefreshLegacyGraphCustomerList(GetLegacyGraphCustomerListEntryId(customer));
+            RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(customer));
+        }
+
+        legacyGraphSelectedItem = vehicle;
+        UpdateLegacyGraphInspector(vehicle);
+        LegacyGraphStatusText.Text =
+            relatedDocumentKeys.Count > 0
+                ? $"車両 {vehicle.DisplayName} と関連書類 {relatedDocumentKeys.Count:N0}件を未確定トレイへ戻しました。元データは変更していません。"
+                : $"車両 {vehicle.DisplayName} を未確定車両トレイへ戻しました。元データは変更していません。";
+        LegacyGraphStatusText.Foreground = ToBrush("#D97706");
     }
 
     private void ClearLegacyGraphManualVehicleCustomerLink(
@@ -2145,6 +2250,7 @@ public partial class MainWindow : Window
         }
 
         legacyGraphManualVehicleCustomerLinks.Remove(vehicle.VehicleId);
+        legacyGraphTrayVehicleIds.Remove(vehicle.VehicleId);
 
         InvalidateLegacyGraphImportConfirmation();
         RefreshLegacyGraphUnresolvedVehicleList();
@@ -2929,17 +3035,22 @@ public partial class MainWindow : Window
                     ? linkedCustomerId
                     : null;
                 var linkedCustomer = manualVehicleCustomerId is null ? null : FindLegacyGraphCustomerById(manualVehicleCustomerId);
+                var isVehicleInTray = legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId);
                 LegacyGraphReassignButton.IsEnabled = linkedCustomer is not null;
                 LegacyGraphReassignButton.Visibility = linkedCustomer is null ? Visibility.Collapsed : Visibility.Visible;
                 LegacyGraphReassignButton.Content = "顧客への接続を解除";
-                LegacyGraphInspectorStateText.Text = linkedCustomer is null
-                    ? "● 未確定車両を選択中"
-                    : "● 未確定車両を顧客へ手動接続中";
+                LegacyGraphInspectorStateText.Text = isVehicleInTray
+                    ? "● 未確定トレイの車両を選択中"
+                    : linkedCustomer is null
+                        ? "● 未確定車両を選択中"
+                        : "● 未確定車両を顧客へ手動接続中";
                 LegacyGraphCustomerMergeStatusText.Text = "顧客ブロックを選択すると、同名顧客の比較候補を表示します。";
                 LegacyGraphInspectorTitleText.Text = $"車両: {Fallback(vehicle.Maker)} {vehicle.DisplayName}";
                 LegacyGraphInspectorStatusText.Text =
                     $"車両ID: {vehicle.VehicleId}\n書類 {vehicle.Documents.Count:N0}件\n" +
-                    (linkedCustomer is null
+                    (isVehicleInTray
+                        ? "最終パッケージ: 未確定トレイのため除外"
+                        : linkedCustomer is null
                         ? "最終パッケージ: 未接続のため除外"
                         : $"接続先顧客: {linkedCustomer.DisplayName}");
                 LegacyGraphInspectorDetailsText.Text =
@@ -2952,7 +3063,9 @@ public partial class MainWindow : Window
                     $"出典: {vehicle.SourceLocation}\n" +
                     "画像: 次段階で候補画像を表示";
                 LegacyGraphInspectorEvidenceText.Text =
-                    (linkedCustomer is null
+                    (isVehicleInTray
+                        ? "ユーザーが車両カードを未確定車両トレイへ移動しました。車両と関連書類は最終パッケージから除外されます。"
+                        : linkedCustomer is null
                         ? vehicle.Warning
                         : $"ユーザーが顧客 {linkedCustomer.DisplayName} へ手動接続しました。") +
                     "\n登録番号・車台番号は書類と画像の候補判定にも使用します。";
@@ -3177,9 +3290,11 @@ public partial class MainWindow : Window
             .ToHashSet(StringComparer.Ordinal);
         var assignedVehicles = legacyExportCandidateGraphResult.UnresolvedVehicleRows
             .Where(vehicle => legacyGraphManualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var targetCustomerId) &&
-                              sourceCustomerIds.Contains(targetCustomerId))
+                              sourceCustomerIds.Contains(targetCustomerId) &&
+                              !legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId))
             .ToArray();
         return customer.Vehicles
+            .Where(vehicle => !legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId))
             .Concat(assignedVehicles)
             .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
             .Select(group => group.First())
@@ -3224,9 +3339,11 @@ public partial class MainWindow : Window
         legacyGraphVirtualCustomerMergeKeys[virtualCustomerId] = mergeKey;
         var vehicles = candidates
             .SelectMany(candidate => candidate.Vehicles)
+            .Where(vehicle => !legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId))
             .Concat(legacyExportCandidateGraphResult?.UnresolvedVehicleRows.Where(vehicle =>
                 legacyGraphManualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var targetCustomerId) &&
-                candidates.Any(candidate => string.Equals(candidate.CustomerId, targetCustomerId, StringComparison.Ordinal))) ?? [])
+                candidates.Any(candidate => string.Equals(candidate.CustomerId, targetCustomerId, StringComparison.Ordinal)) &&
+                !legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId)) ?? [])
             .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
             .Select(group => group.First())
             .OrderBy(vehicle => vehicle.DisplayName, StringComparer.OrdinalIgnoreCase)
@@ -3874,7 +3991,8 @@ public partial class MainWindow : Window
                 (result.ImageAttachmentsPath is null ? "" : $"画像対応表: {(readyResult is null ? result.ImageAttachmentsPath : Path.Combine(readyResult.ReadyPath, "mappings", "image-attachments.json"))}\n") +
                 $"顧客: {result.CustomerRowCount:N0}行 / 車両: {result.VehicleRowCount:N0}行 / " +
                 $"販売書類: {result.SalesRowCount:N0}行 / 整備書類: {result.MaintenanceRowCount:N0}行\n" +
-                $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
+                $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外書類: {result.ExcludedDocumentCount:N0}件 / " +
+                $"除外車両: {result.ExcludedVehicleCount:N0}件（画像 {result.ExcludedVehicleImageCount:N0}件） / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
         }
         catch (OperationCanceledException)
@@ -3987,7 +4105,8 @@ public partial class MainWindow : Window
             legacyGraphImportConfirmed,
             new Dictionary<string, string>(legacyGraphDocumentLinkMethods, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, string>(legacyGraphDocumentLinkReasons, StringComparer.OrdinalIgnoreCase),
-            new Dictionary<string, string>(legacyGraphManualVehicleCustomerLinks, StringComparer.OrdinalIgnoreCase));
+            new Dictionary<string, string>(legacyGraphManualVehicleCustomerLinks, StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(legacyGraphTrayVehicleIds, StringComparer.OrdinalIgnoreCase));
     }
 
     private int GetLegacyGraphPendingMergeGroupCount() =>
@@ -4317,6 +4436,13 @@ public partial class MainWindow : Window
 
     private void LegacyGraphReassignButton_Click(object sender, RoutedEventArgs e)
     {
+        if (legacyGraphSelectedItem is AbacusLegacyExportCandidateGraphVehicle vehicle)
+        {
+            ClearLegacyGraphManualVehicleCustomerLink(vehicle);
+            e.Handled = true;
+            return;
+        }
+
         if (legacyGraphSelectedItem is not AbacusLegacyExportCandidateGraphDocument document ||
             legacyExportCandidateGraphResult is null)
         {
@@ -5335,7 +5461,8 @@ public partial class MainWindow : Window
     private void HandleLegacyGraphCustomerDragOver(Grid customerBlock, DragEventArgs e)
     {
         if (GetLegacyGraphUnresolvedVehicleDragPayload(e.Data) is { } vehiclePayload &&
-            FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is { HasCustomer: false })
+            FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is { } vehicle &&
+            (!vehicle.HasCustomer || legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId)))
         {
             SetLegacyGraphDropHighlight(customerBlock);
             legacyGraphNativeDocumentDropTargetValid = true;
@@ -6025,6 +6152,10 @@ public partial class MainWindow : Window
                                                frameworkElement.Tag is AbacusLegacyExportCandidateGraphDocument document
             ? document
             : null;
+        legacyGraphVehicleCardDragVehicle = element is FrameworkElement vehicleElement &&
+                                            vehicleElement.Tag is AbacusLegacyExportCandidateGraphVehicle vehicle
+            ? vehicle
+            : null;
         legacyGraphBlockDragOriginalCursor = element is FrameworkElement cursorElement
             ? cursorElement.Cursor
             : null;
@@ -6071,7 +6202,7 @@ public partial class MainWindow : Window
 
         if (legacyGraphBlockDragStarted)
         {
-            if (legacyGraphDocumentCardDragDocument is not null)
+            if (legacyGraphDocumentCardDragDocument is not null || legacyGraphVehicleCardDragVehicle is not null)
             {
                 // 書類ブロックを掴んだ直後は通常の移動カーソルを維持し、
                 // 有効なドロップ先に入った時だけ手カーソルへ切り替えます。
@@ -6091,12 +6222,14 @@ public partial class MainWindow : Window
         }
 
         var document = legacyGraphDocumentCardDragDocument;
+        var vehicle = legacyGraphVehicleCardDragVehicle;
         var wasDragging = legacyGraphBlockDragStarted;
         var windowPoint = e.GetPosition(this);
         RestoreLegacyGraphBlockDragCursor();
         legacyGraphDraggingElement.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
         legacyGraphDocumentCardDragDocument = null;
+        legacyGraphVehicleCardDragVehicle = null;
         legacyGraphBlockDragStarted = false;
         ClearLegacyGraphBlockVisualDrag();
         ClearLegacyGraphDropHighlight();
@@ -6105,6 +6238,10 @@ public partial class MainWindow : Window
         if (wasDragging && document is not null)
         {
             HandleLegacyGraphDocumentBlockDrop(document, windowPoint);
+        }
+        else if (wasDragging && vehicle is not null)
+        {
+            HandleLegacyGraphVehicleBlockDrop(vehicle, windowPoint);
         }
 
         e.Handled = true;
@@ -6204,9 +6341,24 @@ public partial class MainWindow : Window
     {
         ClearLegacyGraphDropHighlight();
         ClearLegacyGraphTrayDropHighlight();
-        if (legacyGraphDocumentCardDragDocument is null)
+        if (legacyGraphDocumentCardDragDocument is null && legacyGraphVehicleCardDragVehicle is null)
         {
             RestoreLegacyGraphBlockDragCursor();
+            return;
+        }
+
+        if (legacyGraphVehicleCardDragVehicle is not null)
+        {
+            var vehicleList = FindLegacyGraphUnresolvedVehicleListAt(windowPoint);
+            if (vehicleList is not null)
+            {
+                legacyGraphTrayDropHighlightList = vehicleList;
+                vehicleList.Opacity = 0.82;
+                SetLegacyGraphDocumentDragCursor(Cursors.Hand);
+                return;
+            }
+
+            SetLegacyGraphDocumentDragCursor(Cursors.SizeAll);
             return;
         }
 
@@ -6250,6 +6402,11 @@ public partial class MainWindow : Window
 
         return null;
     }
+
+    private ListBox? FindLegacyGraphUnresolvedVehicleListAt(Point windowPoint) =>
+        IsLegacyGraphElementAtWindowPoint(LegacyGraphUnresolvedVehicleList, windowPoint)
+            ? LegacyGraphUnresolvedVehicleList
+            : null;
 
     private Grid? FindLegacyGraphVehicleBlockAt(Point windowPoint)
     {
@@ -6324,6 +6481,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void HandleLegacyGraphVehicleBlockDrop(
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        Point windowPoint)
+    {
+        if (FindLegacyGraphUnresolvedVehicleListAt(windowPoint) is not null)
+        {
+            MoveLegacyGraphVehicleToTray(vehicle);
+        }
+    }
+
     private bool IsLegacyGraphUnresolvedDocumentList(ListBox list) =>
         ReferenceEquals(list, LegacyGraphUnresolvedSalesList) ||
         ReferenceEquals(list, LegacyGraphUnresolvedMaintenanceList);
@@ -6339,6 +6506,7 @@ public partial class MainWindow : Window
         legacyGraphUnconnectedDocumentKeys.Clear();
         legacyGraphTrayDocumentKeys.Clear();
         legacyGraphExcludedDocumentKeys.Clear();
+        legacyGraphTrayVehicleIds.Clear();
         legacyGraphImportConfirmed = false;
         legacyGraphFinalPackageBusy = false;
         legacyGraphFinalPackageHasError = false;
@@ -6358,6 +6526,7 @@ public partial class MainWindow : Window
         legacyGraphNativeDocumentDropTargetValid = false;
         legacyGraphHandleDragDocument = null;
         legacyGraphDocumentCardDragDocument = null;
+        legacyGraphVehicleCardDragVehicle = null;
         legacyGraphNodeDragSource?.ReleaseMouseCapture();
         legacyGraphNodeDragSource = null;
         StopLegacyGraphNodeAutoScroll();
