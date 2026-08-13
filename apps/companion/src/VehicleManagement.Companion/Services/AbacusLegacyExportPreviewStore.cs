@@ -292,37 +292,46 @@ public sealed class AbacusLegacyExportPreviewStore
                 customerSource,
                 customers);
             var customer = EnsureDocumentCustomer(customers, match, customerSource);
-            if (match.Status != VehicleMatchStatus.Unique)
+            if (match.Status is VehicleMatchStatus.Ambiguous or VehicleMatchStatus.Conflict)
             {
-                skippedMaintenanceWithoutVehicleRows++;
-                var reason = match.Status == VehicleMatchStatus.Ambiguous
-                    ? "複数の車両候補に一致するため、整備書類は登録候補から除外しました。"
-                    : "車両一覧の一意な一致がないため、整備書類は登録候補から除外しました。";
-                previewRows.Add(new AbacusLegacyExportPreviewRow("整備書類", row.FileName, row.RowNumber, customer.Name, Text(source, 13), Text(source, 1), "除外", reason));
-                continue;
+                ambiguousVehicleRows++;
             }
+
+            // 整備書類は車両一覧に一意一致しなくても、顧客直結の未確定書類として保持します。
+            // 車両を失うと、UCS明細・金額・入庫日を後から復元できなくなるためです。
+            var vehicle = match.Status == VehicleMatchStatus.Unique ? match.Vehicle : null;
+            var warning = match.Status switch
+            {
+                VehicleMatchStatus.Unique => "車台番号または登録番号が車両一覧の1行に一致しました。",
+                VehicleMatchStatus.Ambiguous => "複数の車両候補に一致するため、車両未確定のまま顧客直結で保持しました。",
+                VehicleMatchStatus.Conflict => "車両識別子は一致しましたが顧客候補が異なるため、車両未確定のまま顧客直結で保持しました。",
+                _ => "車両一覧の一意な一致がないため、車両未確定のまま顧客直結で保持しました。",
+            };
 
             var document = CreateDocumentCandidate(
                 "整備書類",
                 row,
                 customer,
-                match.Vehicle,
+                vehicle,
                 Text(source, 1),
                 NormalizeDocumentType(Text(source, 2), "整備請求書"),
                 NormalizeCalendarDate(Text(source, 0)),
                 NormalizeNonNegativeInteger(Text(source, 27)),
-                $"ABACUS={row.FileName}#{row.RowNumber}; 備考原文={Text(source, 24)}; 金額は合計欄のみで税・明細は未確定。車両一致: 車台/登録番号。" );
+                $"ABACUS={row.FileName}#{row.RowNumber}; 備考原文={Text(source, 24)}; {warning}" );
             var detailMatch = detailMapper.Match("整備書類", document.Number, customerName, document.VehicleName, Text(source, 20), Text(source, 19));
             document = document with { DetailsJson = AbacusDetailMapper.Serialize(detailMatch) };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
+            var intakeDate = NormalizeCalendarDate(Text(source, 25));
             document = document with
             {
                 Category = "一般整備",
-                IntakeDate = NormalizeCalendarDate(Text(source, 25)),
+                // #635のようにABACUSの入庫日欄が空欄でも、書類日付は失わない。
+                // Web側の発行日・入庫日の基準として書類日付を使用します。
+                IntakeDate = string.IsNullOrWhiteSpace(intakeDate) ? document.IssuedAt : intakeDate,
                 CompletionDate = NormalizeCalendarDate(Text(source, 26)),
             };
             maintenance.Add(document);
-            previewRows.Add(new AbacusLegacyExportPreviewRow("整備書類", row.FileName, row.RowNumber, customer.Name, document.VehicleName, document.Number, "一意一致", "車台番号または登録番号が車両一覧の1行に一致しました。"));
+            previewRows.Add(new AbacusLegacyExportPreviewRow("整備書類", row.FileName, row.RowNumber, customer.Name, document.VehicleName, document.Number, match.StatusLabel, warning));
         }
 
         if (previewRows.Count > MaximumPreviewRows)

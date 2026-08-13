@@ -48,8 +48,7 @@ public sealed class AbacusDetailMapper
             .Where(document => string.Equals(document.Kind, kind, StringComparison.Ordinal))
             .Where(document => Normalize(document.DocumentNumber) == Normalize(documentNumber))
             .Where(document => string.IsNullOrWhiteSpace(customerName) || Normalize(document.CustomerName) == Normalize(customerName))
-            .Where(document => IdentifierCompatible(registrationNumber, document.RegistrationNumber) && IdentifierCompatible(chassisNumber, document.ChassisNumber))
-            .Where(document => string.IsNullOrWhiteSpace(vehicleName) || Normalize(document.VehicleName) == Normalize(vehicleName))
+            .Where(document => VehicleCompatible(document, vehicleName, registrationNumber, chassisNumber))
             .ToArray();
         if (candidates.Length == 1) return new AbacusDetailMatch(candidates[0], "matched", "書類番号・顧客・車両識別子がUCSの1レコードに一致しました。");
         if (candidates.Length > 1) return new AbacusDetailMatch(null, "review", $"同一条件に{candidates.Length:N0}件のUCSレコードが一致しました。明細を自動登録せず要確認にしています。");
@@ -87,6 +86,29 @@ public sealed class AbacusDetailMapper
 
     private static bool IdentifierCompatible(string csv, string ucs) =>
         string.IsNullOrWhiteSpace(csv) || string.IsNullOrWhiteSpace(ucs) || NormalizeIdentifier(csv) == NormalizeIdentifier(ucs);
+
+    private static bool VehicleCompatible(
+        AbacusUcsDetailDocument document,
+        string vehicleName,
+        string registrationNumber,
+        string chassisNumber)
+    {
+        var normalizedRegistration = NormalizeIdentifier(registrationNumber);
+        var normalizedChassis = NormalizeIdentifier(chassisNumber);
+        var hasCsvIdentifier = normalizedRegistration.Length > 0 || normalizedChassis.Length > 0;
+        if (hasCsvIdentifier)
+        {
+            var registrationMatches = normalizedRegistration.Length > 0 &&
+                NormalizeIdentifier(document.RegistrationNumber) == normalizedRegistration;
+            var chassisMatches = normalizedChassis.Length > 0 &&
+                NormalizeIdentifier(document.ChassisNumber) == normalizedChassis;
+            return (registrationMatches || chassisMatches) &&
+                IdentifierCompatible(registrationNumber, document.RegistrationNumber) &&
+                IdentifierCompatible(chassisNumber, document.ChassisNumber);
+        }
+
+        return string.IsNullOrWhiteSpace(vehicleName) || Normalize(document.VehicleName) == Normalize(vehicleName);
+    }
 
     private static string Normalize(string value) =>
         value.Normalize(NormalizationForm.FormKC).Trim().Replace(" ", "", StringComparison.Ordinal).Replace("　", "", StringComparison.Ordinal).ToUpperInvariant();

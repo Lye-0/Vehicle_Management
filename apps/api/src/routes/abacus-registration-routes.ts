@@ -654,7 +654,8 @@ function parseFinalMaintenance(text: string) {
     const intakeDate = optionalDate(row[8], '入庫日')
     const detailPayload = parseAbacusDetailPayload(row[17])
     const amounts = applyAbacusDetailAmounts(normalizeFinalDocumentAmounts(row[12], row[13], row[14], row[17]), detailPayload)
-    return { id, number, type: requiredText(row[2], '書類種別'), category: normalizeMaintenanceCategory(row[3]), status: normalizeImportedStatus(row[4]), customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate, plannedReleaseDate: optionalDate(row[9], '出庫予定日'), dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考') } satisfies FinalMaintenanceRow
+    const plannedReleaseDate = optionalDate(row[9], '出庫予定日')
+    return { id, number, type: requiredText(row[2], '書類種別'), category: normalizeMaintenanceCategory(row[3]), status: normalizeImportedStatus(row[4]), customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate, plannedReleaseDate, dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate ?? plannedReleaseDate ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考') } satisfies FinalMaintenanceRow
   })
 }
 

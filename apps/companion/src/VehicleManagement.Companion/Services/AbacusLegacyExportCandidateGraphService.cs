@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.VisualBasic.FileIO;
 
@@ -20,7 +21,9 @@ public sealed record AbacusLegacyExportCandidateGraphDocument(
     string? LinkedVehicleId,
     IReadOnlyList<string> CandidateVehicleIds,
     IReadOnlyList<string> CandidateCustomerIds,
-    string DetailsJson = "")
+    string DetailsJson = "",
+    string MaintenanceIntakeDate = "",
+    string MaintenanceCompletionDate = "")
 {
     public bool IsLinked => !string.IsNullOrWhiteSpace(LinkedVehicleId);
 
@@ -100,6 +103,10 @@ public sealed class AbacusLegacyExportCandidateGraphService
     private const string SalesFileName = "sales.csv";
     private const string MaintenanceFileName = "maintenance.csv";
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
+    private static readonly JsonSerializerOptions DetailJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private static readonly Regex SourceMemoPattern = new(
         @"ABACUS=(?<file>[^;#]+)#(?<row>\d+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -201,6 +208,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 4,
                 5,
                 6,
+                -1,
                 7,
                 12,
                 Value(row.Fields, 14),
@@ -219,6 +227,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 5,
                 6,
                 7,
+                -1,
                 8,
                 14,
                 Value(row.Fields, 16),
@@ -327,6 +336,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
         int customerNameIndex,
         int vehicleNameIndex,
         int registrationIndex,
+        int chassisIndex,
         int documentDateIndex,
         int totalAmountIndex,
         string memo,
@@ -336,8 +346,11 @@ public sealed class AbacusLegacyExportCandidateGraphService
         ISet<string> representedSources)
     {
         var customerName = Value(row.Fields, customerNameIndex);
-        var vehicleName = Value(row.Fields, vehicleNameIndex);
-        var registrationNumber = Value(row.Fields, registrationIndex);
+        var detailsJson = Value(row.Fields, kind == "販売書類" ? 15 : 17);
+        var detail = ParseDetailJson(detailsJson);
+        var vehicleName = FirstNonEmpty(Value(row.Fields, vehicleNameIndex), detail?.VehicleName);
+        var registrationNumber = FirstNonEmpty(Value(row.Fields, registrationIndex), detail?.RegistrationNumber);
+        var chassisNumber = FirstNonEmpty(Value(row.Fields, chassisIndex), detail?.ChassisNumber);
         var source = SourceMemoPattern.Match(memo);
         var sourceFileName = source.Success ? source.Groups["file"].Value : "";
         var sourceRowNumber = source.Success && int.TryParse(source.Groups["row"].Value, out var parsedRow) ? parsedRow : row.RowNumber;
@@ -349,7 +362,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
 
         manifestRows.TryGetValue(sourceKey, out var manifestRow);
         var candidateCustomerIds = FindCustomers(customers, customerName);
-        var candidateVehicles = FindVehicles(vehicles.Values, candidateCustomerIds, vehicleName, registrationNumber);
+        var candidateVehicles = FindVehicles(vehicles.Values, candidateCustomerIds, vehicleName, registrationNumber, chassisNumber);
         var matchStatus = manifestRow?.MatchStatus ?? (candidateVehicles.Count == 1 ? "要確認" : "未一致");
         var warning = manifestRow?.Warning ?? "候補マニフェストに対応する行がないため、手動確認が必要です。";
         string? linkedVehicleId = null;
@@ -379,7 +392,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
             linkedVehicleId,
             candidateVehicles.Select(vehicle => vehicle.VehicleId).ToArray(),
             candidateCustomerIds,
-            Value(row.Fields, kind == "販売書類" ? 15 : 17));
+            detailsJson,
+            kind == "整備書類" ? Value(row.Fields, 8) : "",
+            kind == "整備書類" ? Value(row.Fields, 9) : "");
         if (linkedVehicleId is not null && vehicles.TryGetValue(linkedVehicleId, out var linkedVehicle))
         {
             linkedVehicle.Documents.Add(document);
@@ -396,7 +411,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
         IEnumerable<VehicleBuilder> source,
         IReadOnlyList<string> candidateCustomerIds,
         string vehicleName,
-        string registrationNumber)
+        string registrationNumber,
+        string chassisNumber)
     {
         var customerSet = candidateCustomerIds.ToHashSet(StringComparer.Ordinal);
         var candidates = source
@@ -407,6 +423,14 @@ public sealed class AbacusLegacyExportCandidateGraphService
         {
             candidates = candidates
                 .Where(vehicle => Normalize(vehicle.RegistrationNumber) == normalizedRegistration)
+                .ToArray();
+        }
+
+        var normalizedChassis = Normalize(chassisNumber);
+        if (!string.IsNullOrWhiteSpace(normalizedChassis))
+        {
+            candidates = candidates
+                .Where(vehicle => Normalize(vehicle.ChassisNumber) == normalizedChassis)
                 .ToArray();
         }
 
@@ -436,6 +460,26 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 .Where(customer => Normalize(customer.DisplayName) == normalizedName)
                 .Select(customer => customer.CustomerId)
                 .ToArray();
+    }
+
+    private static string FirstNonEmpty(string value, string? fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback?.Trim() ?? "" : value;
+
+    private static AbacusDetailJsonDocument? ParseDetailJson(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<AbacusDetailJsonDocument>(value, DetailJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static IReadOnlyList<CsvRow> ReadRows(

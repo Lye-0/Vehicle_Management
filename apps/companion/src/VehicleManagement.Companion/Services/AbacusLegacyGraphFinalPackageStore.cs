@@ -642,6 +642,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var subtotal = (subtotalValue ?? totalValue ?? 0).ToString(CultureInfo.InvariantCulture);
         var tax = (taxValue ?? 0).ToString(CultureInfo.InvariantCulture);
         var taxRate = taxRateValue.ToString(CultureInfo.InvariantCulture);
+        var maintenanceIntakeDate = string.IsNullOrWhiteSpace(document.MaintenanceIntakeDate)
+            ? document.DocumentDate
+            : document.MaintenanceIntakeDate;
+        var maintenanceCompletionDate = document.MaintenanceCompletionDate;
         var originalNumberMemo = string.Equals(finalDocument.ImportDocumentNumber, document.DocumentNumber, StringComparison.Ordinal)
             ? ""
             : $" 原書類番号={document.DocumentNumber};";
@@ -659,8 +663,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 finalDocument.Group.CustomerName,
                 vehicleName,
                 registrationNumber,
-                document.DocumentDate,
-                document.DocumentDate,
+                maintenanceIntakeDate,
+                maintenanceCompletionDate,
                 "",
                 taxRate,
                 subtotal,
