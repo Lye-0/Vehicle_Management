@@ -696,12 +696,13 @@ describe("既存車両の走行距離同期", () => {
       items: [],
     }));
     expect(saved.status).toBe(201);
+    const savedBody = await saved.json() as { document: { id: string } };
 
     const historyResponse = await SELF.fetch(new Request(`https://example.com/api/vehicles/${vid}/history`, { headers: authHeaders() }));
     expect(historyResponse.status).toBe(200);
     const historyBody = await historyResponse.json() as { maintenance: Array<{ id: string; number: string; recordedMileage: number | null }> };
     expect(historyBody.maintenance.find((document) => document.id === importedDid)?.recordedMileage ?? null).toBeNull();
-    expect(historyBody.maintenance.find((document) => document.number !== "M-ABACUS-043")?.recordedMileage).toBe(12000);
+    expect(historyBody.maintenance.find((document) => document.id === savedBody.document.id)?.recordedMileage).toBe(12000);
   });
 
   it("初回POSTでmileageSyncを保存し、車両走行距離と履歴を更新", async () => {
