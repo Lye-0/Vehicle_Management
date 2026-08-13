@@ -402,7 +402,9 @@ export function assertManifestReferences(tables: BackupManifest['tables']) {
   for (const row of tables.salesDocumentItems) assertManifestReference(salesDocumentIds, row.documentId, '販売明細の販売書類')
   for (const row of tables.maintenanceDocuments) {
     assertManifestReference(customerIds, row.customerId, '整備書類の顧客')
-    assertManifestReference(vehicleIds, row.vehicleId, '整備書類の車両')
+    // ABACUS移行では、顧客にのみ紐づく車両なし整備書類を保存できる。
+    // 通常の整備書類で車両IDが指定されている場合は、従来どおり参照先を検証する。
+    if (row.vehicleId !== null) assertManifestReference(vehicleIds, row.vehicleId, '整備書類の車両')
   }
   for (const row of tables.maintenanceItems) assertManifestReference(maintenanceDocumentIds, row.documentId, '整備明細の整備書類')
   for (const row of tables.paymentRecords) assertPaymentReference(row.documentType, row.documentId, salesDocumentIds, maintenanceDocumentIds, '入金記録')
