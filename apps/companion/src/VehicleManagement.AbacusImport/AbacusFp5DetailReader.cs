@@ -17,6 +17,17 @@ public sealed record AbacusDetailLine(
     public bool IsAmountOnly => Description is null && (PartAmount is not null || UnitPrice is not null || TechnicalFees is not null);
 }
 
+/// <summary>
+/// 販売書類の車両本体価格・諸費用など、ABACUSの明細表とは別の金額欄です。
+/// 元の行明細と区別して保持し、登録時にWebの対応する内訳へ変換します。
+/// </summary>
+public sealed record AbacusDetailFinancialLine(
+    string Description,
+    string ItemType,
+    string TaxCategory,
+    long Amount,
+    int SourceRowIndex);
+
 public sealed record AbacusUcsDetailDocument(
     string Kind,
     string SourceFileName,
@@ -31,9 +42,15 @@ public sealed record AbacusUcsDetailDocument(
     long? TechnicalSubtotal,
     long? AbacusSubtotal,
     long? AbacusTotal,
-    int ExcludedDetailCount)
+    int ExcludedDetailCount,
+    IReadOnlyList<AbacusDetailFinancialLine>? FinancialLines = null,
+    long? AbacusTax = null,
+    long? AbacusTaxRate = null)
 {
-    public long DetailAmount => Lines.Sum(line => line.PartAmount ?? 0) + Lines.Sum(line => line.TechnicalFees ?? 0);
+    public long DetailAmount =>
+        Lines.Sum(line => line.PartAmount ?? 0) +
+        Lines.Sum(line => line.TechnicalFees ?? 0) +
+        (FinancialLines?.Sum(line => line.Amount) ?? 0);
 }
 
 public sealed record AbacusUcsDetailReadResult(
@@ -128,6 +145,9 @@ public sealed class AbacusFp5DetailReader
                 if (line.HasValue && (line.Quantity is not null || line.Unit is not null || line.UnitPrice is not null || line.PartAmount is not null || line.TechnicalFees is not null || line.Summary is not null)) lines.Add(line);
             }
 
+            var financialLines = isSales ? CreateSalesFinancialLines(fields, lines) : [];
+            (long? Subtotal, long? Tax, long? Total)? salesAmounts = isSales ? ReadSalesAmounts(fields, financialLines) : null;
+
             var documentNumber = FirstNonEmpty(fields, 0x1F, 0x8055, 0x81A2) ?? ExtractTrailingNumber(FirstNonEmpty(fields, 0x8162));
             if (string.IsNullOrWhiteSpace(documentNumber)) continue;
             result.Add(new AbacusUcsDetailDocument(
@@ -142,12 +162,82 @@ public sealed class AbacusFp5DetailReader
                 lines,
                 isSales ? NullableLong(fields, 0x54) : NullableLong(fields, 0x8106),
                 isSales ? null : NullableLong(fields, 0x8107),
-                isSales ? NullableLong(fields, 0x2D) : NullableLong(fields, 0x812B),
-                isSales ? NullableLong(fields, 0x2D) : NullableLong(fields, 0x812C),
-                lineCount - lines.Count));
+                isSales ? salesAmounts?.Subtotal : NullableLong(fields, 0x812B),
+                isSales ? salesAmounts?.Total : NullableLong(fields, 0x812C),
+                lineCount - lines.Count,
+                financialLines,
+                isSales ? salesAmounts?.Tax : null,
+                isSales ? NullableLong(fields, 0x80EC) ?? NullableLong(fields, 0x80ED) : null));
         }
 
         return result;
+    }
+
+    private static IReadOnlyList<AbacusDetailFinancialLine> CreateSalesFinancialLines(
+        IReadOnlyDictionary<int, string> fields,
+        IReadOnlyList<AbacusDetailLine> detailLines)
+    {
+        var result = new List<AbacusDetailFinancialLine>();
+        AddFinancialLine(result, fields, 0x19, "車両本体価格", "車両本体価格", "課税", 91);
+        AddFinancialLine(result, fields, 0x1A, "値引等", "値引等", "課税", 92);
+        AddFinancialLine(result, fields, 0x43, "諸費用（課税）", "手続代行費用", "課税", 93);
+
+        // 取得税などの税金・保険料は、ABACUSでは非課税欄にまとめて表示されます。
+        var nonTaxableTotal = NullableLong(fields, 0x8101)
+            ?? SumNullable(NullableLong(fields, 0x40), NullableLong(fields, 0x45));
+        if (nonTaxableTotal is not null && nonTaxableTotal.Value != 0)
+        {
+            result.Add(new AbacusDetailFinancialLine("諸費用（非課税）", "法定費用", "非課税", nonTaxableTotal.Value, 94));
+        }
+
+        // 付属品の合計欄と行明細が一致しない古い書類では、差分だけを保持します。
+        var accessoryTotal = NullableLong(fields, 0x54);
+        var accessoryDetailTotal = detailLines.Sum(line => line.PartAmount ?? 0);
+        var accessoryRemainder = accessoryTotal - accessoryDetailTotal;
+        if (accessoryRemainder is not null && accessoryRemainder.Value != 0)
+        {
+            result.Add(new AbacusDetailFinancialLine("付属品・特別仕様（合計差分）", "付属品・特別仕様", "課税", accessoryRemainder.Value, 95));
+        }
+
+        return result;
+    }
+
+    private static void AddFinancialLine(
+        ICollection<AbacusDetailFinancialLine> result,
+        IReadOnlyDictionary<int, string> fields,
+        int reference,
+        string description,
+        string itemType,
+        string taxCategory,
+        int sourceRowIndex)
+    {
+        var value = NullableLong(fields, reference);
+        if (value is null || value.Value == 0) return;
+        result.Add(new AbacusDetailFinancialLine(description, itemType, taxCategory, value.Value, sourceRowIndex));
+    }
+
+    private static long? SumNullable(long? first, long? second) =>
+        first is null && second is null ? null : (first ?? 0) + (second ?? 0);
+
+    private static (long? Subtotal, long? Tax, long? Total) ReadSalesAmounts(
+        IReadOnlyDictionary<int, string> fields,
+        IReadOnlyList<AbacusDetailFinancialLine> financialLines)
+    {
+        var taxIncluded = NullableLong(fields, 0x80FA);
+        var taxRate = NullableLong(fields, 0x80EC) ?? NullableLong(fields, 0x80ED);
+        var nonTaxable = NullableLong(fields, 0x8101)
+            ?? SumNullable(NullableLong(fields, 0x40), NullableLong(fields, 0x45));
+        if (taxIncluded is not null && taxRate is > 0)
+        {
+            var tax = (long)Math.Floor(taxIncluded.Value * (double)taxRate.Value / (100d + taxRate.Value));
+            var taxableSubtotal = taxIncluded.Value - tax;
+            var subtotal = taxableSubtotal + (nonTaxable ?? 0);
+            var total = taxIncluded.Value + (nonTaxable ?? 0);
+            return (subtotal, tax, total);
+        }
+
+        var detailTotal = financialLines.Sum(line => line.Amount);
+        return detailTotal > 0 ? (detailTotal, null, detailTotal) : (null, null, null);
     }
 
     private static string? NullableText(IReadOnlyDictionary<int, string> fields, IReadOnlyList<int> references, int index) =>

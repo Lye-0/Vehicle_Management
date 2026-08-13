@@ -102,6 +102,11 @@ export function calculateSalesEstimateTotals(document: SalesDocumentLike): Sales
   const downPayment = Math.max(0, Number.isFinite(document.details.downPayment) ? document.details.downPayment : 0)
 
   const originalAmounts = document.abacusAmounts
+  // ABACUSの小計は税抜、明細行の金額は帳票表示どおり税込で保持しています。
+  // 移行書類だけは、非課税行を小計から除いた値を課税対象額として表示します。
+  const displayTaxableSubtotal = originalAmounts
+    ? Math.max(0, originalAmounts.subtotal - nonTaxableSubtotal - outOfScopeSubtotal)
+    : taxableSubtotal
   return {
     subtotal: originalAmounts?.subtotal ?? subtotal,
     lineItemsSubtotal,
@@ -115,7 +120,7 @@ export function calculateSalesEstimateTotals(document: SalesDocumentLike): Sales
     taxableFeeTotal,
     nonTaxableFeeTotal,
     feesTotal: legalNonTaxable + taxableFeeTotal + nonTaxableFeeTotal + outOfScopeSubtotal,
-    taxableSubtotal,
+    taxableSubtotal: displayTaxableSubtotal,
     nonTaxableSubtotal,
     outOfScopeSubtotal,
     recycleFee: findRecycleFee(sections),

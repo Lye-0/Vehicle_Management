@@ -536,6 +536,7 @@ function serializeSalesDocument(
     abacusImport,
     isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
     abacusDetailReport: abacusDetails?.report ?? null,
+    abacusAmounts: abacusDetails?.amounts ?? null,
     plate: vehicle?.registrationNumber ?? '',
     vehicleDetails: vehicle ? {
       maker: vehicle.maker ?? '',

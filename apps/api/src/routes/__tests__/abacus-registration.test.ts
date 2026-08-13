@@ -92,6 +92,50 @@ describe('ABACUS registration', () => {
     expect(maintenanceBody.documents.find((document) => document.number === '9002')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true } })
   })
 
+  it('registers Gate19 sales financial lines and preserves ABACUS amounts', async () => {
+    const detailJson = JSON.stringify({
+      version: 1,
+      kind: 'abacus-detail-lines',
+      sourceFile: 'abx-cs-hb.ucs',
+      recordIdHex: '92A0',
+      documentNumber: '9003',
+      customerName: '最終登録テスト顧客',
+      vehicleName: '',
+      registrationNumber: '',
+      chassisNumber: '',
+      lines: [{ description: 'フロアマット', quantity: null, unit: null, unitPrice: null, partAmount: 4263, technicalFees: null, summary: null, sourceRowIndex: 1 }],
+      financialLines: [
+        { description: '車両本体価格', itemType: '車両本体価格', taxCategory: '課税', amount: 1160060, sourceRowIndex: 91 },
+        { description: '諸費用（課税）', itemType: '手続代行費用', taxCategory: '課税', amount: 60060, sourceRowIndex: 93 },
+        { description: '諸費用（非課税）', itemType: '法定費用', taxCategory: '非課税', amount: 18310, sourceRowIndex: 94 },
+      ],
+      partsSubtotal: 4263,
+      technicalSubtotal: null,
+      abacusSubtotal: 1184390,
+      abacusTotal: 1242693,
+      abacusTax: 58303,
+      abacusTaxRate: 5,
+      detailAmount: 1242693,
+      excludedDetailCount: 11,
+      amountOnlyRowCount: 0,
+      matchStatus: 'matched',
+      warning: '',
+    })
+    const packageFiles = await createGraphFinalPackage('gate19-detail', detailJson)
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(response.status).toBe(200)
+
+    const document = await env.DB.prepare('SELECT subtotal, tax, total FROM sales_documents WHERE id = ? AND organization_id = ?').bind(packageFiles.salesId, testOrganizationId).first<{ subtotal: number; tax: number; total: number }>()
+    expect(document).toEqual({ subtotal: 1184390, tax: 58303, total: 1242693 })
+    const items = await env.DB.prepare('SELECT item_type AS itemType, description, tax_category AS taxCategory, amount FROM sales_document_items WHERE document_id = ? AND organization_id = ? ORDER BY sort_order').bind(packageFiles.salesId, testOrganizationId).all<{ itemType: string; description: string; taxCategory: string; amount: number }>()
+    expect(items.results).toEqual([
+      { itemType: '付属品・特別仕様', description: 'フロアマット', taxCategory: '課税', amount: 4263 },
+      { itemType: '車両本体価格', description: '車両本体価格', taxCategory: '課税', amount: 1160060 },
+      { itemType: '手続代行費用', description: '諸費用(課税)', taxCategory: '課税', amount: 60060 },
+      { itemType: '法定費用', description: '諸費用(非課税)', taxCategory: '非課税', amount: 18310 },
+    ])
+  })
+
   it('re-runs the same graph-final package idempotently without duplicating rows', async () => {
     const packageFiles = await createGraphFinalPackage('gate18-idempotency')
     const firstResponse = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
@@ -189,7 +233,7 @@ async function postRegistration(packageFiles: Awaited<ReturnType<typeof createPa
   return SELF.fetch(new Request(probe.url, { method: 'POST', headers, body }))
 }
 
-async function createGraphFinalPackage(suffix = 'finaltest') {
+async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '') {
   const customer = suffix === 'finaltest' ? 'merge-preview:same-name:最終登録テスト' : `merge-preview:same-name:最終登録テスト-${suffix}`
   const customerName = '最終登録テスト顧客'
   const salesId = suffix === 'finaltest' ? 'abacus-sales-finaltest' : `abacus-sales-${suffix}`
@@ -197,10 +241,11 @@ async function createGraphFinalPackage(suffix = 'finaltest') {
   const duplicateMaintenanceId = suffix === 'finaltest' ? 'abacus-maintenance-finaltest-2' : `abacus-maintenance-${suffix}-2`
   const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', [customer, 'ABACUS-CUSTOMER-NUMBER-', customerName, '', '', '', '', '', '', '0'].join(',')].join('\n')
   const vehiclesCsv = '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考'
-  const salesCsv = ['書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [salesId, '9001', '請求書', '下書き', customerName, '', '', '2026-01-02', '', '10', '1000', '0', '1000', '移行販売', 'ABACUSテスト', ''].join(',')].join('\n')
+  const salesNumber = salesDetailJson ? '9003' : '9001'
+  const salesCsv = ['書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [salesId, salesNumber, '請求書', '下書き', customerName, '', '', '2026-01-02', '', '10', salesDetailJson ? '1184390' : '1000', salesDetailJson ? '58303' : '0', salesDetailJson ? '1242693' : '1000', '移行販売', 'ABACUSテスト', csvCell(salesDetailJson)].join(',')].join('\n')
   const maintenanceCsv = ['書類ID,書類番号,書類種別,入庫区分,ステータス,顧客名,車名,登録番号,入庫日,出庫予定日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [maintenanceId, '9002', '整備請求書', '一般整備', '下書き', customerName, '', '', '', '', '', '10', '2000', '0', '2000', '移行整備', 'ABACUSテスト', ''].join(','), [duplicateMaintenanceId, '9002', '整備請求書', '一般整備', '下書き', customerName, '', '', '', '', '', '10', '', '0', '', '移行整備2', 'ABACUSテスト', ''].join(',')].join('\n')
   const linksJson = JSON.stringify({ version: 1, kind: 'abacus-export-import-document-links', status: 'finalization-preview', documents: [
-    { documentKey: '販売書類|final|9001', documentId: salesId, documentKind: '販売書類', documentNumber: '9001', customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'hanbai.csv #1', warning: '' },
+    { documentKey: `販売書類|final|${salesNumber}`, documentId: salesId, documentKind: '販売書類', documentNumber: salesNumber, customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'hanbai.csv #1', warning: '' },
     { documentKey: '整備書類|final|9002', documentId: maintenanceId, documentKind: '整備書類', documentNumber: '9002', customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'seibi.csv #1', warning: '' },
     { documentKey: '整備書類|final|9002|2', documentId: duplicateMaintenanceId, documentKind: '整備書類', documentNumber: '9002', customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'seibi.csv #2', warning: '' },
   ], excludedDocumentKeys: [] })
@@ -213,7 +258,7 @@ async function createGraphFinalPackage(suffix = 'finaltest') {
   ] as const
   const dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
   const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: 0, salesRowCount: 1, maintenanceRowCount: 2, vehiclelessDocumentCount: 3, excludedDocumentCount: 0, imageCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
-    { documentKey: '販売書類|final|9001', documentId: salesId, kind: '販売書類', customerId: customer, vehicleId: null, sourceLocation: 'hanbai.csv #1', vehicleless: true },
+    { documentKey: `販売書類|final|${salesNumber}`, documentId: salesId, kind: '販売書類', customerId: customer, vehicleId: null, sourceLocation: 'hanbai.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002', documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002|2', documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
   ], excludedDocumentKeys: [] })
@@ -322,6 +367,10 @@ async function sha256(value: string) {
 
 function byteLength(value: string) {
   return new TextEncoder().encode(value).byteLength
+}
+
+function csvCell(value: string) {
+  return value.includes(',') || value.includes('"') || value.includes('\n') ? `"${value.replaceAll('"', '""')}"` : value
 }
 
 async function countRows(table: 'customers' | 'vehicles') {

@@ -767,6 +767,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     abacusImport,
     isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
     abacusDetailReport: abacusDetails?.report ?? null,
+    abacusAmounts: abacusDetails?.amounts ?? null,
     plate: vehicle?.registrationNumber ?? '',
     mileage: vehicle ? normalizeMileage(vehicle.mileage) : '',
     vehicleDetails: vehicle ? {

@@ -23,7 +23,10 @@ public sealed record AbacusDetailJsonDocument(
     int ExcludedDetailCount,
     int AmountOnlyRowCount,
     string MatchStatus,
-    string Warning);
+    string Warning,
+    IReadOnlyList<AbacusDetailFinancialLine>? FinancialLines = null,
+    long? AbacusTax = null,
+    long? AbacusTaxRate = null);
 
 public sealed record AbacusDetailMatch(
     AbacusUcsDetailDocument? Document,
@@ -75,7 +78,10 @@ public sealed class AbacusDetailMapper
             document?.ExcludedDetailCount ?? 0,
             document?.Lines.Count(line => line.IsAmountOnly) ?? 0,
             match.Status,
-            match.Warning);
+            match.Warning,
+            document?.FinancialLines ?? [],
+            document?.AbacusTax,
+            document?.AbacusTaxRate);
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false });
     }
 

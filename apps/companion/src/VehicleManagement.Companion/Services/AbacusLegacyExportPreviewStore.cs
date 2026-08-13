@@ -672,6 +672,7 @@ public sealed class AbacusLegacyExportPreviewStore
         foreach (var candidate in candidates)
         {
             var customer = customers[candidate.CustomerKey];
+            var amounts = ResolveAmounts(candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
             AppendCsvRow(builder, [
                 candidate.DocumentId,
                 candidate.Number,
@@ -682,10 +683,10 @@ public sealed class AbacusLegacyExportPreviewStore
                 candidate.RegistrationNumber,
                 candidate.IssuedAt,
                 "",
-                "10",
-                candidate.Total,
-                "0",
-                candidate.Total,
+                amounts.TaxRate,
+                amounts.Subtotal,
+                amounts.Tax,
+                amounts.Total,
                 "",
                 candidate.Memo,
                 candidate.DetailsJson,
@@ -704,6 +705,7 @@ public sealed class AbacusLegacyExportPreviewStore
         foreach (var candidate in candidates)
         {
             var customer = customers[candidate.CustomerKey];
+            var amounts = ResolveAmounts(candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
             AppendCsvRow(builder, [
                 candidate.DocumentId,
                 candidate.Number,
@@ -716,10 +718,10 @@ public sealed class AbacusLegacyExportPreviewStore
                 candidate.IntakeDate,
                 candidate.CompletionDate,
                 "",
-                "10",
-                candidate.Total,
-                "0",
-                candidate.Total,
+                amounts.TaxRate,
+                amounts.Subtotal,
+                amounts.Tax,
+                amounts.Total,
                 "",
                 candidate.Memo,
                 candidate.DetailsJson,
@@ -727,6 +729,61 @@ public sealed class AbacusLegacyExportPreviewStore
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
+    }
+
+    private static (string TaxRate, string Subtotal, string Tax, string Total) ResolveAmounts(string detailsJson, string sourceTotal, string issuedAt)
+    {
+        var detail = ParseDetailJson(detailsJson);
+        var sourceTotalValue = ParseAmount(sourceTotal);
+        var totalValue = detail?.AbacusTotal ?? (sourceTotalValue == 0 ? null : sourceTotalValue);
+        var taxRateValue = detail?.AbacusTaxRate ?? InferLegacyTaxRate(issuedAt);
+        var taxValue = detail?.AbacusTax;
+        var subtotalValue = detail?.AbacusSubtotal;
+        if (totalValue is not null && taxValue is null)
+        {
+            if (detail is not null && detail.DetailAmount == totalValue.Value)
+            {
+                taxValue = CalculateIncludedTax(totalValue.Value, taxRateValue);
+                subtotalValue = totalValue.Value - taxValue.Value;
+            }
+            else if (subtotalValue is not null)
+            {
+                taxValue = Math.Max(0, totalValue.Value - subtotalValue.Value);
+            }
+        }
+
+        return (
+            taxRateValue.ToString(CultureInfo.InvariantCulture),
+            (subtotalValue ?? totalValue ?? 0).ToString(CultureInfo.InvariantCulture),
+            (taxValue ?? 0).ToString(CultureInfo.InvariantCulture),
+            (totalValue ?? 0).ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static AbacusDetailJsonDocument? ParseDetailJson(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<AbacusDetailJsonDocument>(value, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static long ParseAmount(string value) =>
+        long.TryParse(value.Trim().Replace(",", "", StringComparison.Ordinal), NumberStyles.Integer, CultureInfo.InvariantCulture, out var amount)
+            ? amount
+            : 0;
+
+    private static long CalculateIncludedTax(long total, long taxRate) =>
+        taxRate <= 0 ? 0 : (long)Math.Floor(total * (double)taxRate / (100d + taxRate));
+
+    private static long InferLegacyTaxRate(string date)
+    {
+        if (!DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed)) return 10;
+        return parsed >= new DateTime(2019, 10, 1) ? 10 : parsed >= new DateTime(2014, 4, 1) ? 8 : 5;
     }
 
     private static void AppendCsvRow(StringBuilder builder, IReadOnlyList<string> values)

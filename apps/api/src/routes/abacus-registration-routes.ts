@@ -127,6 +127,20 @@ type AbacusDetailLine = {
   sourceRowIndex: number
 }
 
+type ImportedDetailLine = {
+  line: AbacusDetailLine
+  itemType: string
+  taxCategory: string
+}
+
+type AbacusDetailFinancialLine = {
+  description: string
+  itemType: string
+  taxCategory: string
+  amount: number
+  sourceRowIndex: number
+}
+
 type AbacusDetailPayload = {
   version: 1
   kind: 'abacus-detail-lines'
@@ -138,10 +152,13 @@ type AbacusDetailPayload = {
   registrationNumber: string
   chassisNumber: string
   lines: AbacusDetailLine[]
+  financialLines: AbacusDetailFinancialLine[]
   partsSubtotal: number | null
   technicalSubtotal: number | null
   abacusSubtotal: number | null
   abacusTotal: number | null
+  abacusTax: number | null
+  abacusTaxRate: number | null
   detailAmount: number
   excludedDetailCount: number
   amountOnlyRowCount: number
@@ -622,7 +639,7 @@ function parseFinalSales(text: string) {
     ids.add(id)
     const detailPayload = parseAbacusDetailPayload(row[15])
     const amounts = applyAbacusDetailAmounts(normalizeFinalDocumentAmounts(row[10], row[11], row[12], row[15]), detailPayload)
-    return { id, number, type: requiredText(row[2], '書類種別'), status: normalizeImportedStatus(row[3]), customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: requiredDate(row[7], '発行日'), dueDate: optionalDate(row[8], '支払期限'), taxRate: nonNegativeInteger(row[9], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考') } satisfies FinalSalesRow
+    return { id, number, type: requiredText(row[2], '書類種別'), status: normalizeImportedStatus(row[3]), customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: requiredDate(row[7], '発行日'), dueDate: optionalDate(row[8], '支払期限'), taxRate: detailPayload?.abacusTaxRate ?? nonNegativeInteger(row[9], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考') } satisfies FinalSalesRow
   })
 }
 
@@ -683,6 +700,24 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
       sourceRowIndex,
     }
   })
+  const financialLines = Array.isArray(record.financialLines)
+    ? record.financialLines.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `ABACUS金額内訳JSONの${index + 1}行目が不正です。`)
+      const line = item as Record<string, unknown>
+      const sourceRowIndex = integerValue(line.sourceRowIndex)
+      const amount = nullableJsonInteger(line.amount)
+      if (sourceRowIndex === null || sourceRowIndex < 1 || sourceRowIndex > 100) throw new HttpError(400, `ABACUS金額内訳JSONの元行番号が不正です: ${index + 1}`)
+      if (amount === null) throw new HttpError(400, `ABACUS金額内訳JSONの金額がありません: ${index + 1}`)
+      const description = jsonText(line.description, 500)
+      const itemType = jsonText(line.itemType, 100)
+      const taxCategory = jsonText(line.taxCategory, 50)
+      if (!description || !itemType || !taxCategory) throw new HttpError(400, `ABACUS金額内訳JSONの項目名・種別・税区分がありません: ${index + 1}`)
+      return { description, itemType, taxCategory, amount, sourceRowIndex }
+    })
+    : []
+  if (new Set([...lines.map((line) => line.sourceRowIndex), ...financialLines.map((line) => line.sourceRowIndex)]).size !== lines.length + financialLines.length) {
+    throw new HttpError(400, 'ABACUS明細詳細JSONの元行番号が重複しています。')
+  }
   if (new Set(lines.map((line) => line.sourceRowIndex)).size !== lines.length) throw new HttpError(400, 'ABACUS明細詳細JSONの元行番号が重複しています。')
   const matchStatus = record.matchStatus
   if (matchStatus !== 'matched' && matchStatus !== 'review' && matchStatus !== 'unmatched') throw new HttpError(400, 'ABACUS明細詳細JSONの対応付け状態が不正です。')
@@ -700,10 +735,13 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
     registrationNumber: jsonText(record.registrationNumber, 100),
     chassisNumber: jsonText(record.chassisNumber, 100),
     lines,
+    financialLines,
     partsSubtotal: nullableJsonInteger(record.partsSubtotal),
     technicalSubtotal: nullableJsonInteger(record.technicalSubtotal),
     abacusSubtotal: nullableJsonInteger(record.abacusSubtotal),
     abacusTotal: nullableJsonInteger(record.abacusTotal),
+    abacusTax: nullableJsonInteger(record.abacusTax),
+    abacusTaxRate: nullableJsonInteger(record.abacusTaxRate),
     detailAmount,
     excludedDetailCount: Math.max(0, integerValue(record.excludedDetailCount) ?? 0),
     amountOnlyRowCount: Math.max(0, integerValue(record.amountOnlyRowCount) ?? lines.filter((line) => !line.description && (line.partAmount !== null || line.unitPrice !== null || line.technicalFees !== null)).length),
@@ -712,7 +750,7 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
   }
 }
 
-function applyAbacusDetailAmounts<T extends { subtotal: number; total: number; details: string; amountDefaulted: boolean }>(amounts: T, detailPayload: AbacusDetailPayload | null) {
+function applyAbacusDetailAmounts<T extends { subtotal: number; tax: number; total: number; details: string; amountDefaulted: boolean }>(amounts: T, detailPayload: AbacusDetailPayload | null) {
   if (!detailPayload) return { ...amounts, detailReport: null as AbacusDetailReport | null }
   if (detailPayload.matchStatus !== 'matched') return {
     ...amounts,
@@ -726,9 +764,18 @@ function applyAbacusDetailAmounts<T extends { subtotal: number; total: number; d
       warning: detailPayload.warning || (detailPayload.matchStatus === 'review' ? 'UCS明細が複数候補のため、明細を登録せず要確認にしています。' : 'UCS明細が対応付けできないため、明細を登録せず要確認にしています。'),
     } satisfies AbacusDetailReport,
   }
-  const subtotal = detailPayload.abacusSubtotal ?? amounts.subtotal
+  // 整備UCSの「税・単P」は税抜明細、販売UCSのabacusTax付き値は税抜小計です。
+  // 税額が取得できない旧整備レコードの値で、CSV側の税抜補正を上書きしないようにします。
+  const subtotal = detailPayload.abacusTax !== null
+    ? (detailPayload.abacusSubtotal ?? amounts.subtotal)
+    : amounts.subtotal
+  const tax = detailPayload.abacusTax ?? amounts.tax
   const total = detailPayload.abacusTotal ?? amounts.total
-  const detailSubtotalDifference = detailPayload.abacusSubtotal === null ? null : detailPayload.detailAmount - detailPayload.abacusSubtotal
+  const rawDetailSubtotalDifference = detailPayload.abacusSubtotal === null ? null : detailPayload.detailAmount - detailPayload.abacusSubtotal
+  // 販売のUCS明細は税込行、ABACUS小計は税抜なので、税額分の差は仕様上の一致として扱います。
+  const detailSubtotalDifference = rawDetailSubtotalDifference !== null && detailPayload.abacusTax !== null && rawDetailSubtotalDifference === detailPayload.abacusTax
+    ? 0
+    : rawDetailSubtotalDifference
   const detailTotalDifference = detailPayload.abacusTotal === null ? null : detailPayload.detailAmount - detailPayload.abacusTotal
   const warnings = [
     detailSubtotalDifference !== null && detailSubtotalDifference !== 0 ? `明細合計とABACUS小計の差額=${detailSubtotalDifference}` : '',
@@ -738,6 +785,7 @@ function applyAbacusDetailAmounts<T extends { subtotal: number; total: number; d
   return {
     ...amounts,
     subtotal,
+    tax,
     total,
     detailReport: {
       isAbacusMigration: true,
@@ -1004,18 +1052,18 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
     const values = chunk.flatMap(({ link, row }) => [row.id, organizationId, row.number, row.type, row.category, row.status, link.customerId, link.vehicleId, row.intakeDate, row.plannedReleaseDate, null, row.issuedAt, row.dueDate, row.taxRate, '切り捨て', row.subtotal, row.tax, row.total, row.note, JSON.stringify(buildAbacusDetailsEnvelope(link, row)), now])
     statements.push(database.$client.prepare(`INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, intake_date, planned_release_date, completion_date, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
   }
-  const items = await Promise.all(rows.flatMap(({ kind, link, row }) => detailLinesForRow(kind, row).map((line) => ({ kind, link, row, line }))).map(async (item) => ({ ...item, id: await stableFileId(`${organizationId}\u0000${item.row.id}\u0000detail\u0000${item.line.sourceRowIndex}`) })))
+  const items = await Promise.all(rows.flatMap(({ kind, link, row }) => detailLinesForRow(kind, row).map((line) => ({ kind, link, row, line }))).map(async (item) => ({ ...item, id: await stableFileId(`${organizationId}\u0000${item.row.id}\u0000detail\u0000${item.line.line.sourceRowIndex}`) })))
   for (const chunk of chunked(items, Math.min(maximumSalesItemBatchRows, maximumMaintenanceItemBatchRows))) {
     const salesItems = chunk.filter((item) => item.kind === 'sales')
     if (salesItems.length > 0) {
       const placeholders = salesItems.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
-      const values = salesItems.flatMap((item) => { const row = item.row as FinalSalesRow; const normalized = salesDetailValues(item.line); return [item.id, organizationId, row.id, 'その他', normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, '課税', normalized.otherAmount, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
+      const values = salesItems.flatMap((item) => { const row = item.row as FinalSalesRow; const normalized = salesDetailValues(item.line.line); return [item.id, organizationId, row.id, item.line.itemType, normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, item.line.taxCategory, normalized.otherAmount, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
       statements.push(database.$client.prepare(`INSERT INTO sales_document_items (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, tax_category, other_amount, summary, amount, sort_order) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
     }
     const maintenanceItemsForChunk = chunk.filter((item) => item.kind === 'maintenance')
     if (maintenanceItemsForChunk.length > 0) {
       const placeholders = maintenanceItemsForChunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
-      const values = maintenanceItemsForChunk.flatMap((item) => { const row = item.row as FinalMaintenanceRow; const normalized = maintenanceDetailValues(item.line); return [item.id, organizationId, row.id, normalized.kind, normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, normalized.technicalFee, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
+      const values = maintenanceItemsForChunk.flatMap((item) => { const row = item.row as FinalMaintenanceRow; const normalized = maintenanceDetailValues(item.line.line); return [item.id, organizationId, row.id, normalized.kind, normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, normalized.technicalFee, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
       statements.push(database.$client.prepare(`INSERT INTO maintenance_items (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, technical_fee, summary, amount, sort_order) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
     }
   }
@@ -1035,17 +1083,47 @@ function buildAbacusDetailsEnvelope(link: GraphFinalDocumentLink, row: FinalSale
   }
 }
 
-function detailLinesForRow(kind: 'sales' | 'maintenance', row: FinalSalesRow | FinalMaintenanceRow): AbacusDetailLine[] {
-  if (row.detailPayload?.matchStatus === 'matched' && row.detailPayload.lines.length > 0) return row.detailPayload.lines
+function detailLinesForRow(kind: 'sales' | 'maintenance', row: FinalSalesRow | FinalMaintenanceRow): ImportedDetailLine[] {
+  if (row.detailPayload) {
+    // UCSに対応付けできなかった書類へ、内容不明の0円行を作らないようにします。
+    if (row.detailPayload.matchStatus !== 'matched') return []
+    const detailLines = row.detailPayload.lines.map((line) => ({
+      line,
+      itemType: kind === 'sales' ? '付属品・特別仕様' : '作業',
+      taxCategory: '課税',
+    }))
+    if (kind === 'sales') {
+      const financialLines = row.detailPayload.financialLines.map((financialLine) => ({
+        line: {
+          description: financialLine.description,
+          quantity: 1,
+          unit: '式',
+          unitPrice: financialLine.amount,
+          partAmount: financialLine.amount,
+          technicalFees: null,
+          summary: null,
+          sourceRowIndex: financialLine.sourceRowIndex,
+        },
+        itemType: financialLine.itemType,
+        taxCategory: financialLine.taxCategory,
+      }))
+      return [...detailLines, ...financialLines]
+    }
+    return detailLines
+  }
   return [{
-    description: row.itemDescription || `ABACUS${kind === 'sales' ? '販売' : '整備'}書類 #${row.number}`,
-    quantity: 1,
-    unit: '式',
-    unitPrice: row.subtotal,
-    partAmount: row.subtotal,
-    technicalFees: kind === 'maintenance' ? 0 : null,
-    summary: null,
-    sourceRowIndex: 0,
+    line: {
+      description: row.itemDescription || `ABACUS${kind === 'sales' ? '販売' : '整備'}書類 #${row.number}`,
+      quantity: 1,
+      unit: '式',
+      unitPrice: row.subtotal,
+      partAmount: row.subtotal,
+      technicalFees: kind === 'maintenance' ? 0 : null,
+      summary: null,
+      sourceRowIndex: 0,
+    },
+    itemType: kind === 'sales' ? 'その他' : '作業',
+    taxCategory: '課税',
   }]
 }
 
