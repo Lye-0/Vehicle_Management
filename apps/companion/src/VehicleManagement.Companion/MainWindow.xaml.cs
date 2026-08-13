@@ -171,6 +171,8 @@ public partial class MainWindow : Window
     private bool legacyGraphNativeDocumentDropTargetValid;
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
 
+    private const double LegacyGraphMinimumCanvasHeight = 620;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -192,6 +194,49 @@ public partial class MainWindow : Window
             UpdateLegacyGraphBlockDropTarget(e.GetPosition(this));
         }
 
+    }
+
+    private void LegacyGraphInspectorLayer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateLegacyGraphTrashOverlaySize();
+    }
+
+    private void UpdateLegacyGraphTrashOverlaySize()
+    {
+        if (LegacyGraphInspectorLayer is null || LegacyGraphTrashOverlay is null)
+        {
+            return;
+        }
+
+        var width = LegacyGraphInspectorLayer.ActualWidth;
+        if (width <= 0 || double.IsNaN(width))
+        {
+            return;
+        }
+
+        // 詳細表示欄と同じ幅・高さにし、右下へ重ねて表示します。
+        LegacyGraphTrashOverlay.Width = width;
+        LegacyGraphTrashOverlay.Height = width;
+    }
+
+    private void ShowLegacyGraphTrashOverlay()
+    {
+        UpdateLegacyGraphTrashOverlaySize();
+        LegacyGraphTrashOverlay.Visibility = Visibility.Visible;
+        SetLegacyGraphTrashOverlayHighlight(false);
+    }
+
+    private void HideLegacyGraphTrashOverlay()
+    {
+        SetLegacyGraphTrashOverlayHighlight(false);
+        LegacyGraphTrashOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void SetLegacyGraphTrashOverlayHighlight(bool highlighted)
+    {
+        LegacyGraphTrashOverlay.Background = ToBrush(highlighted ? "#FFFFE4E6" : "#E6FFF1F2");
+        LegacyGraphTrashOverlay.BorderBrush = ToBrush(highlighted ? "#DC2626" : "#F87171");
+        LegacyGraphTrashOverlay.BorderThickness = new Thickness(highlighted ? 3 : 2);
     }
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
@@ -1734,6 +1779,7 @@ public partial class MainWindow : Window
         var showUngroupZone = TryGetLegacyGraphMergeGroup(sourceGroupKey, out var sourceGroup) &&
                               sourceGroup.CustomerIds.Count > 1;
         SetLegacyGraphCustomerUngroupDropZoneVisible(showUngroupZone);
+        ShowLegacyGraphTrashOverlay();
         try
         {
             DragDrop.DoDragDrop(list, data, DragDropEffects.Link);
@@ -1742,6 +1788,7 @@ public partial class MainWindow : Window
         {
             SetLegacyGraphCustomerUngroupDropZoneVisible(false);
             ClearLegacyGraphCustomerDropHighlight();
+            HideLegacyGraphTrashOverlay();
         }
 
         e.Handled = true;
@@ -2315,6 +2362,7 @@ public partial class MainWindow : Window
         var data = new DataObject();
         data.SetData(typeof(LegacyGraphUnresolvedVehicleDragPayload),
             new LegacyGraphUnresolvedVehicleDragPayload(vehicle.VehicleId));
+        ShowLegacyGraphTrashOverlay();
         try
         {
             DragDrop.DoDragDrop(sender as UIElement ?? this, data, DragDropEffects.Link);
@@ -2323,6 +2371,7 @@ public partial class MainWindow : Window
         {
             ClearLegacyGraphCustomerDropHighlight();
             legacyGraphNativeDocumentDropTargetValid = false;
+            HideLegacyGraphTrashOverlay();
         }
 
         e.Handled = true;
@@ -2519,6 +2568,7 @@ public partial class MainWindow : Window
             dragSource.GiveFeedback += LegacyGraphDocumentDrag_GiveFeedback;
         }
 
+        ShowLegacyGraphTrashOverlay();
         try
         {
             DragDrop.DoDragDrop(dragSource ?? this, data, DragDropEffects.Link);
@@ -2533,6 +2583,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = null;
             Cursor = null;
             legacyGraphNativeDocumentDropTargetValid = false;
+            HideLegacyGraphTrashOverlay();
         }
         e.Handled = true;
     }
@@ -2604,13 +2655,68 @@ public partial class MainWindow : Window
 
     private void ClearLegacyGraphTrashDropHighlight()
     {
-        if (legacyGraphTrashDropHighlightList is null)
+        if (legacyGraphTrashDropHighlightList is not null)
         {
+            legacyGraphTrashDropHighlightList.Opacity = 1;
+            legacyGraphTrashDropHighlightList = null;
+        }
+
+        if (LegacyGraphTrashOverlay.Visibility == Visibility.Visible)
+        {
+            SetLegacyGraphTrashOverlayHighlight(false);
+        }
+    }
+
+    private void LegacyGraphTrashOverlay_DragOver(object sender, DragEventArgs e)
+    {
+        var valid = GetLegacyGraphTrashCustomerDragPayload(e.Data) is { } customerPayload &&
+                    FindLegacyGraphCustomerById(customerPayload.CustomerId) is not null;
+        valid |= GetLegacyGraphUnresolvedVehicleDragPayload(e.Data) is { } vehiclePayload &&
+                 FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is not null;
+        valid |= GetLegacyGraphDocumentDragPayload(e.Data) is not null;
+        if (!valid)
+        {
+            ClearLegacyGraphTrashDropHighlight();
+            e.Effects = DragDropEffects.None;
             return;
         }
 
-        legacyGraphTrashDropHighlightList.Opacity = 1;
-        legacyGraphTrashDropHighlightList = null;
+        ClearLegacyGraphTrashDropHighlight();
+        SetLegacyGraphTrashOverlayHighlight(true);
+        e.Effects = DragDropEffects.Link;
+        e.Handled = true;
+    }
+
+    private void LegacyGraphTrashOverlay_DragLeave(object sender, DragEventArgs e)
+    {
+        ClearLegacyGraphTrashDropHighlight();
+    }
+
+    private void LegacyGraphTrashOverlay_Drop(object sender, DragEventArgs e)
+    {
+        ClearLegacyGraphTrashDropHighlight();
+        if (GetLegacyGraphTrashCustomerDragPayload(e.Data) is { } customerPayload &&
+            FindLegacyGraphCustomerById(customerPayload.CustomerId) is { } customer)
+        {
+            MoveLegacyGraphCustomerToTrash(customer);
+        }
+        else if (GetLegacyGraphUnresolvedVehicleDragPayload(e.Data) is { } vehiclePayload &&
+                 FindLegacyGraphVehicleById(vehiclePayload.VehicleId) is { } vehicle)
+        {
+            MoveLegacyGraphVehicleToTrash(vehicle);
+        }
+        else if (GetLegacyGraphDocumentDragPayload(e.Data) is { } documentPayload)
+        {
+            MoveLegacyGraphDocumentToTrash(documentPayload.Document);
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+            return;
+        }
+
+        e.Effects = DragDropEffects.Link;
+        e.Handled = true;
     }
 
     private void LegacyGraphTrashCustomerList_DragOver(object sender, DragEventArgs e)
@@ -5532,11 +5638,11 @@ public partial class MainWindow : Window
         LegacyGraphEdgesCanvas.Children.Clear();
         LegacyGraphPageDragPreviewCanvas.Children.Clear();
         LegacyGraphBoardGrid.Width = 1120;
-        LegacyGraphBoardGrid.Height = 720;
+        LegacyGraphBoardGrid.Height = LegacyGraphMinimumCanvasHeight;
         LegacyGraphCanvas.Width = 1120;
-        LegacyGraphCanvas.Height = 720;
+        LegacyGraphCanvas.Height = LegacyGraphMinimumCanvasHeight;
         LegacyGraphEdgesCanvas.Width = 1120;
-        LegacyGraphEdgesCanvas.Height = 720;
+        LegacyGraphEdgesCanvas.Height = LegacyGraphMinimumCanvasHeight;
         legacyGraphEdges.Clear();
         const double customerX = 30;
         const double customerY = 32;
@@ -5735,9 +5841,9 @@ public partial class MainWindow : Window
         var contentBottom = LegacyGraphCanvas.Children
             .OfType<FrameworkElement>()
             .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
-            .DefaultIfEmpty(720)
+            .DefaultIfEmpty(LegacyGraphMinimumCanvasHeight)
             .Max();
-        LegacyGraphCanvas.Height = Math.Max(720, contentBottom + 70);
+        LegacyGraphCanvas.Height = Math.Max(LegacyGraphMinimumCanvasHeight, contentBottom + 70);
         LegacyGraphEdgesCanvas.Width = LegacyGraphCanvas.Width;
         LegacyGraphEdgesCanvas.Height = LegacyGraphCanvas.Height;
         LegacyGraphBoardGrid.Width = LegacyGraphCanvas.Width;
@@ -6799,25 +6905,28 @@ public partial class MainWindow : Window
         var vehicle = legacyGraphVehicleCardDragVehicle;
         var wasDragging = legacyGraphBlockDragStarted;
         var windowPoint = e.GetPosition(this);
+        var droppedOnTrashOverlay = wasDragging && IsLegacyGraphTrashOverlayAt(windowPoint);
         RestoreLegacyGraphBlockDragCursor();
         legacyGraphDraggingElement.ReleaseMouseCapture();
         legacyGraphDraggingElement = null;
         legacyGraphDocumentCardDragDocument = null;
         legacyGraphVehicleCardDragVehicle = null;
         legacyGraphBlockDragStarted = false;
-        ClearLegacyGraphBlockVisualDrag();
+        ClearLegacyGraphBlockVisualDrag(hideTrashOverlay: false);
         ClearLegacyGraphDropHighlight();
         ClearLegacyGraphTrayDropHighlight();
         ClearLegacyGraphTrashDropHighlight();
 
         if (wasDragging && document is not null)
         {
-            HandleLegacyGraphDocumentBlockDrop(document, windowPoint);
+            HandleLegacyGraphDocumentBlockDrop(document, windowPoint, droppedOnTrashOverlay);
         }
         else if (wasDragging && vehicle is not null)
         {
-            HandleLegacyGraphVehicleBlockDrop(vehicle, windowPoint);
+            HandleLegacyGraphVehicleBlockDrop(vehicle, windowPoint, droppedOnTrashOverlay);
         }
+
+        HideLegacyGraphTrashOverlay();
 
         e.Handled = true;
     }
@@ -6833,6 +6942,11 @@ public partial class MainWindow : Window
         var height = Math.Max(58, GetLegacyGraphElementHeight(source));
         legacyGraphBlockDragPreviewSource = source;
         source.Opacity = 0.38;
+        if (source.Tag is AbacusLegacyExportCandidateGraphDocument or
+            AbacusLegacyExportCandidateGraphVehicle)
+        {
+            ShowLegacyGraphTrashOverlay();
+        }
         legacyGraphBlockDragPreview = new Border
         {
             Width = width,
@@ -6873,7 +6987,7 @@ public partial class MainWindow : Window
         Canvas.SetTop(legacyGraphBlockDragPreview, pagePoint.Y - legacyGraphDragOffset.Y);
     }
 
-    private void ClearLegacyGraphBlockVisualDrag()
+    private void ClearLegacyGraphBlockVisualDrag(bool hideTrashOverlay = true)
     {
         RestoreLegacyGraphBlockDragCursor();
         if (legacyGraphBlockDragPreviewSource is not null)
@@ -6888,6 +7002,10 @@ public partial class MainWindow : Window
 
         legacyGraphBlockDragPreview = null;
         legacyGraphBlockDragPreviewSource = null;
+        if (hideTrashOverlay)
+        {
+            HideLegacyGraphTrashOverlay();
+        }
     }
 
     private void SetLegacyGraphDocumentDragCursor(Cursor cursor)
@@ -6920,6 +7038,13 @@ public partial class MainWindow : Window
         if (legacyGraphDocumentCardDragDocument is null && legacyGraphVehicleCardDragVehicle is null)
         {
             RestoreLegacyGraphBlockDragCursor();
+            return;
+        }
+
+        if (IsLegacyGraphTrashOverlayAt(windowPoint))
+        {
+            SetLegacyGraphTrashOverlayHighlight(true);
+            SetLegacyGraphDocumentDragCursor(Cursors.Hand);
             return;
         }
 
@@ -7059,11 +7184,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool IsLegacyGraphTrashOverlayAt(Point windowPoint) =>
+        LegacyGraphTrashOverlay.Visibility == Visibility.Visible &&
+        IsLegacyGraphElementAtWindowPoint(LegacyGraphTrashOverlay, windowPoint);
+
     private void HandleLegacyGraphDocumentBlockDrop(
         AbacusLegacyExportCandidateGraphDocument document,
-        Point windowPoint)
+        Point windowPoint,
+        bool droppedOnTrashOverlay = false)
     {
-        if (FindLegacyGraphTrashDocumentListAt(windowPoint) is not null)
+        if (droppedOnTrashOverlay || IsLegacyGraphTrashOverlayAt(windowPoint) ||
+            FindLegacyGraphTrashDocumentListAt(windowPoint) is not null)
         {
             MoveLegacyGraphDocumentToTrash(document);
             return;
@@ -7132,9 +7263,11 @@ public partial class MainWindow : Window
 
     private void HandleLegacyGraphVehicleBlockDrop(
         AbacusLegacyExportCandidateGraphVehicle vehicle,
-        Point windowPoint)
+        Point windowPoint,
+        bool droppedOnTrashOverlay = false)
     {
-        if (FindLegacyGraphTrashVehicleListAt(windowPoint) is not null)
+        if (droppedOnTrashOverlay || IsLegacyGraphTrashOverlayAt(windowPoint) ||
+            FindLegacyGraphTrashVehicleListAt(windowPoint) is not null)
         {
             MoveLegacyGraphVehicleToTrash(vehicle);
         }

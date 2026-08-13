@@ -1122,7 +1122,7 @@
                             <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
                                        Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。すべての操作が終わった後のインポート確定時に、未確定トレイの書類を警告付きで除外します。" />
                         </Border>
-                        <Grid Margin="0,14,0,0" Height="820">
+                        <Grid Margin="0,14,0,0" Height="650">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="500" />
                                 <ColumnDefinition Width="12" />
@@ -1232,10 +1232,10 @@
                                               PreviewMouseLeftButtonDown="LegacyGraphScrollViewer_PreviewMouseLeftButtonDown"
                                               PreviewMouseMove="LegacyGraphScrollViewer_PreviewMouseMove"
                                               PreviewMouseLeftButtonUp="LegacyGraphScrollViewer_PreviewMouseLeftButtonUp">
-                                        <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="720" Background="#F7F9FC">
-                                            <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="720"
+                                        <Grid x:Name="LegacyGraphBoardGrid" Width="1120" Height="620" Background="#F7F9FC">
+                                            <Canvas x:Name="LegacyGraphEdgesCanvas" Width="1120" Height="620"
                                                 IsHitTestVisible="False" />
-                                            <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="720"
+                                            <Canvas x:Name="LegacyGraphCanvas" Width="1120" Height="620"
                                                 AllowDrop="True"
                                                 PreviewMouseLeftButtonDown="LegacyGraphCanvas_PreviewMouseLeftButtonDown"
                                                 PreviewMouseMove="LegacyGraphCanvas_PreviewMouseMove"
@@ -1248,14 +1248,16 @@
                             </Border>
                             <Border Grid.Column="4" Padding="14" Background="#FFFFFF" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">
-                                <ScrollViewer x:Name="LegacyGraphInspectorScrollViewer"
-                                              VerticalScrollBarVisibility="Auto"
-                                              CanContentScroll="False"
-                                              Background="Transparent"
-                                              PreviewMouseLeftButtonDown="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonDown"
-                                              PreviewMouseMove="LegacyGraphInspectorScrollViewer_PreviewMouseMove"
-                                              PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp">
-                                    <StackPanel>
+                                <Grid x:Name="LegacyGraphInspectorLayer"
+                                      SizeChanged="LegacyGraphInspectorLayer_SizeChanged">
+                                    <ScrollViewer x:Name="LegacyGraphInspectorScrollViewer"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  CanContentScroll="False"
+                                                  Background="Transparent"
+                                                  PreviewMouseLeftButtonDown="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonDown"
+                                                  PreviewMouseMove="LegacyGraphInspectorScrollViewer_PreviewMouseMove"
+                                                  PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp">
+                                        <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
                                                    Text="選択項目の詳細" />
                                         <TextBlock x:Name="LegacyGraphInspectorTitleText" Margin="0,12,0,0"
@@ -1358,8 +1360,28 @@
                                                 </StackPanel>
                                             </TabItem>
                                         </TabControl>
-                                    </StackPanel>
-                                </ScrollViewer>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                    <Border x:Name="LegacyGraphTrashOverlay"
+                                            Width="0" Height="0"
+                                            HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                            Panel.ZIndex="100"
+                                            Visibility="Collapsed"
+                                            AllowDrop="True"
+                                            Background="#E6FFF1F2"
+                                            BorderBrush="#F87171" BorderThickness="2"
+                                            CornerRadius="8"
+                                            DragOver="LegacyGraphTrashOverlay_DragOver"
+                                            DragLeave="LegacyGraphTrashOverlay_DragLeave"
+                                            Drop="LegacyGraphTrashOverlay_Drop">
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <TextBlock HorizontalAlignment="Center" FontSize="18" FontWeight="SemiBold"
+                                                       Foreground="#B91C1C" Text="ごみ箱" />
+                                            <TextBlock Margin="0,8,0,0" HorizontalAlignment="Center"
+                                                       Foreground="#B91C1C" Text="ここへドロップ" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
                             </Border>
                         </Grid>
                         <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
@@ -1482,11 +1504,11 @@
                         </Grid>
                         <Border Margin="0,14,0,0" Padding="12" Background="#FFF7ED" BorderBrush="#F59E0B"
                                 BorderThickness="1" CornerRadius="6">
-                            <StackPanel>
-                                <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="#92400E"
-                                           Text="ごみ箱（明示的にインポートから除外）" />
-                                <TextBlock Margin="0,5,0,8" Foreground="#8A5A00" TextWrapping="Wrap"
-                                           Text="ここへ移動した顧客・車両・書類は、未確定トレイとは別に今回のインポートから除外します。顧客・車両・書類を選択し、右側の詳細欄から復元できます。顧客を除外すると、その顧客の車両・書類・対応画像も除外対象になります。" />
+                            <Expander Header="ごみ箱一覧（復元）" IsExpanded="False"
+                                      FontWeight="SemiBold" Foreground="#92400E">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Margin="0,0,0,8" Foreground="#8A5A00" TextWrapping="Wrap"
+                                               Text="ここへ移動した顧客・車両・書類は、未確定トレイとは別に今回のインポートから除外します。顧客・車両・書類を選択し、右側の詳細欄から復元できます。顧客を除外すると、その顧客の車両・書類・対応画像も除外対象になります。" />
                                 <Grid Height="235">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -1570,7 +1592,8 @@
                                         </StackPanel>
                                     </Border>
                                 </Grid>
-                            </StackPanel>
+                                </StackPanel>
+                            </Expander>
                         </Border>
                         <Border Margin="0,14,0,0" Padding="12" Background="#EAF2FF" BorderBrush="#93C5FD"
                                 BorderThickness="1" CornerRadius="6">
