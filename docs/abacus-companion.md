@@ -244,7 +244,9 @@ Web側では利用者が`ABACUS-Import-*`ルート全体を選択できますが
 
 実ファイルを解析した調査報告では、`abx-cs-sk.ucs`をFileMaker Pro 5.0のコンテナとして解釈し、1024バイトセクター、前後リンク、FileMakerのトークン列、画像セグメントの連結を復元する方式が示されています。報告上は、153件のJPEG候補について、長さ検証・SOI/EOI検証・画素デコード・SHA-256計算が153件すべて成功し、車検証画像として目視できるサンプルも確認されています。これは、従来の`FF D8`から`FF D9`までの生 carve とは異なる、検証可能な方式です。
 
-ただし、報告の方式はまだ本リポジトリへ統合されておらず、画像と`syaryou.csv`の車両を完全に対応付ける方法も未確定です。そのため、次の条件を満たすまで「実装済み」とは扱いません。
+Gate 13では、sector headerを14バイトのBig Endian `deleted_flag / index_level / prev_id / next_id / skip_bytes / payload_length`として解釈します。tokenはABACUS実ファイルで確認した`00`、`01–3F`、`40–7F`、`81–BF`、`C0`、`C1–FD`、`FF 01–04`、`FF 40–7F`および`01 FF 05` length checkだけを受け付けます。これはFileMaker公式の完全仕様ではなく、公開FP5 parserとABACUS実ファイルを照合したstrict parserです。未知token、sector範囲外の長さ、不連続なsegment counter、length不一致は推測して読み飛ばさず処理を中止します。
+
+画像復元部分はGate 13で本リポジトリへ統合しました。ただし、画像と`syaryou.csv`の車両を完全に対応付ける方法と完成タブへの接続は未確定です。そのため、次の条件をGate 14・15まで通して満たすまでは、完成版の画像移行導線を「実装済み」とは扱いません。
 
 - FileMaker Pro 5.0形式、1024バイトセクター、リンク順、トークン列、分割セグメントを読み取り専用で再現できること
 - 抽出画像のファイル長、JPEG構造、デコード、SHA-256が一致すること
@@ -294,7 +296,7 @@ FP5コンテナ復元方式を主方式とし、従来の画面移動型取得�
 
 このGateでは、未完成の画像取得処理を見せかけで動かしません。既存処理を完成タブから呼び出せるようにし、Gate 13以降の画像取得エンジンを後から画面移植なしで接続できる境界までを実装します。
 
-#### Gate 13: FP5コンテナ復元の実証
+#### Gate 13: FP5コンテナ復元の実証（実装済み）
 
 - 実ファイルの作業用コピーを入力にする読み取り専用パーサーを作成
 - FileMaker Pro 5.0ヘッダー、1024バイトセクター、前後リンク、トークン列を検証
@@ -302,6 +304,19 @@ FP5コンテナ復元方式を主方式とし、従来の画面移動型取得�
 - 既知画像を複数件へ拡張し、壊れた候補を保存せずレポートへ分離
 
 目視確認では、復元された車検証画像が灰色・ノイズ状ではなく読めること、原本フォルダーに新規ファイルが作られていないことを確認します。ここではまだ顧客・車両・Web APIへの登録を行いません。
+
+実装した`AbacusFp5ImageRestorer`は、入力`.ucs`／`.fp5`を`FileAccess.Read`で開き、入力フォルダー外の新規`ABACUS-FP5-Restoration-*`フォルダーへJPEGと検証レポートだけを保存します。復元前にFileMaker Pro 5.0 magic、1024-byte境界、block chainを検証し、復元後にFileMaker length check、JPEG SOI/EOI、WPF JPEG decoderによる全pixel走査、SHA-256を確認します。画像IDは診断情報としてだけ記録し、永続的な車両IDには使用しません。
+
+実際の作業用`abx-cs-sk.ucs`で次を再現しました。
+
+- ファイルサイズ: 370,083,840 bytes、361,410 sectors
+- block chain: 3階層、data sector 358,379件
+- JPEG node: 153件
+- segment復元・FileMaker length一致・全pixel decode: 153 / 153
+- 異なるJPEG SHA-256: 153 / 153
+- 最初の画像: image ID `80C1`、4,275,126 bytes、3,888 × 2,760、SHA-256 `4417DB5C85597A977323E3D73F26AD089F158EFAC534EDDCDDA3DA7256467A41`
+
+最初の画像のサイズ・寸法・SHA-256は、調査報告で車検証として目視確認済みの画像と一致しています。synthetic self-testでは、long segmentの後にshort segmentが続くFP5を生成し、block順序、segment counter、length check、JPEG完全decodeまで継続検証します。
 
 #### Gate 14: 全画像抽出と車両対応付け
 
@@ -366,6 +381,12 @@ dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/Vehic
 
 ```powershell
 dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- --legacy-export "<ABACUSのCSVフォルダー>"
+```
+
+Gate 13のFP5画像復元を実行する場合は、検証済み作業用コピーの`.ucs`または`.fp5`と、その入力フォルダー外にある生成物親フォルダーを指定します。既存ファイルは上書きしません。
+
+```powershell
+dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- --fp5-images "<作業用abx-cs-sk.ucs>" "<生成物親フォルダー>"
 ```
 
 ## ビルドと起動

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -142,6 +143,7 @@ public partial class App : Application
             fakeJpegEncoder.Frames.Add(BitmapFrame.Create(fakeBitmap));
             fakeJpegEncoder.Save(fakeJpegStream);
             var fakeJpeg = fakeJpegStream.ToArray();
+            await WriteFp5ImageSelfTestAsync(Path.Combine(source, "abx-cs-sk.ucs"), fakeJpeg);
             await File.WriteAllBytesAsync(
                 Path.Combine(source, "BackUp-5.fp5"),
                 [.. fakeFp5Header, .. fakeJpeg]);
@@ -169,6 +171,12 @@ public partial class App : Application
                 source,
                 before.FolderFingerprint,
                 "screen-navigation");
+            var fp5RestorationParent = Path.Combine(testRoot, "fp5-restoration");
+            Directory.CreateDirectory(fp5RestorationParent);
+            var fp5Restoration = await new AbacusFp5ImageRestorer().RestoreAsync(
+                Path.Combine(workspace.WorkspacePath, "abx-cs-sk.ucs"),
+                fp5RestorationParent);
+            var fp5RestorationReportText = await File.ReadAllTextAsync(fp5Restoration.ReportPath);
             var outputRootManifestText = await File.ReadAllTextAsync(outputPackageSession.RootManifestPath);
             var outputReadyManifestText = await File.ReadAllTextAsync(outputPackageSession.ReadyManifestPath);
             var outputPackageStructureValid =
@@ -627,6 +635,18 @@ public partial class App : Application
                 toolbarCropResult.Image.PixelHeight == 96 &&
                 verifiedUsedWorkspace.AllowedRuntimeChanges.Count == 2 &&
                 rejectedUnallowedChange &&
+                fp5Restoration.IsValid &&
+                fp5Restoration.ImageNodeCount == 1 &&
+                fp5Restoration.RestoredImageCount == 1 &&
+                fp5Restoration.LengthCheckMatchCount == 1 &&
+                fp5Restoration.DecodeSuccessCount == 1 &&
+                fp5Restoration.UniqueImageSha256Count == 1 &&
+                fp5Restoration.Images[0].FileSize == fakeJpeg.Length &&
+                fp5Restoration.Images[0].ExpectedFileSize == fakeJpeg.Length &&
+                fp5Restoration.Images[0].PixelWidth == 3 &&
+                fp5Restoration.Images[0].PixelHeight == 2 &&
+                File.Exists(Path.Combine(fp5Restoration.OutputFolderPath, fp5Restoration.Images[0].RelativePath)) &&
+                fp5RestorationReportText.Contains("gate13-verified", StringComparison.Ordinal) &&
                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&
@@ -759,6 +779,79 @@ public partial class App : Application
             clone[specification.ChassisNumberColumn] = chassis;
             clone[specification.DocumentNumberColumn] = document;
             return clone;
+        }
+    }
+
+    private static async Task WriteFp5ImageSelfTestAsync(string path, byte[] jpeg)
+    {
+        const int sectorBytes = 1024;
+        var file = new byte[5 * sectorBytes];
+        var magic = new byte[]
+        {
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+            0x00, 0x05, 0x00, 0x02, 0x00, 0x02, 0xC0,
+        };
+        magic.CopyTo(file, 0);
+        var version = Encoding.ASCII.GetBytes("Pro 5.0");
+        file[541] = checked((byte)version.Length);
+        version.CopyTo(file, 542);
+
+        var topPayload = new byte[] { 0x00, 0x04, 0x00, 0x00, 0x00, 0x01 };
+        WriteSector(file, 2 * sectorBytes, level: 1, previousId: 0, nextId: 2, skipBytes: 0, topPayload);
+
+        var finalSegmentLength = Math.Min(200, jpeg.Length / 2);
+        var firstSegmentLength = jpeg.Length - finalSegmentLength;
+        if (firstSegmentLength <= 0 || finalSegmentLength <= 0 || finalSegmentLength > byte.MaxValue)
+        {
+            throw new InvalidOperationException("FP5セルフテスト用JPEGを分割できません。");
+        }
+
+        using var payload = new MemoryStream();
+        payload.Write([0xC1, 0x1F, 0xC1, 0x05, 0xC1, 0x02, 0xC4, 0x4A, 0x50, 0x45, 0x47]);
+        payload.WriteByte(0xFF);
+        payload.WriteByte(0x41);
+        Span<byte> longLength = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16BigEndian(longLength, checked((ushort)firstSegmentLength));
+        payload.Write(longLength);
+        payload.Write(jpeg, 0, firstSegmentLength);
+        payload.WriteByte(0x42);
+        payload.WriteByte(checked((byte)finalSegmentLength));
+        payload.Write(jpeg, firstSegmentLength, finalSegmentLength);
+        payload.Write([0x01, 0xFF, 0x05]);
+        Span<byte> expectedLength = stackalloc byte[5];
+        expectedLength[0] = checked((byte)((long)jpeg.Length >> 32));
+        expectedLength[1] = checked((byte)((long)jpeg.Length >> 24));
+        expectedLength[2] = checked((byte)((long)jpeg.Length >> 16));
+        expectedLength[3] = checked((byte)((long)jpeg.Length >> 8));
+        expectedLength[4] = checked((byte)jpeg.Length);
+        payload.Write(expectedLength);
+        payload.Write([0xC0, 0xC0]);
+
+        WriteSector(file, 3 * sectorBytes, level: 0, previousId: 0, nextId: 2, skipBytes: 0, payload.ToArray());
+        WriteSector(file, 4 * sectorBytes, level: 0, previousId: 1, nextId: 0, skipBytes: 1, [0xC0, 0xC0]);
+        await File.WriteAllBytesAsync(path, file);
+
+        static void WriteSector(
+            byte[] destination,
+            int offset,
+            byte level,
+            uint previousId,
+            uint nextId,
+            ushort skipBytes,
+            byte[] payloadBytes)
+        {
+            if (payloadBytes.Length > sectorBytes - 14)
+            {
+                throw new InvalidOperationException("FP5セルフテストpayloadがsector上限を超えています。");
+            }
+
+            destination[offset] = 0;
+            destination[offset + 1] = level;
+            BinaryPrimitives.WriteUInt32BigEndian(destination.AsSpan(offset + 2, 4), previousId);
+            BinaryPrimitives.WriteUInt32BigEndian(destination.AsSpan(offset + 6, 4), nextId);
+            BinaryPrimitives.WriteUInt16BigEndian(destination.AsSpan(offset + 10, 2), skipBytes);
+            BinaryPrimitives.WriteUInt16BigEndian(destination.AsSpan(offset + 12, 2), checked((ushort)payloadBytes.Length));
+            payloadBytes.CopyTo(destination, offset + 14);
         }
     }
 }
