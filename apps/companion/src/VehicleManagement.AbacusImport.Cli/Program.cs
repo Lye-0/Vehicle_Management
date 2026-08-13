@@ -2,6 +2,36 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using VehicleManagement.AbacusImport;
 
+if (args.Length == 4 && args[0].Equals("--fp5-map", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await new AbacusFp5VehicleImageMapper().MapAsync(args[1], args[2], args[3]);
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        result.OutputFolderPath,
+        result.ReportPath,
+        result.InternalVehicleRecordCount,
+        result.VehicleCsvRowCount,
+        result.JpegImageCount,
+        result.GifPlaceholderCount,
+        result.MatchedImageCount,
+        result.NoImageCount,
+        result.ReviewCount,
+        result.UnmatchedCount,
+        result.MultipleCandidateCount,
+        result.UnknownImageReferenceCount,
+        result.DuplicateImageReferenceCount,
+        result.DuplicateImageSha256Count,
+        result.UnreferencedImageCount,
+        result.IsValid,
+        result.IsFullyMatched,
+    }, new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    }));
+    return result.IsValid ? 0 : 1;
+}
+
 if (args.Length == 3 && args[0].Equals("--fp5-images", StringComparison.OrdinalIgnoreCase))
 {
     var result = await new AbacusFp5ImageRestorer().RestoreAsync(args[1], args[2]);
@@ -61,6 +91,7 @@ if (args.Length != 1)
     Console.Error.WriteLine("Usage: VehicleManagement.AbacusImport.Cli <ABACUS folder>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --legacy-export <CSV folder>");
     Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-images <FP5/UCS file> <output parent folder>");
+    Console.Error.WriteLine("       VehicleManagement.AbacusImport.Cli --fp5-map <FP5/UCS file> <CSV folder> <output parent folder>");
     return 2;
 }
 

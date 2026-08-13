@@ -41,6 +41,18 @@ public sealed record AbacusFp5ImageRestoration(
         LengthCheckMatchCount == DecodeSuccessCount;
 }
 
+internal sealed record AbacusFp5InternalVehicleRecord(
+    string RecordIdHex,
+    byte[] RegistrationNumberBytes,
+    byte[] ChassisNumberBytes,
+    byte[] ImageReferenceBytes);
+
+internal sealed record AbacusFp5VehicleImageSource(
+    AbacusFp5ImageRestoration Restoration,
+    IReadOnlyList<AbacusFp5InternalVehicleRecord> VehicleRecords,
+    IReadOnlySet<string> GifImageIds,
+    IReadOnlyDictionary<byte, byte[]> VehicleFieldNames);
+
 /// <summary>
 /// FileMaker Pro 5の1024-byte sector、リンク順、token path、分割data tokenを
 /// 読み取り専用で復元し、1F/05/&lt;image id&gt;/JPEGノードを書き出します。
@@ -67,12 +79,21 @@ public sealed class AbacusFp5ImageRestorer
         string outputParentFolder,
         CancellationToken cancellationToken = default) =>
         Task.Run(
-            () => Restore(sourceFilePath, outputParentFolder, cancellationToken),
+            () => Restore(sourceFilePath, outputParentFolder, collectVehicleMapping: false, cancellationToken).Restoration,
             cancellationToken);
 
-    private static AbacusFp5ImageRestoration Restore(
+    internal Task<AbacusFp5VehicleImageSource> RestoreForVehicleMappingAsync(
         string sourceFilePath,
         string outputParentFolder,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(
+            () => Restore(sourceFilePath, outputParentFolder, collectVehicleMapping: true, cancellationToken),
+            cancellationToken);
+
+    private static AbacusFp5VehicleImageSource Restore(
+        string sourceFilePath,
+        string outputParentFolder,
+        bool collectVehicleMapping,
         CancellationToken cancellationToken)
     {
         var sourcePath = Path.GetFullPath(sourceFilePath);
@@ -106,6 +127,9 @@ public sealed class AbacusFp5ImageRestorer
         var catalog = ReadSectorCatalog(stream, cancellationToken);
         var dataSectorPositions = OrderDataSectors(stream, catalog, cancellationToken);
         var restoredImages = new List<AbacusFp5RestoredImage>();
+        var vehicleRecordBuilders = new Dictionary<string, InternalVehicleRecordBuilder>(StringComparer.Ordinal);
+        var gifImageIds = new HashSet<string>(StringComparer.Ordinal);
+        var vehicleFieldNames = new Dictionary<byte, byte[]>();
         var uniqueHashes = new HashSet<string>(StringComparer.Ordinal);
 
         ParseImageNodes(
@@ -154,6 +178,10 @@ public sealed class AbacusFp5ImageRestorer
                     dimensions.Height,
                     sha256));
             },
+            vehicleRecordBuilders,
+            gifImageIds,
+            vehicleFieldNames,
+            collectVehicleMapping,
             cancellationToken);
 
         if (stream.Length != sourceFile.Length || sourceLastWriteTimeUtc != new FileInfo(sourcePath).LastWriteTimeUtc)
@@ -184,7 +212,10 @@ public sealed class AbacusFp5ImageRestorer
         }
 
         WriteReport(result, reportPath);
-        return result;
+        var vehicleRecords = collectVehicleMapping
+            ? vehicleRecordBuilders.Values.Select(record => record.Complete()).ToList()
+            : [];
+        return new AbacusFp5VehicleImageSource(result, vehicleRecords, gifImageIds, vehicleFieldNames);
     }
 
     private static void ValidatePaths(FileInfo sourceFile, string outputParent)
@@ -444,6 +475,10 @@ public sealed class AbacusFp5ImageRestorer
         FileStream stream,
         IReadOnlyList<long> dataSectorPositions,
         Action<byte[], long, ReadOnlyMemory<byte>> onImage,
+        IDictionary<string, InternalVehicleRecordBuilder> vehicleRecords,
+        ISet<string> gifImageIds,
+        IDictionary<byte, byte[]> vehicleFieldNames,
+        bool collectVehicleMapping,
         CancellationToken cancellationToken)
     {
         var path = new List<byte[]>();
@@ -504,6 +539,20 @@ public sealed class AbacusFp5ImageRestorer
                         }
                     }
 
+                    if (collectVehicleMapping)
+                    {
+                        CaptureVehicleField(
+                            path,
+                            payload.AsSpan(cursor + 1, referenceLength),
+                            payload.AsSpan(dataStart, dataLength),
+                            vehicleRecords);
+                        CaptureVehicleFieldName(
+                            path,
+                            payload.AsSpan(cursor + 1, referenceLength),
+                            payload.AsSpan(dataStart, dataLength),
+                            vehicleFieldNames);
+                    }
+
                     cursor = dataStart + dataLength;
                     continue;
                 }
@@ -524,6 +573,21 @@ public sealed class AbacusFp5ImageRestorer
                         {
                             image.SetSinglePayload(payload.AsSpan(dataStart, dataLength));
                         }
+                    }
+
+                    byte[] reference = [(byte)(token - 0x40)];
+                    if (collectVehicleMapping)
+                    {
+                        CaptureVehicleField(
+                            path,
+                            reference,
+                            payload.AsSpan(dataStart, dataLength),
+                            vehicleRecords);
+                        CaptureVehicleFieldName(
+                            path,
+                            reference,
+                            payload.AsSpan(dataStart, dataLength),
+                            vehicleFieldNames);
                     }
 
                     cursor = dataStart + dataLength;
@@ -580,6 +644,16 @@ public sealed class AbacusFp5ImageRestorer
                     }
 
                     path.Add(payload.AsSpan(componentStart, componentLength).ToArray());
+                    if (collectVehicleMapping && path.Count == 2 &&
+                        path[0].Length == 1 && path[0][0] == 0x05)
+                    {
+                        GetOrAddVehicleRecord(path[1], vehicleRecords);
+                    }
+                    if (collectVehicleMapping && IsGifPath(path) &&
+                        !gifImageIds.Add(Convert.ToHexString(path[2])))
+                    {
+                        throw new InvalidDataException("FP5 GIF image IDが重複しています。");
+                    }
                     if (IsJpegPath(path))
                     {
                         if (image is not null)
@@ -653,6 +727,68 @@ public sealed class AbacusFp5ImageRestorer
         {
             image.Dispose();
             throw new InvalidDataException("FP5 JPEG nodeが閉じずにdata block chainが終了しました。");
+        }
+    }
+
+    private static void CaptureVehicleField(
+        IReadOnlyList<byte[]> path,
+        ReadOnlySpan<byte> reference,
+        ReadOnlySpan<byte> data,
+        IDictionary<string, InternalVehicleRecordBuilder> vehicleRecords)
+    {
+        if (path.Count != 2 || path[0].Length != 1 || path[0][0] != 0x05 ||
+            reference.Length != 1 || reference[0] is not (0x10 or 0x25 or 0x37))
+        {
+            return;
+        }
+
+        var record = GetOrAddVehicleRecord(path[1], vehicleRecords);
+        record.SetField(reference[0], data);
+    }
+
+    private static InternalVehicleRecordBuilder GetOrAddVehicleRecord(
+        ReadOnlySpan<byte> recordId,
+        IDictionary<string, InternalVehicleRecordBuilder> vehicleRecords)
+    {
+        var recordIdHex = Convert.ToHexString(recordId);
+        if (vehicleRecords.TryGetValue(recordIdHex, out var record))
+        {
+            return record;
+        }
+
+        if (vehicleRecords.Count >= 50_000)
+        {
+            throw new InvalidDataException("FP5車両レコード数が上限50,000件を超えています。");
+        }
+
+        record = new InternalVehicleRecordBuilder(recordIdHex);
+        vehicleRecords.Add(recordIdHex, record);
+        return record;
+    }
+
+    private static bool IsGifPath(IReadOnlyList<byte[]> path) =>
+        path.Count == 4 &&
+        path[0].Length == 1 && path[0][0] == 0x1F &&
+        path[1].Length == 1 && path[1][0] == 0x05 &&
+        path[3].AsSpan().SequenceEqual("GIFf"u8);
+
+    private static void CaptureVehicleFieldName(
+        IReadOnlyList<byte[]> path,
+        ReadOnlySpan<byte> reference,
+        ReadOnlySpan<byte> data,
+        IDictionary<byte, byte[]> vehicleFieldNames)
+    {
+        if (path.Count != 3 || path[0].Length != 1 || path[0][0] != 0x03 ||
+            path[1].Length != 1 || path[1][0] != 0x05 || path[2].Length != 1 ||
+            path[2][0] is not (0x10 or 0x25 or 0x37) ||
+            reference.Length != 1 || reference[0] != 0x01)
+        {
+            return;
+        }
+
+        if (!vehicleFieldNames.TryAdd(path[2][0], data.ToArray()))
+        {
+            throw new InvalidDataException($"FP5 field 0x{path[2][0]:X2}の名前が重複しています。");
         }
     }
 
@@ -854,6 +990,58 @@ public sealed class AbacusFp5ImageRestorer
         uint NextId,
         ushort SkipBytes,
         ushort PayloadLength);
+
+    internal sealed class InternalVehicleRecordBuilder(string recordIdHex)
+    {
+        private byte[]? registrationNumber;
+        private byte[]? chassisNumber;
+        private byte[]? imageReference;
+
+        public void SetField(byte fieldId, ReadOnlySpan<byte> data)
+        {
+            var existing = fieldId switch
+            {
+                0x10 => registrationNumber,
+                0x25 => imageReference,
+                0x37 => chassisNumber,
+                _ => throw new ArgumentOutOfRangeException(nameof(fieldId)),
+            };
+            if (existing is not null)
+            {
+                throw new InvalidDataException(
+                    $"FP5車両レコード{recordIdHex}のfield 0x{fieldId:X2}が重複しています。");
+            }
+
+            var value = data.ToArray();
+            switch (fieldId)
+            {
+                case 0x10:
+                    registrationNumber = value;
+                    break;
+                case 0x25:
+                    imageReference = value;
+                    break;
+                case 0x37:
+                    chassisNumber = value;
+                    break;
+            }
+        }
+
+        public AbacusFp5InternalVehicleRecord Complete()
+        {
+            if (registrationNumber is null || chassisNumber is null || imageReference is null)
+            {
+                throw new InvalidDataException(
+                    $"FP5車両レコード{recordIdHex}に登録番号・車台番号・画像参照のいずれかがありません。");
+            }
+
+            return new AbacusFp5InternalVehicleRecord(
+                recordIdHex,
+                registrationNumber,
+                chassisNumber,
+                imageReference);
+        }
+    }
 
     private sealed class ImageNodeBuilder(long maximumBytes) : IDisposable
     {

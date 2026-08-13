@@ -408,6 +408,18 @@ public partial class App : Application
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "seibi.csv"), string.Join(',', maintenanceExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou.csv"), string.Join(',', vehicleExportFields), shiftJis);
             await File.WriteAllTextAsync(Path.Combine(legacyExportFolder, "syaryou2.csv"), string.Join(',', vehicleExportFields), shiftJis);
+            var fp5MappingParent = Path.Combine(testRoot, "fp5-mapping");
+            var fp5MappingExportFolder = Path.Combine(testRoot, "fp5-mapping-export");
+            Directory.CreateDirectory(fp5MappingParent);
+            Directory.CreateDirectory(fp5MappingExportFolder);
+            File.Copy(
+                Path.Combine(legacyExportFolder, "syaryou.csv"),
+                Path.Combine(fp5MappingExportFolder, "syaryou.csv"));
+            var fp5Mapping = await new AbacusFp5VehicleImageMapper().MapAsync(
+                Path.Combine(workspace.WorkspacePath, "abx-cs-sk.ucs"),
+                fp5MappingExportFolder,
+                fp5MappingParent);
+            var fp5MappingReportText = await File.ReadAllTextAsync(fp5Mapping.ReportPath);
             var legacyExportAnalysis = await new AbacusLegacyExportInspector().AnalyzeAsync(legacyExportFolder);
             var legacyPreviewSource = Path.Combine(testRoot, "legacy-preview-source");
             Directory.CreateDirectory(legacyPreviewSource);
@@ -647,6 +659,23 @@ public partial class App : Application
                 fp5Restoration.Images[0].PixelHeight == 2 &&
                 File.Exists(Path.Combine(fp5Restoration.OutputFolderPath, fp5Restoration.Images[0].RelativePath)) &&
                 fp5RestorationReportText.Contains("gate13-verified", StringComparison.Ordinal) &&
+                fp5Mapping.IsValid &&
+                fp5Mapping.IsFullyMatched &&
+                fp5Mapping.InternalVehicleRecordCount == 1 &&
+                fp5Mapping.VehicleCsvRowCount == 1 &&
+                fp5Mapping.JpegImageCount == 1 &&
+                fp5Mapping.GifPlaceholderCount == 0 &&
+                fp5Mapping.MatchedImageCount == 1 &&
+                fp5Mapping.NoImageCount == 0 &&
+                fp5Mapping.ReviewCount == 0 &&
+                fp5Mapping.UnmatchedCount == 0 &&
+                fp5Mapping.MultipleCandidateCount == 0 &&
+                fp5Mapping.UnknownImageReferenceCount == 0 &&
+                fp5Mapping.DuplicateImageReferenceCount == 0 &&
+                fp5Mapping.DuplicateImageSha256Count == 0 &&
+                fp5Mapping.UnreferencedImageCount == 0 &&
+                fp5MappingReportText.Contains("gate14-verified", StringComparison.Ordinal) &&
+                fp5MappingReportText.Contains("fp5-record-image-reference+exact-chassis-registration", StringComparison.Ordinal) &&
                 analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&
@@ -807,6 +836,18 @@ public partial class App : Application
         }
 
         using var payload = new MemoryStream();
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var shiftJis = Encoding.GetEncoding(932);
+        payload.Write([0xC1, 0x03, 0xC1, 0x05]);
+        WriteFieldDefinition(payload, 0x10, "登録番号", shiftJis);
+        WriteFieldDefinition(payload, 0x25, "車検証画像", shiftJis);
+        WriteFieldDefinition(payload, 0x37, "車体番号", shiftJis);
+        payload.Write([0xC0, 0xC0]);
+        payload.Write([0xC1, 0x05, 0xC1, 0x01]);
+        WriteSimpleField(payload, 0x10, shiftJis.GetBytes("大阪537む16"));
+        WriteSimpleField(payload, 0x25, [0x01, 0x02]);
+        WriteSimpleField(payload, 0x37, shiftJis.GetBytes("CHASSIS1"));
+        payload.Write([0xC0, 0xC0]);
         payload.Write([0xC1, 0x1F, 0xC1, 0x05, 0xC1, 0x02, 0xC4, 0x4A, 0x50, 0x45, 0x47]);
         payload.WriteByte(0xFF);
         payload.WriteByte(0x41);
@@ -830,6 +871,21 @@ public partial class App : Application
         WriteSector(file, 3 * sectorBytes, level: 0, previousId: 0, nextId: 2, skipBytes: 0, payload.ToArray());
         WriteSector(file, 4 * sectorBytes, level: 0, previousId: 1, nextId: 0, skipBytes: 1, [0xC0, 0xC0]);
         await File.WriteAllBytesAsync(path, file);
+
+        static void WriteFieldDefinition(Stream stream, byte fieldId, string name, Encoding encoding)
+        {
+            var nameBytes = encoding.GetBytes(name);
+            stream.Write([0xC1, fieldId, 0x41, checked((byte)nameBytes.Length)]);
+            stream.Write(nameBytes);
+            stream.WriteByte(0xC0);
+        }
+
+        static void WriteSimpleField(Stream stream, byte fieldId, byte[] value)
+        {
+            stream.WriteByte(checked((byte)(0x40 + fieldId)));
+            stream.WriteByte(checked((byte)value.Length));
+            stream.Write(value);
+        }
 
         static void WriteSector(
             byte[] destination,
