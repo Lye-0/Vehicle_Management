@@ -1286,6 +1286,10 @@
                                                 Visibility="Collapsed" Click="LegacyGraphDissolveCustomerMergeButton_Click" />
                                         <Button x:Name="LegacyGraphReassignButton" Content="仮紐付けを解除"
                                                 IsEnabled="False" Visibility="Collapsed" Click="LegacyGraphClearManualLinkButton_Click" />
+                                        <Button x:Name="LegacyGraphTrashButton" Margin="0,8,0,0"
+                                                Content="ごみ箱へ移動"
+                                                IsEnabled="False" Visibility="Collapsed"
+                                                Click="LegacyGraphTrashButton_Click" />
                                         <TabControl x:Name="LegacyGraphInspectorTabs" Margin="0,14,0,0">
                                             <TabItem Header="統合後">
                                                 <StackPanel Margin="0,8,0,0">
@@ -1476,6 +1480,98 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+                        <Border Margin="0,14,0,0" Padding="12" Background="#FFF7ED" BorderBrush="#F59E0B"
+                                BorderThickness="1" CornerRadius="6">
+                            <StackPanel>
+                                <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="#92400E"
+                                           Text="ごみ箱（明示的にインポートから除外）" />
+                                <TextBlock Margin="0,5,0,8" Foreground="#8A5A00" TextWrapping="Wrap"
+                                           Text="ここへ移動した顧客・車両・書類は、未確定トレイとは別に今回のインポートから除外します。顧客・車両・書類を選択し、右側の詳細欄から復元できます。顧客を除外すると、その顧客の車両・書類・対応画像も除外対象になります。" />
+                                <Grid Height="235">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Padding="10" Background="#FFFBEB" BorderBrush="#FBBF24"
+                                            BorderThickness="1" CornerRadius="6">
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" Foreground="#92400E" Text="除外顧客" />
+                                            <ListBox x:Name="LegacyGraphTrashCustomerList" Margin="0,7,0,0" Height="185"
+                                                     AllowDrop="True" SelectionChanged="LegacyGraphTrashSelectionChanged"
+                                                     DragOver="LegacyGraphTrashCustomerList_DragOver"
+                                                     DragLeave="LegacyGraphTrashList_DragLeave"
+                                                     Drop="LegacyGraphTrashCustomerList_Drop">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Margin="2,3" Padding="8" Background="#FEF2F2" BorderBrush="#DC2626"
+                                                                BorderThickness="1" CornerRadius="5">
+                                                            <StackPanel>
+                                                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" TextWrapping="Wrap" />
+                                                                <TextBlock Margin="0,3,0,0" Foreground="#7F1D1D" FontSize="11"
+                                                                           Text="{Binding CustomerNumber}" TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Padding="10" Background="#FFFBEB" BorderBrush="#FBBF24"
+                                            BorderThickness="1" CornerRadius="6">
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" Foreground="#92400E" Text="除外車両" />
+                                            <ListBox x:Name="LegacyGraphTrashVehicleList" Margin="0,7,0,0" Height="185"
+                                                     AllowDrop="True" SelectionChanged="LegacyGraphTrashSelectionChanged"
+                                                     DragOver="LegacyGraphTrashVehicleList_DragOver"
+                                                     DragLeave="LegacyGraphTrashList_DragLeave"
+                                                     Drop="LegacyGraphTrashVehicleList_Drop">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Margin="2,3" Padding="8" Background="#FEF2F2" BorderBrush="#DC2626"
+                                                                BorderThickness="1" CornerRadius="5">
+                                                            <StackPanel>
+                                                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" TextWrapping="Wrap" />
+                                                                <TextBlock Margin="0,3,0,0" Foreground="#7F1D1D" FontSize="11"
+                                                                           Text="{Binding IdentifierSummary}" TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="4" Padding="10" Background="#FFFBEB" BorderBrush="#FBBF24"
+                                            BorderThickness="1" CornerRadius="6">
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" Foreground="#92400E" Text="除外書類" />
+                                            <ListBox x:Name="LegacyGraphTrashDocumentList" Margin="0,7,0,0" Height="185"
+                                                     AllowDrop="True" SelectionChanged="LegacyGraphTrashSelectionChanged"
+                                                     DragOver="LegacyGraphTrashDocumentList_DragOver"
+                                                     DragLeave="LegacyGraphTrashList_DragLeave"
+                                                     Drop="LegacyGraphTrashDocumentList_Drop">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Margin="2,3" Padding="8" Background="#FEF2F2" BorderBrush="#DC2626"
+                                                                BorderThickness="1" CornerRadius="5">
+                                                            <StackPanel>
+                                                                <TextBlock FontWeight="SemiBold" Text="{Binding DocumentNumber}" TextWrapping="Wrap" />
+                                                                <TextBlock Margin="0,3,0,0" Foreground="#7F1D1D" FontSize="11"
+                                                                           Text="{Binding Kind}" TextWrapping="Wrap" />
+                                                                <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
+                                                                           Text="{Binding CustomerName}" TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                         <Border Margin="0,14,0,0" Padding="12" Background="#EAF2FF" BorderBrush="#93C5FD"
                                 BorderThickness="1" CornerRadius="6">
                             <StackPanel>
