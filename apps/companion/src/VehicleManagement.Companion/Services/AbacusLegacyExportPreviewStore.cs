@@ -235,18 +235,22 @@ public sealed class AbacusLegacyExportPreviewStore
                 ambiguousVehicleRows++;
             }
 
+            var documentType = AbacusDocumentClassification.NormalizeDocumentType(Text(source, 2), "請求書");
             var document = CreateDocumentCandidate(
                 "販売書類",
                 row,
                 customer,
                 match.Vehicle,
                 Text(source, 1),
-                NormalizeDocumentType(Text(source, 2), "請求書"),
+                documentType.Value,
                 NormalizeCalendarDate(Text(source, 0)),
                 NormalizeNonNegativeInteger(Text(source, 31)),
-                $"ABACUS={row.FileName}#{row.RowNumber}; 区分原文={Text(source, 3)}; 金額は合計欄のみで税・明細は未確定。{warning}");
+                $"ABACUS={row.FileName}#{row.RowNumber}; 書類種別原文={Text(source, 2)}; 区分原文={Text(source, 3)}; 金額は合計欄のみで税・明細は未確定。{documentType.Warning ?? ""}{warning}");
             var detailMatch = detailMapper.Match("販売書類", document.Number, customerName, document.VehicleName, Text(source, 22), Text(source, 21));
-            document = document with { DetailsJson = AbacusDetailMapper.Serialize(detailMatch) };
+            document = document with
+            {
+                DetailsJson = AbacusDetailMapper.Serialize(detailMatch, Text(source, 2), null, documentType.Warning),
+            };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             sales.Add(document);
             previewRows.Add(new AbacusLegacyExportPreviewRow("販売書類", row.FileName, row.RowNumber, customer.Name, document.VehicleName, document.Number, match.StatusLabel, warning));
@@ -296,23 +300,29 @@ public sealed class AbacusLegacyExportPreviewStore
                 _ => "車両一覧の一意な一致がないため、車両未確定のまま顧客直結で保持しました。",
             };
 
+            var documentType = AbacusDocumentClassification.NormalizeDocumentType(Text(source, 2), "整備請求書");
+            var maintenanceDocumentType = documentType.Value == "見積書" ? "整備見積書" : "整備請求書";
+            var maintenanceCategory = AbacusDocumentClassification.NormalizeMaintenanceCategory(Text(source, 24));
             var document = CreateDocumentCandidate(
                 "整備書類",
                 row,
                 customer,
                 vehicle,
                 Text(source, 1),
-                NormalizeDocumentType(Text(source, 2), "整備請求書"),
+                maintenanceDocumentType,
                 NormalizeCalendarDate(Text(source, 0)),
                 NormalizeNonNegativeInteger(Text(source, 27)),
-                $"ABACUS={row.FileName}#{row.RowNumber}; 備考原文={Text(source, 24)}; {warning}" );
+                $"ABACUS={row.FileName}#{row.RowNumber}; 書類種別原文={Text(source, 2)}; 入庫区分原文={Text(source, 24)}; {documentType.Warning ?? ""}{maintenanceCategory.Warning ?? ""}{warning}" );
             var detailMatch = detailMapper.Match("整備書類", document.Number, customerName, document.VehicleName, Text(source, 20), Text(source, 19));
-            document = document with { DetailsJson = AbacusDetailMapper.Serialize(detailMatch) };
+            document = document with
+            {
+                DetailsJson = AbacusDetailMapper.Serialize(detailMatch, Text(source, 2), Text(source, 24), string.Join(" / ", new[] { documentType.Warning, maintenanceCategory.Warning }.Where(value => !string.IsNullOrWhiteSpace(value)))),
+            };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             var intakeDate = NormalizeCalendarDate(Text(source, 25));
             document = document with
             {
-                Category = "一般整備",
+                Category = maintenanceCategory.Value,
                 // #635のようにABACUSの入庫日欄が空欄でも、書類日付は失わない。
                 // Web側の発行日・入庫日の基準として書類日付を使用します。
                 IntakeDate = string.IsNullOrWhiteSpace(intakeDate) ? document.IssuedAt : intakeDate,

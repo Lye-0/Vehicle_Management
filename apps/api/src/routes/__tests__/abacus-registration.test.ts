@@ -230,6 +230,26 @@ describe('ABACUS registration', () => {
     expect(items.results).toEqual([{ description: 'エンジンS/W 交換', quantity: 1, unit: '式', unitPrice: 13800, technicalFee: 2000, amount: 15800 }])
   })
 
+  it('restores Gate24 document types, point-inspection category, and date-based status', async () => {
+    const packageFiles = await createGate24Package()
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'committed',
+      importedCompletedDocumentCount: 2,
+      importedDraftDocumentCount: 1,
+      importedDateWarningDocumentCount: 1,
+      importedClassificationWarningDocumentCount: 0,
+    })
+
+    const sales = await env.DB.prepare('SELECT type, status FROM sales_documents WHERE id = ? AND organization_id = ?').bind(packageFiles.salesId, testOrganizationId).first<{ type: string; status: string }>()
+    expect(sales).toEqual({ type: '見積書', status: '完了' })
+    const maintenance = await env.DB.prepare('SELECT type, category, status FROM maintenance_documents WHERE id = ? AND organization_id = ?').bind(packageFiles.maintenanceId, testOrganizationId).first<{ type: string; category: string; status: string }>()
+    expect(maintenance).toEqual({ type: '整備見積書', category: '一般整備', status: '完了' })
+    const draftMaintenance = await env.DB.prepare('SELECT status FROM maintenance_documents WHERE id = ? AND organization_id = ?').bind(packageFiles.duplicateMaintenanceId, testOrganizationId).first<{ status: string }>()
+    expect(draftMaintenance).toEqual({ status: '下書き' })
+  })
+
   it('re-runs the same graph-final package idempotently without duplicating rows', async () => {
     const packageFiles = await createGraphFinalPackage('gate18-idempotency')
     const firstResponse = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
@@ -366,6 +386,38 @@ async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '
     { documentKey: `整備書類|final|${duplicateMaintenanceNumber}|2`, documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
   ], excludedDocumentKeys: [] })
   return { manifest, manifestSha256: await sha256(manifest), files, customerId: customer, salesId, maintenanceId, duplicateMaintenanceId }
+}
+
+async function createGate24Package() {
+  const basePackage = await createGraphFinalPackage('gate24-classification')
+  const importBaseDate = '2026-08-14'
+  const files = basePackage.files.map(([fileName, content]) => {
+    if (fileName === 'sales.csv') {
+      const rows = content.split('\n')
+      const fields = rows[1].split(',')
+      fields[2] = '見積書'
+      fields[3] = '完了'
+      fields[7] = '2025-01-01'
+      rows[1] = fields.join(',')
+      return [fileName, rows.join('\n')] as const
+    }
+    if (fileName === 'maintenance.csv') {
+      const rows = content.split('\n')
+      const fields = rows[1].split(',')
+      fields[2] = '整備見積書'
+      fields[3] = '点検'
+      fields[4] = '完了'
+      fields[8] = '2025-01-01'
+      rows[1] = fields.join(',')
+      return [fileName, rows.join('\n')] as const
+    }
+    return [fileName, content] as const
+  })
+  const manifestValue = JSON.parse(basePackage.manifest) as { importBaseDate?: string; dataFiles: Array<{ fileName: string; sizeBytes: number; sha256: string }> }
+  manifestValue.importBaseDate = importBaseDate
+  manifestValue.dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
+  const manifest = JSON.stringify(manifestValue)
+  return { ...basePackage, manifest, manifestSha256: await sha256(manifest), files }
 }
 
 async function createLargeGraphFinalPackage(customerCount: number) {

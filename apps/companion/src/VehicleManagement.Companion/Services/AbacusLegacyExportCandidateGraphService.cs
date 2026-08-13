@@ -23,7 +23,10 @@ public sealed record AbacusLegacyExportCandidateGraphDocument(
     IReadOnlyList<string> CandidateCustomerIds,
     string DetailsJson = "",
     string MaintenanceIntakeDate = "",
-    string MaintenanceCompletionDate = "")
+    string MaintenanceCompletionDate = "",
+    string DocumentType = "",
+    string MaintenanceCategory = "",
+    string ClassificationWarning = "")
 {
     public bool IsLinked => !string.IsNullOrWhiteSpace(LinkedVehicleId);
 
@@ -457,7 +460,10 @@ public sealed class AbacusLegacyExportCandidateGraphService
             candidateCustomerIds,
             detailsJson,
             kind == "整備書類" ? Value(row.Fields, 8) : "",
-            kind == "整備書類" ? Value(row.Fields, 9) : "");
+            kind == "整備書類" ? Value(row.Fields, 9) : "",
+            Value(row.Fields, 2),
+            kind == "整備書類" ? Value(row.Fields, 3) : "",
+            detail?.ClassificationWarning ?? "");
         if (linkedVehicleId is not null && vehicles.TryGetValue(linkedVehicleId, out var linkedVehicle))
         {
             linkedVehicle.Documents.Add(document);

@@ -227,6 +227,9 @@ public sealed class AbacusImportOutputPackageStore
                 createdAtUtc = DateTime.UtcNow,
                 source = new { path = session.SourcePath, fingerprint = session.SourceFingerprint },
                 imageAcquisitionMethod = session.ImageAcquisitionMethod,
+                importBaseDate = finalManifest.TryGetProperty("importBaseDate", out var importBaseDate)
+                    ? importBaseDate.GetString()
+                    : null,
                 summary = new
                 {
                     customerCount = finalPackage.CustomerRowCount,

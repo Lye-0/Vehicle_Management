@@ -156,6 +156,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var sourceRoot = ValidateFolder(graph.PackagePath, "候補パッケージ");
         var destinationRoot = ValidateFolder(destinationParent, "登録前パッケージ保存先");
         ValidateDestination(sourceRoot, destinationRoot);
+        // 状態判定はパッケージ作成時点で一度だけ固定し、後日同じパッケージを
+        // 登録・再検証しても「完了／下書き」が変化しないようにします。
+        // 利用者が確認する書類の基準日なので、実行環境のローカル日付（日本時間）で固定します。
+        var importBaseDate = DateTime.Now.Date;
         if (graph.AllDocuments.Count > MaximumDocumentCount)
         {
             throw new InvalidDataException($"書類件数が上限{MaximumDocumentCount:N0}件を超えています。");
@@ -351,8 +355,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             string? imageAttachmentsPath = null;
             await WriteAndVerifyAsync(customersCsvPath, BuildCustomersCsv(customerRows), cancellationToken);
             await WriteAndVerifyAsync(vehiclesCsvPath, BuildVehiclesCsv(vehicleRows), cancellationToken);
-            await WriteAndVerifyAsync(salesCsvPath, BuildSalesCsv(finalDocuments.Where(document => document.Document.Kind == "販売書類")), cancellationToken);
-            await WriteAndVerifyAsync(maintenanceCsvPath, BuildMaintenanceCsv(finalDocuments.Where(document => document.Document.Kind == "整備書類")), cancellationToken);
+            await WriteAndVerifyAsync(salesCsvPath, BuildSalesCsv(finalDocuments.Where(document => document.Document.Kind == "販売書類"), importBaseDate), cancellationToken);
+            await WriteAndVerifyAsync(maintenanceCsvPath, BuildMaintenanceCsv(finalDocuments.Where(document => document.Document.Kind == "整備書類"), importBaseDate), cancellationToken);
             var linksDocument = new DocumentLinksDocument(
                 1,
                 "abacus-export-import-document-links",
@@ -488,6 +492,19 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 warnings.Add($"ABACUSで金額が未設定の{amountDefaultedDocumentCount:N0}件は、小計・合計を0として登録用CSVへ出力しています。元データに金額がないことは備考へ記録しています。");
             }
+            var statusDateWarningCount = finalDocuments.Count(document =>
+                !DateTime.TryParseExact(GetStatusDate(document), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
+            if (statusDateWarningCount > 0)
+            {
+                warnings.Add($"書類日付が空欄または不正な{statusDateWarningCount:N0}件は、状態を下書きとして出力しました。");
+            }
+            var classificationWarningCount = finalDocuments.Count(document =>
+                !string.IsNullOrWhiteSpace(document.Document.ClassificationWarning) ||
+                (document.Document.Kind == "整備書類" && AbacusDocumentClassification.NormalizeMaintenanceCategory(document.Document.MaintenanceCategory).Warning is not null));
+            if (classificationWarningCount > 0)
+            {
+                warnings.Add($"書類種別・入庫区分を正規化した際の警告対象は{classificationWarningCount:N0}件です。原文と警告を明細詳細JSONへ保存しています。");
+            }
             warnings.Add($"Gate 19明細: 対応付け済み{detailMappedCount:N0}件 / 要確認{detailReviewCount:N0}件 / 未対応{detailUnsupportedCount:N0}件 / 除外行{detailExcludedRowCount:N0}件 / 金額のみ行{amountOnlyDetailRowCount:N0}件。");
             if (explicitExcludedCustomerIds.Count > 0)
             {
@@ -500,6 +517,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 "registration-preview",
                 DateTime.UtcNow,
                 new OutputSource(sourceRoot, sourceManifestSha256),
+                importBaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 new OutputSummary(
                     customerRows.Length,
                     vehicleRows.Length,
@@ -891,34 +909,49 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static byte[] BuildSalesCsv(IEnumerable<FinalDocument> documents)
+    private static byte[] BuildSalesCsv(IEnumerable<FinalDocument> documents, DateTime importBaseDate)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, ["書類ID", "書類番号", "書類種別", "ステータス", "顧客名", "車名", "登録番号", "発行日", "支払期限", "税率", "小計", "消費税", "合計", "明細", "備考", "明細詳細"]);
         foreach (var document in documents)
         {
-            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: false));
+            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: false, importBaseDate));
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static byte[] BuildMaintenanceCsv(IEnumerable<FinalDocument> documents)
+    private static byte[] BuildMaintenanceCsv(IEnumerable<FinalDocument> documents, DateTime importBaseDate)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, ["書類ID", "書類番号", "書類種別", "入庫区分", "ステータス", "顧客名", "車名", "登録番号", "入庫日", "出庫予定日", "支払期限", "税率", "小計", "消費税", "合計", "明細", "備考", "明細詳細"]);
         foreach (var document in documents)
         {
-            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: true));
+            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: true, importBaseDate));
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static IReadOnlyList<string> BuildDocumentFields(FinalDocument finalDocument, bool isMaintenance)
+    private static IReadOnlyList<string> BuildDocumentFields(FinalDocument finalDocument, bool isMaintenance, DateTime importBaseDate)
     {
         var document = finalDocument.Document;
         var detail = ParseDetailJson(document.DetailsJson);
+        var rawDocumentType = string.IsNullOrWhiteSpace(detail?.RawDocumentType)
+            ? document.DocumentType
+            : detail.RawDocumentType!;
+        var documentTypeClassification = AbacusDocumentClassification.NormalizeDocumentType(
+            rawDocumentType,
+            isMaintenance ? "整備請求書" : "請求書");
+        var documentType = isMaintenance
+            ? documentTypeClassification.Value == "見積書" ? "整備見積書" : "整備請求書"
+            : documentTypeClassification.Value;
+        var rawMaintenanceCategory = isMaintenance
+            ? (string.IsNullOrWhiteSpace(detail?.RawMaintenanceCategory) ? document.MaintenanceCategory : detail.RawMaintenanceCategory!)
+            : "";
+        var categoryClassification = isMaintenance
+            ? AbacusDocumentClassification.NormalizeMaintenanceCategory(rawMaintenanceCategory)
+            : null;
         var vehicleName = finalDocument.Vehicle?.VehicleName ?? "";
         var registrationNumber = finalDocument.Vehicle?.RegistrationNumber ?? "";
         var amountWasMissing = string.IsNullOrWhiteSpace(document.TotalAmount);
@@ -947,20 +980,31 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             ? document.DocumentDate
             : document.MaintenanceIntakeDate;
         var maintenanceCompletionDate = document.MaintenanceCompletionDate;
+        var statusClassification = AbacusDocumentClassification.CalculateStatus(
+            GetStatusDate(finalDocument, maintenanceIntakeDate, maintenanceCompletionDate),
+            importBaseDate);
         var originalNumberMemo = string.Equals(finalDocument.ImportDocumentNumber, document.DocumentNumber, StringComparison.Ordinal)
             ? ""
             : $" 原書類番号={document.DocumentNumber};";
         var missingAmountMemo = amountWasMissing ? " 金額未設定（小計・合計を0として登録）;" : "";
+        var classificationWarnings = new[]
+        {
+            detail?.ClassificationWarning,
+            document.ClassificationWarning,
+            documentTypeClassification.Warning,
+            categoryClassification?.Warning,
+            statusClassification.Warning,
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
         var memo = Truncate(
-            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 候補ID={finalDocument.SourceCandidateId}; 紐づけ方法={finalDocument.LinkMethod}; 根拠={finalDocument.LinkReason}; 元顧客名={document.CustomerName};{originalNumberMemo}{missingAmountMemo} " +
+            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 候補ID={finalDocument.SourceCandidateId}; 紐づけ方法={finalDocument.LinkMethod}; 根拠={finalDocument.LinkReason}; 元顧客名={document.CustomerName}; 書類種別原文={rawDocumentType}; 入庫区分原文={rawMaintenanceCategory}; 状態基準日={importBaseDate:yyyy-MM-dd}; 状態判定={statusClassification.Value};{(classificationWarnings.Length > 0 ? $" 警告={string.Join(" / ", classificationWarnings)};" : "")}{originalNumberMemo}{missingAmountMemo} " +
             (finalDocument.Vehicle is null ? "車両情報なし（顧客直結の特例）" : $"車両ID={finalDocument.Vehicle.VehicleId}"));
         return isMaintenance
             ? [
                 finalDocument.DocumentId,
                 finalDocument.ImportDocumentNumber,
-                "整備請求書",
-                "一般整備",
-                "下書き",
+                documentType,
+                categoryClassification!.Value,
+                statusClassification.Value,
                 finalDocument.Group.CustomerName,
                 vehicleName,
                 registrationNumber,
@@ -978,8 +1022,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             : [
                 finalDocument.DocumentId,
                 finalDocument.ImportDocumentNumber,
-                "請求書",
-                "下書き",
+                documentType,
+                statusClassification.Value,
                 finalDocument.Group.CustomerName,
                 vehicleName,
                 registrationNumber,
@@ -994,6 +1038,19 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 document.DetailsJson,
             ];
     }
+
+    private static string GetStatusDate(FinalDocument finalDocument) =>
+        GetStatusDate(
+            finalDocument,
+            finalDocument.Document.Kind == "整備書類" && string.IsNullOrWhiteSpace(finalDocument.Document.MaintenanceIntakeDate)
+                ? finalDocument.Document.DocumentDate
+                : finalDocument.Document.MaintenanceIntakeDate,
+            finalDocument.Document.MaintenanceCompletionDate);
+
+    private static string GetStatusDate(FinalDocument finalDocument, string? maintenanceIntakeDate, string? maintenanceCompletionDate) =>
+        finalDocument.Document.Kind == "整備書類"
+            ? (!string.IsNullOrWhiteSpace(maintenanceIntakeDate) ? maintenanceIntakeDate : maintenanceCompletionDate) ?? ""
+            : finalDocument.Document.DocumentDate;
 
     private static long ParseAmount(string value) =>
         long.TryParse(value.Trim().Replace(",", "", StringComparison.Ordinal), NumberStyles.Integer, CultureInfo.InvariantCulture, out var amount)
@@ -1505,7 +1562,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
         await WriteAndVerifyAsync(path, bytes, cancellationToken);
         var actual = JsonSerializer.Deserialize<OutputManifest>(await File.ReadAllBytesAsync(path, cancellationToken), JsonOptions);
-        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.DataFiles.Count != expected.DataFiles.Count || actual.ImageFiles.Count != expected.ImageFiles.Count || actual.Summary.ImageCount != expected.Summary.ImageCount)
+        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.ImportBaseDate != expected.ImportBaseDate || actual.DataFiles.Count != expected.DataFiles.Count || actual.ImageFiles.Count != expected.ImageFiles.Count || actual.Summary.ImageCount != expected.Summary.ImageCount)
         {
             throw new InvalidDataException("作成したグラフ確定マニフェストの再読込検証に失敗しました。");
         }
@@ -1576,6 +1633,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string Status,
         DateTime CreatedAtUtc,
         OutputSource Source,
+        string ImportBaseDate,
         OutputSummary Summary,
         IReadOnlyList<OutputFile> DataFiles,
         IReadOnlyList<OutputFile> ImageFiles,

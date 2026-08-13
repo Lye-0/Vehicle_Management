@@ -95,6 +95,7 @@ type GraphFinalManifest = {
   version?: unknown
   kind?: unknown
   status?: unknown
+  importBaseDate?: unknown
   summary?: Record<string, unknown>
   dataFiles?: unknown
   imageFiles?: unknown
@@ -168,6 +169,9 @@ type AbacusDetailPayload = {
   amountOnlyRowCount: number
   matchStatus: 'matched' | 'review' | 'unmatched'
   warning: string
+  rawDocumentType: string | null
+  rawMaintenanceCategory: string | null
+  classificationWarning: string | null
 }
 
 type AbacusDetailReport = {
@@ -200,6 +204,9 @@ type FinalSalesRow = {
   detailPayload: AbacusDetailPayload | null
   detailReport: AbacusDetailReport | null
   amountDefaulted: boolean
+  statusWarning: string | null
+  statusBaseDate: string | null
+  classificationWarning: string | null
 }
 
 type FinalMaintenanceRow = {
@@ -225,6 +232,9 @@ type FinalMaintenanceRow = {
   detailPayload: AbacusDetailPayload | null
   detailReport: AbacusDetailReport | null
   amountDefaulted: boolean
+  statusWarning: string | null
+  statusBaseDate: string | null
+  classificationWarning: string | null
 }
 
 export async function handleAbacusRegistrationRoutes(request: Request, env: Env): Promise<Response | null> {
@@ -318,8 +328,9 @@ async function previewRegistration(request: Request, env: Env, database: ReturnT
   const customerRows = await normalizeFinalCustomerNumbers(parseFinalCustomers(await decodeUtf8(files.customers.bytes)))
   const vehicleRows = parseFinalVehicles(await decodeUtf8(files.vehicles.bytes), customerRows)
   validateVehicleCounts(customerRows, vehicleRows)
-  const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes))
-  const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes))
+  const importBaseDate = parseImportBaseDate(manifest)
+  const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes), importBaseDate)
+  const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes), importBaseDate)
   const links = parseFinalDocumentLinks(await decodeUtf8(files.links.bytes))
   const imageAttachments = files.imageAttachments
     ? parseGraphFinalImageAttachments(await decodeUtf8(files.imageAttachments.bytes), files.imageDescriptors)
@@ -334,6 +345,7 @@ async function previewRegistration(request: Request, env: Env, database: ReturnT
   const normalizedLinks = { documents: normalizedDocuments.links, excludedDocumentKeys: links.excludedDocumentKeys }
   validateFinalPackage(manifest, customerRows, vehicleRows, normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks)
   const detailSummary = summarizeAbacusDetails(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows)
+  const classificationSummary = summarizeImportedClassification(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows)
   if (manifest.summary?.imageCount !== undefined && manifest.summary.imageCount !== imageAttachments.length) throw new HttpError(409, `マニフェストの画像件数が一致しません: ${manifest.summary.imageCount} / ${imageAttachments.length}`)
   return jsonResponse({
     status: 'preview',
@@ -350,6 +362,10 @@ async function previewRegistration(request: Request, env: Env, database: ReturnT
     abacusDetailExcludedRowCount: detailSummary.excludedRowCount,
     abacusAmountOnlyRowCount: detailSummary.amountOnlyRowCount,
     abacusDetailMismatchDocumentCount: detailSummary.mismatchDocumentCount,
+    importedCompletedDocumentCount: classificationSummary.completedDocumentCount,
+    importedDraftDocumentCount: classificationSummary.draftDocumentCount,
+    importedDateWarningDocumentCount: classificationSummary.dateWarningDocumentCount,
+    importedClassificationWarningDocumentCount: classificationSummary.classificationWarningDocumentCount,
     imageCount: imageAttachments.length,
     checkedReadyFileCount: readyEnvelope.checkedReadyFileCount,
     errors: [],
@@ -368,8 +384,9 @@ async function commitGraphFinalRegistration(
   const customerRows = await normalizeFinalCustomerNumbers(parseFinalCustomers(await decodeUtf8(files.customers.bytes)))
   const vehicleRows = parseFinalVehicles(await decodeUtf8(files.vehicles.bytes), customerRows)
   validateVehicleCounts(customerRows, vehicleRows)
-  const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes))
-  const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes))
+  const importBaseDate = parseImportBaseDate(manifest)
+  const salesRows = parseFinalSales(await decodeUtf8(files.sales.bytes), importBaseDate)
+  const maintenanceRows = parseFinalMaintenance(await decodeUtf8(files.maintenance.bytes), importBaseDate)
   const links = parseFinalDocumentLinks(await decodeUtf8(files.links.bytes))
   const imageAttachments = files.imageAttachments
     ? parseGraphFinalImageAttachments(await decodeUtf8(files.imageAttachments.bytes), files.imageDescriptors)
@@ -384,6 +401,7 @@ async function commitGraphFinalRegistration(
   const normalizedLinks = { documents: normalizedDocuments.links, excludedDocumentKeys: links.excludedDocumentKeys }
   validateFinalPackage(manifest, customerRows, vehicleRows, normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows, normalizedLinks)
   const detailSummary = summarizeAbacusDetails(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows)
+  const classificationSummary = summarizeImportedClassification(normalizedDocuments.salesRows, normalizedDocuments.maintenanceRows)
   if (manifest.summary && manifest.summary.imageCount !== undefined && manifest.summary.imageCount !== imageAttachments.length) throw new HttpError(409, `マニフェストの画像件数が一致しません: ${manifest.summary.imageCount} / ${imageAttachments.length}`)
 
   const existingRows = await validateExistingRows(database, organizationId, customerRows, vehicleRows)
@@ -420,6 +438,10 @@ async function commitGraphFinalRegistration(
     abacusDetailExcludedRowCount: detailSummary.excludedRowCount,
     abacusAmountOnlyRowCount: detailSummary.amountOnlyRowCount,
     abacusDetailMismatchDocumentCount: detailSummary.mismatchDocumentCount,
+    importedCompletedDocumentCount: classificationSummary.completedDocumentCount,
+    importedDraftDocumentCount: classificationSummary.draftDocumentCount,
+    importedDateWarningDocumentCount: classificationSummary.dateWarningDocumentCount,
+    importedClassificationWarningDocumentCount: classificationSummary.classificationWarningDocumentCount,
     imageCount: imageAttachments.length,
     customers: { imported: existingRows.newCustomerCount, updated: existingRows.existingCustomerCount },
     vehicles: { imported: existingRows.newVehicleCount, updated: existingRows.existingVehicleCount },
@@ -482,6 +504,7 @@ async function validateReadyEnvelope(formData: FormData, manifest: GraphFinalMan
   }
   if (packageManifest.version !== 1 || packageManifest.kind !== 'abacus-import' || packageManifest.status !== 'ready' || packageManifest.readyPath !== 'ready' || packageManifest.readyManifest !== 'ready/manifest.json' || packageManifest.imageAcquisitionMethod !== 'fp5-vehicle-record' || typeof packageManifest.packageId !== 'string' || !packageManifest.packageId) throw new HttpError(400, 'abacus-import.jsonの完成状態または画像取得方式が不正です。')
   if (readyManifest.version !== 1 || readyManifest.kind !== 'abacus-import-ready' || readyManifest.status !== 'ready' || readyManifest.packageId !== packageManifest.packageId || readyManifest.imageAcquisitionMethod !== 'fp5-vehicle-record' || !Array.isArray(readyManifest.files) || !readyManifest.summary || typeof readyManifest.summary !== 'object') throw new HttpError(400, 'ready/manifest.jsonの完成状態が不正です。')
+  if (manifest.importBaseDate !== undefined && readyManifest.importBaseDate !== manifest.importBaseDate) throw new HttpError(409, 'readyマニフェストと確定パッケージのインポート基準日が一致しません。')
 
   const readyDescriptors = parseReadyEnvelopeDescriptors(readyManifest.files)
   const descriptorsByPath = new Map(readyDescriptors.map((descriptor) => [descriptor.path, descriptor]))
@@ -633,7 +656,7 @@ function parseFinalVehicles(text: string, customersRows: CustomerRegistrationRow
   })
 }
 
-function parseFinalSales(text: string) {
+function parseFinalSales(text: string, importBaseDate: string | null) {
   const rows = parseFinalRows(text, finalSalesHeaders, 'sales.csv', maximumRows, true)
   const ids = new Set<string>()
   return rows.map((row, index) => {
@@ -641,13 +664,16 @@ function parseFinalSales(text: string) {
     const number = requiredText(row[1], '販売書類番号')
     if (ids.has(id)) throw new HttpError(400, `sales.csv ${index + 2}行目の書類IDが重複しています。`)
     ids.add(id)
+    const issuedDate = parseImportedDocumentDate(row[7], '発行日')
     const detailPayload = parseAbacusDetailPayload(row[15])
     const amounts = applyAbacusDetailAmounts(normalizeFinalDocumentAmounts(row[10], row[11], row[12], row[15]), detailPayload)
-    return { id, number, type: requiredText(row[2], '書類種別'), status: normalizeImportedStatus(row[3]), customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: requiredDate(row[7], '発行日'), dueDate: optionalDate(row[8], '支払期限'), taxRate: detailPayload?.abacusTaxRate ?? nonNegativeInteger(row[9], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考') } satisfies FinalSalesRow
+    const status = resolveImportedStatus(row[3], issuedDate.value, importBaseDate, `sales.csv ${index + 2}行目`)
+    const type = normalizeImportedDocumentType(row[2], '販売')
+    return { id, number, type, status: status.value, customerName: requiredText(row[4], '顧客名'), vehicleName: row[5].trim(), registrationNumber: row[6].trim(), issuedAt: issuedDate.value ?? '1970-01-01', dueDate: optionalDate(row[8], '支払期限'), taxRate: detailPayload?.abacusTaxRate ?? nonNegativeInteger(row[9], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[13], '明細') ?? '', note: nullableText(row[14], '備考'), statusWarning: status.warning, statusBaseDate: importBaseDate, classificationWarning: detailPayload?.classificationWarning ?? null } satisfies FinalSalesRow
   })
 }
 
-function parseFinalMaintenance(text: string) {
+function parseFinalMaintenance(text: string, importBaseDate: string | null) {
   const rows = parseFinalRows(text, finalMaintenanceHeaders, 'maintenance.csv', maximumRows, true)
   const ids = new Set<string>()
   return rows.map((row, index) => {
@@ -655,11 +681,18 @@ function parseFinalMaintenance(text: string) {
     const number = requiredText(row[1], '整備書類番号')
     if (ids.has(id)) throw new HttpError(400, `maintenance.csv ${index + 2}行目の書類IDが重複しています。`)
     ids.add(id)
-    const intakeDate = optionalDate(row[8], '入庫日')
+    const intakeDate = parseImportedDocumentDate(row[8], '入庫日')
     const detailPayload = parseAbacusDetailPayload(row[17])
     const amounts = applyAbacusDetailAmounts(normalizeFinalDocumentAmounts(row[12], row[13], row[14], row[17]), detailPayload)
-    const plannedReleaseDate = optionalDate(row[9], '出庫予定日')
-    return { id, number, type: requiredText(row[2], '書類種別'), category: normalizeMaintenanceCategory(row[3]), status: normalizeImportedStatus(row[4]), customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate, plannedReleaseDate, dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate ?? plannedReleaseDate ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考') } satisfies FinalMaintenanceRow
+    const plannedReleaseDate = parseImportedDocumentDate(row[9], '出庫予定日')
+    const category = normalizeImportedMaintenanceCategory(row[3])
+    // 入庫日欄に値がある場合は、その値自体を書類日付として扱います。
+    // 不正値を出庫予定日に置き換えると、補助アプリ側の「不正日付は下書き」判定とずれるためです。
+    const statusDate = row[8].trim() ? intakeDate.value : plannedReleaseDate.value
+    const status = resolveImportedStatus(row[4], statusDate, importBaseDate, `maintenance.csv ${index + 2}行目`)
+    const type = normalizeImportedDocumentType(row[2], '整備')
+    const classificationWarning = [detailPayload?.classificationWarning, category.warning, intakeDate.warning, plannedReleaseDate.warning].filter(Boolean).join(' / ') || null
+    return { id, number, type, category: category.value, status: status.value, customerName: requiredText(row[5], '顧客名'), vehicleName: row[6].trim(), registrationNumber: row[7].trim(), intakeDate: intakeDate.value, plannedReleaseDate: plannedReleaseDate.value, dueDate: optionalDate(row[10], '支払期限'), issuedAt: intakeDate.value ?? plannedReleaseDate.value ?? '1970-01-01', taxRate: nonNegativeInteger(row[11], '税率'), ...amounts, detailPayload, itemDescription: nullableText(row[15], '明細') ?? '', note: nullableText(row[16], '備考'), statusWarning: status.warning, statusBaseDate: importBaseDate, classificationWarning } satisfies FinalMaintenanceRow
   })
 }
 
@@ -729,6 +762,9 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
   const documentNumber = jsonText(record.documentNumber, 200)
   if (matchStatus === 'matched' && !documentNumber) throw new HttpError(400, 'ABACUS明細詳細JSONの書類番号がありません。')
   const detailAmount = nullableJsonInteger(record.detailAmount) ?? lines.reduce((sum, line) => sum + (line.partAmount ?? 0) + (line.technicalFees ?? 0), 0)
+  const rawDocumentType = nullableJsonText(record.rawDocumentType, 100)
+  const rawMaintenanceCategory = nullableJsonText(record.rawMaintenanceCategory, 200)
+  const classificationWarning = nullableJsonText(record.classificationWarning, 500)
   return {
     version: 1,
     kind: 'abacus-detail-lines',
@@ -752,6 +788,9 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
     amountOnlyRowCount: Math.max(0, integerValue(record.amountOnlyRowCount) ?? lines.filter((line) => !line.description && (line.partAmount !== null || line.unitPrice !== null || line.technicalFees !== null)).length),
     matchStatus,
     warning: jsonText(record.warning, 500),
+    rawDocumentType,
+    rawMaintenanceCategory,
+    classificationWarning,
   }
 }
 
@@ -1040,7 +1079,7 @@ async function validateExistingFinalDocuments(database: ReturnType<typeof create
     const sameNumber = existingSalesByNumber.find((candidate) => candidate.number === item.row.number)
     if (sameNumber && sameNumber.id !== item.row.id) throw new HttpError(409, `販売書類番号が既存書類と競合します: ${item.row.number}`)
     if (existing) {
-      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存販売書類の内容が登録前パッケージと異なります: ${item.row.id}`)
+      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.type !== item.row.type || existing.status !== item.row.status || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存販売書類の内容が登録前パッケージと異なります: ${item.row.id}`)
       existingDocumentCount += 1
     }
   }
@@ -1050,7 +1089,7 @@ async function validateExistingFinalDocuments(database: ReturnType<typeof create
     const sameNumber = existingMaintenanceByNumber.find((candidate) => candidate.number === item.row.number)
     if (sameNumber && sameNumber.id !== item.row.id) throw new HttpError(409, `整備書類番号が既存書類と競合します: ${item.row.number}`)
     if (existing) {
-      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存整備書類の内容が登録前パッケージと異なります: ${item.row.id}`)
+      if (existing.customerId !== item.link.customerId || existing.vehicleId !== item.link.vehicleId || existing.number !== item.row.number || existing.type !== item.row.type || existing.category !== item.row.category || existing.status !== item.row.status || existing.issuedAt !== item.row.issuedAt || existing.subtotal !== item.row.subtotal || existing.tax !== item.row.tax || existing.total !== item.row.total) throw new HttpError(409, `既存整備書類の内容が登録前パッケージと異なります: ${item.row.id}`)
       existingDocumentCount += 1
     }
   }
@@ -1090,6 +1129,7 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
 }
 
 function buildAbacusDetailsEnvelope(link: GraphFinalDocumentLink, row: FinalSalesRow | FinalMaintenanceRow) {
+  const isMaintenance = 'category' in row
   return {
     version: 2,
     abacusImport: {
@@ -1105,6 +1145,16 @@ function buildAbacusDetailsEnvelope(link: GraphFinalDocumentLink, row: FinalSale
     sourceDetails: row.details,
     abacusDetails: row.detailPayload,
     abacusDetailReport: row.detailReport,
+    abacusClassification: {
+      rawDocumentType: row.detailPayload?.rawDocumentType ?? row.type,
+      documentType: row.type,
+      rawMaintenanceCategory: isMaintenance ? (row.detailPayload?.rawMaintenanceCategory ?? row.category) : null,
+      maintenanceCategory: isMaintenance ? row.category : null,
+      status: row.status,
+      statusBaseDate: row.statusBaseDate,
+      statusWarning: row.statusWarning,
+      classificationWarning: row.classificationWarning,
+    },
     abacusAmounts: { subtotal: row.subtotal, tax: row.tax, total: row.total },
     amountDefaulted: row.amountDefaulted,
     amountWarning: row.amountDefaulted ? 'ABACUS金額未設定（小計・合計を補完して登録）' : null,
@@ -1615,10 +1665,69 @@ function normalizeImportedStatus(value: string) {
   return normalized
 }
 
+function parseImportBaseDate(manifest: GraphFinalManifest) {
+  if (manifest.importBaseDate === undefined || manifest.importBaseDate === null) return null
+  const value = textValue(manifest.importBaseDate)
+  const normalized = normalizeCalendarDate(value)
+  if (!normalized) throw new HttpError(400, 'manifest.jsonのインポート基準日が不正です。')
+  return normalized
+}
+
+function parseImportedDocumentDate(value: string, label: string) {
+  const raw = value.trim()
+  if (!raw) return { value: null as string | null, warning: null as string | null }
+  const normalized = normalizeCalendarDate(raw)
+  return normalized
+    ? { value: normalized, warning: null as string | null }
+    : { value: null as string | null, warning: `${label}「${raw.slice(0, 80)}」が不正です。` }
+}
+
+function resolveImportedStatus(value: string, documentDate: string | null, importBaseDate: string | null, location: string) {
+  const sourceStatus = normalizeImportedStatus(value)
+  if (!importBaseDate) return { value: sourceStatus, warning: null as string | null }
+  const calculated = calculateImportedStatus(documentDate, importBaseDate)
+  if (sourceStatus !== calculated.value) throw new HttpError(409, `${location}のステータスがインポート基準日から計算した値と一致しません。`)
+  return calculated
+}
+
+function calculateImportedStatus(documentDate: string | null, importBaseDate: string) {
+  if (!documentDate) return { value: '下書き', warning: '書類日付が空欄または不正なため「下書き」として扱いました。' }
+  const documentDateValue = new Date(`${documentDate}T00:00:00Z`)
+  const boundary = new Date(`${importBaseDate}T00:00:00Z`)
+  boundary.setUTCMonth(boundary.getUTCMonth() - 1)
+  return {
+    value: documentDateValue <= boundary ? '完了' : '下書き',
+    warning: null as string | null,
+  }
+}
+
+function summarizeImportedClassification(salesRows: FinalSalesRow[], maintenanceRows: FinalMaintenanceRow[]) {
+  const rows = [...salesRows, ...maintenanceRows]
+  return {
+    completedDocumentCount: rows.filter((row) => row.status === '完了').length,
+    draftDocumentCount: rows.filter((row) => row.status === '下書き').length,
+    dateWarningDocumentCount: rows.filter((row) => Boolean(row.statusWarning)).length,
+    classificationWarningDocumentCount: rows.filter((row) => Boolean(row.classificationWarning)).length,
+  }
+}
+
+function normalizeImportedDocumentType(value: string, kind: '販売' | '整備') {
+  const normalized = requiredText(value, '書類種別')
+  if (normalized.includes('見積')) return kind === '整備' ? '整備見積書' : '見積書'
+  if (normalized.includes('請求')) return kind === '整備' ? '整備請求書' : '請求書'
+  return kind === '整備' ? '整備請求書' : '請求書'
+}
+
+function normalizeImportedMaintenanceCategory(value: string) {
+  const normalized = requiredText(value, '入庫区分').normalize('NFKC')
+  if (normalized.includes('車検')) return { value: '車検', warning: null as string | null }
+  if (normalized.includes('板金') || normalized.includes('鈑金') || normalized.includes('事故') || normalized.includes('保険修理')) return { value: '板金', warning: null as string | null }
+  if (normalized === '一般整備' || normalized.includes('点検')) return { value: '一般整備', warning: null as string | null }
+  return { value: '一般整備', warning: `ABACUSの入庫区分「${normalized.slice(0, 100)}」を「一般整備」として扱いました。` }
+}
+
 function normalizeMaintenanceCategory(value: string) {
-  const normalized = requiredText(value, '入庫区分')
-  if (normalized === '車検' || normalized === '板金' || normalized === '一般整備') return normalized
-  return '一般整備'
+  return normalizeImportedMaintenanceCategory(value).value
 }
 
 function requiredSha256(value: string, label: string) {
