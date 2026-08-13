@@ -809,7 +809,7 @@
 .sales-detail-title .abacus-detail-summary-row span { padding: 5px; }
 .maintenance-detail-title .abacus-detail-notice { width: 100%; max-width: none; margin: 10px 0 0; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary),
-.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) { grid-template-columns: minmax(250px, 0.85fr) minmax(0, 1.15fr); column-gap: 12px; align-items: start; }
+.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; align-items: start; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .sales-detail-badges,
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > h2,
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > small,
@@ -817,9 +817,10 @@
 .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > h2,
 .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > small { grid-column: 1 / -1; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .document-abacus-provenance,
-.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .document-abacus-provenance { grid-column: 1; }
+.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .document-abacus-provenance { grid-column: 1; width: 100%; max-width: none; min-width: 0; box-sizing: border-box; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .abacus-detail-summary,
-.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .abacus-detail-notice { grid-column: 2; }
+.maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .abacus-detail-notice { grid-column: 2; min-width: 0; }
+.sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .abacus-detail-summary { grid-column: 2; min-width: 0; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) .abacus-detail-summary-row { grid-template-columns: 28px minmax(90px, 2.4fr) 42px 40px 62px 70px 62px minmax(62px, 1.3fr); min-width: 0; }
 .sales-estimate-edit-details > summary { display: flex; align-items: center; gap: 6px; padding: 9px 11px; color: #123f8c; cursor: pointer; font-size: 11px; font-weight: 800; }
 .sales-estimate-edit-details[open] > summary { border-bottom: 1px solid #d5dfeb; }
@@ -2331,6 +2332,12 @@
   .inspection-date-filter-reset { width: 100%; margin-left: 0; text-align: right; }
   .sales-detail-header, .maintenance-detail-header, .payment-detail-header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }
   .sales-detail-title, .maintenance-detail-title, .payment-detail-title { width: 100%; flex: 0 1 auto; }
+  .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary),
+  .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .document-abacus-provenance,
+  .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .document-abacus-provenance,
+  .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .abacus-detail-summary,
+  .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .abacus-detail-notice { grid-column: 1; }
   .sales-detail-actions, .maintenance-detail-actions, .payment-detail-actions { width: 100%; }
   .sales-detail-actions .button, .maintenance-detail-actions .button, .payment-detail-actions .button { flex: 1 1 140px; }
   .sales-document-tabs, .maintenance-document-tabs { padding-left: 18px; padding-right: 18px; }
