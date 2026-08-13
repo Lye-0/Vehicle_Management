@@ -822,6 +822,10 @@
 .maintenance-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-notice) > .abacus-detail-notice { grid-column: 2; min-width: 0; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) > .abacus-detail-summary { grid-column: 2; min-width: 0; }
 .sales-detail-title > div:has(> .document-abacus-provenance):has(> .abacus-detail-summary) .abacus-detail-summary-row { grid-template-columns: 28px minmax(90px, 2.4fr) 42px 40px 62px 70px 62px minmax(62px, 1.3fr); min-width: 0; }
+.sales-detail-header:has(.abacus-detail-summary),
+.maintenance-detail-header:has(.abacus-detail-notice) { display: grid; grid-template-columns: minmax(0, 1fr); }
+.sales-detail-header:has(.abacus-detail-summary) > .sales-detail-actions,
+.maintenance-detail-header:has(.abacus-detail-notice) > .maintenance-detail-actions { grid-column: 1; justify-content: flex-end; }
 .sales-estimate-edit-details > summary { display: flex; align-items: center; gap: 6px; padding: 9px 11px; color: #123f8c; cursor: pointer; font-size: 11px; font-weight: 800; }
 .sales-estimate-edit-details[open] > summary { border-bottom: 1px solid #d5dfeb; }
 .sales-estimate-edit-details .sales-estimate-items-table { margin: 10px; }
