@@ -403,18 +403,23 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
       freeItem3: vehicle.freeItem3,
     },
     sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
-    maintenance: maintenance.map((document) => ({
-      id: document.id,
-      number: document.number,
-      type: document.type,
-      category: document.category,
-      status: document.status,
-      issuedAt: document.issuedAt,
-      intakeDate: document.intakeDate,
-      completionDate: document.completionDate,
-      total: document.total,
-      recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? vehicle.mileage,
-    })),
+    maintenance: maintenance.map((document) => {
+      const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+      return {
+        id: document.id,
+        number: document.number,
+        type: document.type,
+        category: document.category,
+        status: document.status,
+        issuedAt: document.issuedAt,
+        intakeDate: document.intakeDate,
+        completionDate: document.completionDate,
+        total: document.total,
+        // ABACUS書類に走行距離の入力がない場合、現在の車両マスタ値を履歴へ流用しない。
+        // 後日入力した走行距離によって、過去書類の記録まで変わらないようにする。
+        recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? (abacusImport ? null : vehicle.mileage),
+      }
+    }),
     inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
     payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
     attachments: files.map(serializeFile),
