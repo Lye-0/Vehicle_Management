@@ -1,3 +1,5 @@
+import { ABACUS_LINK_METHODS, type AbacusLinkMethod } from './abacusDocumentMetadata'
+
 export type GraphFinalFileDescriptor = {
   fileName: string
   sizeBytes: number
@@ -21,6 +23,9 @@ export type GraphFinalManifestDocument = {
   vehicleId?: string | null
   sourceLocation: string
   vehicleless: boolean
+  sourceCandidateId?: string
+  linkMethod?: AbacusLinkMethod
+  linkReason?: string
 }
 
 export type GraphFinalManifest = {
@@ -60,6 +65,9 @@ export type GraphFinalDocumentLink = {
   vehicleless: boolean
   sourceLocation: string
   warning: string
+  sourceCandidateId: string
+  linkMethod: AbacusLinkMethod
+  linkReason: string
 }
 
 export type GraphFinalImageAttachment = {
@@ -338,7 +346,7 @@ export async function validateAbacusImportPackage(selectedFiles: File[]): Promis
     imageFiles: descriptors.filter((descriptor) => descriptor.path.startsWith('images/')).map((descriptor) => ({ fileName: descriptor.path, sizeBytes: descriptor.sizeBytes, sha256: descriptor.sha256 })),
     warnings: [],
     groups,
-    documents: links.map((link) => ({ documentKey: link.documentKey, documentId: link.documentId, kind: link.documentKind, customerId: link.customerId, vehicleId: link.vehicleId, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless })),
+    documents: links.map((link) => ({ documentKey: link.documentKey, documentId: link.documentId, kind: link.documentKind, customerId: link.customerId, vehicleId: link.vehicleId, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless, sourceCandidateId: link.sourceCandidateId, linkMethod: link.linkMethod, linkReason: link.linkReason })),
     excludedDocumentKeys,
   }
   // dataFilesのSHAは実ファイルから作り、合成manifest自体をAPI再検証可能にします。
@@ -494,13 +502,15 @@ function validateDocumentLinks(links: GraphFinalDocumentLink[], csvDocuments: Ma
   const keys = new Set<string>()
   const ids = new Set<string>()
   for (const [index, link] of links.entries()) {
-    if (!link.documentKey || !link.documentId || keys.has(link.documentKey) || ids.has(link.documentId) || !customerIds.has(link.customerId) || !link.customerName || !link.sourceLocation || typeof link.vehicleless !== 'boolean') throw validationError(`document-links.jsonの${index + 1}件目が不正です。`)
+    if (!link.documentKey || !link.documentId || keys.has(link.documentKey) || ids.has(link.documentId) || !customerIds.has(link.customerId) || !link.customerName || !link.sourceLocation || !link.sourceCandidateId || !link.linkReason || !ABACUS_LINK_METHODS.includes(link.linkMethod) || typeof link.vehicleless !== 'boolean') throw validationError(`document-links.jsonの${index + 1}件目が不正です。`)
     const csv = csvDocuments.get(link.documentId)
     if (!csv || csv.kind !== link.documentKind || csv.documentNumber !== link.documentNumber || csv.customerName !== link.customerName || csv.vehicleName !== textValue(link.vehicleName)) throw validationError(`document-links.jsonの${index + 1}件目がCSVと一致しません。`)
     const vehicleId = textValue(link.vehicleId)
     const vehicleless = link.vehicleless
     if (vehicleless && vehicleId) throw validationError(`車両なし書類にvehicleIdがあります: ${link.documentId}`)
     if (!vehicleless && !vehicleId) throw validationError(`車両あり書類にvehicleIdがありません: ${link.documentId}`)
+    if (link.linkMethod === 'manual-vehicle' && !vehicleId) throw validationError(`車両手動紐づけ書類にvehicleIdがありません: ${link.documentId}`)
+    if (link.linkMethod === 'manual-customer-only' && vehicleId) throw validationError(`顧客のみ手動紐づけ書類にvehicleIdがあります: ${link.documentId}`)
     if (vehicleId && !customerByVehicleId.has(vehicleId)) throw validationError(`存在しない車両IDが参照されています: ${vehicleId}`)
     if (vehicleId && customerByVehicleId.get(vehicleId) !== link.customerId) throw validationError(`書類と車両の顧客IDが一致しません: ${link.documentId}`)
     if (vehicleless !== (!csv.vehicleName && !csv.registrationNumber)) throw validationError(`車両なし判定とCSVの車両欄が一致しません: ${link.documentId}`)
@@ -529,7 +539,10 @@ function validateManifestDocuments(manifestDocuments: GraphFinalManifestDocument
   for (const [index, item] of manifestDocuments.entries()) {
     if (!item || typeof item.documentId !== 'string' || typeof item.documentKey !== 'string' || typeof item.kind !== 'string' || typeof item.customerId !== 'string' || typeof item.sourceLocation !== 'string' || typeof item.vehicleless !== 'boolean' || ids.has(item.documentId)) throw validationError(`マニフェストの書類${index + 1}件目が不正です。`)
     const link = linksById.get(item.documentId)
-    if (!link || link.documentKey !== item.documentKey || link.documentKind !== item.kind || link.customerId !== item.customerId || link.sourceLocation !== item.sourceLocation || link.vehicleless !== item.vehicleless || textValue(item.vehicleId) !== textValue(link.vehicleId)) throw validationError(`マニフェストの書類${index + 1}件目が対応表と一致しません。`)
+    const manifestLinkMethod = item.linkMethod || 'automatic'
+    const manifestSourceCandidateId = item.sourceCandidateId || item.documentKey
+    const manifestLinkReason = item.linkReason || '旧形式パッケージ（Gate17〜19）から互換読み込み'
+    if (!link || link.documentKey !== item.documentKey || link.documentKind !== item.kind || link.customerId !== item.customerId || link.sourceLocation !== item.sourceLocation || link.vehicleless !== item.vehicleless || textValue(item.vehicleId) !== textValue(link.vehicleId) || manifestLinkMethod !== link.linkMethod || manifestSourceCandidateId !== link.sourceCandidateId || manifestLinkReason !== link.linkReason) throw validationError(`マニフェストの書類${index + 1}件目が対応表と一致しません。`)
     ids.add(item.documentId)
   }
 }
@@ -569,8 +582,11 @@ function parseDocumentLinks(value: unknown) {
     const document = item as Record<string, unknown>
     const documentKind = textValue(document.documentKind)
     if (documentKind !== '販売書類' && documentKind !== '整備書類') throw validationError(`document-links.jsonの書類種別が不正です: ${index + 1}件目`)
+    const documentKey = textValue(document.documentKey)
+    const rawLinkMethod = textValue(document.linkMethod)
+    if (rawLinkMethod && !ABACUS_LINK_METHODS.includes(rawLinkMethod as AbacusLinkMethod)) throw validationError(`document-links.jsonの紐づけ方法が不正です: ${index + 1}件目`)
     return {
-      documentKey: textValue(document.documentKey),
+      documentKey,
       documentId: textValue(document.documentId),
       documentKind,
       documentNumber: textValue(document.documentNumber),
@@ -581,6 +597,9 @@ function parseDocumentLinks(value: unknown) {
       vehicleless: document.vehicleless === true,
       sourceLocation: textValue(document.sourceLocation),
       warning: textValue(document.warning),
+      sourceCandidateId: textValue(document.sourceCandidateId) || documentKey,
+      linkMethod: (rawLinkMethod || 'automatic') as AbacusLinkMethod,
+      linkReason: textValue(document.linkReason) || (rawLinkMethod ? 'ABACUS移行元の紐づけ判断' : '旧形式パッケージ（Gate17〜19）から互換読み込み'),
     } satisfies GraphFinalDocumentLink
   })
   return { documents, excludedDocumentKeys }

@@ -5,6 +5,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
 import { assertRequestContentLength, HttpError, jsonResponse, readFormData } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { ABACUS_LINK_METHODS, type AbacusLinkMethod } from '../lib/abacus-document-metadata'
 import { assertD1BatchStatementCount } from '../lib/resource-limits'
 import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey, isSafePathSegment } from '../lib/file-validation'
 import { createB2Storage } from '../storage/b2'
@@ -114,6 +115,9 @@ type GraphFinalDocumentLink = {
   vehicleless: boolean
   sourceLocation: string
   warning: string
+  sourceCandidateId: string
+  linkMethod: AbacusLinkMethod
+  linkReason: string
 }
 
 type AbacusDetailLine = {
@@ -893,8 +897,12 @@ function parseFinalDocumentLinks(text: string) {
     const row = item as Record<string, unknown>
     const documentKind = textValue(row.documentKind)
     if (documentKind !== '販売書類' && documentKind !== '整備書類') throw new HttpError(400, `document-links.json ${index + 1}件目の種別が不正です。`)
+    const documentKey = requiredText(textValue(row.documentKey), '書類キー')
+    const rawLinkMethod = textValue(row.linkMethod)
+    if (rawLinkMethod && !ABACUS_LINK_METHODS.includes(rawLinkMethod as AbacusLinkMethod)) throw new HttpError(400, `document-links.json ${index + 1}件目の紐づけ方法が不正です。`)
+    const linkMethod = (rawLinkMethod || 'automatic') as AbacusLinkMethod
     return {
-      documentKey: requiredText(textValue(row.documentKey), '書類キー'),
+      documentKey,
       documentId: requiredFinalIdentifier(textValue(row.documentId), '書類ID', documentKind === '販売書類' ? ['abacus-sales-'] : ['abacus-maintenance-']),
       documentKind,
       documentNumber: requiredText(textValue(row.documentNumber), '書類番号'),
@@ -905,6 +913,9 @@ function parseFinalDocumentLinks(text: string) {
       vehicleless: row.vehicleless === true,
       sourceLocation: requiredText(textValue(row.sourceLocation), '出典'),
       warning: nullableText(textValue(row.warning), '警告') ?? '',
+      sourceCandidateId: requiredText(textValue(row.sourceCandidateId) || documentKey, '元候補ID'),
+      linkMethod,
+      linkReason: requiredText(textValue(row.linkReason) || (rawLinkMethod ? 'ABACUS移行元の紐づけ判断' : '旧形式パッケージ（Gate17〜19）から互換読み込み'), '判断根拠'),
     } satisfies GraphFinalDocumentLink
   })
   const excludedDocumentKeys = document.excludedDocumentKeys.map((item) => requiredText(textValue(item), '除外書類キー'))
@@ -946,6 +957,10 @@ function validateFinalPackage(
     const csvRow = [...salesRows, ...maintenanceRows].find((row) => row.id === link.documentId)
     if (!csvRow || link.vehicleless !== (!csvRow.vehicleName && !csvRow.registrationNumber) || link.vehicleName !== (csvRow.vehicleName || null)) throw new HttpError(409, `車両なし判定とCSVの車両欄が一致しません: ${link.documentId}`)
     if (link.vehicleless !== !link.vehicleId) throw new HttpError(409, `車両なし判定と車両IDが一致しません: ${link.documentId}`)
+    if (!ABACUS_LINK_METHODS.includes(link.linkMethod)) throw new HttpError(409, `書類の紐づけ方法が不正です: ${link.documentId}`)
+    if (link.linkMethod === 'manual-vehicle' && !link.vehicleId) throw new HttpError(409, `車両手動紐づけ書類に車両IDがありません: ${link.documentId}`)
+    if (link.linkMethod === 'manual-customer-only' && link.vehicleId) throw new HttpError(409, `顧客のみ手動紐づけ書類に車両IDがあります: ${link.documentId}`)
+    if (!link.sourceCandidateId || !link.linkReason) throw new HttpError(409, `書類の紐づけ根拠がありません: ${link.documentId}`)
     if (link.vehicleId) {
       const vehicle = vehicleById.get(link.vehicleId)
       if (!vehicle || vehicle.customerId !== link.customerId) throw new HttpError(409, `書類対応表の車両と顧客が一致しません: ${link.documentId}`)
@@ -970,7 +985,10 @@ function validateFinalPackage(
     const row = item as Record<string, unknown>
     const id = textValue(row.documentId)
     const link = links.documents.find((candidate) => candidate.documentId === id)
-    if (!link || textValue(row.documentKey) !== link.documentKey || textValue(row.kind) !== link.documentKind || textValue(row.customerId) !== link.customerId || textValue(row.sourceLocation) !== link.sourceLocation || Boolean(row.vehicleless) !== link.vehicleless || textValue(row.vehicleId) !== (link.vehicleId ?? '')) throw new HttpError(409, `マニフェストと書類対応表が一致しません: ${id}`)
+    const manifestLinkMethod = textValue(row.linkMethod) || 'automatic'
+    const manifestSourceCandidateId = textValue(row.sourceCandidateId) || textValue(row.documentKey)
+    const manifestLinkReason = textValue(row.linkReason) || '旧形式パッケージ（Gate17〜19）から互換読み込み'
+    if (!link || textValue(row.documentKey) !== link.documentKey || textValue(row.kind) !== link.documentKind || textValue(row.customerId) !== link.customerId || textValue(row.sourceLocation) !== link.sourceLocation || Boolean(row.vehicleless) !== link.vehicleless || textValue(row.vehicleId) !== (link.vehicleId ?? '') || manifestLinkMethod !== link.linkMethod || manifestSourceCandidateId !== link.sourceCandidateId || manifestLinkReason !== link.linkReason) throw new HttpError(409, `マニフェストと書類対応表が一致しません: ${id}`)
     manifestDocumentIds.add(id)
   }
   if (manifestDocumentIds.size !== links.documents.length) throw new HttpError(409, 'マニフェストの書類IDが重複または不足しています。')
@@ -1074,7 +1092,16 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
 function buildAbacusDetailsEnvelope(link: GraphFinalDocumentLink, row: FinalSalesRow | FinalMaintenanceRow) {
   return {
     version: 2,
-    abacusImport: { documentKey: link.documentKey, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless },
+    abacusImport: {
+      documentKey: link.documentKey,
+      sourceCandidateId: link.sourceCandidateId,
+      sourceLocation: link.sourceLocation,
+      vehicleless: link.vehicleless,
+      linkedCustomerId: link.customerId,
+      linkedVehicleId: link.vehicleId,
+      linkMethod: link.linkMethod,
+      linkReason: link.linkReason,
+    },
     sourceDetails: row.details,
     abacusDetails: row.detailPayload,
     abacusDetailReport: row.detailReport,

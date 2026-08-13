@@ -100,6 +100,9 @@ public partial class MainWindow : Window
     // 車両情報を持たない書類を、顧客だけへ一時的に紐付ける状態です。
     // 値は顧客IDではなく統合グループキーを保持し、統合前後でも同じ顧客グループを指します。
     private readonly Dictionary<string, string> legacyGraphManualDocumentCustomerLinks = new(StringComparer.OrdinalIgnoreCase);
+    // 書類ごとの紐づけ方法と判断根拠を、作業状態から登録前パッケージへ引き継ぎます。
+    private readonly Dictionary<string, string> legacyGraphDocumentLinkMethods = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> legacyGraphDocumentLinkReasons = new(StringComparer.OrdinalIgnoreCase);
     // 書類の配置変更は画面上の一時状態としてのみ保持します。
     // 未接続はキャンバス上で確認中、トレイ移動済みはキャンバスから隠す状態です。
     private readonly HashSet<string> legacyGraphUnconnectedDocumentKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -1469,6 +1472,8 @@ public partial class MainWindow : Window
                 legacyExportCandidateGraphResult = graph;
                 legacyGraphManualDocumentLinks.Clear();
                 legacyGraphManualDocumentCustomerLinks.Clear();
+                legacyGraphDocumentLinkMethods.Clear();
+                legacyGraphDocumentLinkReasons.Clear();
                 legacyGraphUnconnectedDocumentKeys.Clear();
                 legacyGraphTrayDocumentKeys.Clear();
                 legacyGraphExcludedDocumentKeys.Clear();
@@ -2751,6 +2756,8 @@ public partial class MainWindow : Window
                 var isTrayDocument = IsLegacyGraphDocumentInTray(document);
                 var isCustomerDirectDocument = IsLegacyGraphCustomerDirectDocument(document);
                 var isManualCustomerDocument = legacyGraphManualDocumentCustomerLinks.ContainsKey(GetLegacyDocumentKey(document));
+                var linkMethod = GetLegacyGraphDocumentLinkMethod(document);
+                var linkReason = GetLegacyGraphDocumentLinkReason(document);
                 LegacyGraphInspectorStateText.Text = isUnconnectedDocument
                     ? "● 書類を選択中（未接続）"
                     : isTrayDocument
@@ -2768,20 +2775,22 @@ public partial class MainWindow : Window
                     ? "判定: 未接続（画面上の一時状態）\n車両ノードへ接続するか、書類カードを未確定トレイへ移動してください。"
                     : isTrayDocument
                         ? $"判定: 未確定トレイ\nインポート: {(legacyGraphExcludedDocumentKeys.Contains(GetLegacyDocumentKey(document)) ? "除外確定" : "インポート確定時に除外")}\n候補車両: {document.CandidateSummary}"
-                        : isManualCustomerDocument
-                            ? "判定: 顧客へ手動仮紐付け（車両なし）\nキャンバス承認前の画面上の一時状態です。"
+                    : isManualCustomerDocument
+                            ? $"判定: 顧客へ手動仮紐付け（車両なし）\n紐づけ方法: {linkMethod}\nキャンバス承認前の画面上の一時状態です。"
                         : isCustomerDirectDocument
-                            ? $"判定: 顧客に一意紐付け（車両情報なしの特例）\n候補車両: {document.CandidateSummary}\nこのまま確定すると顧客だけへ保存します。必要なら車両ノードへ接続できます。"
+                            ? $"判定: 顧客に一意紐付け（車両情報なしの特例）\n紐づけ方法: {linkMethod}\n候補車両: {document.CandidateSummary}\nこのまま確定すると顧客だけへ保存します。必要なら車両ノードへ接続できます。"
                         : manualVehicle is null
-                            ? $"判定: {document.MatchStatus}\n候補車両: {document.CandidateSummary}"
-                    : $"判定: 手動仮紐付け（未登録）\n紐付け先: {manualVehicle.DisplayName}";
+                            ? $"判定: {document.MatchStatus}\n紐づけ方法: {linkMethod}\n候補車両: {document.CandidateSummary}"
+                    : $"判定: 手動仮紐付け（未登録）\n紐づけ方法: {linkMethod}\n紐付け先: {manualVehicle.DisplayName}";
                 LegacyGraphInspectorDetailsText.Text =
                     $"顧客: {Fallback(document.CustomerName)}\n" +
                     $"車名: {Fallback(document.VehicleName)}\n" +
                     $"登録番号: {Fallback(document.RegistrationNumber)}\n" +
                     $"日付: {Fallback(document.DocumentDate)}\n" +
                     $"合計: {Fallback(document.TotalAmount)}\n" +
-                    $"出典: {document.SourceLocation}";
+                    $"出典: {document.SourceLocation}\n" +
+                    $"元候補ID: {GetLegacyDocumentKey(document)}\n" +
+                    $"判断根拠: {linkReason}";
                 var manualEvidence = isUnconnectedDocument
                     ? "\nこの書類はノード接続がありません。キャンバス承認前に車両へ接続するか、未確定トレイへ移動してください。"
                     : isManualCustomerDocument
@@ -3749,7 +3758,9 @@ public partial class MainWindow : Window
             new Dictionary<string, string>(legacyGraphManualDocumentLinks, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, string>(legacyGraphManualDocumentCustomerLinks, StringComparer.OrdinalIgnoreCase),
             new HashSet<string>(legacyGraphExcludedDocumentKeys, StringComparer.OrdinalIgnoreCase),
-            legacyGraphImportConfirmed);
+            legacyGraphImportConfirmed,
+            new Dictionary<string, string>(legacyGraphDocumentLinkMethods, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphDocumentLinkReasons, StringComparer.OrdinalIgnoreCase));
     }
 
     private int GetLegacyGraphPendingMergeGroupCount() =>
@@ -4063,6 +4074,8 @@ public partial class MainWindow : Window
 
         if (legacyGraphManualDocumentLinks.Remove(GetLegacyDocumentKey(document)))
         {
+            legacyGraphDocumentLinkMethods.Remove(GetLegacyDocumentKey(document));
+            legacyGraphDocumentLinkReasons.Remove(GetLegacyDocumentKey(document));
             RefreshLegacyGraphAfterManualLink(document, null);
         }
     }
@@ -4188,6 +4201,8 @@ public partial class MainWindow : Window
         {
             clearRequested = true;
             legacyGraphManualDocumentLinks.Remove(GetLegacyDocumentKey(document));
+            legacyGraphDocumentLinkMethods.Remove(GetLegacyDocumentKey(document));
+            legacyGraphDocumentLinkReasons.Remove(GetLegacyDocumentKey(document));
             dialog.DialogResult = true;
             RefreshLegacyGraphAfterManualLink(document, null);
         };
@@ -4201,7 +4216,10 @@ public partial class MainWindow : Window
         dialog.Content = root;
         if (dialog.ShowDialog() == true && !clearRequested && vehicleCombo.SelectedItem is LegacyGraphVehicleChoice selectedChoice)
         {
-            legacyGraphManualDocumentLinks[GetLegacyDocumentKey(document)] = selectedChoice.VehicleId;
+            var key = GetLegacyDocumentKey(document);
+            legacyGraphManualDocumentLinks[key] = selectedChoice.VehicleId;
+            legacyGraphDocumentLinkMethods[key] = "manual-vehicle";
+            legacyGraphDocumentLinkReasons[key] = "ユーザーが紐づけ先車両を選択";
             RefreshLegacyGraphAfterManualLink(document, selectedChoice.VehicleId);
         }
     }
@@ -4222,6 +4240,8 @@ public partial class MainWindow : Window
         if (vehicleId is null)
         {
             legacyGraphManualDocumentLinks.Remove(documentKey);
+            legacyGraphDocumentLinkMethods.Remove(documentKey);
+            legacyGraphDocumentLinkReasons.Remove(documentKey);
             if (!legacyGraphTrayDocumentKeys.Contains(documentKey))
             {
                 legacyGraphExcludedDocumentKeys.Remove(documentKey);
@@ -4281,6 +4301,8 @@ public partial class MainWindow : Window
         legacyGraphTrayDocumentKeys.Remove(key);
         legacyGraphExcludedDocumentKeys.Remove(key);
         legacyGraphManualDocumentCustomerLinks[key] = targetGroupKey;
+        legacyGraphDocumentLinkMethods[key] = "manual-customer-only";
+        legacyGraphDocumentLinkReasons[key] = "ユーザーが顧客だけへ手動紐づけ（車両なし）";
         RefreshLegacyGraphAfterManualCustomerLink(document, customer);
     }
 
@@ -4311,6 +4333,8 @@ public partial class MainWindow : Window
         InvalidateLegacyGraphApprovalForDocument(document);
         legacyGraphManualDocumentLinks.Remove(key);
         legacyGraphManualDocumentCustomerLinks.Remove(key);
+        legacyGraphDocumentLinkMethods.Remove(key);
+        legacyGraphDocumentLinkReasons.Remove(key);
         legacyGraphUnconnectedDocumentKeys.Remove(key);
         legacyGraphTrayDocumentKeys.Add(key);
         ClearLegacyGraphBlockVisualDrag();
@@ -4332,10 +4356,14 @@ public partial class MainWindow : Window
             string.Equals(originalVehicle.VehicleId, vehicleId, StringComparison.Ordinal))
         {
             legacyGraphManualDocumentLinks.Remove(key);
+            legacyGraphDocumentLinkMethods.Remove(key);
+            legacyGraphDocumentLinkReasons.Remove(key);
         }
         else
         {
             legacyGraphManualDocumentLinks[key] = vehicleId;
+            legacyGraphDocumentLinkMethods[key] = "manual-vehicle";
+            legacyGraphDocumentLinkReasons[key] = "ユーザーが紐づけ先車両を選択";
         }
         RefreshLegacyGraphAfterManualLink(document, vehicleId);
     }
@@ -5142,6 +5170,8 @@ public partial class MainWindow : Window
         var key = GetLegacyDocumentKey(document);
         legacyGraphManualDocumentLinks.Remove(key);
         legacyGraphManualDocumentCustomerLinks.Remove(key);
+        legacyGraphDocumentLinkMethods.Remove(key);
+        legacyGraphDocumentLinkReasons.Remove(key);
         legacyGraphTrayDocumentKeys.Remove(key);
         legacyGraphUnconnectedDocumentKeys.Add(key);
         RefreshLegacyGraphAfterManualLink(document, null);
@@ -6020,6 +6050,8 @@ public partial class MainWindow : Window
         legacyExportCandidateGraphResult = null;
         legacyGraphManualDocumentLinks.Clear();
         legacyGraphManualDocumentCustomerLinks.Clear();
+        legacyGraphDocumentLinkMethods.Clear();
+        legacyGraphDocumentLinkReasons.Clear();
         legacyGraphUnconnectedDocumentKeys.Clear();
         legacyGraphTrayDocumentKeys.Clear();
         legacyGraphExcludedDocumentKeys.Clear();
@@ -6106,6 +6138,37 @@ public partial class MainWindow : Window
 
     private static string GetLegacyDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
         string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
+
+    private string GetLegacyGraphDocumentLinkMethod(AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetLegacyDocumentKey(document);
+        if (legacyGraphDocumentLinkMethods.TryGetValue(key, out var method))
+        {
+            return method;
+        }
+
+        if (legacyGraphManualDocumentLinks.ContainsKey(key)) return "manual-vehicle";
+        if (legacyGraphManualDocumentCustomerLinks.ContainsKey(key)) return "manual-customer-only";
+        return "automatic";
+    }
+
+    private string GetLegacyGraphDocumentLinkReason(AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetLegacyDocumentKey(document);
+        if (legacyGraphDocumentLinkReasons.TryGetValue(key, out var reason) && !string.IsNullOrWhiteSpace(reason))
+        {
+            return reason;
+        }
+
+        return GetLegacyGraphDocumentLinkMethod(document) switch
+        {
+            "manual-vehicle" => "ユーザーが紐づけ先車両を選択",
+            "manual-customer-only" => "ユーザーが顧客だけへ手動紐づけ（車両なし）",
+            _ when !string.IsNullOrWhiteSpace(document.LinkedVehicleId) => "候補マニフェストの一意一致",
+            _ when IsLegacyGraphCustomerDirectDocument(document) => "顧客候補が一意で、車両情報がないため顧客へ自動紐づけ",
+            _ => "ABACUS候補グラフの自動判定",
+        };
+    }
 
     private static (string Stroke, string Fill, bool Dashed) GetDocumentVisual(string status) => status switch
     {
