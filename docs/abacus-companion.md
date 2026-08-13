@@ -420,6 +420,17 @@ Gate 18では、次の再実行・中断境界を実装しました。
 
 Gate 18の自動受入では、合成データによる中断・再開、画像ありから画像なしへの再完成、進捗通知、原本指紋不変、API同一パッケージ再実行を確認します。実データでのバックアップ復元、153枚の画像対応付け、実際の大量データ時間・メモリは、別途実ファイルを用いた運用確認として記録します。
 
+#### Gate 19: 別名CSVの検出と顧客別検証用抽出
+
+- `taguti_hanbai.csv`、`tiguti_seibi.csv`などの接尾辞付きファイルを、固定列数に基づいて販売・整備CSVとして診断
+- `taguti.csv`など標準名でない23列CSVを車両一覧として診断
+- 詳細診断画面で顧客名と住所を候補キーにして1顧客を選択し、原本とは別の新規フォルダーへ`hanbai.csv`、`seibi.csv`、`syaryou.csv`をCP932・見出しなしで抽出
+- `manifest.json`へ選択顧客、入力ファイルSHA-256、出力行数・SHA-256を保存し、抽出後に同じ厳格リーダーで再読込検証
+- 原本フォルダー内への出力、原本CSVの書換え、顧客名だけの同一視による住所混在を禁止
+- 顧客別フォルダーを完成タブへ指定した場合は、Gate 14を対象車両だけの部分スコープで実行し、対象外のFP5車両を`out-of-scope`として集計から分離
+
+添付の単品データでは、別名3ファイルを合計3行として診断し、田口和世の車両1行・販売1行・整備1行を抽出後に再読込できること、同じUCSに対する部分スコープ画像対応付けが対象1件一致・対象外153件として成立することを確認しました。
+
 GUIを使わず、個人情報を出力せずに集計だけを確認する場合は次を使用します。
 
 ```powershell
@@ -430,6 +441,12 @@ dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/Vehic
 
 ```powershell
 dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- --legacy-export "<ABACUSのCSVフォルダー>"
+```
+
+顧客別の検証用CSVをCLIから作成する場合は、顧客名を指定します。保存先は入力CSVフォルダーの外側を指定し、原本は変更されません。
+
+```powershell
+dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj -- --legacy-subset "<ABACUSのCSVフォルダー>" "<顧客名>" "<抽出先親フォルダー>"
 ```
 
 Gate 13のFP5画像復元を実行する場合は、検証済み作業用コピーの`.ucs`または`.fp5`と、その入力フォルダー外にある生成物親フォルダーを指定します。既存ファイルは上書きしません。

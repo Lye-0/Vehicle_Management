@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly AbacusLinkagePlanner linkagePlanner = new(new AbacusTabParser());
     private readonly AbacusLegacyExportReader legacyExportReader = new();
     private readonly AbacusLegacyExportFolderDetector legacyExportFolderDetector = new();
+    private readonly AbacusLegacyExportSubsetStore legacyExportSubsetStore = new();
     private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
     private readonly AbacusLegacyExportPreviewPackageReader legacyExportPackageReader = new();
     private readonly AbacusLegacyExportCandidateGraphService legacyExportCandidateGraphService = new();
@@ -90,6 +91,8 @@ public partial class MainWindow : Window
     private AbacusImportOutputPackageSession? unifiedImportOutputSession;
     private AbacusBulkImagePreparationResult? bulkImagePreparationResult;
     private CancellationTokenSource? legacyExportDetectionCancellation;
+    private AbacusLegacyExportReadResult? legacyExportReadResult;
+    private bool legacyExportSubsetActive;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
     private List<WebImportMappingRow> webImportMappingRows = [];
     private AbacusLegacyExportCandidateGraphResult? legacyExportCandidateGraphResult;
@@ -232,10 +235,18 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ApplySelectedAbacusFolderAsync(string folderPath)
+    private async Task ApplySelectedAbacusFolderAsync(
+        string folderPath,
+        bool preserveSelectedLegacyExport = false)
     {
         var previousBulkSourcePath = BulkImageSourcePathTextBox.Text.Trim();
         var bulkSourceChanged = !string.Equals(previousBulkSourcePath, folderPath, StringComparison.OrdinalIgnoreCase);
+        var preservedLegacyExportPath = preserveSelectedLegacyExport &&
+                                        !string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text) &&
+                                        Directory.Exists(LegacyExportPathTextBox.Text.Trim())
+            ? LegacyExportPathTextBox.Text.Trim()
+            : null;
+        var preservedLegacyExportSubset = preservedLegacyExportPath is not null && legacyExportSubsetActive;
         UnifiedImportFolderPathTextBox.Text = folderPath;
         BulkImageSourcePathTextBox.Text = folderPath;
         SourcePathTextBox.Text = folderPath;
@@ -259,7 +270,18 @@ public partial class MainWindow : Window
         {
             ResetBulkImagePreparationState();
         }
-        await AutoDetectAndInspectLegacyExportsAsync(folderPath);
+        if (preservedLegacyExportPath is not null)
+        {
+            legacyExportSubsetActive = preservedLegacyExportSubset;
+            LegacyExportPathTextBox.Text = preservedLegacyExportPath;
+            LegacyExportAutoDetectStatusText.Text = "選択済みのCSVフォルダーを維持して固定列を再診断しています…";
+            LegacyExportAutoDetectStatusText.Foreground = ToBrush("#52647A");
+            await InspectLegacyExportsAsync(preservedLegacyExportPath, automatic: true, CancellationToken.None);
+        }
+        else
+        {
+            await AutoDetectAndInspectLegacyExportsAsync(folderPath);
+        }
         UpdateUnifiedImportEntryState();
         UpdateBulkImagePreparationButtonState();
     }
@@ -359,7 +381,7 @@ public partial class MainWindow : Window
         UnifiedImportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         try
         {
-            await ApplySelectedAbacusFolderAsync(folderPath);
+            await ApplySelectedAbacusFolderAsync(folderPath, preserveSelectedLegacyExport: true);
             if (!CreateLegacyExportPreviewButton.IsEnabled)
             {
                 UnifiedImportStatusText.Text = "CSVの診断に合格していません。詳細診断で内容を確認してください。";
@@ -500,12 +522,15 @@ public partial class MainWindow : Window
             fp5VehicleImageMapping = await fp5VehicleImageMapper.MapAsync(
                 fp5SourcePath,
                 workspaceVehicleExportPath,
-                outputParent);
+                outputParent,
+                allowPartialScope: legacyExportSubsetActive);
             UnifiedImportImageMappingSummaryText.Text =
                 $"車両レコード: {fp5VehicleImageMapping.InternalVehicleRecordCount:N0}件 / " +
+                $"今回の対象: {fp5VehicleImageMapping.InScopeVehicleRecordCount:N0}件 / " +
                 $"JPEG: {fp5VehicleImageMapping.JpegImageCount:N0}件 / " +
                 $"対応付け: {fp5VehicleImageMapping.MatchedImageCount:N0}件 / " +
                 $"画像なし: {fp5VehicleImageMapping.NoImageCount:N0}件 / " +
+                $"対象外: {fp5VehicleImageMapping.OutOfScopeRecordCount:N0}件 / " +
                 $"要確認: {fp5VehicleImageMapping.ReviewCount + fp5VehicleImageMapping.UnmatchedCount + fp5VehicleImageMapping.MultipleCandidateCount + fp5VehicleImageMapping.UnknownImageReferenceCount:N0}件";
             if (!fp5VehicleImageMapping.IsFullyMatched)
             {
@@ -515,8 +540,9 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            UnifiedImportImageMappingStatusText.Text =
-                "Gate 14の検証済み方式で画像を復元し、車両へ自動対応付けしました。";
+            UnifiedImportImageMappingStatusText.Text = legacyExportSubsetActive
+                ? "Gate 14の方式でFP5画像を復元し、選択顧客の車両だけを対象に自動対応付けしました。対象外の車両は今回の検証から除外しています。"
+                : "Gate 14の検証済み方式で画像を復元し、車両へ自動対応付けしました。";
             UnifiedImportImageMappingStatusText.Foreground = ToBrush("#17643A");
             return true;
         }
@@ -926,8 +952,13 @@ public partial class MainWindow : Window
             }
 
             LegacyExportPathTextBox.Clear();
+            legacyExportReadResult = null;
+            legacyExportSubsetActive = false;
             LegacyExportFilesGrid.ItemsSource = null;
             LegacyExportColumnsGrid.ItemsSource = null;
+            LegacyExportCustomerComboBox.ItemsSource = null;
+            LegacyExportCustomerComboBox.SelectedItem = null;
+            CreateLegacyExportSubsetButton.IsEnabled = false;
             CreateLegacyExportPreviewButton.IsEnabled = false;
             if (detection.ScanLimitReached)
             {
@@ -974,6 +1005,8 @@ public partial class MainWindow : Window
     private void ResetLegacyExportImportState()
     {
         CancelLegacyExportFolderDetection();
+        legacyExportReadResult = null;
+        legacyExportSubsetActive = false;
         LegacyExportPathTextBox.Clear();
         LegacyExportAutoDetectStatusText.Text = "ABACUSフォルダーを選択すると、内部のCSVを自動検出します。";
         LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
@@ -981,6 +1014,11 @@ public partial class MainWindow : Window
         LegacyExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         LegacyExportFilesGrid.ItemsSource = null;
         LegacyExportColumnsGrid.ItemsSource = null;
+        LegacyExportCustomerComboBox.ItemsSource = null;
+        LegacyExportCustomerComboBox.SelectedItem = null;
+        LegacyExportSubsetStatusText.Text = "固定列診断に合格すると、抽出対象を選択できます。";
+        LegacyExportSubsetStatusText.Foreground = ToBrush("#52647A");
+        CreateLegacyExportSubsetButton.IsEnabled = false;
         TransformationReadinessText.Text = "";
         CreateLegacyExportPreviewButton.IsEnabled = false;
         LegacyExportPreviewGrid.ItemsSource = null;
@@ -1015,12 +1053,19 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog(this) == true)
         {
+            legacyExportReadResult = null;
+            legacyExportSubsetActive = false;
             LegacyExportPathTextBox.Text = dialog.FolderName;
             LegacyExportAutoDetectStatusText.Text = "CSVフォルダーを手動で選択しました。固定列を診断してください。";
             LegacyExportAutoDetectStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
             LegacyExportStatusText.Text = "未診断";
             LegacyExportFilesGrid.ItemsSource = null;
             LegacyExportColumnsGrid.ItemsSource = null;
+            LegacyExportCustomerComboBox.ItemsSource = null;
+            LegacyExportCustomerComboBox.SelectedItem = null;
+            LegacyExportSubsetStatusText.Text = "固定列診断に合格すると、抽出対象を選択できます。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush("#52647A");
+            CreateLegacyExportSubsetButton.IsEnabled = false;
             TransformationReadinessText.Text = "";
             CreateLegacyExportPreviewButton.IsEnabled = false;
             LegacyExportPreviewGrid.ItemsSource = null;
@@ -1046,14 +1091,39 @@ public partial class MainWindow : Window
         await InspectLegacyExportsAsync(LegacyExportPathTextBox.Text.Trim(), automatic: false, CancellationToken.None);
     }
 
+    private void LegacyExportCustomerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CreateLegacyExportSubsetButton is null || LegacyExportSubsetStatusText is null)
+        {
+            return;
+        }
+
+        if (LegacyExportCustomerComboBox.SelectedItem is AbacusLegacyExportCustomerOption option)
+        {
+            CreateLegacyExportSubsetButton.IsEnabled = legacyExportReadResult?.IsValid == true && option.HasVehicle;
+            LegacyExportSubsetStatusText.Text = option.HasVehicle
+                ? $"選択中: {option.DisplayName}（車両 {option.VehicleRows:N0} / 販売 {option.SalesRows:N0} / 整備 {option.MaintenanceRows:N0} 行）"
+                : $"{option.DisplayName}は車両一覧に行がないため抽出できません。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush(option.HasVehicle ? "#1E40AF" : "#805B10");
+        }
+        else if (legacyExportReadResult?.IsValid == true)
+        {
+            CreateLegacyExportSubsetButton.IsEnabled = false;
+            LegacyExportSubsetStatusText.Text = "抽出する顧客を選択してください。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush("#52647A");
+        }
+    }
+
     private async Task InspectLegacyExportsAsync(string folderPath, bool automatic, CancellationToken cancellationToken)
     {
+        var previousCustomerKey = (LegacyExportCustomerComboBox.SelectedItem as AbacusLegacyExportCustomerOption)?.Key;
         InspectLegacyExportsButton.IsEnabled = false;
         LegacyExportPathTextBox.IsEnabled = false;
         LegacyExportStatusText.Text = "固定列CSVをShift-JISとして厳格に診断しています…";
         try
         {
             var result = await legacyExportReader.ReadAsync(folderPath, cancellationToken);
+            legacyExportReadResult = result;
             var fileAnalyses = result.Files
                 .Select(file => new AbacusLegacyExportFileAnalysis(
                     file.FileName,
@@ -1067,6 +1137,21 @@ public partial class MainWindow : Window
                 .ToArray();
             LegacyExportFilesGrid.ItemsSource = fileAnalyses;
             LegacyExportColumnsGrid.ItemsSource = result.FirstRowSamples;
+            IReadOnlyList<AbacusLegacyExportCustomerOption> customerOptions = result.IsValid
+                ? legacyExportSubsetStore.GetCustomerOptions(result)
+                : [];
+            LegacyExportCustomerComboBox.ItemsSource = customerOptions;
+            LegacyExportCustomerComboBox.SelectedItem = customerOptions.FirstOrDefault(option =>
+                string.Equals(option.Key, previousCustomerKey, StringComparison.Ordinal));
+            CreateLegacyExportSubsetButton.IsEnabled = result.IsValid &&
+                                                        customerOptions.Any(option => option.HasVehicle) &&
+                                                        LegacyExportCustomerComboBox.SelectedItem is AbacusLegacyExportCustomerOption;
+            LegacyExportSubsetStatusText.Text = result.IsValid
+                ? customerOptions.Count == 0
+                    ? "顧客名が入った抽出対象を見つけられませんでした。"
+                    : $"抽出候補: {customerOptions.Count:N0}件。顧客を選んで別フォルダーへ出力できます。"
+                : "固定列診断に合格すると、抽出対象を選択できます。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush(result.IsValid ? "#1E40AF" : "#52647A");
             var errors = result.Errors.Count + result.Files.Sum(file => file.InvalidDateRows);
             LegacyExportStatusText.Text = result.IsValid
                 ? "固定列形式の診断に合格しました。先頭行の列サンプルを表示しています。CSVへの書き込みは行っていません。"
@@ -1081,7 +1166,7 @@ public partial class MainWindow : Window
             TransformationReadinessText.Text =
                 $"販売CSV: {result.SalesRows:N0}行 / 整備CSV: {result.MaintenanceRows:N0}行 / 車両CSV: {result.VehicleRows:N0}行\n" +
                 $"{vehicleDecision}\n" +
-                "下の列サンプルで金額・明細・日付の位置を確認してから、登録用データの候補化へ進みます。車両一覧が1ファイルで診断に合格した場合だけ、下の候補作成ボタンを押せます。現段階では登録用データを出力しません。";
+                "下の列サンプルで金額・明細・日付の位置を確認してから、登録用データの候補化へ進みます。車両一覧が1ファイルで診断に合格した場合だけ、下の候補作成ボタンを押せます。必要なら上の抽出機能で1顧客分だけの検証用CSVを作成できます。";
             CreateLegacyExportPreviewButton.IsEnabled = result.IsValid && result.VehicleFileCount == 1;
 
             if (automatic)
@@ -1106,6 +1191,12 @@ public partial class MainWindow : Window
             LegacyExportStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             LegacyExportFilesGrid.ItemsSource = null;
             LegacyExportColumnsGrid.ItemsSource = null;
+            legacyExportReadResult = null;
+            LegacyExportCustomerComboBox.ItemsSource = null;
+            LegacyExportCustomerComboBox.SelectedItem = null;
+            LegacyExportSubsetStatusText.Text = "固定列診断に合格すると、抽出対象を選択できます。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush("#52647A");
+            CreateLegacyExportSubsetButton.IsEnabled = false;
             TransformationReadinessText.Text = "";
             CreateLegacyExportPreviewButton.IsEnabled = false;
             if (automatic)
@@ -1140,6 +1231,72 @@ public partial class MainWindow : Window
         }
 
         await CreateLegacyExportPreviewAsync(dialog.FolderName);
+    }
+
+    private async void CreateLegacyExportSubsetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyExportReadResult is null || !legacyExportReadResult.IsValid)
+        {
+            MessageBox.Show(this, "先に固定列CSVの診断を完了してください。", "CSV未診断");
+            return;
+        }
+
+        if (LegacyExportCustomerComboBox.SelectedItem is not AbacusLegacyExportCustomerOption option)
+        {
+            MessageBox.Show(this, "抽出する顧客を選択してください。", "顧客未選択");
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "顧客別検証用CSVの保存先を選択（原本とは別のフォルダー）",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        CreateLegacyExportSubsetButton.IsEnabled = false;
+        InspectLegacyExportsButton.IsEnabled = false;
+        LegacyExportPathTextBox.IsEnabled = false;
+        LegacyExportSubsetStatusText.Text = $"{option.DisplayName}の行を抽出し、作成後の再読込検証を実行しています…";
+        LegacyExportSubsetStatusText.Foreground = ToBrush("#52647A");
+        try
+        {
+            var result = await legacyExportSubsetStore.CreateAsync(
+                LegacyExportPathTextBox.Text.Trim(),
+                dialog.FolderName,
+                option.Key);
+            legacyExportSubsetActive = true;
+            LegacyExportPathTextBox.Text = result.PackagePath;
+            LegacyExportAutoDetectStatusText.Text = "顧客別の検証用CSVを選択中です。原本フォルダーは変更していません。";
+            LegacyExportAutoDetectStatusText.Foreground = ToBrush("#1E40AF");
+            await InspectLegacyExportsAsync(result.PackagePath, automatic: false, CancellationToken.None);
+            LegacyExportCustomerComboBox.SelectedItem =
+                (LegacyExportCustomerComboBox.ItemsSource as IEnumerable<AbacusLegacyExportCustomerOption>)
+                ?.FirstOrDefault(item => string.Equals(item.Key, option.Key, StringComparison.Ordinal));
+            LegacyExportSubsetStatusText.Text =
+                $"抽出済み: {result.CustomerName}{(string.IsNullOrEmpty(result.CustomerAddress) ? "" : $"（住所: {result.CustomerAddress}）")}\n" +
+                $"車両 {result.VehicleRows:N0}行 / 販売 {result.SalesRows:N0}行 / 整備 {result.MaintenanceRows:N0}行\n" +
+                $"保存先: {result.PackagePath}\n" +
+                "原本は変更していません。このフォルダーを選択した状態で、登録前候補の作成や解析を実行できます。";
+            LegacyExportSubsetStatusText.Foreground = ToBrush("#17643A");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            LegacyExportSubsetStatusText.Text = $"顧客別CSVを作成できません: {exception.Message}";
+            LegacyExportSubsetStatusText.Foreground = ToBrush("#A61B1B");
+        }
+        finally
+        {
+            InspectLegacyExportsButton.IsEnabled = true;
+            LegacyExportPathTextBox.IsEnabled = true;
+            CreateLegacyExportSubsetButton.IsEnabled = legacyExportReadResult?.IsValid == true &&
+                                                        legacyExportSubsetStore.GetCustomerOptions(legacyExportReadResult).Any(option => option.HasVehicle);
+            UpdateUnifiedImportEntryState();
+        }
     }
 
     private async Task CreateLegacyExportPreviewAsync(string destinationFolder)

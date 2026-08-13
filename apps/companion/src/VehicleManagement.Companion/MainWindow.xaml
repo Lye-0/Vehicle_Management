@@ -1007,6 +1007,31 @@
                                        TextWrapping="Wrap" LineHeight="24" />
                         </Border>
 
+                        <Border Margin="0,16,0,0" Padding="14" Background="#EAF2FF" CornerRadius="8">
+                            <StackPanel>
+                                <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
+                                           Text="検証用に特定顧客のCSVだけを抽出" />
+                                <TextBlock Margin="0,5,0,10" Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="診断済みCSVから顧客名・住所が一致する行だけを、原本とは別の新規フォルダーへCP932で出力します。原本は変更しません。車両一覧に行がある顧客だけを選択できます。" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox x:Name="LegacyExportCustomerComboBox" MinHeight="38" Padding="8,5"
+                                              VerticalContentAlignment="Center" DisplayMemberPath="DisplayName"
+                                              SelectionChanged="LegacyExportCustomerComboBox_SelectionChanged"
+                                              ToolTip="診断済みCSVから抽出する顧客を選択" />
+                                    <Button x:Name="CreateLegacyExportSubsetButton" Grid.Column="1" Margin="10,0,0,0"
+                                            Content="選択顧客のCSVを抽出" IsEnabled="False"
+                                            Click="CreateLegacyExportSubsetButton_Click" />
+                                </Grid>
+                                <TextBlock x:Name="LegacyExportSubsetStatusText" Margin="0,8,0,0"
+                                           Foreground="#52647A" TextWrapping="Wrap"
+                                           Text="固定列診断に合格すると、抽出対象を選択できます。" />
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="固定列CSVから登録前候補を作成" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"

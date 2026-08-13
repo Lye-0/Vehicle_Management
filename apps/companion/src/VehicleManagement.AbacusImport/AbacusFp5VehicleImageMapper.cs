@@ -38,18 +38,24 @@ public sealed record AbacusFp5VehicleImageMappingResult(
     int UnreferencedImageCount,
     IReadOnlyList<AbacusFp5VehicleImageMapping> Mappings)
 {
+    public int OutOfScopeRecordCount =>
+        Mappings.Count(mapping => mapping.Status == "out-of-scope");
+
+    public int InScopeVehicleRecordCount =>
+        InternalVehicleRecordCount - OutOfScopeRecordCount;
+
     public bool IsValid =>
         InternalVehicleRecordCount > 0 &&
         InternalVehicleRecordCount == Mappings.Count &&
         MatchedImageCount + NoImageCount + ReviewCount + UnmatchedCount + MultipleCandidateCount +
-            UnknownImageReferenceCount == InternalVehicleRecordCount &&
+            UnknownImageReferenceCount + OutOfScopeRecordCount == InternalVehicleRecordCount &&
         DuplicateImageReferenceCount == 0 &&
         DuplicateImageSha256Count == 0 &&
         UnreferencedImageCount == 0;
 
     public bool IsFullyMatched =>
         IsValid &&
-        MatchedImageCount + NoImageCount == InternalVehicleRecordCount &&
+        MatchedImageCount + NoImageCount == InScopeVehicleRecordCount &&
         ReviewCount == 0 &&
         UnmatchedCount == 0 &&
         MultipleCandidateCount == 0 &&
@@ -69,11 +75,13 @@ public sealed class AbacusFp5VehicleImageMapper
     private const string Unmatched = "unmatched-vehicle";
     private const string Multiple = "multiple-vehicle-candidates";
     private const string UnknownImage = "unknown-image-reference";
+    private const string OutOfScope = "out-of-scope";
 
     public async Task<AbacusFp5VehicleImageMappingResult> MapAsync(
         string sourceFilePath,
         string vehicleExportFolder,
         string outputParentFolder,
+        bool allowPartialScope = false,
         CancellationToken cancellationToken = default)
     {
         var vehicleExport = await new AbacusVehicleExportReader().ReadAsync(
@@ -104,6 +112,9 @@ public sealed class AbacusFp5VehicleImageMapper
             .ToDictionary(group => group.Key, group => group.ToList());
         var rowsByRegistration = vehicleExport.Rows
             .GroupBy(row => row.RegistrationNumber)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var rowsByChassis = vehicleExport.Rows
+            .GroupBy(row => row.ChassisNumber)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
         var imagesById = source.Restoration.Images.ToDictionary(
             image => image.ImageIdHex,
@@ -141,6 +152,28 @@ public sealed class AbacusFp5VehicleImageMapper
             pairCandidates ??= [];
             rowsByRegistration.TryGetValue(registrationNumber, out var registrationCandidates);
             registrationCandidates ??= [];
+            rowsByChassis.TryGetValue(chassisNumber, out var chassisCandidates);
+            chassisCandidates ??= [];
+            var inScope = pairCandidates.Count > 0 || registrationCandidates.Count > 0 || chassisCandidates.Count > 0;
+
+            if (allowPartialScope && !inScope)
+            {
+                mappings.Add(new AbacusFp5VehicleImageMapping(
+                    mappings.Count + 1,
+                    record.RecordIdHex,
+                    imageIdHex,
+                    image?.RelativePath,
+                    image?.Sha256,
+                    null,
+                    null,
+                    OutOfScope,
+                    "vehicle-not-present-in-selected-customer-subset",
+                    null,
+                    null,
+                    null,
+                    null));
+                continue;
+            }
 
             var status = UnknownImage;
             var evidence = "internal-image-reference-not-found";
@@ -279,7 +312,9 @@ public sealed class AbacusFp5VehicleImageMapper
         var report = new
         {
             formatVersion = 1,
-            status = result.IsFullyMatched ? "gate14-verified" : "gate14-review-required",
+            status = result.IsFullyMatched
+                ? result.OutOfScopeRecordCount > 0 ? "gate14-partial-verified" : "gate14-verified"
+                : "gate14-review-required",
             source = new
             {
                 fileName = Path.GetFileName(restoration.SourceFilePath),
@@ -318,6 +353,8 @@ public sealed class AbacusFp5VehicleImageMapper
                 result.DuplicateImageReferenceCount,
                 result.DuplicateImageSha256Count,
                 result.UnreferencedImageCount,
+                result.InScopeVehicleRecordCount,
+                result.OutOfScopeRecordCount,
                 result.IsValid,
                 result.IsFullyMatched,
             },

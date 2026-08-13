@@ -27,6 +27,8 @@ public sealed class AbacusLegacyExportFolderDetector
         "syaryou2.csv",
     };
 
+    private static readonly string[] KnownAliasSuffixes = ["_hanbai", "-hanbai", "_seibi", "-seibi", "_syaryou", "-syaryou"];
+
     public Task<AbacusLegacyExportFolderDetection> DetectAsync(
         string rootPath,
         CancellationToken cancellationToken = default) =>
@@ -63,9 +65,12 @@ public sealed class AbacusLegacyExportFolderDetector
             bool containsKnownCsv;
             try
             {
-                containsKnownCsv = directory.EnumerateFiles()
-                    .Any(file => !file.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
-                                 KnownFileNames.Contains(file.Name));
+                var csvFiles = directory.EnumerateFiles()
+                    .Where(file => !file.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+                                   string.Equals(file.Extension, ".csv", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                containsKnownCsv = csvFiles.Any(file => KnownFileNames.Contains(file.Name) || IsKnownAlias(file.Name)) ||
+                                   csvFiles.Length >= 3;
             }
             catch (IOException)
             {
@@ -112,5 +117,16 @@ public sealed class AbacusLegacyExportFolderDetector
             root,
             candidates.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray(),
             scanLimitReached);
+    }
+
+    private static bool IsKnownAlias(string fileName)
+    {
+        if (!string.Equals(Path.GetExtension(fileName), ".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return KnownAliasSuffixes.Any(suffix => stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -110,9 +110,8 @@ public sealed class AbacusLegacyExportReader
         }
 
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var files = Specifications
-            .Where(specification => File.Exists(Path.Combine(root, specification.FileName)))
-            .Select(specification => ReadFile(root, specification, cancellationToken))
+        var files = ResolveSourceFiles(root)
+            .Select(source => ReadFile(root, source.Specification, source.FileName, cancellationToken))
             .ToList();
         if (files.Count == 0)
         {
@@ -127,15 +126,133 @@ public sealed class AbacusLegacyExportReader
         return new AbacusLegacyExportReadResult(root, files, errors);
     }
 
+    private static IReadOnlyList<ResolvedSourceFile> ResolveSourceFiles(string root)
+    {
+        var csvFiles = Directory.EnumerateFiles(root, "*.csv", System.IO.SearchOption.TopDirectoryOnly)
+            .Select(path => Path.GetFileName(path))
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .ToArray();
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var resolved = new List<ResolvedSourceFile>();
+
+        ResolveSingle(
+            Specifications[0],
+            csvFiles,
+            used,
+            fileName => HasAliasSuffix(fileName, "hanbai"),
+            resolved);
+        ResolveSingle(
+            Specifications[1],
+            csvFiles,
+            used,
+            fileName => HasAliasSuffix(fileName, "seibi"),
+            resolved);
+
+        var canonicalVehicleFiles = csvFiles
+            .Where(fileName => string.Equals(fileName, "syaryou.csv", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(fileName, "syaryou2.csv", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (canonicalVehicleFiles.Length > 0)
+        {
+            foreach (var fileName in canonicalVehicleFiles)
+            {
+                used.Add(fileName);
+                var specification = string.Equals(fileName, "syaryou2.csv", StringComparison.OrdinalIgnoreCase)
+                    ? Specifications[3]
+                    : Specifications[2];
+                resolved.Add(new ResolvedSourceFile(specification, fileName));
+            }
+        }
+        else
+        {
+            var vehicleAliases = csvFiles
+                .Where(fileName => !used.Contains(fileName))
+                .Where(fileName => HasAliasSuffix(fileName, "syaryou") ||
+                                   HasExpectedColumnCount(Path.Combine(root, fileName), Specifications[2].ExpectedColumns))
+                .ToArray();
+            for (var index = 0; index < vehicleAliases.Length; index++)
+            {
+                var specification = index == 0 ? Specifications[2] : Specifications[3];
+                used.Add(vehicleAliases[index]);
+                resolved.Add(new ResolvedSourceFile(specification, vehicleAliases[index]));
+            }
+        }
+
+        return resolved;
+    }
+
+    private static void ResolveSingle(
+        ExportSpecification specification,
+        IReadOnlyList<string> csvFiles,
+        ISet<string> used,
+        Func<string, bool> aliasPredicate,
+        ICollection<ResolvedSourceFile> resolved)
+    {
+        var exact = csvFiles.FirstOrDefault(fileName =>
+            string.Equals(fileName, specification.FileName, StringComparison.OrdinalIgnoreCase));
+        var alias = exact is not null
+            ? exact
+            : csvFiles.FirstOrDefault(fileName => !used.Contains(fileName) && aliasPredicate(fileName));
+        if (alias is null)
+        {
+            return;
+        }
+
+        used.Add(alias);
+        resolved.Add(new ResolvedSourceFile(specification, alias));
+    }
+
+    private static bool HasAliasSuffix(string fileName, string suffix)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return stem.EndsWith($"_{suffix}", StringComparison.OrdinalIgnoreCase) ||
+               stem.EndsWith($"-{suffix}", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(stem, suffix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExpectedColumnCount(string path, int expectedColumns)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            var parserEncoding = Encoding.GetEncoding(932);
+            using var parser = new TextFieldParser(path, parserEncoding, detectEncoding: false)
+            {
+                TextFieldType = FieldType.Delimited,
+                HasFieldsEnclosedInQuotes = true,
+                TrimWhiteSpace = false,
+            };
+            parser.SetDelimiters(",");
+            return !parser.EndOfData && (parser.ReadFields()?.Length ?? 0) == expectedColumns;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (MalformedLineException)
+        {
+            return false;
+        }
+    }
+
     private static AbacusLegacyExportFileReadResult ReadFile(
         string root,
         ExportSpecification specification,
+        string fileName,
         CancellationToken cancellationToken)
     {
-        var path = Path.GetFullPath(Path.Combine(root, specification.FileName));
+        var path = Path.GetFullPath(Path.Combine(root, fileName));
         if (!path.StartsWith($"{root}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
         {
-            return Invalid(specification, "フォルダー外のCSVは読み取れません。");
+            return Invalid(specification, fileName, "フォルダー外のCSVは読み取れません。");
         }
 
         FileInfo file;
@@ -144,21 +261,21 @@ public sealed class AbacusLegacyExportReader
             file = new FileInfo(path);
             if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint))
             {
-                return Invalid(specification, "CSVが存在しない、またはリンクです。");
+                return Invalid(specification, fileName, "CSVが存在しない、またはリンクです。");
             }
 
             if (file.Length > MaximumFileBytes)
             {
-                return Invalid(specification, $"CSVサイズが上限{MaximumFileBytes:N0} bytesを超えています。");
+                return Invalid(specification, fileName, $"CSVサイズが上限{MaximumFileBytes:N0} bytesを超えています。");
             }
         }
         catch (IOException exception)
         {
-            return Invalid(specification, $"CSVの情報を読み取れません: {exception.Message}");
+            return Invalid(specification, fileName, $"CSVの情報を読み取れません: {exception.Message}");
         }
         catch (UnauthorizedAccessException exception)
         {
-            return Invalid(specification, $"CSVの権限を確認できません: {exception.Message}");
+            return Invalid(specification, fileName, $"CSVの権限を確認できません: {exception.Message}");
         }
 
         var strictEncoding = Encoding.GetEncoding(
@@ -257,7 +374,7 @@ public sealed class AbacusLegacyExportReader
                     invalidDateRows++;
                 }
 
-                rows.Add(new AbacusLegacyExportRow(specification.FileName, totalRows, fields));
+                rows.Add(new AbacusLegacyExportRow(fileName, totalRows, fields));
             }
 
             var afterSha256 = CalculateSha256(path, cancellationToken);
@@ -281,7 +398,7 @@ public sealed class AbacusLegacyExportReader
         }
 
         return new AbacusLegacyExportFileReadResult(
-            specification.FileName,
+            fileName,
             specification.Kind,
             specification.ExpectedColumns,
             totalRows,
@@ -311,9 +428,10 @@ public sealed class AbacusLegacyExportReader
 
     private static AbacusLegacyExportFileReadResult Invalid(
         ExportSpecification specification,
+        string fileName,
         string message) =>
         new(
-            specification.FileName,
+            fileName,
             specification.Kind,
             specification.ExpectedColumns,
             0,
@@ -322,6 +440,10 @@ public sealed class AbacusLegacyExportReader
             [],
             [new AbacusParseError(null, message)],
             null);
+
+    private sealed record ResolvedSourceFile(
+        ExportSpecification Specification,
+        string FileName);
 
     public sealed record ExportSpecification(
         string FileName,
