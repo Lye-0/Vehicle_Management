@@ -29,12 +29,14 @@ import {
   fetchVehicleFile,
   fetchCustomers,
   fetchVehicleHistory,
+  fetchVehiclelessDocuments,
   type Customer,
   type CustomerInput,
   type Attachment,
   type Vehicle,
   type VehicleInput,
   type VehicleHistory,
+  type VehiclelessDocuments,
   updateCustomer,
   updateVehicle,
   uploadVehicleFile,
@@ -85,6 +87,9 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedVehicleId, setSelectedVehicleId] = useState('')
+  const [vehiclelessDocumentsByCustomer, setVehiclelessDocumentsByCustomer] = useState<Record<string, VehiclelessDocuments>>({})
+  const [vehiclelessLoadingCustomerId, setVehiclelessLoadingCustomerId] = useState('')
+  const [selectedVehiclelessCustomerId, setSelectedVehiclelessCustomerId] = useState('')
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialCustomerId ? 'detail' : 'list')
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false)
   const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false)
@@ -142,6 +147,24 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
 
   const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
+  const selectedVehiclelessDocuments = selectedCustomer ? vehiclelessDocumentsByCustomer[selectedCustomer.id] ?? null : null
+  const vehiclelessLoading = Boolean(selectedCustomer && vehiclelessLoadingCustomerId === selectedCustomer.id)
+
+  useEffect(() => {
+    const customerId = selectedCustomer?.id
+    if (!customerId) return
+    let active = true
+    setVehiclelessLoadingCustomerId(customerId)
+    void fetchVehiclelessDocuments(customerId).then((nextDocuments) => {
+      if (!active) return
+      setVehiclelessDocumentsByCustomer((current) => ({ ...current, [customerId]: nextDocuments }))
+    }).catch((reason: unknown) => {
+      if (active) setError(getErrorMessage(reason))
+    }).finally(() => {
+      if (active) setVehiclelessLoadingCustomerId((current) => current === customerId ? '' : current)
+    })
+    return () => { active = false }
+  }, [selectedCustomer?.id])
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
@@ -156,12 +179,21 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(customer.vehicles[0]?.id ?? '')
+    setSelectedVehiclelessCustomerId('')
     openMobileDetail()
   }
 
   function selectVehicle(customer: Customer, vehicle: Vehicle) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(vehicle.id)
+    setSelectedVehiclelessCustomerId('')
+  }
+
+  function selectVehiclelessDocuments(customer: Customer) {
+    setSelectedCustomerId(customer.id)
+    setSelectedVehicleId('')
+    setSelectedVehiclelessCustomerId(customer.id)
+    openMobileDetail()
   }
 
   function openNewCustomerDialog() {
@@ -333,7 +365,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         <div className="mobile-workspace-list"><CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} /></div>
         <div className="mobile-workspace-detail">
           <button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />顧客一覧へ戻る</button>
-          <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
+          <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} vehiclelessDocuments={selectedVehiclelessDocuments} vehiclelessLoading={vehiclelessLoading} vehiclelessSelected={selectedVehiclelessCustomerId === selectedCustomer?.id} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onSelectVehiclelessDocuments={() => selectedCustomer && selectVehiclelessDocuments(selectedCustomer)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
         </div>
       </div>
 
@@ -348,10 +380,17 @@ function CustomerList({ customers, selectedCustomerId, onSelect }: { customers: 
   return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone || '電話番号未登録'}</small></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>顧客を登録するか、検索条件を変更してください。</span></div>}</div></section>
 }
 
-function CustomerProfile({ customer, vehicle, onSelectVehicle, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment, onNavigate }: { customer: Customer | null; vehicle: Vehicle | null; onSelectVehicle: (vehicle: Vehicle) => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
+function CustomerProfile({ customer, vehicle, vehiclelessDocuments, vehiclelessLoading, vehiclelessSelected, onSelectVehicle, onSelectVehiclelessDocuments, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment, onNavigate }: { customer: Customer | null; vehicle: Vehicle | null; vehiclelessDocuments: VehiclelessDocuments | null; vehiclelessLoading: boolean; vehiclelessSelected: boolean; onSelectVehicle: (vehicle: Vehicle) => void; onSelectVehiclelessDocuments: () => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
   if (!customer) return <section className="panel customer-profile-empty"><UserRound size={30} /><strong>顧客を登録してください</strong><span>登録した顧客の情報がここに表示されます。</span></section>
 
-  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={CalendarDays} label="生年月日" value={customer.birthDate || '未登録'} /><InfoItem icon={BriefcaseBusiness} label="勤務先等" value={customer.employer || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両</h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span></div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${vehicleInspectionTone(item.inspectionDate)}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onAttachmentDrop={onAttachmentDrop} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} onNavigate={onNavigate} /></>}</section>
+  const hasVehiclelessDocuments = Boolean(vehiclelessDocuments?.documents.length)
+  const showVehiclelessDocuments = vehiclelessSelected && vehiclelessDocuments !== null
+
+  return <section className="customer-profile"><section className="panel customer-info-panel"><div className="customer-profile-header"><div className="customer-identity"><span className="customer-profile-avatar"><UserRound size={28} /></span><span><h2>{customer.name}</h2><small>{customer.kana || 'ふりがな未登録'}</small></span></div><button className="button button-secondary" type="button" onClick={() => onEditCustomer(customer)}><Pencil size={17} />顧客情報を編集</button></div><div className="customer-info-grid"><InfoItem icon={Phone} label="電話番号" value={customer.phone || '未登録'} /><InfoItem icon={Mail} label="メールアドレス" value={customer.email || '未登録'} /><InfoItem icon={CalendarDays} label="生年月日" value={customer.birthDate || '未登録'} /><InfoItem icon={BriefcaseBusiness} label="勤務先等" value={customer.employer || '未登録'} /><InfoItem icon={MapPin} label="住所" value={customer.address || '未登録'} /></div>{customer.memo && <div className="customer-memo"><span>メモ</span><p>{customer.memo}</p></div>}</section><section className="owned-vehicles-section"><div className="owned-vehicles-header"><div><h2>所有車両</h2><span>車両を選択すると詳細と添付ファイルが切り替わります</span>{vehiclelessLoading && <small className="vehicleless-documents-loading">車両情報のない書類を確認中…</small>}</div><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>{customer.vehicles.length || hasVehiclelessDocuments ? <div className="vehicle-choice-grid">{customer.vehicles.map((item) => <button className={`vehicle-choice-card${!vehiclelessSelected && item.id === vehicle?.id ? ' is-selected' : ''}`} key={item.id} type="button" onClick={() => onSelectVehicle(item)}><span className="vehicle-choice-name"><span className={`vehicle-status-dot ${vehicleInspectionTone(item.inspectionDate)}`} /><strong>{item.maker} {item.model}</strong></span><span className="vehicle-choice-plate">{item.plate || '登録番号未登録'}</span><span className="vehicle-choice-footer"><span>{item.year || '年式未登録'}</span><span>{item.attachments.length}件の添付</span></span></button>)}{hasVehiclelessDocuments && vehiclelessDocuments && <button className={`vehicle-choice-card vehicleless-choice-card${vehiclelessSelected ? ' is-selected' : ''}`} type="button" onClick={onSelectVehiclelessDocuments}><span className="vehicle-choice-name"><FileText size={15} aria-hidden="true" /><strong>車両情報のない書類</strong></span><span className="vehicle-choice-plate">販売 {vehiclelessDocuments.salesCount}件 ・ 整備 {vehiclelessDocuments.maintenanceCount}件</span><span className="vehicle-choice-footer"><span>ABACUS互換</span><span>車両：なし</span></span></button>}</div> : <div className="owned-vehicles-empty"><CarFront size={23} /><strong>所有車両が登録されていません</strong><span>この顧客に最初の車両を追加してください。</span><button className="button button-primary" type="button" onClick={onAddVehicle}><Plus size={17} />車両を追加</button></div>}</section>{showVehiclelessDocuments ? <VehiclelessDocumentPanel documents={vehiclelessDocuments.documents} onNavigate={onNavigate} /> : vehicle && <><div className="selected-vehicle-grid"><VehicleSummary vehicle={vehicle} onEdit={onEditVehicle} /><section className="panel attachments-panel"><AttachmentSection vehicle={vehicle} onAttachments={onAttachments} onAttachmentDrop={onAttachmentDrop} onPreviewAttachment={onPreviewAttachment} onRemoveAttachment={onRemoveAttachment} /></section></div><VehicleHistoryPanel vehicleId={vehicle.id} onNavigate={onNavigate} /></>}</section>
+}
+
+function VehiclelessDocumentPanel({ documents, onNavigate }: { documents: VehiclelessDocuments['documents']; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
+  return <section className="panel vehicleless-documents-panel"><div className="vehicle-history-header"><div><span className="page-eyebrow">ABACUS COMPATIBILITY</span><h3>車両情報のない書類</h3><p>顧客にのみ紐づくABACUS移行書類です。車両履歴や車両添付には含まれません。</p></div><FileText size={20} /></div><div className="vehicleless-documents-list">{documents.map((document) => { const kindLabel = document.kind === 'sales' ? '販売' : '整備'; const categoryLabel = document.kind === 'maintenance' && document.category ? ` ・ ${document.category}` : ''; return <div className="vehicleless-document-row" key={`${document.kind}-${document.id}`}><span className="vehicleless-document-kind">{kindLabel}{categoryLabel}</span><HistoryRow primary={`${document.type} ${document.number}`} secondary={`${formatHistoryDate(document.issuedAt)} ・ ${document.status} ・ ${document.sourceLocation}`} onClick={onNavigate ? () => onNavigate({ section: document.kind, recordId: document.id }) : undefined} /><strong className="vehicleless-document-amount">{formatYen(document.total)}</strong></div> })}</div></section>
 }
 
 function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {

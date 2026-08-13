@@ -90,6 +90,22 @@ describe('ABACUS registration', () => {
     expect(maintenanceResponse.status).toBe(200)
     const maintenanceBody = await maintenanceResponse.json() as { documents: Array<{ number: string; vehicle: string; vehicleId: string | null; abacusImport?: { vehicleless: boolean; sourceLocation: string } | null }> }
     expect(maintenanceBody.documents.find((document) => document.number === '9002')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true } })
+
+    await env.DB.prepare('INSERT INTO sales_documents (id, organization_id, number, type, status, customer_id, vehicle_id, issued_at, details_json) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)').bind('abacus-unverified-vehicleless', testOrganizationId, 'UNVERIFIED-VEHICLELESS', '請求書', '下書き', packageFiles.customerId, '2026-01-01', '{}').run()
+    const vehiclelessResponse = await SELF.fetch(new Request(`https://example.com/api/customers/${encodeURIComponent(packageFiles.customerId)}/vehicleless-documents`, { headers: authHeaders() }))
+    expect(vehiclelessResponse.status).toBe(200)
+    const vehiclelessBody = await vehiclelessResponse.json() as { customerId: string; salesCount: number; maintenanceCount: number; documents: Array<{ kind: string; number: string; sourceLocation: string }> }
+    expect(vehiclelessBody).toMatchObject({
+      customerId: packageFiles.customerId,
+      salesCount: 1,
+      maintenanceCount: 2,
+      documents: expect.arrayContaining([
+        expect.objectContaining({ kind: 'sales', number: '9001', sourceLocation: 'hanbai.csv #1' }),
+        expect.objectContaining({ kind: 'maintenance', number: '9002', sourceLocation: 'seibi.csv #1' }),
+      ]),
+    })
+    expect(vehiclelessBody.documents).toHaveLength(3)
+    expect(vehiclelessBody.documents.some((document) => document.number === 'UNVERIFIED-VEHICLELESS')).toBe(false)
   })
 
   it('registers Gate19 sales financial lines and preserves ABACUS amounts', async () => {

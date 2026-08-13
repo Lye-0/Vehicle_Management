@@ -1199,6 +1199,12 @@
 .vehicle-status-dot.is-danger { background: var(--danger); }
 .vehicle-choice-plate { color: var(--text-secondary); font-size: 11px; }
 .vehicle-choice-footer { display: flex; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 10px; }
+.vehicleless-choice-card { border-color: #efd28c; background: #fff9e8; }
+.vehicleless-choice-card:hover, .vehicleless-choice-card.is-selected { border-color: #d6a72f; background: #fff4d8; }
+.vehicleless-choice-card.is-selected { box-shadow: 0 6px 16px rgba(214, 167, 47, 0.18); }
+.vehicleless-choice-card .vehicle-choice-name { color: #7b5a1a; }
+.vehicleless-choice-card .vehicle-choice-name svg { flex: 0 0 auto; color: #b27a10; }
+.vehicleless-documents-loading { display: block; margin-top: 5px; color: #8b5b16; font-size: 10px; }
 .owned-vehicles-empty { min-height: 190px; display: grid; place-items: center; align-content: center; gap: 7px; padding: 20px; color: var(--text-muted); border: 1px dashed #b8cbe9; border-radius: var(--radius-md); background: #f8fbff; text-align: center; }
 .owned-vehicles-empty strong { color: var(--text); font-size: 13px; }
 .owned-vehicles-empty span { font-size: 11px; }
@@ -2093,6 +2099,13 @@
 .vehicle-history-none { color: var(--text-muted); font-size: 10px; }
 .vehicle-history-empty { padding: 22px 24px; color: var(--text-muted); font-size: 12px; }
 .vehicle-history-empty.is-error { color: var(--danger); }
+.vehicleless-documents-panel { margin-top: 0; padding: 0; overflow: hidden; }
+.vehicleless-documents-list { display: grid; gap: 0; padding: 8px 24px 16px; }
+.vehicleless-document-row { display: grid; grid-template-columns: minmax(92px, 0.35fr) minmax(220px, 1.5fr) auto; align-items: center; gap: 12px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.vehicleless-document-row:last-child { border-bottom: 0; }
+.vehicleless-document-kind { color: #8b5b16; font-size: 11px; font-weight: 800; }
+.vehicleless-document-row > .vehicle-history-row-label, .vehicleless-document-row > .vehicle-history-row-action { min-width: 0; }
+.vehicleless-document-amount { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .inspection-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
 .inspection-search { min-width: 220px; flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 13px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
 .inspection-search input { width: 100%; padding: 12px 0; color: var(--text); border: 0; outline: 0; background: transparent; font: inherit; font-size: 12px; }
@@ -2151,6 +2164,8 @@
 }
 @media (max-width: 760px) {
   .vehicle-free-items, .vehicle-history-grid, .inspection-schedule-grid { grid-template-columns: 1fr; }
+  .vehicleless-document-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+  .vehicleless-document-kind { grid-column: 1 / -1; }
   .inspection-toolbar { align-items: stretch; flex-direction: column; }
   .inspection-result-summary { text-align: left; }
   .vehicle-timeline-table { display: flex; flex-direction: column; gap: 12px; padding-inline: 0; }

@@ -58,6 +58,25 @@ export type CustomerInput = {
   memo: string
 }
 
+export type VehiclelessDocument = {
+  id: string
+  kind: 'sales' | 'maintenance'
+  number: string
+  type: string
+  category: string | null
+  status: string
+  issuedAt: string
+  total: number
+  sourceLocation: string
+}
+
+export type VehiclelessDocuments = {
+  customerId: string
+  salesCount: number
+  maintenanceCount: number
+  documents: VehiclelessDocument[]
+}
+
 export type VehicleInput = {
   maker: string
   model: string
@@ -123,9 +142,16 @@ type ApiAttachment = {
   createdAt: string
 }
 
+type ApiVehiclelessDocument = VehiclelessDocument
+
 export async function fetchCustomers() {
   const response = await apiFetch<{ customers: ApiCustomer[] }>('/api/customers')
   return response.customers.map(mapCustomer)
+}
+
+export async function fetchVehiclelessDocuments(customerId: string) {
+  const response = await apiFetch<{ customerId: string; salesCount: number; maintenanceCount: number; documents: ApiVehiclelessDocument[] }>(`/api/customers/${encodeURIComponent(customerId)}/vehicleless-documents`)
+  return response
 }
 
 export async function createCustomer(input: CustomerInput) {
