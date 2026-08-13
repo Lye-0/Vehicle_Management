@@ -101,6 +101,11 @@ public sealed class AbacusFp5VehicleImageMapper
             throw new InvalidDataException("FP5に画像参照を持つ車両レコードがありません。");
         }
 
+        // CSVの車両行数がFP5の内部車両レコードより少ない場合は、
+        // 顧客別抽出などの検証用部分スコープとみなします。明示指定も残し、
+        // 同じ件数でもsubset manifestを持つ入力は部分スコープで扱えます。
+        var effectivePartialScope = allowPartialScope || vehicleExport.Rows.Count < source.VehicleRecords.Count;
+
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var strictShiftJis = Encoding.GetEncoding(
             932,
@@ -156,7 +161,7 @@ public sealed class AbacusFp5VehicleImageMapper
             chassisCandidates ??= [];
             var inScope = pairCandidates.Count > 0 || registrationCandidates.Count > 0 || chassisCandidates.Count > 0;
 
-            if (allowPartialScope && !inScope)
+            if (effectivePartialScope && !inScope)
             {
                 mappings.Add(new AbacusFp5VehicleImageMapping(
                     mappings.Count + 1,

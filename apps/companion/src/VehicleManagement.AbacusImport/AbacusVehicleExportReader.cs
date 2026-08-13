@@ -67,8 +67,7 @@ public sealed class AbacusVehicleExportReader
         }
 
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var files = FileNames
-            .Where(fileName => File.Exists(Path.Combine(root, fileName)))
+        var files = ResolveFileNames(root)
             .Select(fileName => ParseFile(root, fileName, cancellationToken))
             .ToList();
         if (files.Count == 0)
@@ -86,6 +85,64 @@ public sealed class AbacusVehicleExportReader
             files,
             files.SelectMany(file => file.Rows).ToList(),
             errors);
+    }
+
+    private static IReadOnlyList<string> ResolveFileNames(string root)
+    {
+        var canonical = FileNames
+            .Where(fileName => File.Exists(Path.Combine(root, fileName)))
+            .ToArray();
+        if (canonical.Length > 0)
+        {
+            return canonical;
+        }
+
+        // ABACUSの単品出力では、車両一覧が「顧客名.csv」などの名前になります。
+        // 23列という形式を確認したCSVだけを車両一覧として扱い、販売・整備CSVを誤って読みません。
+        return Directory.EnumerateFiles(root, "*.csv", System.IO.SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Where(fileName => HasVehicleAliasSuffix(fileName!) ||
+                               HasExpectedColumnCount(Path.Combine(root, fileName!), ExpectedColumns))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(fileName => fileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
+    private static bool HasVehicleAliasSuffix(string fileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return stem.EndsWith("_syaryou", StringComparison.OrdinalIgnoreCase) ||
+               stem.EndsWith("-syaryou", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(stem, "syaryou", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExpectedColumnCount(string path, int expectedColumns)
+    {
+        try
+        {
+            var parserEncoding = Encoding.GetEncoding(932);
+            using var parser = new TextFieldParser(path, parserEncoding, detectEncoding: false)
+            {
+                TextFieldType = FieldType.Delimited,
+                HasFieldsEnclosedInQuotes = true,
+                TrimWhiteSpace = false,
+            };
+            parser.SetDelimiters(",");
+            return !parser.EndOfData && (parser.ReadFields()?.Length ?? 0) == expectedColumns;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (MalformedLineException)
+        {
+            return false;
+        }
     }
 
     private static AbacusVehicleExportFileResult ParseFile(

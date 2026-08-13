@@ -540,7 +540,7 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            UnifiedImportImageMappingStatusText.Text = legacyExportSubsetActive
+            UnifiedImportImageMappingStatusText.Text = fp5VehicleImageMapping.OutOfScopeRecordCount > 0 || legacyExportSubsetActive
                 ? "Gate 14の方式でFP5画像を復元し、選択顧客の車両だけを対象に自動対応付けしました。対象外の車両は今回の検証から除外しています。"
                 : "Gate 14の検証済み方式で画像を復元し、車両へ自動対応付けしました。";
             UnifiedImportImageMappingStatusText.Foreground = ToBrush("#17643A");
@@ -1114,6 +1114,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool IsCustomerSubsetExport(
+        string folderPath,
+        AbacusLegacyExportReadResult result)
+    {
+        if (result.Files.Any(file => file.Kind == "車両一覧" &&
+                                     !string.Equals(file.FileName, "syaryou.csv", StringComparison.OrdinalIgnoreCase) &&
+                                     !string.Equals(file.FileName, "syaryou2.csv", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var manifestPath = Path.Combine(folderPath, "manifest.json");
+        if (!File.Exists(manifestPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            return document.RootElement.TryGetProperty("kind", out var kind) &&
+                   string.Equals(kind.GetString(), "abacus-export-customer-subset", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private async Task InspectLegacyExportsAsync(string folderPath, bool automatic, CancellationToken cancellationToken)
     {
         var previousCustomerKey = (LegacyExportCustomerComboBox.SelectedItem as AbacusLegacyExportCustomerOption)?.Key;
@@ -1124,6 +1161,10 @@ public partial class MainWindow : Window
         {
             var result = await legacyExportReader.ReadAsync(folderPath, cancellationToken);
             legacyExportReadResult = result;
+            if (!legacyExportSubsetActive && IsCustomerSubsetExport(folderPath, result))
+            {
+                legacyExportSubsetActive = true;
+            }
             var fileAnalyses = result.Files
                 .Select(file => new AbacusLegacyExportFileAnalysis(
                     file.FileName,
