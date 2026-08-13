@@ -92,6 +92,30 @@ describe('ABACUS registration', () => {
     expect(maintenanceBody.documents.find((document) => document.number === '9002')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true } })
   })
 
+  it('re-runs the same graph-final package idempotently without duplicating rows', async () => {
+    const packageFiles = await createGraphFinalPackage('gate18-idempotency')
+    const firstResponse = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(firstResponse.status).toBe(200)
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      status: 'committed',
+      customers: { imported: 1, updated: 0 },
+      vehicles: { imported: 0, updated: 0 },
+      documents: { imported: 3, existing: 0 },
+    })
+
+    const firstCounts = await countGraphFinalRows(packageFiles)
+    const secondResponse = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(secondResponse.status).toBe(200)
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      status: 'committed',
+      customers: { imported: 0, updated: 1 },
+      vehicles: { imported: 0, updated: 0 },
+      documents: { imported: 0, existing: 3 },
+    })
+
+    expect(await countGraphFinalRows(packageFiles)).toEqual(firstCounts)
+  })
+
   it('revalidates a Gate 17 ready envelope in preview without writing', async () => {
     const packageFiles = await createGraphFinalPackage()
     const ready = await createReadyEnvelope(packageFiles)
@@ -165,12 +189,12 @@ async function postRegistration(packageFiles: Awaited<ReturnType<typeof createPa
   return SELF.fetch(new Request(probe.url, { method: 'POST', headers, body }))
 }
 
-async function createGraphFinalPackage() {
-  const customer = 'merge-preview:same-name:最終登録テスト'
+async function createGraphFinalPackage(suffix = 'finaltest') {
+  const customer = suffix === 'finaltest' ? 'merge-preview:same-name:最終登録テスト' : `merge-preview:same-name:最終登録テスト-${suffix}`
   const customerName = '最終登録テスト顧客'
-  const salesId = 'abacus-sales-finaltest'
-  const maintenanceId = 'abacus-maintenance-finaltest'
-  const duplicateMaintenanceId = 'abacus-maintenance-finaltest-2'
+  const salesId = suffix === 'finaltest' ? 'abacus-sales-finaltest' : `abacus-sales-${suffix}`
+  const maintenanceId = suffix === 'finaltest' ? 'abacus-maintenance-finaltest' : `abacus-maintenance-${suffix}`
+  const duplicateMaintenanceId = suffix === 'finaltest' ? 'abacus-maintenance-finaltest-2' : `abacus-maintenance-${suffix}-2`
   const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', [customer, 'ABACUS-CUSTOMER-NUMBER-', customerName, '', '', '', '', '', '', '0'].join(',')].join('\n')
   const vehiclesCsv = '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考'
   const salesCsv = ['書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [salesId, '9001', '請求書', '下書き', customerName, '', '', '2026-01-02', '', '10', '1000', '0', '1000', '移行販売', 'ABACUSテスト', ''].join(',')].join('\n')
@@ -193,7 +217,7 @@ async function createGraphFinalPackage() {
     { documentKey: '整備書類|final|9002', documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002|2', documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
   ], excludedDocumentKeys: [] })
-  return { manifest, manifestSha256: await sha256(manifest), files }
+  return { manifest, manifestSha256: await sha256(manifest), files, customerId: customer, salesId, maintenanceId, duplicateMaintenanceId }
 }
 
 async function createLargeGraphFinalPackage(customerCount: number) {
@@ -304,4 +328,17 @@ async function countRows(table: 'customers' | 'vehicles') {
   const column = table === 'customers' ? 'organization_id' : 'organization_id'
   const result = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).bind(testOrganizationId).first<{ count: number }>()
   return Number(result?.count ?? 0)
+}
+
+async function countGraphFinalRows(packageFiles: Awaited<ReturnType<typeof createGraphFinalPackage>>) {
+  const [customers, sales, maintenance] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) AS count FROM customers WHERE organization_id = ? AND id = ?').bind(testOrganizationId, packageFiles.customerId).first<{ count: number }>(),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM sales_documents WHERE organization_id = ? AND id = ?').bind(testOrganizationId, packageFiles.salesId).first<{ count: number }>(),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM maintenance_documents WHERE organization_id = ? AND id IN (?, ?)').bind(testOrganizationId, packageFiles.maintenanceId, packageFiles.duplicateMaintenanceId).first<{ count: number }>(),
+  ])
+  return {
+    customers: Number(customers?.count ?? 0),
+    sales: Number(sales?.count ?? 0),
+    maintenance: Number(maintenance?.count ?? 0),
+  }
 }

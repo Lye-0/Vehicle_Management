@@ -3393,6 +3393,8 @@ public partial class MainWindow : Window
         legacyGraphFinalPackageBusy = true;
         legacyGraphFinalPackageHasError = false;
         legacyGraphFinalPackagePath = null;
+        BeginOperation("登録前パッケージを作成しています…");
+        OperationProgressBar.IsIndeterminate = true;
         LegacyGraphOpenFinalPackageButton.IsEnabled = false;
         LegacyGraphCreateFinalPackageButton.IsEnabled = false;
         LegacyGraphFinalPackageResultText.Text = "";
@@ -3402,18 +3404,21 @@ public partial class MainWindow : Window
         LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#52647A");
         try
         {
+            var cancellationToken = operationCancellation?.Token ?? CancellationToken.None;
             var snapshot = BuildLegacyGraphFinalizationSnapshot();
             var result = await legacyGraphFinalPackageStore.CreateAsync(
                 legacyExportCandidateGraphResult,
                 snapshot,
                 unifiedImportOutputSession.WorkIntermediatePath,
-                fp5VehicleImageMapping);
+                fp5VehicleImageMapping,
+                cancellationToken);
             LegacyGraphFinalPackageStatusText.Text =
                 "グラフ確定パッケージを検証しました。readyフォルダーへ完成品を移しています…";
             var readyResult = await importOutputPackageStore.CompleteAsync(
                 unifiedImportOutputSession,
                 result,
-                fp5VehicleImageMapping.ReportPath);
+                fp5VehicleImageMapping.ReportPath,
+                cancellationToken);
             LegacyGraphFinalPackageStatusText.Text =
                 result.ImageCount > 0
                     ? "グラフ確定後の登録前パッケージを作成しました。画像も再検証して同梱済みです。Web API・DB・画像アップロードはまだ行っていません。"
@@ -3438,6 +3443,17 @@ public partial class MainWindow : Window
                 $"車両情報なし: {result.VehiclelessDocumentCount:N0}件 / 除外: {result.ExcludedDocumentCount:N0}件 / 画像: {result.ImageCount:N0}件\n" +
                 $"マニフェスト SHA-256: {result.ManifestSha256}";
         }
+        catch (OperationCanceledException)
+        {
+            legacyGraphFinalPackageHasError = true;
+            LegacyGraphFinalPackageResultText.Text = "";
+            LegacyGraphFinalPackageStatusText.Text =
+                "登録前パッケージの作成をキャンセルしました。保存用ABACUS原本は変更していません。";
+            LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#A61B1B");
+            LegacyGraphFinalPackageNextStepText.Text =
+                "次の操作: 確定内容を確認してから、もう一度「確定内容から登録前パッケージを作成」を実行してください。";
+            LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#A61B1B");
+        }
         catch (Exception exception)
         {
             // async void のイベントハンドラーから例外を外へ出すと、画面には
@@ -3457,6 +3473,7 @@ public partial class MainWindow : Window
         finally
         {
             legacyGraphFinalPackageBusy = false;
+            EndOperation();
             UpdateLegacyGraphImportConfirmationButton();
         }
     }
@@ -7147,6 +7164,7 @@ public partial class MainWindow : Window
         operationCancellation?.Dispose();
         operationCancellation = new CancellationTokenSource();
         OperationStatusText.Text = status;
+        OperationProgressBar.IsIndeterminate = false;
         OperationProgressBar.Value = 0;
         CancelOperationButton.IsEnabled = true;
         SelectSourceButton.IsEnabled = false;
@@ -7158,6 +7176,7 @@ public partial class MainWindow : Window
     private void EndOperation()
     {
         CancelOperationButton.IsEnabled = false;
+        OperationProgressBar.IsIndeterminate = false;
         SelectSourceButton.IsEnabled = true;
         SourcePathTextBox.IsEnabled = true;
         InspectFolderButton.IsEnabled = true;

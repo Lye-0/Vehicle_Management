@@ -72,86 +72,105 @@ public sealed class AbacusWorkspaceService(AbacusFolderInspector inspector)
         }
 
         Directory.CreateDirectory(workspacePath);
-
-        for (var index = 0; index < sourceReport.Files.Count; index++)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var sourceFile = sourceReport.Files[index];
-            progress?.Report(new AbacusWorkspaceProgress("コピー中", index, sourceReport.FileCount, sourceFile.RelativePath));
-
-            var sourcePath = SafeCombine(sourceRoot, sourceFile.RelativePath);
-            var destinationPath = SafeCombine(workspacePath, sourceFile.RelativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-
-            await using (var input = new FileStream(
-                sourcePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                1024 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan))
-            await using (var output = new FileStream(
-                destinationPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                1024 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            for (var index = 0; index < sourceReport.Files.Count; index++)
             {
-                await input.CopyToAsync(output, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var sourceFile = sourceReport.Files[index];
+                progress?.Report(new AbacusWorkspaceProgress("コピー中", index, sourceReport.FileCount, sourceFile.RelativePath));
+
+                var sourcePath = SafeCombine(sourceRoot, sourceFile.RelativePath);
+                var destinationPath = SafeCombine(workspacePath, sourceFile.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+
+                await using (var input = new FileStream(
+                    sourcePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    1024 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var output = new FileStream(
+                    destinationPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    1024 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan))
+                {
+                    await input.CopyToAsync(output, cancellationToken);
+                }
+
+                File.SetLastWriteTimeUtc(destinationPath, sourceFile.LastWriteTimeUtc);
+                await VerifyFileHashAsync(destinationPath, sourceFile.Sha256, cancellationToken);
             }
 
-            File.SetLastWriteTimeUtc(destinationPath, sourceFile.LastWriteTimeUtc);
-            await VerifyFileHashAsync(destinationPath, sourceFile.Sha256, cancellationToken);
+            progress?.Report(new AbacusWorkspaceProgress("コピー検証中", sourceReport.FileCount, sourceReport.FileCount, "作業用コピー"));
+            var workspaceReport = await inspector.InspectAsync(
+                workspacePath,
+                new Progress<AbacusInspectionProgress>(item =>
+                    progress?.Report(new AbacusWorkspaceProgress("コピー検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
+                cancellationToken);
+
+            progress?.Report(new AbacusWorkspaceProgress("原本再検証中", 0, sourceReport.FileCount, "保存用原本"));
+            var sourceAfterCopyReport = await inspector.InspectAsync(
+                sourceRoot,
+                new Progress<AbacusInspectionProgress>(item =>
+                    progress?.Report(new AbacusWorkspaceProgress("原本再検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
+                cancellationToken);
+
+            if (workspaceReport.FolderFingerprint != sourceReport.FolderFingerprint)
+            {
+                throw new InvalidDataException("作業用コピーが保存用原本と一致しません。コピーは使用しないでください。");
+            }
+
+            if (sourceAfterCopyReport.FolderFingerprint != sourceReport.FolderFingerprint)
+            {
+                throw new InvalidDataException("コピー処理中に保存用原本の内容が変化しました。処理を中止しました。");
+            }
+
+            if (!HasSameSourceMetadata(sourceReport, sourceAfterCopyReport))
+            {
+                throw new InvalidDataException("コピー処理中に保存用原本のファイル情報が変化しました。処理を中止しました。");
+            }
+
+            var manifestPath = $"{workspacePath}.manifest.json";
+            var manifest = new
+            {
+                Version = 1,
+                CreatedAtUtc = DateTime.UtcNow,
+                SourcePath = sourceRoot,
+                WorkspacePath = workspacePath,
+                sourceReport.FileCount,
+                sourceReport.TotalBytes,
+                sourceReport.FolderFingerprint,
+            };
+            await File.WriteAllTextAsync(
+                manifestPath,
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+
+            progress?.Report(new AbacusWorkspaceProgress("完了", sourceReport.FileCount, sourceReport.FileCount, "完了"));
+            return new AbacusWorkspaceResult(workspacePath, manifestPath, workspaceReport, sourceAfterCopyReport);
         }
-
-        progress?.Report(new AbacusWorkspaceProgress("コピー検証中", sourceReport.FileCount, sourceReport.FileCount, "作業用コピー"));
-        var workspaceReport = await inspector.InspectAsync(
-            workspacePath,
-            new Progress<AbacusInspectionProgress>(item =>
-                progress?.Report(new AbacusWorkspaceProgress("コピー検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
-            cancellationToken);
-
-        progress?.Report(new AbacusWorkspaceProgress("原本再検証中", 0, sourceReport.FileCount, "保存用原本"));
-        var sourceAfterCopyReport = await inspector.InspectAsync(
-            sourceRoot,
-            new Progress<AbacusInspectionProgress>(item =>
-                progress?.Report(new AbacusWorkspaceProgress("原本再検証中", item.CompletedFiles, item.TotalFiles, item.CurrentFile))),
-            cancellationToken);
-
-        if (workspaceReport.FolderFingerprint != sourceReport.FolderFingerprint)
+        catch
         {
-            throw new InvalidDataException("作業用コピーが保存用原本と一致しません。コピーは使用しないでください。");
+            // 中断・失敗したコピーを次回起動対象として残さない。作成直後の
+            // workspaceだけを削除し、保存用原本には一切触れない。
+            if (Directory.Exists(workspacePath) && IsSameOrSubPath(workspacePath, destinationRoot))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+
+            var manifestPath = $"{workspacePath}.manifest.json";
+            if (File.Exists(manifestPath))
+            {
+                File.Delete(manifestPath);
+            }
+
+            throw;
         }
-
-        if (sourceAfterCopyReport.FolderFingerprint != sourceReport.FolderFingerprint)
-        {
-            throw new InvalidDataException("コピー処理中に保存用原本の内容が変化しました。処理を中止しました。");
-        }
-
-        if (!HasSameSourceMetadata(sourceReport, sourceAfterCopyReport))
-        {
-            throw new InvalidDataException("コピー処理中に保存用原本のファイル情報が変化しました。処理を中止しました。");
-        }
-
-        var manifestPath = $"{workspacePath}.manifest.json";
-        var manifest = new
-        {
-            Version = 1,
-            CreatedAtUtc = DateTime.UtcNow,
-            SourcePath = sourceRoot,
-            WorkspacePath = workspacePath,
-            sourceReport.FileCount,
-            sourceReport.TotalBytes,
-            sourceReport.FolderFingerprint,
-        };
-        await File.WriteAllTextAsync(
-            manifestPath,
-            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-
-        progress?.Report(new AbacusWorkspaceProgress("完了", sourceReport.FileCount, sourceReport.FileCount, "完了"));
-        return new AbacusWorkspaceResult(workspacePath, manifestPath, workspaceReport, sourceAfterCopyReport);
     }
 
     public async Task<AbacusWorkspaceVerificationResult> VerifyExistingAsync(

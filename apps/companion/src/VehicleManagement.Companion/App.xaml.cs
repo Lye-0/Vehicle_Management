@@ -171,6 +171,35 @@ public partial class App : Application
                 source,
                 before.FolderFingerprint,
                 "fp5-vehicle-record");
+            var interruptedWorkspaceParent = Path.Combine(testRoot, "interrupted-workspace-parent");
+            Directory.CreateDirectory(interruptedWorkspaceParent);
+            using var interruptedWorkspaceCancellation = new CancellationTokenSource();
+            interruptedWorkspaceCancellation.Cancel();
+            var interruptedWorkspaceRejected = false;
+            try
+            {
+                await workspaceService.CreateAsync(
+                    before,
+                    interruptedWorkspaceParent,
+                    cancellationToken: interruptedWorkspaceCancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                interruptedWorkspaceRejected = true;
+            }
+            var interruptedWorkspaceCleaned =
+                !Directory.EnumerateFileSystemEntries(interruptedWorkspaceParent).Any();
+            var resumedProgressEvents = 0;
+            AbacusWorkspaceProgress? lastResumedProgress = null;
+            var resumedWorkspace = await workspaceService.CreateAsync(
+                before,
+                interruptedWorkspaceParent,
+                new InlineProgress<AbacusWorkspaceProgress>(item =>
+                {
+                    resumedProgressEvents++;
+                    lastResumedProgress = item;
+                }));
+            var outputPackageReopened = await outputPackageStore.OpenAsync(outputPackageSession.RootPath);
             var fp5RestorationParent = Path.Combine(testRoot, "fp5-restoration");
             Directory.CreateDirectory(fp5RestorationParent);
             var fp5Restoration = await new AbacusFp5ImageRestorer().RestoreAsync(
@@ -486,6 +515,29 @@ public partial class App : Application
             var gate14ReadyImagePath = Path.Combine(
                 gate14ReadyPackage.ReadyPath,
                 gate14ImageMapping.ImageRelativePath!.Replace('/', Path.DirectorySeparatorChar));
+            var gate18NoImagePackageParent = Path.Combine(testRoot, "gate18-no-image-packages");
+            Directory.CreateDirectory(gate18NoImagePackageParent);
+            var gate18NoImageFinalPackage = await new AbacusLegacyGraphFinalPackageStore().CreateAsync(
+                legacyCandidateGraph,
+                gate14FinalizationSnapshot,
+                gate18NoImagePackageParent);
+            var gate18RerunSession = await outputPackageStore.CreateAsync(
+                outputPackageDestination,
+                source,
+                before.FolderFingerprint,
+                "fp5-vehicle-record");
+            var gate18FirstReadyPackage = await outputPackageStore.CompleteAsync(
+                gate18RerunSession,
+                gate14FinalPackage,
+                gate14MappingWithCompatibilitySpacing.ReportPath);
+            var gate18SecondReadyPackage = await outputPackageStore.CompleteAsync(
+                gate18RerunSession,
+                gate18NoImageFinalPackage);
+            var gate18RerunImagePath = Path.Combine(
+                gate18SecondReadyPackage.ReadyPath,
+                gate14ImageMapping.ImageRelativePath!.Replace('/', Path.DirectorySeparatorChar));
+            var gate18SecondReadyManifestText = await File.ReadAllTextAsync(gate18SecondReadyPackage.ReadyManifestPath);
+            var gate18RerunSessionReopened = await outputPackageStore.OpenAsync(gate18RerunSession.RootPath);
             var tamperedLegacyPackagePath = Path.Combine(testRoot, "legacy-preview-tampered");
             Directory.CreateDirectory(tamperedLegacyPackagePath);
             foreach (var packageFile in Directory.EnumerateFiles(legacyPreview.PackagePath))
@@ -724,14 +776,28 @@ public partial class App : Application
                  fp5Mapping.UnreferencedImageCount == 0 &&
                  fp5MappingReportText.Contains("gate14-verified", StringComparison.Ordinal) &&
                  fp5MappingReportText.Contains("fp5-record-image-reference+exact-chassis-registration", StringComparison.Ordinal) &&
-                 gate14FinalPackage.ImageCount == fp5Mapping.MatchedImageCount &&
-                 gate14FinalPackage.ImageAttachmentsPath is not null &&
-                 File.Exists(gate14FinalPackage.ImageAttachmentsPath) &&
-                 gate14ReadyPackage.ReadyPath == outputPackageSession.ReadyPath &&
-                 File.Exists(gate14ReadyImagePath) &&
-                 File.Exists(Path.Combine(gate14ReadyPackage.ReadyPath, "reports", "fp5-vehicle-image-mapping-report.json")) &&
-                 gate14ReadyManifestText.Contains("fp5-vehicle-image-mapping-report.json", StringComparison.Ordinal) &&
-                 analysis.IsStructurallyValid &&
+                gate14FinalPackage.ImageCount == fp5Mapping.MatchedImageCount &&
+                gate14FinalPackage.ImageAttachmentsPath is not null &&
+                File.Exists(gate14FinalPackage.ImageAttachmentsPath) &&
+                gate14ReadyPackage.ReadyPath == outputPackageSession.ReadyPath &&
+                File.Exists(gate14ReadyImagePath) &&
+                File.Exists(Path.Combine(gate14ReadyPackage.ReadyPath, "reports", "fp5-vehicle-image-mapping-report.json")) &&
+                gate14ReadyManifestText.Contains("fp5-vehicle-image-mapping-report.json", StringComparison.Ordinal) &&
+                interruptedWorkspaceRejected &&
+                interruptedWorkspaceCleaned &&
+                resumedWorkspace.WorkspaceReport.FolderFingerprint == before.FolderFingerprint &&
+                resumedProgressEvents > 0 &&
+                lastResumedProgress is { Phase: "完了", CompletedFiles: > 0 } &&
+                outputPackageReopened.PackageId == outputPackageSession.PackageId &&
+                outputPackageReopened.SourceFingerprint == outputPackageSession.SourceFingerprint &&
+                gate18NoImageFinalPackage.ImageCount == 0 &&
+                gate18FirstReadyPackage.ReadyPath == gate18SecondReadyPackage.ReadyPath &&
+                !File.Exists(gate18RerunImagePath) &&
+                !Directory.EnumerateFiles(Path.Combine(gate18SecondReadyPackage.ReadyPath, "images"), "*", SearchOption.AllDirectories).Any() &&
+                gate18SecondReadyManifestText.Contains("\"imageCount\": 0", StringComparison.Ordinal) &&
+                !gate18SecondReadyManifestText.Contains("fp5-vehicle-image-mapping-report.json", StringComparison.Ordinal) &&
+                gate18RerunSessionReopened.PackageId == gate18RerunSession.PackageId &&
+                analysis.IsStructurallyValid &&
                 analysis.TotalImportCandidateRows == 7 &&
                 analysis.TotalSkippedBlankCustomerRows == 2 &&
                 linkage.IsValid &&
@@ -864,6 +930,11 @@ public partial class App : Application
             clone[specification.DocumentNumberColumn] = document;
             return clone;
         }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 
     private static async Task WriteFp5ImageSelfTestAsync(string path, byte[] jpeg)

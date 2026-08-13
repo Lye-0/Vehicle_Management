@@ -157,6 +157,7 @@ public sealed class AbacusImportOutputPackageStore
         Directory.CreateDirectory(stagingPath);
         try
         {
+            await WriteCheckpointAsync(session, "finalizing", cancellationToken);
             var dataPath = Path.Combine(stagingPath, "data");
             var mappingsPath = Path.Combine(stagingPath, "mappings");
             var imagesPath = Path.Combine(stagingPath, "images");
@@ -240,10 +241,13 @@ public sealed class AbacusImportOutputPackageStore
             };
             await WriteTextFileAsync(Path.Combine(stagingPath, "manifest.json"), JsonSerializer.Serialize(readyManifest, JsonOptions), cancellationToken);
 
-            // ready配下の既存のpending内容を残したまま、検証済みの各ファイルを上書きします。
-            // 完成状態のmanifestは最後に置くため、途中で停止してもpendingとして扱えます。
-            CopyDirectory(stagingPath, session.ReadyPath, overwrite: true);
+            // 同じセッションを再実行した場合も、前回の画像やレポートを残さない。
+            // 古いファイルが残るとready/manifest.jsonに列挙されないファイルをWeb側へ
+            // 渡すことになるため、検証済みstagingの内容と完全に置き換える。
+            await WriteRootManifestAsync(session, "in-progress", cancellationToken);
+            ReplaceDirectoryContents(stagingPath, session.ReadyPath);
             await WriteRootManifestAsync(session, "ready", cancellationToken);
+            await WriteCheckpointAsync(session, "ready", cancellationToken);
             return new AbacusImportOutputPackageReadyResult(
                 session.RootPath,
                 session.ReadyPath,
@@ -254,8 +258,102 @@ public sealed class AbacusImportOutputPackageStore
         catch
         {
             if (Directory.Exists(stagingPath)) Directory.Delete(stagingPath, recursive: true);
+            await TryWriteCheckpointAsync(session, "failed");
             throw;
         }
+    }
+
+    /// <summary>
+    /// アプリ再起動後に、既存のABACUS-Importルートを安全に再開対象として開きます。
+    /// ルートマニフェスト、作業領域、保存用原本の指紋を再検証するため、途中状態を
+    /// 別の原本や別パッケージへ誤って紐付けません。
+    /// </summary>
+    public async Task<AbacusImportOutputPackageSession> OpenAsync(
+        string rootPath,
+        CancellationToken cancellationToken = default)
+    {
+        var root = ValidateExistingDirectory(rootPath, "生成物ルート");
+        var rootManifestPath = Path.Combine(root, "abacus-import.json");
+        var manifest = await ReadJsonObjectAsync(rootManifestPath, cancellationToken);
+        if (!string.Equals(ReadString(manifest, "kind"), "abacus-import", StringComparison.Ordinal) ||
+            ReadInt32(manifest, "version") != RootManifestVersion)
+        {
+            throw new InvalidDataException("ABACUS登録パッケージのルートマニフェストが不正です。");
+        }
+
+        var packageId = ReadString(manifest, "packageId");
+        var status = ReadString(manifest, "status");
+        if (packageId.Length == 0 || status is not ("in-progress" or "ready"))
+        {
+            throw new InvalidDataException("ABACUS登録パッケージの状態が再開対象ではありません。");
+        }
+
+        var source = ReadObject(manifest, "source");
+        var sourcePath = ValidateExistingDirectory(ReadString(source, "path"), "ABACUSフォルダー");
+        var sourceFingerprint = ReadString(source, "fingerprint");
+        if (sourceFingerprint.Length != 64)
+        {
+            throw new InvalidDataException("ABACUS原本の指紋が不正です。");
+        }
+        if (IsSameOrSubPath(root, sourcePath) || IsSameOrSubPath(sourcePath, root))
+        {
+            throw new InvalidDataException("生成物と保存用ABACUS原本が分離されていません。");
+        }
+
+        var workPath = ResolveManifestPath(root, manifest, "workPath", "work");
+        var workAbacusCopyPath = ResolveManifestPath(root, manifest, "workAbacusCopy", "work/abacus-copy");
+        var workIntermediatePath = ResolveManifestPath(root, manifest, "workIntermediate", "work/intermediate");
+        var workCheckpointsPath = ResolveManifestPath(root, manifest, "workCheckpoints", "work/checkpoints");
+        var workLogsPath = ResolveManifestPath(root, manifest, "workLogs", "work/logs");
+        var readyPath = ResolveManifestPath(root, manifest, "readyPath", "ready");
+        var readyManifestPath = ResolveManifestPath(root, manifest, "readyManifest", "ready/manifest.json");
+        foreach (var path in new[] { workPath, workAbacusCopyPath, workIntermediatePath, workCheckpointsPath, workLogsPath, readyPath })
+        {
+            _ = ValidateExistingDirectory(path, "生成物領域");
+        }
+        if (!string.Equals(Path.GetFullPath(readyManifestPath), Path.Combine(readyPath, "manifest.json"), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("完成品マニフェストの配置が不正です。");
+        }
+        var readyManifest = await ReadJsonObjectAsync(readyManifestPath, cancellationToken);
+        if (!string.Equals(ReadString(readyManifest, "kind"), "abacus-import-ready", StringComparison.Ordinal) ||
+            ReadInt32(readyManifest, "version") != ReadyManifestVersion ||
+            !string.Equals(ReadString(readyManifest, "packageId"), packageId, StringComparison.Ordinal) ||
+            ReadString(readyManifest, "status") is not ("pending" or "ready"))
+        {
+            throw new InvalidDataException("完成品マニフェストがルートマニフェストと一致しません。");
+        }
+        var checkpointPath = Path.Combine(workCheckpointsPath, "state.json");
+        if (File.Exists(checkpointPath))
+        {
+            var checkpoint = await ReadJsonObjectAsync(checkpointPath, cancellationToken);
+            if (!string.Equals(ReadString(checkpoint, "packageId"), packageId, StringComparison.Ordinal) ||
+                !string.Equals(ReadString(checkpoint, "sourceFingerprint"), sourceFingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("再開チェックポイントがパッケージと一致しません。");
+            }
+        }
+
+        var actualFingerprint = await CalculateMetadataFingerprintAsync(sourcePath, cancellationToken);
+        if (!string.Equals(actualFingerprint, sourceFingerprint, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("保存用ABACUS原本が作成時の指紋と一致しません。再開を中止しました。");
+        }
+
+        return new AbacusImportOutputPackageSession(
+            packageId,
+            root,
+            rootManifestPath,
+            workPath,
+            workAbacusCopyPath,
+            workIntermediatePath,
+            workCheckpointsPath,
+            workLogsPath,
+            readyPath,
+            readyManifestPath,
+            sourcePath,
+            sourceFingerprint,
+            NormalizeImageMethod(ReadString(manifest, "imageAcquisitionMethod")));
     }
 
     private async Task WriteRootManifestAsync(AbacusImportOutputPackageSession session, string status, CancellationToken cancellationToken)
@@ -279,6 +377,37 @@ public sealed class AbacusImportOutputPackageStore
             imageAcquisitionMethod = session.ImageAcquisitionMethod,
         };
         await WriteTextFileAsync(session.RootManifestPath, JsonSerializer.Serialize(manifest, JsonOptions), cancellationToken);
+    }
+
+    private static Task WriteCheckpointAsync(
+        AbacusImportOutputPackageSession session,
+        string status,
+        CancellationToken cancellationToken) =>
+        WriteTextFileAsync(
+            Path.Combine(session.WorkCheckpointsPath, "state.json"),
+            JsonSerializer.Serialize(new
+            {
+                version = 1,
+                status,
+                packageId = session.PackageId,
+                updatedAtUtc = DateTime.UtcNow,
+                sourceFingerprint = session.SourceFingerprint,
+                imageAcquisitionMethod = session.ImageAcquisitionMethod,
+                abacusCopyPath = "../abacus-copy",
+            }, JsonOptions),
+            cancellationToken);
+
+    private static async Task TryWriteCheckpointAsync(AbacusImportOutputPackageSession session, string status)
+    {
+        try
+        {
+            await WriteCheckpointAsync(session, status, CancellationToken.None);
+        }
+        catch
+        {
+            // 元の例外を失敗理由として返す。診断用チェックポイントの書き込み失敗で
+            // エラー内容を隠さない。
+        }
     }
 
     private void ValidateSession(AbacusImportOutputPackageSession session)
@@ -391,6 +520,39 @@ public sealed class AbacusImportOutputPackageStore
         }
     }
 
+    private static void ReplaceDirectoryContents(string source, string destination)
+    {
+        var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+        var destinationRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
+        if (!Directory.Exists(sourceRoot) || !Directory.Exists(destinationRoot) ||
+            IsSameOrSubPath(sourceRoot, destinationRoot) || IsSameOrSubPath(destinationRoot, sourceRoot))
+        {
+            throw new InvalidDataException("完成品フォルダーの置換範囲が不正です。");
+        }
+
+        foreach (var destinationFile in Directory.EnumerateFiles(destinationRoot, "*", SearchOption.AllDirectories).ToArray())
+        {
+            var relative = Path.GetRelativePath(destinationRoot, destinationFile);
+            if (!File.Exists(Path.Combine(sourceRoot, relative)))
+            {
+                File.Delete(destinationFile);
+            }
+        }
+
+        foreach (var destinationDirectory in Directory.EnumerateDirectories(destinationRoot, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(path => path.Length)
+                     .ToArray())
+        {
+            var relative = Path.GetRelativePath(destinationRoot, destinationDirectory);
+            if (!Directory.Exists(Path.Combine(sourceRoot, relative)))
+            {
+                Directory.Delete(destinationDirectory, recursive: true);
+            }
+        }
+
+        CopyDirectory(sourceRoot, destinationRoot, overwrite: true);
+    }
+
     private static async Task<IReadOnlyList<ReadyFile>> DescribeFilesAsync(string root, CancellationToken cancellationToken)
     {
         var files = new List<ReadyFile>();
@@ -421,6 +583,59 @@ public sealed class AbacusImportOutputPackageStore
             hash.AppendData(Encoding.UTF8.GetBytes(line));
         }
         return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static string ResolveManifestPath(
+        string root,
+        JsonElement manifest,
+        string propertyName,
+        string fallbackRelativePath)
+    {
+        var relative = manifest.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString() ?? string.Empty
+            : fallbackRelativePath;
+        if (relative.Length == 0 || Path.IsPathRooted(relative) || relative.Contains(':', StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"ルートマニフェストのパスが不正です: {propertyName}");
+        }
+
+        var resolved = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+        if (!IsSameOrSubPath(resolved, root))
+        {
+            throw new InvalidDataException($"ルートマニフェストがフォルダー外を参照しています: {propertyName}");
+        }
+
+        return Path.TrimEndingDirectorySeparator(resolved);
+    }
+
+    private static JsonElement ReadObject(JsonElement parent, string propertyName)
+    {
+        if (!parent.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException($"マニフェストの必須オブジェクトがありません: {propertyName}");
+        }
+
+        return value;
+    }
+
+    private static string ReadString(JsonElement parent, string propertyName)
+    {
+        if (!parent.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidDataException($"マニフェストの必須文字列がありません: {propertyName}");
+        }
+
+        return value.GetString()?.Trim() ?? string.Empty;
+    }
+
+    private static int ReadInt32(JsonElement parent, string propertyName)
+    {
+        if (!parent.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+        {
+            throw new InvalidDataException($"マニフェストの必須数値がありません: {propertyName}");
+        }
+
+        return number;
     }
 
     private static string NormalizeImageMethod(string value) => value switch
