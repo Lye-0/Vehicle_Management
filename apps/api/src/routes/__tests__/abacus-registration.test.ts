@@ -92,6 +92,27 @@ describe('ABACUS registration', () => {
     expect(maintenanceBody.documents.find((document) => document.number === '9002')).toMatchObject({ vehicle: 'なし', vehicleId: null, abacusImport: { vehicleless: true } })
   })
 
+  it('revalidates a Gate 17 ready envelope in preview without writing', async () => {
+    const packageFiles = await createGraphFinalPackage()
+    const ready = await createReadyEnvelope(packageFiles)
+    const beforeCustomers = await countRows('customers')
+    const response = await postGraphFinalPreview(packageFiles, ready)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'preview',
+      customerCount: 1,
+      vehicleCount: 0,
+      salesCount: 1,
+      maintenanceCount: 2,
+      vehiclelessDocumentCount: 3,
+      excludedDocumentCount: 0,
+      imageCount: 0,
+      errors: [],
+    })
+    expect(await countRows('customers')).toBe(beforeCustomers)
+  })
+
   it('chunks graph-final existing-row lookups below the D1 bound-variable limit', async () => {
     const packageFiles = await createLargeGraphFinalPackage(120)
     const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
@@ -167,7 +188,7 @@ async function createGraphFinalPackage() {
     ['document-links.json', linksJson],
   ] as const
   const dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
-  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: 0, salesRowCount: 1, maintenanceRowCount: 2, vehiclelessDocumentCount: 3, excludedDocumentCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
+  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: 0, salesRowCount: 1, maintenanceRowCount: 2, vehiclelessDocumentCount: 3, excludedDocumentCount: 0, imageCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
     { documentKey: '販売書類|final|9001', documentId: salesId, kind: '販売書類', customerId: customer, vehicleId: null, sourceLocation: 'hanbai.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002', documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
     { documentKey: '整備書類|final|9002|2', documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
@@ -200,6 +221,54 @@ async function postGraphFinalRegistration(packageFiles: Awaited<ReturnType<typeo
   formData.append('manifestSha256', packageFiles.manifestSha256)
   formData.append('confirmation', confirmation)
   const probe = new Request('https://example.com/api/import/abacus-registration/commit', { method: 'POST', headers: authHeaders(), body: formData })
+  const body = await probe.arrayBuffer()
+  const headers = new Headers(probe.headers)
+  headers.set('Content-Length', String(body.byteLength))
+  return SELF.fetch(new Request(probe.url, { method: 'POST', headers, body }))
+}
+
+async function createReadyEnvelope(packageFiles: Awaited<ReturnType<typeof createGraphFinalPackage>>) {
+  const manifest = JSON.parse(packageFiles.manifest) as { summary: Record<string, number> }
+  const files = new Map<string, string>([
+    ['data/customers.csv', packageFiles.files.find(([fileName]) => fileName === 'customers.csv')?.[1] ?? ''],
+    ['data/vehicles.csv', packageFiles.files.find(([fileName]) => fileName === 'vehicles.csv')?.[1] ?? ''],
+    ['data/sales-documents.csv', packageFiles.files.find(([fileName]) => fileName === 'sales.csv')?.[1] ?? ''],
+    ['data/maintenance-documents.csv', packageFiles.files.find(([fileName]) => fileName === 'maintenance.csv')?.[1] ?? ''],
+    ['mappings/document-links.json', packageFiles.files.find(([fileName]) => fileName === 'document-links.json')?.[1] ?? ''],
+    ['mappings/customer-merges.json', JSON.stringify([{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: 'merge-preview:same-name:最終登録テスト', customerName: '最終登録テスト顧客' }])],
+    ['reports/excluded-documents.json', '[]'],
+    ['reports/unresolved-items.json', '[]'],
+    ['reports/image-acquisition-report.json', JSON.stringify({ method: 'fp5-vehicle-record', status: 'completed', imageCount: 0 })],
+  ])
+  const descriptors = await Promise.all([...files.entries()].map(async ([path, content]) => ({ path, sizeBytes: byteLength(content), sha256: await sha256(content) })))
+  const rootManifest = JSON.stringify({ version: 1, kind: 'abacus-import', status: 'ready', packageId: 'test-package', readyPath: 'ready', readyManifest: 'ready/manifest.json', imageAcquisitionMethod: 'fp5-vehicle-record' })
+  const readyManifest = JSON.stringify({ version: 1, kind: 'abacus-import-ready', status: 'ready', packageId: 'test-package', imageAcquisitionMethod: 'fp5-vehicle-record', summary: { customerCount: manifest.summary.customerRowCount, vehicleCount: manifest.summary.vehicleRowCount, salesDocumentCount: manifest.summary.salesRowCount, maintenanceDocumentCount: manifest.summary.maintenanceRowCount, vehiclelessDocumentCount: manifest.summary.vehiclelessDocumentCount, excludedDocumentCount: manifest.summary.excludedDocumentCount, imageCount: 0 }, files: descriptors })
+  return { rootManifest, readyManifest, files, descriptors, rootManifestSha256: await sha256(rootManifest), readyManifestSha256: await sha256(readyManifest) }
+}
+
+async function postGraphFinalPreview(packageFiles: Awaited<ReturnType<typeof createGraphFinalPackage>>, ready: Awaited<ReturnType<typeof createReadyEnvelope>>) {
+  const formData = new FormData()
+  formData.append('manifest', new File([packageFiles.manifest], 'manifest.json', { type: 'application/json' }))
+  for (const [fileName, content] of packageFiles.files) formData.append(fileName === 'document-links.json' ? 'documentLinks' : fileName.replace('.csv', ''), new File([content], fileName, { type: 'text/plain' }))
+  formData.append('manifestSha256', packageFiles.manifestSha256)
+  formData.append('packageManifest', new File([ready.rootManifest], 'abacus-import.json', { type: 'application/json' }))
+  formData.append('readyManifest', new File([ready.readyManifest], 'manifest.json', { type: 'application/json' }))
+  formData.append('packageManifestSha256', ready.rootManifestSha256)
+  formData.append('readyManifestSha256', ready.readyManifestSha256)
+  const readyFields: Record<string, string> = {
+    'readyCustomers': 'data/customers.csv',
+    'readyVehicles': 'data/vehicles.csv',
+    'readySales': 'data/sales-documents.csv',
+    'readyMaintenance': 'data/maintenance-documents.csv',
+    'readyDocumentLinks': 'mappings/document-links.json',
+    'readyCustomerMerges': 'mappings/customer-merges.json',
+    'readyExcludedDocuments': 'reports/excluded-documents.json',
+    'readyUnresolvedItems': 'reports/unresolved-items.json',
+    'readyImageAcquisitionReport': 'reports/image-acquisition-report.json',
+  }
+  for (const [field, path] of Object.entries(readyFields)) formData.append(field, new File([ready.files.get(path) ?? ''], path, { type: 'text/plain' }))
+  formData.append('readyImageDescriptors', '[]')
+  const probe = new Request('https://example.com/api/import/abacus-registration/preview', { method: 'POST', headers: authHeaders(), body: formData })
   const body = await probe.arrayBuffer()
   const headers = new Headers(probe.headers)
   headers.set('Content-Length', String(body.byteLength))

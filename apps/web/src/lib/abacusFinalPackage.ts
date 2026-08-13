@@ -84,6 +84,50 @@ export type GraphFinalPackageValidation = {
   checkedFileCount: number
   checkedImageCount: number
   manifestSha256: string
+  abacusImport?: AbacusImportPackageContext
+}
+
+export type AbacusImportReadyFileDescriptor = {
+  path: string
+  sizeBytes: number
+  sha256: string
+}
+
+export type AbacusImportPackageContext = {
+  rootManifestFile: File
+  readyManifestFile: File
+  rootManifestSha256: string
+  readyManifestSha256: string
+  readyFiles: Map<string, File>
+  readyDescriptors: AbacusImportReadyFileDescriptor[]
+}
+
+type AbacusImportRootManifest = {
+  version: number
+  kind: 'abacus-import'
+  status: 'ready'
+  packageId: string
+  readyPath: string
+  readyManifest: string
+  imageAcquisitionMethod: 'fp5-vehicle-record'
+}
+
+type AbacusImportReadyManifest = {
+  version: number
+  kind: 'abacus-import-ready'
+  status: 'ready'
+  packageId: string
+  imageAcquisitionMethod: 'fp5-vehicle-record'
+  summary: {
+    customerCount: number
+    vehicleCount: number
+    salesDocumentCount: number
+    maintenanceDocumentCount: number
+    vehiclelessDocumentCount: number
+    excludedDocumentCount: number
+    imageCount: number
+  }
+  files: AbacusImportReadyFileDescriptor[]
 }
 
 type ValidationFailure = Error & { details?: string[] }
@@ -110,7 +154,10 @@ export function isGraphFinalManifest(value: unknown): value is Pick<GraphFinalMa
 }
 
 export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<GraphFinalPackageValidation> {
-  const files = collectFiles(selectedFiles)
+  return validateGraphFinalFiles(collectFiles(selectedFiles))
+}
+
+async function validateGraphFinalFiles(files: PackageFileMap): Promise<GraphFinalPackageValidation> {
   const manifestFile = requireFile(files, 'manifest.json')
   if (manifestFile.size <= 0 || manifestFile.size > maximumManifestBytes) throw validationError('manifest.jsonのサイズが不正です。')
   const manifest = parseJson<GraphFinalManifest>(await readUtf8(manifestFile), 'manifest.json')
@@ -186,6 +233,139 @@ export async function validateGraphFinalPackage(selectedFiles: File[]): Promise<
     checkedImageCount: verifiedImageDescriptors.descriptors.length,
     manifestSha256: await sha256(manifestFile),
   }
+}
+
+/**
+ * Gate 17 の `ABACUS-Import-*` ルートを、既存のGraph Final登録形式へ
+ * 正規化します。`work/`は読み取るだけで検証対象へ入れず、readyの
+ * マニフェストに列挙されたファイルだけを登録前パッケージとして扱います。
+ */
+export async function validateAbacusImportPackage(selectedFiles: File[]): Promise<GraphFinalPackageValidation> {
+  const rootFiles = collectFiles(selectedFiles)
+  const rootManifestFile = rootFiles.get('abacus-import.json')
+  if (!rootManifestFile) throw validationError('abacus-import.jsonがありません。ABACUS-Import-*ルートを選択してください。')
+  if (rootManifestFile.size <= 0 || rootManifestFile.size > maximumManifestBytes) throw validationError('abacus-import.jsonのサイズが不正です。')
+  const rootManifest = parseJson<AbacusImportRootManifest>(await readUtf8(rootManifestFile), 'abacus-import.json')
+  if (rootManifest.version !== 1 || rootManifest.kind !== 'abacus-import' || rootManifest.status !== 'ready' || !rootManifest.packageId || rootManifest.readyPath !== 'ready' || rootManifest.readyManifest !== 'ready/manifest.json' || rootManifest.imageAcquisitionMethod !== 'fp5-vehicle-record') {
+    throw validationError('完成状態のABACUS-Importパッケージではありません。')
+  }
+
+  const readyManifestPath = `${rootManifest.readyPath}/manifest.json`
+  const readyManifestFile = rootFiles.get(readyManifestPath)
+  if (!readyManifestFile) throw validationError('ready/manifest.jsonがありません。完成品が未作成の可能性があります。')
+  if (readyManifestFile.size <= 0 || readyManifestFile.size > maximumManifestBytes) throw validationError('ready/manifest.jsonのサイズが不正です。')
+  const readyManifest = parseJson<AbacusImportReadyManifest>(await readUtf8(readyManifestFile), 'ready/manifest.json')
+  validateAbacusImportReadyManifest(readyManifest, rootManifest)
+
+  const descriptors = readyManifest.files.map((descriptor) => ({ ...descriptor, path: normalizePackagePath(descriptor.path) }))
+  const descriptorPaths = new Set<string>()
+  const readyFiles = new Map<string, File>()
+  const allowedReadyPaths = new Set([
+    'data/customers.csv',
+    'data/vehicles.csv',
+    'data/sales-documents.csv',
+    'data/maintenance-documents.csv',
+    'mappings/customer-merges.json',
+    'mappings/document-links.json',
+    'mappings/image-attachments.json',
+    'reports/excluded-documents.json',
+    'reports/unresolved-items.json',
+    'reports/image-acquisition-report.json',
+    'reports/fp5-vehicle-image-mapping-report.json',
+  ])
+  let totalBytes = rootManifestFile.size + readyManifestFile.size
+  for (const descriptor of descriptors) {
+    if (!descriptor.path || (!descriptor.path.startsWith('images/') && !allowedReadyPaths.has(descriptor.path))) throw validationError(`readyマニフェストのファイルパスが不正です: ${descriptor.path || '(空欄)'}`)
+    if (descriptor.path.startsWith('images/') && (descriptor.path.split('/').length !== 2 || !/\.(?:png|jpe?g)$/iu.test(descriptor.path))) throw validationError(`readyマニフェストの画像パスが不正です: ${descriptor.path}`)
+    if (descriptorPaths.has(descriptor.path)) throw validationError(`readyマニフェストに同じファイルが重複しています: ${descriptor.path}`)
+    descriptorPaths.add(descriptor.path)
+    const file = rootFiles.get(`${rootManifest.readyPath}/${descriptor.path}`)
+    if (!file) throw validationError(`readyに記載されたファイルがありません: ${descriptor.path}`)
+    const maximumBytes = descriptor.path.startsWith('images/') ? maximumImageBytes : maximumDataFileBytes
+    if (!Number.isSafeInteger(descriptor.sizeBytes) || descriptor.sizeBytes <= 0 || !/^[0-9a-f]{64}$/i.test(descriptor.sha256) || file.size !== descriptor.sizeBytes || file.size > maximumBytes) {
+      throw validationError(`readyファイルのサイズまたは記述が一致しません: ${descriptor.path}`)
+    }
+    await verifySha256(file, descriptor.sha256, descriptor.path)
+    readyFiles.set(descriptor.path, file)
+    totalBytes += file.size
+    if (totalBytes > maximumPackageBytes) throw validationError('ABACUS-Importパッケージの合計サイズが上限を超えています。')
+  }
+  const readyPrefix = `${rootManifest.readyPath}/`
+  for (const path of rootFiles.keys()) {
+    if (!path.startsWith(readyPrefix)) continue
+    const relative = path.slice(readyPrefix.length)
+    if (relative !== 'manifest.json' && !descriptorPaths.has(relative)) throw validationError(`readyマニフェストに記載されていないファイルがあります: ${relative}`)
+  }
+
+  const data = new Map<string, File>()
+  const dataPaths = {
+    'customers.csv': 'data/customers.csv',
+    'vehicles.csv': 'data/vehicles.csv',
+    'sales.csv': 'data/sales-documents.csv',
+    'maintenance.csv': 'data/maintenance-documents.csv',
+    'document-links.json': 'mappings/document-links.json',
+  } as const
+  for (const [target, source] of Object.entries(dataPaths) as Array<[keyof typeof dataPaths, string]>) {
+    const file = readyFiles.get(source)
+    if (!file) throw validationError(`readyに必要なファイルがありません: ${source}`)
+    data.set(target, file)
+  }
+  const imageAttachmentsFile = readyFiles.get('mappings/image-attachments.json')
+  if (imageAttachmentsFile) data.set('image-attachments.json', imageAttachmentsFile)
+  const mergeFile = readyFiles.get('mappings/customer-merges.json')
+  const excludedFile = readyFiles.get('reports/excluded-documents.json')
+  if (!mergeFile || !excludedFile) throw validationError('readyに顧客統合または除外書類の証跡がありません。')
+  const groups = parseJson<GraphFinalGroup[]>(await readUtf8(mergeFile), 'ready/mappings/customer-merges.json')
+  const excludedDocumentKeys = parseJson<string[]>(await readUtf8(excludedFile), 'ready/reports/excluded-documents.json')
+  if (!Array.isArray(groups) || !Array.isArray(excludedDocumentKeys)) throw validationError('readyの顧客統合または除外書類の形式が不正です。')
+  const links = parseDocumentLinks(parseJson<unknown>(await readUtf8(data.get('document-links.json') as File), 'ready/mappings/document-links.json')).documents
+
+  const graphManifest: GraphFinalManifest = {
+    version: 1,
+    kind: 'abacus-export-import-final-package',
+    status: 'registration-preview',
+    source: { candidatePackagePath: `ABACUS-Import/${rootManifest.packageId}`, candidateManifestSha256: await sha256(rootManifestFile) },
+    summary: {
+      customerRowCount: readyManifest.summary.customerCount,
+      vehicleRowCount: readyManifest.summary.vehicleCount,
+      salesRowCount: readyManifest.summary.salesDocumentCount,
+      maintenanceRowCount: readyManifest.summary.maintenanceDocumentCount,
+      vehiclelessDocumentCount: readyManifest.summary.vehiclelessDocumentCount,
+      excludedDocumentCount: readyManifest.summary.excludedDocumentCount,
+      imageCount: readyManifest.summary.imageCount,
+    },
+    dataFiles: [...data.entries()].map(([fileName, file]) => ({ fileName, sizeBytes: file.size, sha256: '' })),
+    imageFiles: descriptors.filter((descriptor) => descriptor.path.startsWith('images/')).map((descriptor) => ({ fileName: descriptor.path, sizeBytes: descriptor.sizeBytes, sha256: descriptor.sha256 })),
+    warnings: [],
+    groups,
+    documents: links.map((link) => ({ documentKey: link.documentKey, documentId: link.documentId, kind: link.documentKind, customerId: link.customerId, vehicleId: link.vehicleId, sourceLocation: link.sourceLocation, vehicleless: link.vehicleless })),
+    excludedDocumentKeys,
+  }
+  // dataFilesのSHAは実ファイルから作り、合成manifest自体をAPI再検証可能にします。
+  const graphFiles: PackageFileMap = new Map(data)
+  for (const descriptor of graphManifest.dataFiles) {
+    const file = graphFiles.get(descriptor.fileName)
+    if (file) descriptor.sha256 = await sha256(file)
+  }
+  for (const descriptor of graphManifest.imageFiles ?? []) graphFiles.set(descriptor.fileName, readyFiles.get(descriptor.fileName) as File)
+  const syntheticManifestFile = new File([JSON.stringify(graphManifest)], 'manifest.json', { type: 'application/json' })
+  graphFiles.set('manifest.json', syntheticManifestFile)
+  const validation = await validateGraphFinalFiles(graphFiles)
+  validation.abacusImport = {
+    rootManifestFile,
+    readyManifestFile,
+    rootManifestSha256: await sha256(rootManifestFile),
+    readyManifestSha256: await sha256(readyManifestFile),
+    readyFiles,
+    readyDescriptors: descriptors,
+  }
+  return validation
+}
+
+function validateAbacusImportReadyManifest(manifest: AbacusImportReadyManifest, root: AbacusImportRootManifest) {
+  if (manifest.version !== 1 || manifest.kind !== 'abacus-import-ready' || manifest.status !== 'ready' || manifest.packageId !== root.packageId || manifest.imageAcquisitionMethod !== 'fp5-vehicle-record' || !Array.isArray(manifest.files) || !manifest.summary) throw validationError('ready/manifest.jsonの形式または状態が不正です。')
+  const summaryValues = Object.values(manifest.summary)
+  if (summaryValues.some((value) => !Number.isSafeInteger(value) || value < 0)) throw validationError('ready/manifest.jsonの集計値が不正です。')
 }
 
 function validateManifestShape(manifest: GraphFinalManifest) {
