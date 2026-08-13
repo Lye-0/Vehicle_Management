@@ -105,13 +105,20 @@ function VehicleEditor({ vehicle, onUpdate }: { vehicle: NonNullable<Maintenance
 
 function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { item: MaintenanceLineItem; index: number; itemPresets: string[]; onUpdateItem: Props['onUpdateItem']; onRemoveItem: Props['onRemoveItem'] }) {
   const y = 587 + index * 28
+  const imported = item.abacusDetail
+  const description = imported ? imported.description ?? '' : item.description
+  const quantity = imported ? imported.quantity : item.quantity
+  const unit = imported ? imported.unit ?? '' : item.unit
+  const unitPrice = imported ? imported.unitPrice : item.unitPrice
+  const technicalFee = imported ? imported.technicalFees : item.technicalFee
+  const summary = imported ? imported.summary ?? '' : item.summary
   return <>
-    <StatementNameCombobox value={item.description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y - 6} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={item.quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
-    <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={item.unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={item.unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={item.technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
-    <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={item.summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
+    <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y - 6} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
+    <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
+    <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
     <button className="maintenance-statement-remove" type="button" aria-label={`明細${index + 1}を削除`} style={controlStyle(1085, y + 3, 31, 22)} onClick={() => onRemoveItem(item.id)}><Trash2 size={13} /></button>
   </>
 }
@@ -201,10 +208,10 @@ function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
   return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
-function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
-  const [draft, setDraft] = useState(String(value))
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value))
   const [focused, setFocused] = useState(false)
-  useEffect(() => { if (!focused) setDraft(String(value)) }, [focused, value])
+  useEffect(() => { if (!focused) setDraft(value === null ? '' : String(value)) }, [focused, value])
 
   function update(nextValue: string) {
     const pattern = decimal ? /^-?\d*(?:\.\d*)?$/ : /^-?\d*$/
@@ -223,7 +230,7 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
   }
 
   const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(value === null ? '' : String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
 }
 
 const statementNumberFormatter = new Intl.NumberFormat('ja-JP')

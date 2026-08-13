@@ -8,6 +8,7 @@ import { handleSettingsRoutes } from './routes/settings-routes'
 import { handleOrganizationRoutes } from './routes/organization-routes'
 import { handleMemberRoutes } from './routes/member-routes'
 import { handleImportRoutes } from './routes/import-routes'
+import { handleAbacusRegistrationRoutes } from './routes/abacus-registration-routes'
 import { handleBackupRoutes } from './routes/backup-routes'
 import { handleArchiveRoutes } from './routes/archive-routes'
 import { handleInspectionRoutes } from './routes/inspection-routes'
@@ -39,6 +40,9 @@ export default {
 
     const importRouteResponse = await handleImportRoutes(request, env)
     if (importRouteResponse) return importRouteResponse
+
+    const abacusRegistrationRouteResponse = await handleAbacusRegistrationRoutes(request, env)
+    if (abacusRegistrationRouteResponse) return abacusRegistrationRouteResponse
 
     const backupRouteResponse = await handleBackupRoutes(request, env)
     if (backupRouteResponse) return backupRouteResponse

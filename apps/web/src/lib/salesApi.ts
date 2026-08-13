@@ -1,4 +1,6 @@
 import { apiFetch } from './api'
+import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
+import type { AbacusDetailLine, AbacusDetailReport, AbacusDocumentAmounts } from './abacusDetail'
 
 export type SalesDocumentType = '見積書' | '請求書'
 export type SalesStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -102,6 +104,9 @@ export type SalesLineItem = {
   taxCategory: SalesTaxCategory
   otherAmount: number
   summary: string
+  sourceRowIndex?: number
+  abacusDetail?: AbacusDetailLine | null
+  isAbacusMigration?: boolean
 }
 
 export type SalesDocument = {
@@ -115,6 +120,11 @@ export type SalesDocument = {
   vehicleId: string | null
   vehicle: string
   plate: string
+  /** ABACUSグラフ登録が付与する互換表示用メタデータ。通常書類では未設定です。 */
+  abacusImport?: AbacusDocumentImportMetadata | null
+  isAbacusMigration?: boolean
+  abacusDetailReport?: AbacusDetailReport | null
+  abacusAmounts?: AbacusDocumentAmounts | null
   customerDetails: SalesCustomerDetails
   vehicleDetails: SalesVehicleDetails | null
   details: SalesDocumentDetails
@@ -322,7 +332,7 @@ function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
     taxRate: document.taxRate / 100,
     taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
-    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '' })),
+    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary, sourceRowIndex, abacusDetail, isAbacusMigration }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '', sourceRowIndex, abacusDetail: abacusDetail ?? null, isAbacusMigration })),
   }
 }
 

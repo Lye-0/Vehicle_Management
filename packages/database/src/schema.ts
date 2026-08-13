@@ -194,7 +194,9 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   category: text('category').notNull(),
   status: text('status').notNull().default('下書き'),
   customerId: text('customer_id').notNull().references(() => customers.id),
-  vehicleId: text('vehicle_id').notNull().references(() => vehicles.id),
+  // ABACUS移行では顧客に直結し、車両情報を持たない整備書類を保存する。
+  // 通常のWeb作成経路では引き続き車両必須として検証する。
+  vehicleId: text('vehicle_id').references(() => vehicles.id),
   intakeDate: text('intake_date'),
   plannedReleaseDate: text('planned_release_date'),
   completionDate: text('completion_date'),

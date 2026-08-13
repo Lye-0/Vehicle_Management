@@ -664,6 +664,47 @@ describe("新規車両の走行距離", () => {
 });
 
 describe("既存車両の走行距離同期", () => {
+  it("ABACUS書類の未入力走行距離を後日の車両走行距離で上書きしない", async () => {
+    const cid = "ms-cust-043";
+    const vid = "ms-veh-043";
+    const importedDid = "ms-doc-043-imported";
+    await seedCustomer(cid, "ABACUS走行距離顧客");
+    await seedVehicle(vid, cid, "トヨタ", "プリウス");
+    await env.DB.prepare("UPDATE vehicles SET mileage = 0 WHERE id = ? AND organization_id = ?").bind(vid, TEST_ORG).run();
+    await env.DB.prepare(
+      "INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, issued_at, details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      importedDid,
+      TEST_ORG,
+      "M-ABACUS-043",
+      "整備請求書",
+      "一般整備",
+      "完了",
+      cid,
+      vid,
+      "2026-01-01",
+      JSON.stringify({ version: 2, abacusImport: { documentKey: "整備書類|043", sourceLocation: "seibi.csv #43", vehicleless: false } }),
+    ).run();
+
+    const saved = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
+      type: "整備請求書",
+      category: "一般整備",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: { mileage: "12000" } },
+      mileageSync: { confirmed: true, openedMileage: 0, inputMileage: 12000 },
+      items: [],
+    }));
+    expect(saved.status).toBe(201);
+    const savedBody = await saved.json() as { document: { id: string } };
+
+    const historyResponse = await SELF.fetch(new Request(`https://example.com/api/vehicles/${vid}/history`, { headers: authHeaders() }));
+    expect(historyResponse.status).toBe(200);
+    const historyBody = await historyResponse.json() as { maintenance: Array<{ id: string; number: string; recordedMileage: number | null }> };
+    expect(historyBody.maintenance.find((document) => document.id === importedDid)?.recordedMileage ?? null).toBeNull();
+    expect(historyBody.maintenance.find((document) => document.id === savedBody.document.id)?.recordedMileage).toBe(12000);
+  });
+
   it("初回POSTでmileageSyncを保存し、車両走行距離と履歴を更新", async () => {
     const cid = "ms-cust-040";
     const vid = "ms-veh-040";

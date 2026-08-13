@@ -11,6 +11,7 @@ import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImpor
 import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '../lib/backupsApi'
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
+import { AbacusRegistrationPackagePanel } from './AbacusRegistrationPackagePanel'
 import { IconWithChain } from './IconWithChain'
 import { NormalizedInput } from './NormalizedValueInput'
 
@@ -210,7 +211,7 @@ function updateSalesPresetGroups(settings: AppSettings, groups: SalesItemPresetG
 }
 
 function DataSettingsPanel({ exporting, onExport, backupSettings, onBackupSettingsChange }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void; backupSettings: BackupSettings; onBackupSettingsChange: (settings: BackupSettings) => void }) {
-  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Table2} title="データ" description="データの入出力とバックアップを管理します。" /><CsvExportPanel exporting={exporting} onExport={onExport} /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></div>
+  return <div className="settings-panel-stack"><SettingsPanelHeader icon={Table2} title="データ" description="データの入出力とバックアップを管理します。" /><CsvExportPanel exporting={exporting} onExport={onExport} /><AbacusRegistrationPackagePanel /><CsvImportPanel /><BackupSettingsPanel backupSettings={backupSettings} onBackupSettingsChange={onBackupSettingsChange} /></div>
 }
 
 function PermissionsPanel({ permissions, onUpdate }: { permissions: OrganizationPermissions; onUpdate: (field: keyof OrganizationPermissions, value: boolean) => void }) {

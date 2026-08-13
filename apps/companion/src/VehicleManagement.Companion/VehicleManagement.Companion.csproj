@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>VehicleManagement.Companion</AssemblyName>
+    <RootNamespace>VehicleManagement.Companion</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VehicleManagement.AbacusImport\VehicleManagement.AbacusImport.csproj" />
+    <ProjectReference Include="..\VehicleManagement.LegacyHost\VehicleManagement.LegacyHost.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\VehicleManagement.LegacyAutomationProbe\VehicleManagement.LegacyAutomationProbe.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\VehicleManagement.LocalProtocol\VehicleManagement.LocalProtocol.csproj" />
+  </ItemGroup>
+
+  <Target Name="CopyLegacyHost" AfterTargets="Build">
+    <ItemGroup>
+      <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyHost\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LegacyHost*" />
+      <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyHost\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LocalProtocol.dll" />
+      <LegacyHostOutput Include="$(MSBuildThisFileDirectory)..\VehicleManagement.LegacyAutomationProbe\bin\$(Configuration)\$(TargetFramework)\VehicleManagement.LegacyAutomationProbe*" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)LegacyHost" />
+    <Copy SourceFiles="@(LegacyHostOutput)"
+          DestinationFolder="$(OutDir)LegacyHost"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

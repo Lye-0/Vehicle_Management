@@ -1,9 +1,10 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readFormData, readJson } from '../http'
+import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
@@ -25,6 +26,12 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     if (pathname === '/api/customers') {
       if (request.method === 'GET') return await listCustomers(request, env, database, organizationId)
       if (request.method === 'POST') return await createCustomer(request, env, database, organizationId)
+      throw new HttpError(405, 'この操作には対応していません。')
+    }
+
+    const vehiclelessDocumentsMatch = pathname.match(/^\/api\/customers\/([^/]+)\/vehicleless-documents$/)
+    if (vehiclelessDocumentsMatch) {
+      if (request.method === 'GET') return await listVehiclelessDocuments(env, database, decodeURIComponent(vehiclelessDocumentsMatch[1]), organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
@@ -292,6 +299,69 @@ async function findCustomer(database: ReturnType<typeof createDatabase>, custome
   return records.find((customer) => customer.id === customerId) ?? null
 }
 
+type VehiclelessDocumentSummary = {
+  id: string
+  kind: 'sales' | 'maintenance'
+  number: string
+  type: string
+  category: string | null
+  status: string
+  issuedAt: string
+  total: number
+  sourceLocation: string
+}
+
+async function listVehiclelessDocuments(env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  if (!customer) throw new HttpError(404, '顧客が見つかりません。')
+
+  const [salesRows, maintenanceRows] = await Promise.all([
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.customerId, customerId), eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.vehicleId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt), desc(salesDocuments.number)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.customerId, customerId), eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.vehicleId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
+  ])
+  const documents = [
+    ...salesRows.flatMap((document) => {
+      const summary = toVehiclelessDocumentSummary(document, 'sales')
+      return summary ? [summary] : []
+    }),
+    ...maintenanceRows.flatMap((document) => {
+      const summary = toVehiclelessDocumentSummary(document, 'maintenance')
+      return summary ? [summary] : []
+    }),
+  ].sort(compareVehiclelessDocuments)
+
+  return jsonResponse({
+    customerId,
+    salesCount: documents.filter((document) => document.kind === 'sales').length,
+    maintenanceCount: documents.filter((document) => document.kind === 'maintenance').length,
+    documents,
+  }, 200, env)
+}
+
+function toVehiclelessDocumentSummary(document: typeof salesDocuments.$inferSelect | typeof maintenanceDocuments.$inferSelect, kind: VehiclelessDocumentSummary['kind']): VehiclelessDocumentSummary | null {
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  if (!abacusImport?.vehicleless) return null
+  return {
+    id: document.id,
+    kind,
+    number: document.number,
+    type: document.type,
+    category: kind === 'maintenance' ? (document as typeof maintenanceDocuments.$inferSelect).category : null,
+    status: document.status,
+    issuedAt: document.issuedAt,
+    total: document.total,
+    sourceLocation: abacusImport.sourceLocation,
+  }
+}
+
+function compareVehiclelessDocuments(left: VehiclelessDocumentSummary, right: VehiclelessDocumentSummary) {
+  const dateCompare = right.issuedAt.localeCompare(left.issuedAt)
+  if (dateCompare !== 0) return dateCompare
+  const kindCompare = left.kind.localeCompare(right.kind)
+  if (kindCompare !== 0) return kindCompare
+  return left.number.localeCompare(right.number, 'ja-JP', { numeric: true })
+}
+
 async function getVehicleHistory(env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
   const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
@@ -333,18 +403,23 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
       freeItem3: vehicle.freeItem3,
     },
     sales: sales.map((document) => ({ id: document.id, number: document.number, type: document.type, status: document.status, issuedAt: document.issuedAt, dueDate: document.dueDate, total: document.total })),
-    maintenance: maintenance.map((document) => ({
-      id: document.id,
-      number: document.number,
-      type: document.type,
-      category: document.category,
-      status: document.status,
-      issuedAt: document.issuedAt,
-      intakeDate: document.intakeDate,
-      completionDate: document.completionDate,
-      total: document.total,
-      recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? vehicle.mileage,
-    })),
+    maintenance: maintenance.map((document) => {
+      const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+      return {
+        id: document.id,
+        number: document.number,
+        type: document.type,
+        category: document.category,
+        status: document.status,
+        issuedAt: document.issuedAt,
+        intakeDate: document.intakeDate,
+        completionDate: document.completionDate,
+        total: document.total,
+        // ABACUS書類に走行距離の入力がない場合、現在の車両マスタ値を履歴へ流用しない。
+        // 後日入力した走行距離によって、過去書類の記録まで変わらないようにする。
+        recordedMileage: mileageByDocumentId.get(document.id) ?? extractMileageFromDetailsJson(document.detailsJson) ?? (abacusImport ? null : vehicle.mileage),
+      }
+    }),
     inspections: schedules.map((schedule) => ({ id: schedule.id, inspectionType: schedule.inspectionType, dueDate: schedule.dueDate, status: schedule.status, note: schedule.note, notifiedAt: schedule.notifiedAt })),
     payments: relatedPayments.map((payment) => ({ id: payment.id, documentType: payment.documentType, documentId: payment.documentId, documentNumber: payment.documentType === '販売請求書' ? salesById.get(payment.documentId)?.number ?? '' : maintenanceById.get(payment.documentId)?.number ?? '', paidAmount: payment.paidAmount, paymentDate: payment.paymentDate, method: payment.method, note: payment.note })),
     attachments: files.map(serializeFile),

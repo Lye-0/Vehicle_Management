@@ -43,4 +43,19 @@ describe('backup manifest relationship validation', () => {
 
     expect(() => assertManifestReferences(tables({ customers: [customer], vehicles: [vehicle], salesDocuments: [salesDocument], salesDocumentItems: [salesItem], maintenanceDocuments: [maintenanceDocument], maintenanceItems: [maintenanceItem], paymentRecords: [paymentRecord], paymentEntries: [paymentEntry], inspectionSchedules: [inspection], mileageHistories: [mileage] }))).not.toThrow()
   })
+
+  it('accepts vehicleless maintenance documents from ABACUS imports', () => {
+    const customer = { id: 'customer-vehicleless', organizationId: 'org-1' } as ManifestTables['customers'][number]
+    const maintenanceDocument = { id: 'maintenance-vehicleless', organizationId: 'org-1', customerId: customer.id, vehicleId: null } as ManifestTables['maintenanceDocuments'][number]
+    const maintenanceItem = { id: 'maintenance-item-vehicleless', organizationId: 'org-1', documentId: maintenanceDocument.id } as ManifestTables['maintenanceItems'][number]
+
+    expect(() => assertManifestReferences(tables({ customers: [customer], maintenanceDocuments: [maintenanceDocument], maintenanceItems: [maintenanceItem] }))).not.toThrow()
+  })
+
+  it('rejects a maintenance document that references a vehicle outside the manifest', () => {
+    const customer = { id: 'customer-2', organizationId: 'org-1' } as ManifestTables['customers'][number]
+    const maintenanceDocument = { id: 'maintenance-2', organizationId: 'org-1', customerId: customer.id, vehicleId: 'vehicle-from-another-backup' } as ManifestTables['maintenanceDocuments'][number]
+
+    expect(() => assertManifestReferences(tables({ customers: [customer], maintenanceDocuments: [maintenanceDocument] }))).toThrow(HttpError)
+  })
 })

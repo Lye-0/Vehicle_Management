@@ -1,4 +1,6 @@
 import { apiFetch } from './api'
+import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
+import type { AbacusDetailLine, AbacusDetailReport, AbacusDocumentAmounts } from './abacusDetail'
 
 export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
 export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -27,7 +29,7 @@ export type MaintenanceDocumentDetails = {
     otherFee: string
   }
 }
-export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string }
+export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; sourceRowIndex?: number; abacusDetail?: AbacusDetailLine | null; isAbacusMigration?: boolean }
 
 export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
   staffName: '',
@@ -59,9 +61,14 @@ export type MaintenanceDocument = {
   customerName: string
   phone: string
   customerDetails: MaintenanceCustomerDetails
-  vehicleId: string
+  vehicleId: string | null
   vehicle: string
   plate: string
+  /** ABACUSグラフ登録が付与する互換表示用メタデータ。通常書類では未設定です。 */
+  abacusImport?: AbacusDocumentImportMetadata | null
+  isAbacusMigration?: boolean
+  abacusDetailReport?: AbacusDetailReport | null
+  abacusAmounts?: AbacusDocumentAmounts | null
   mileage: string
   vehicleDetails: MaintenanceVehicleDetails | null
   details: MaintenanceDocumentDetails

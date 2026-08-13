@@ -9,6 +9,8 @@ import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
+import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
+import { parseAbacusDetailEnvelope } from '../lib/abacus-detail-metadata'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -357,6 +359,10 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
 
   const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
+  const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
+  if (current.vehicleId && !requestedVehicleId) {
+    throw new HttpError(400, '通常の整備書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
+  }
   const mileageSync = parseMileageSync(body)
   const masterSyncRaw = body.masterSync
 
@@ -646,7 +652,7 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   return documentRows.filter((document) => includeArchived || !document.archivedAt).map((document) => serializeMaintenanceDocument(
     document,
     customersById.get(document.customerId),
-    vehiclesById.get(document.vehicleId),
+    document.vehicleId ? vehiclesById.get(document.vehicleId) : undefined,
     itemsByDocument.get(document.id) ?? [],
   ))
 }
@@ -732,6 +738,9 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const adjustment = extractAdjustment(rows)
   const items = rows.filter((item) => item.itemType === '作業' || item.itemType === '部品')
   const details = parseMaintenanceDetails(parseDetailsJson(document.detailsJson))
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
+  const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
   const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
   const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
@@ -754,10 +763,14 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
       employer: customerEmployer,
     },
     vehicleId: document.vehicleId,
-    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : '',
+    vehicle: vehicle ? [vehicle.maker, vehicle.name].filter(Boolean).join(' ') : 'なし',
+    abacusImport,
+    isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
+    abacusDetailReport: abacusDetails?.report ?? null,
+    abacusAmounts: abacusDetails?.amounts ?? null,
     plate: vehicle?.registrationNumber ?? '',
-    mileage: normalizeMileage(vehicle?.mileage),
-    vehicleDetails: {
+    mileage: vehicle ? normalizeMileage(vehicle.mileage) : '',
+    vehicleDetails: vehicle ? {
       maker: vehicle?.maker ?? '',
       name: vehicle?.name ?? '',
       modelType: vehicle?.model ?? '',
@@ -770,7 +783,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
       displacement: normalizeDisplacement(vehicle?.displacement),
       transmission: vehicle?.transmission ?? '',
       inspectionRecordAvailable: vehicle?.inspectionRecordAvailable ?? false,
-    },
+    } : null,
     intakeDate: document.intakeDate,
     plannedReleaseDate: document.plannedReleaseDate ?? document.completionDate,
     completionDate: document.completionDate,
@@ -790,7 +803,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
     archivedBy: document.archivedBy,
     purgeAt: document.purgeAt,
     keepForever: document.keepForever,
-    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary })),
+    items: items.map((item) => ({ id: item.id, kind: item.itemType === '部品' ? '部品' : '作業', description: item.description, quantity: item.quantity, unit: item.unit, unitPrice: item.unitPrice, technicalFee: item.technicalFee, summary: item.summary, sourceRowIndex: item.sortOrder, abacusDetail: abacusLines.get(item.sortOrder) ?? null, isAbacusMigration: Boolean(abacusDetails) })),
   }
 }
 
