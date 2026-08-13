@@ -1035,7 +1035,7 @@
                         <TextBlock Margin="0,26,0,0" FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="固定列CSVから登録前候補を作成" />
                         <TextBlock Margin="0,7,0,12" Foreground="#52647A" TextWrapping="Wrap"
-                                   Text="診断に合格した販売・整備・車両一覧CSVを、既存Webインポート形式の顧客・車両・書類候補へ変換します。顧客名空欄行は無視し、車両識別子が一意に一致しない整備書類は除外します。金額の税・明細は未確定として明示します。" />
+                                   Text="診断に合格した販売・整備・車両一覧CSVを、既存Webインポート形式の顧客・車両・書類候補へ変換します。顧客名空欄の書類は除外し、顧客名空欄の車両は未確定車両として保持します。車両識別子が一意に一致しない整備書類は顧客直結の未確定書類として保持します。金額の税・明細は未確定として明示します。" />
                         <Button x:Name="CreateLegacyExportPreviewButton" HorizontalAlignment="Left"
                                 Content="保存先を選んで登録前候補を作成" IsEnabled="False"
                                 Click="CreateLegacyExportPreviewButton_Click" />
@@ -1374,17 +1374,24 @@
                                 <StackPanel>
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定車両" />
                                     <ListBox x:Name="LegacyGraphUnresolvedVehicleList" Margin="0,7,0,0" Height="195"
-                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged">
+                                             SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             PreviewMouseLeftButtonDown="LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonDown"
+                                             PreviewMouseMove="LegacyGraphUnresolvedVehicleList_PreviewMouseMove"
+                                             PreviewMouseLeftButtonUp="LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonUp">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Margin="2,3" Padding="8" Background="#FEF2F2" BorderBrush="#B91C1C"
                                                         BorderThickness="2" CornerRadius="5">
                                                     <StackPanel>
-                                                        <TextBlock FontWeight="SemiBold" Text="{Binding VehicleName}" TextWrapping="Wrap" />
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" TextWrapping="Wrap" />
                                                         <TextBlock Margin="0,3,0,0" Foreground="#A61B1B" FontSize="11"
                                                                    Text="{Binding Warning}" TextWrapping="Wrap" />
                                                         <TextBlock Margin="0,3,0,0" Foreground="#718096" FontSize="11"
-                                                                   Text="{Binding SourceFileName}" TextWrapping="Wrap" />
+                                                                   Text="{Binding SourceLocation}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,3,0,0" Foreground="#52647A" FontSize="11"
+                                                                   Text="{Binding IdentifierSummary}" TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,4,0,0" Foreground="#8A5A00" FontSize="10"
+                                                                   Text="顧客カードへドラッグして手動接続" TextWrapping="Wrap" />
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

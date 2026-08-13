@@ -51,13 +51,26 @@ public sealed record AbacusLegacyExportCandidateGraphVehicle(
     string Mileage,
     string RegistrationNumber,
     string ChassisNumber,
-    IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> Documents)
+    IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> Documents,
+    string SourceFileName = "",
+    int SourceRowNumber = 0)
 {
+    public bool HasCustomer => !string.IsNullOrWhiteSpace(CustomerId);
+
     public string DisplayName =>
         string.IsNullOrWhiteSpace(VehicleName) ? "車名未設定" : VehicleName;
 
     public string IdentifierSummary =>
         string.Join(" / ", new[] { RegistrationNumber, ChassisNumber }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    public string SourceLocation =>
+        string.IsNullOrWhiteSpace(SourceFileName)
+            ? "出典不明"
+            : $"{SourceFileName} #{SourceRowNumber}";
+
+    public string Warning => HasCustomer
+        ? "車両一覧の顧客IDで顧客へ接続済みです。"
+        : "顧客情報がないため未確定車両として保持しています。顧客へ接続しない場合は最終パッケージから除外されます。";
 }
 
 public sealed record AbacusLegacyExportCandidateGraphCustomer(
@@ -86,7 +99,7 @@ public sealed record AbacusLegacyExportCandidateGraphResult(
     IReadOnlyList<AbacusLegacyExportCandidateGraphCustomer> Customers,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> AllDocuments,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> UnresolvedDocuments,
-    IReadOnlyList<AbacusLegacyExportPreviewRow> UnresolvedVehicleRows,
+    IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> UnresolvedVehicleRows,
     int SolidLinkCount,
     int ReviewLinkCount,
     int UnmatchedDocumentCount,
@@ -164,21 +177,29 @@ public sealed class AbacusLegacyExportCandidateGraphService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var vehicleId = Required(row.Fields, 0, "車両ID");
-            var customerId = Required(row.Fields, 1, "車両の顧客ID");
+            var customerId = Value(row.Fields, 1);
             if (vehicles.ContainsKey(vehicleId))
             {
                 throw new InvalidDataException($"車両CSVに重複した車両IDがあります: {vehicleId}");
             }
 
-            if (!customers.TryGetValue(customerId, out var customer))
+            customers.TryGetValue(customerId, out var customer);
+            if (!string.IsNullOrWhiteSpace(customerId) && customer is null)
             {
                 throw new InvalidDataException($"車両CSVの顧客IDが顧客CSVにありません: {customerId}");
             }
 
+            var sourceMemo = Value(row.Fields, 15);
+            var source = SourceMemoPattern.Match(sourceMemo);
+            var sourceFileName = source.Success ? source.Groups["file"].Value : "";
+            var sourceRowNumber = source.Success && int.TryParse(source.Groups["row"].Value, out var parsedSourceRow)
+                ? parsedSourceRow
+                : row.RowNumber;
+
             var vehicle = new VehicleBuilder(
                 vehicleId,
                 customerId,
-                customer.DisplayName,
+                customer?.DisplayName ?? Value(row.Fields, 2),
                 Value(row.Fields, 3),
                 Value(row.Fields, 4),
                 Value(row.Fields, 8),
@@ -186,9 +207,11 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 Value(row.Fields, 10),
                 Value(row.Fields, 6),
                 Value(row.Fields, 7),
-                new List<AbacusLegacyExportCandidateGraphDocument>());
+                new List<AbacusLegacyExportCandidateGraphDocument>(),
+                sourceFileName,
+                sourceRowNumber);
             vehicles.Add(vehicleId, vehicle);
-            customer.Vehicles.Add(vehicle);
+            customer?.Vehicles.Add(vehicle);
         }
 
         var manifestRows = package.Rows
@@ -235,6 +258,23 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 customers,
                 manifestRows,
                 representedSources));
+        }
+
+        // 顧客名はあるが車両CSV側の顧客IDが空欄の候補は、書類を自動確定しません。
+        // ただし識別子が一致した書類を車両の「関連候補」として保持し、
+        // 未確定車両を顧客へ接続した後に、ユーザーが書類を確認できるようにします。
+        foreach (var document in documents)
+        {
+            foreach (var vehicleId in document.CandidateVehicleIds.Distinct(StringComparer.Ordinal))
+            {
+                if (vehicles.TryGetValue(vehicleId, out var candidateVehicle) &&
+                    string.IsNullOrWhiteSpace(candidateVehicle.CustomerId) &&
+                    candidateVehicle.Documents.All(existing =>
+                        !string.Equals(GetDocumentKey(existing), GetDocumentKey(document), StringComparison.OrdinalIgnoreCase)))
+                {
+                    candidateVehicle.Documents.Add(document);
+                }
+            }
         }
 
         // 出力CSVに含まれなかった「除外」行も、顧客名が分かるものは未確定欄で確認できるようにします。
@@ -301,9 +341,31 @@ public sealed class AbacusLegacyExportCandidateGraphService
                         vehicle.Mileage,
                         vehicle.RegistrationNumber,
                         vehicle.ChassisNumber,
-                        vehicle.Documents.ToArray()))
+                        vehicle.Documents.ToArray(),
+                        vehicle.SourceFileName,
+                        vehicle.SourceRowNumber))
                     .ToArray(),
                 customer.UnresolvedDocuments.ToArray()))
+            .ToArray();
+
+        var unresolvedVehicles = vehicles.Values
+            .Where(vehicle => string.IsNullOrWhiteSpace(vehicle.CustomerId))
+            .OrderBy(vehicle => vehicle.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .Select(vehicle => new AbacusLegacyExportCandidateGraphVehicle(
+                vehicle.VehicleId,
+                "",
+                vehicle.CustomerName,
+                vehicle.Maker,
+                vehicle.VehicleName,
+                vehicle.ModelYear,
+                vehicle.InspectionDate,
+                vehicle.Mileage,
+                vehicle.RegistrationNumber,
+                vehicle.ChassisNumber,
+                vehicle.Documents.ToArray(),
+                vehicle.SourceFileName,
+                vehicle.SourceRowNumber))
             .ToArray();
 
         var warnings = new List<string>
@@ -313,7 +375,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
         };
         if (package.SkippedBlankCustomerRows > 0)
         {
-            warnings.Add($"顧客名空欄で{package.SkippedBlankCustomerRows:N0}行を無視しています。これはエラーではありません。");
+            warnings.Add($"顧客名空欄の書類は従来どおり除外し、顧客名空欄の車両は{unresolvedVehicles.Length:N0}件を未確定車両として保持しています。");
         }
 
         return new AbacusLegacyExportCandidateGraphResult(
@@ -321,9 +383,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
             customerResults,
             documents,
             unresolved,
-            package.Rows
-                .Where(row => row.Kind == "車両一覧" && row.MatchStatus != "候補")
-                .ToArray(),
+            unresolvedVehicles,
             solidLinkCount,
             reviewLinkCount,
             unmatchedCount,
@@ -366,7 +426,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
         var matchStatus = manifestRow?.MatchStatus ?? (candidateVehicles.Count == 1 ? "要確認" : "未一致");
         var warning = manifestRow?.Warning ?? "候補マニフェストに対応する行がないため、手動確認が必要です。";
         string? linkedVehicleId = null;
-        if (matchStatus == "一意一致" && candidateVehicles.Count == 1)
+        if (matchStatus == "一意一致" && candidateVehicles.Count == 1 &&
+            !string.IsNullOrWhiteSpace(candidateVehicles[0].CustomerId))
         {
             linkedVehicleId = candidateVehicles[0].VehicleId;
             candidateCustomerIds = [candidateVehicles[0].CustomerId];
@@ -374,7 +435,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
         else if (matchStatus == "一意一致")
         {
             matchStatus = candidateVehicles.Count == 0 ? "未一致" : "要確認";
-            warning = "マニフェストは一意一致ですが、再検証した車両CSVから1台に再現できません。手動確認が必要です。";
+            warning = candidateVehicles.Any(vehicle => string.IsNullOrWhiteSpace(vehicle.CustomerId))
+                ? "識別子が顧客情報のない未確定車両候補に一致しました。車両を顧客へ接続した後、書類も手動で確認してください。"
+                : "マニフェストは一意一致ですが、再検証した車両CSVから1台に再現できません。手動確認が必要です。";
         }
 
         var document = new AbacusLegacyExportCandidateGraphDocument(
@@ -416,7 +479,11 @@ public sealed class AbacusLegacyExportCandidateGraphService
     {
         var customerSet = candidateCustomerIds.ToHashSet(StringComparer.Ordinal);
         var candidates = source
-            .Where(vehicle => customerSet.Count == 0 || customerSet.Contains(vehicle.CustomerId))
+            // 顧客候補がない書類を、顧客情報のない車両へ自動接続しない。
+            // 顧客候補がある場合だけ、識別子確認用の未確定車両候補を残します。
+            .Where(vehicle => customerSet.Count == 0
+                ? !string.IsNullOrWhiteSpace(vehicle.CustomerId)
+                : string.IsNullOrWhiteSpace(vehicle.CustomerId) || customerSet.Contains(vehicle.CustomerId))
             .ToArray();
         var normalizedRegistration = Normalize(registrationNumber);
         if (!string.IsNullOrWhiteSpace(normalizedRegistration))
@@ -556,6 +623,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
     private static string BuildSourceKey(string kind, string fileName, int rowNumber) =>
         $"{kind}|{fileName}|{rowNumber}";
 
+    private static string GetDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
+        string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
+
     private static string Required(IReadOnlyList<string> fields, int index, string label)
     {
         var value = Value(fields, index);
@@ -614,7 +684,9 @@ public sealed class AbacusLegacyExportCandidateGraphService
         string mileage,
         string registrationNumber,
         string chassisNumber,
-        List<AbacusLegacyExportCandidateGraphDocument> documents)
+        List<AbacusLegacyExportCandidateGraphDocument> documents,
+        string sourceFileName,
+        int sourceRowNumber)
     {
         public string VehicleId { get; } = vehicleId;
         public string CustomerId { get; } = customerId;
@@ -628,5 +700,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
         public string RegistrationNumber { get; } = registrationNumber;
         public string ChassisNumber { get; } = chassisNumber;
         public List<AbacusLegacyExportCandidateGraphDocument> Documents { get; } = documents;
+        public string SourceFileName { get; } = sourceFileName;
+        public int SourceRowNumber { get; } = sourceRowNumber;
     }
 }

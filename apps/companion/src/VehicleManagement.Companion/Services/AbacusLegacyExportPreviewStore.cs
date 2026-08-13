@@ -132,48 +132,29 @@ public sealed class AbacusLegacyExportPreviewStore
             cancellationToken.ThrowIfCancellationRequested();
             var source = row.Fields;
             var customerName = Text(source, 0);
+            var vehicleName = Text(source, 12);
+            CustomerCandidate? customer = null;
             if (string.IsNullOrEmpty(customerName))
             {
+                // 顧客情報がない車両も候補から捨てず、Gate22の未確定車両へ渡します。
+                // 顧客IDは空欄のまま出力し、最終確定時にユーザーが顧客へ接続しなければ除外します。
                 skippedBlankCustomerRows++;
-                previewRows.Add(new AbacusLegacyExportPreviewRow(
-                    "車両一覧",
-                    row.FileName,
-                    row.RowNumber,
-                    "",
-                    Text(source, 12),
-                    "",
-                    "除外",
-                    "顧客名が空欄のため無視しました。"));
-                continue;
             }
-
-            var vehicleName = Text(source, 12);
-            if (string.IsNullOrEmpty(vehicleName))
+            else
             {
-                previewRows.Add(new AbacusLegacyExportPreviewRow(
-                    "車両一覧",
-                    row.FileName,
-                    row.RowNumber,
-                    customerName,
-                    "",
-                    "",
-                    "要確認",
-                    "車名が空欄のため車両候補へ出力しません。"));
-                continue;
+                customer = EnsureCustomer(
+                    customers,
+                    BuildCustomerSource(
+                        customerName,
+                        Text(source, 1),
+                        "",
+                        Text(source, 3),
+                        row.FileName,
+                        row.RowNumber));
             }
-
-            var customer = EnsureCustomer(
-                customers,
-                BuildCustomerSource(
-                    customerName,
-                    Text(source, 1),
-                    "",
-                    Text(source, 3),
-                    row.FileName,
-                    row.RowNumber));
             var candidate = new VehicleCandidate(
                 CreateStableId("abacus-vehicle", $"{row.FileName}:{row.RowNumber}"),
-                customer.Key,
+                customer?.Key ?? "",
                 Text(source, 11),
                 vehicleName,
                 Text(source, 17),
@@ -189,18 +170,25 @@ public sealed class AbacusLegacyExportPreviewStore
                 row.FileName,
                 row.RowNumber);
             vehicles.Add(candidate);
-            customer.VehicleCount++;
+            if (customer is not null)
+            {
+                customer.VehicleCount++;
+            }
             AddIndex(vehicleByChassis, NormalizeIdentifier(candidate.ChassisNumber), candidate);
             AddIndex(vehicleByRegistration, NormalizeIdentifier(candidate.RegistrationNumber), candidate);
             previewRows.Add(new AbacusLegacyExportPreviewRow(
                 "車両一覧",
                 row.FileName,
                 row.RowNumber,
-                customer.Name,
+                customer?.Name ?? "",
                 candidate.VehicleName,
                 candidate.RegistrationNumber,
-                "候補",
-                "車両一覧の1行を独立した車両候補として扱います。"));
+                string.IsNullOrEmpty(customerName) ? "要確認" : "候補",
+                string.IsNullOrEmpty(customerName)
+                    ? "顧客名が空欄のため、未確定車両として保持しています。顧客へ接続しない場合は最終パッケージから除外されます。"
+                    : string.IsNullOrEmpty(vehicleName)
+                        ? "車名が空欄ですが、車両一覧の1行を候補として保持しています。"
+                        : "車両一覧の1行を独立した車両候補として扱います。"));
         }
 
         var salesRows = input.Files.FirstOrDefault(file => file.Kind == "販売書類")?.Rows ?? [];
@@ -364,7 +352,7 @@ public sealed class AbacusLegacyExportPreviewStore
             };
             if (skippedBlankCustomerRows > 0)
             {
-                warnings.Add($"顧客名空欄のため{skippedBlankCustomerRows:N0}行を無視しました。これはエラーではありません。");
+                warnings.Add($"顧客名空欄の書類は除外し、顧客名空欄の車両は未確定候補として保持しました（対象{skippedBlankCustomerRows:N0}行）。");
             }
             if (skippedMaintenanceWithoutVehicleRows > 0)
             {
@@ -648,11 +636,13 @@ public sealed class AbacusLegacyExportPreviewStore
         AppendCsvRow(builder, ["車両ID", "顧客ID", "顧客名", "メーカー", "車名", "型式", "登録番号", "車台番号", "年式", "車検満了日", "走行距離", "車体色", "排気量", "ミッション", "記録簿", "備考"]);
         foreach (var candidate in candidates)
         {
-            var customer = customers[candidate.CustomerKey];
+            var customer = string.IsNullOrWhiteSpace(candidate.CustomerKey)
+                ? null
+                : customers[candidate.CustomerKey];
             AppendCsvRow(builder, [
                 candidate.VehicleId,
-                customer.CustomerId,
-                customer.Name,
+                customer?.CustomerId ?? "",
+                customer?.Name ?? "",
                 candidate.Maker,
                 candidate.VehicleName,
                 candidate.Model,
