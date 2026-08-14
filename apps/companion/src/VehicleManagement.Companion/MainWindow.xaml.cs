@@ -3196,6 +3196,7 @@ public partial class MainWindow : Window
         LegacyGraphTrashCustomerList.ItemsSource = GetLegacyGraphTrashCustomers();
         LegacyGraphTrashVehicleList.ItemsSource = GetLegacyGraphTrashVehicles();
         LegacyGraphTrashDocumentList.ItemsSource = GetLegacyGraphTrashDocuments();
+        RefreshLegacyGraphSearchResults();
     }
 
     private void RefreshLegacyGraphUnresolvedVehicleList()
@@ -3207,6 +3208,7 @@ public partial class MainWindow : Window
         }
 
         LegacyGraphUnresolvedVehicleList.ItemsSource = GetLegacyGraphUnresolvedVehicles();
+        RefreshLegacyGraphSearchResults();
     }
 
     private void LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -4146,6 +4148,7 @@ public partial class MainWindow : Window
             LegacyGraphEdgesCanvas.Children.Clear();
             UpdateLegacyGraphCurrentCustomerSelectionText();
             UpdateLegacyGraphImportConfirmationButton();
+            RefreshLegacyGraphSearchResults();
             return;
         }
 
@@ -4155,6 +4158,428 @@ public partial class MainWindow : Window
         LegacyGraphCustomersList.SelectedItem = selectedEntry ?? entries[0];
         UpdateLegacyGraphCurrentCustomerSelectionText();
         UpdateLegacyGraphImportConfirmationButton();
+        RefreshLegacyGraphSearchResults();
+    }
+
+    private void LegacyGraphSearchTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        RefreshLegacyGraphSearchResults();
+
+    private void LegacyGraphSearchFilter_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        RefreshLegacyGraphSearchResults();
+
+    private void LegacyGraphSearchResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        LegacyGraphSearchOpenButton.IsEnabled = LegacyGraphSearchResultsList.SelectedItem is LegacyGraphSearchResult;
+    }
+
+    private void LegacyGraphSearchResultsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (LegacyGraphSearchResultsList.SelectedItem is LegacyGraphSearchResult)
+        {
+            ShowLegacyGraphSearchResult();
+            e.Handled = true;
+        }
+    }
+
+    private void LegacyGraphSearchOpenButton_Click(object sender, RoutedEventArgs e) =>
+        ShowLegacyGraphSearchResult();
+
+    private void RefreshLegacyGraphSearchResults()
+    {
+        if (LegacyGraphSearchResultsList is null || LegacyGraphSearchTextBox is null)
+        {
+            return;
+        }
+
+        if (legacyExportCandidateGraphResult is null)
+        {
+            LegacyGraphSearchResultsList.ItemsSource = null;
+            LegacyGraphSearchOpenButton.IsEnabled = false;
+            LegacyGraphSearchStatusText.Text = "候補パッケージを読み込むと検索できます。";
+            return;
+        }
+
+        var query = NormalizeLegacyGraphSearchText(LegacyGraphSearchTextBox.Text);
+        var kindFilter = GetLegacyGraphSearchFilterValue(LegacyGraphSearchKindComboBox);
+        var stateFilter = GetLegacyGraphSearchFilterValue(LegacyGraphSearchStateComboBox);
+        var methodFilter = GetLegacyGraphSearchFilterValue(LegacyGraphSearchMethodComboBox);
+        var results = BuildLegacyGraphSearchResults()
+            .Where(result => kindFilter == "all" || result.TypeCode == kindFilter)
+            .Where(result => stateFilter == "all" || result.StateCode == stateFilter)
+            .Where(result => methodFilter == "all" || result.MethodCode == methodFilter)
+            .Where(result => string.IsNullOrWhiteSpace(query) || result.SearchText.Contains(query, StringComparison.Ordinal))
+            .OrderBy(result => result.TypeText, StringComparer.Ordinal)
+            .ThenBy(result => result.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(500)
+            .ToArray();
+
+        LegacyGraphSearchResultsList.ItemsSource = results;
+        LegacyGraphSearchResultsList.SelectedIndex = -1;
+        LegacyGraphSearchOpenButton.IsEnabled = false;
+        LegacyGraphSearchStatusText.Text = results.Length == 500
+            ? "検索結果が500件を超えたため、先頭500件だけ表示しています。検索条件を追加してください。"
+            : $"検索結果: {results.Length:N0}件。結果を選択して表示できます。";
+    }
+
+    private IReadOnlyList<LegacyGraphSearchResult> BuildLegacyGraphSearchResults()
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [];
+        }
+
+        var results = new List<LegacyGraphSearchResult>();
+        foreach (var customer in legacyExportCandidateGraphResult.Customers)
+        {
+            var state = GetLegacyGraphSearchCustomerState(customer);
+            var method = GetLegacyGraphSearchCustomerMethod(customer);
+            results.Add(CreateLegacyGraphSearchResult(
+                customer,
+                "customer",
+                "顧客",
+                customer.DisplayName,
+                $"{Fallback(customer.NameKana)} / {Fallback(customer.PhoneNumber)} / 車両 {customer.Vehicles.Count:N0}台",
+                state,
+                method,
+                new[]
+                {
+                    customer.CustomerId,
+                    customer.CustomerNumber,
+                    customer.CustomerName,
+                    customer.NameKana,
+                    customer.PhoneNumber,
+                    customer.EmailAddress,
+                    customer.PostalCode,
+                    customer.Address,
+                    customer.Memo,
+                }));
+        }
+
+        foreach (var vehicle in GetLegacyGraphAllVehicles())
+        {
+            var state = GetLegacyGraphSearchVehicleState(vehicle);
+            var method = GetLegacyGraphSearchVehicleMethod(vehicle);
+            results.Add(CreateLegacyGraphSearchResult(
+                vehicle,
+                "vehicle",
+                "車両",
+                $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}",
+                $"{Fallback(vehicle.CustomerName)} / {Fallback(vehicle.IdentifierSummary)} / {vehicle.SourceLocation}",
+                state,
+                method,
+                new[]
+                {
+                    vehicle.VehicleId,
+                    vehicle.CustomerName,
+                    vehicle.Maker,
+                    vehicle.VehicleName,
+                    vehicle.ModelYear,
+                    vehicle.InspectionDate,
+                    vehicle.Mileage,
+                    vehicle.RegistrationNumber,
+                    vehicle.ChassisNumber,
+                    vehicle.SourceFileName,
+                    vehicle.SourceRowNumber.ToString(),
+                }));
+        }
+
+        foreach (var document in legacyExportCandidateGraphResult.AllDocuments
+                     .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+                     .Select(group => group.First()))
+        {
+            var state = GetLegacyGraphSearchDocumentState(document);
+            var method = GetLegacyGraphSearchDocumentMethod(document);
+            results.Add(CreateLegacyGraphSearchResult(
+                document,
+                "document",
+                "書類",
+                $"{document.Kind} {Fallback(document.DocumentNumber)}",
+                $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)} / {Fallback(document.DocumentDate)} / {Fallback(document.TotalAmount)}",
+                state,
+                method,
+                new[]
+                {
+                    document.Kind,
+                    document.SourceFileName,
+                    document.SourceRowNumber.ToString(),
+                    document.DocumentNumber,
+                    document.CustomerName,
+                    document.VehicleName,
+                    document.RegistrationNumber,
+                    document.DocumentDate,
+                    document.TotalAmount,
+                    document.DocumentType,
+                    document.MaintenanceCategory,
+                    document.ClassificationWarning,
+                }));
+        }
+
+        return results;
+    }
+
+    private LegacyGraphSearchResult CreateLegacyGraphSearchResult(
+        object item,
+        string typeCode,
+        string typeText,
+        string title,
+        string subtitle,
+        (string Code, string Text) state,
+        (string Code, string Text) method,
+        IEnumerable<string> searchValues)
+    {
+        var stateBrush = state.Code switch
+        {
+            "trash" => ToBrush("#B91C1C"),
+            "unresolved" => ToBrush("#C2410C"),
+            _ => ToBrush("#17643A"),
+        };
+        var backgroundBrush = state.Code switch
+        {
+            "trash" => ToBrush("#FFF1F2"),
+            "unresolved" => ToBrush("#FFF7ED"),
+            _ => ToBrush("#F0FDF4"),
+        };
+        var borderBrush = state.Code switch
+        {
+            "trash" => ToBrush("#FCA5A5"),
+            "unresolved" => ToBrush("#FDBA74"),
+            _ => ToBrush("#86EFAC"),
+        };
+        return new LegacyGraphSearchResult(
+            item,
+            typeCode,
+            typeText,
+            title,
+            subtitle,
+            state.Code,
+            state.Text,
+            method.Code,
+            method.Text,
+            NormalizeLegacyGraphSearchText(string.Join("\n", searchValues)),
+            stateBrush,
+            backgroundBrush,
+            borderBrush);
+    }
+
+    private void ShowLegacyGraphSearchResult()
+    {
+        if (LegacyGraphSearchResultsList.SelectedItem is not LegacyGraphSearchResult result)
+        {
+            return;
+        }
+
+        switch (result.Item)
+        {
+            case AbacusLegacyExportCandidateGraphCustomer customer:
+                if (legacyGraphTrashCustomerIds.Contains(customer.CustomerId))
+                {
+                    LegacyGraphTrashCustomerList.SelectedItem = customer;
+                    LegacyGraphTrashCustomerList.ScrollIntoView(customer);
+                    UpdateLegacyGraphInspector(customer);
+                    LegacyGraphStatusText.Text = $"検索結果からごみ箱の顧客 {customer.DisplayName} を表示しました。";
+                }
+                else
+                {
+                    SelectLegacyGraphCustomerInList(customer);
+                    LegacyGraphStatusText.Text = $"検索結果から顧客 {customer.DisplayName} を表示しました。";
+                }
+                LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+                break;
+            case AbacusLegacyExportCandidateGraphVehicle vehicle:
+                ShowLegacyGraphSearchVehicle(vehicle);
+                break;
+            case AbacusLegacyExportCandidateGraphDocument document:
+                ShowLegacyGraphSearchDocument(document);
+                break;
+        }
+    }
+
+    private void ShowLegacyGraphSearchVehicle(AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        if (IsLegacyGraphVehicleInTrash(vehicle))
+        {
+            LegacyGraphTrashVehicleList.SelectedItem = vehicle;
+            LegacyGraphTrashVehicleList.ScrollIntoView(vehicle);
+            UpdateLegacyGraphInspector(vehicle);
+            LegacyGraphStatusText.Text = $"検索結果からごみ箱の車両 {vehicle.DisplayName} を表示しました。";
+            LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+            return;
+        }
+
+        if (GetLegacyGraphUnresolvedVehicles().Any(candidate =>
+                string.Equals(candidate.VehicleId, vehicle.VehicleId, StringComparison.Ordinal)))
+        {
+            LegacyGraphUnresolvedVehicleList.SelectedItem = vehicle;
+            LegacyGraphUnresolvedVehicleList.ScrollIntoView(vehicle);
+            UpdateLegacyGraphInspector(vehicle);
+            LegacyGraphStatusText.Text = $"検索結果から未確定車両 {vehicle.DisplayName} を表示しました。";
+            LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+            return;
+        }
+
+        var customerId = legacyGraphManualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var manualCustomerId)
+            ? manualCustomerId
+            : vehicle.CustomerId;
+        var customer = FindLegacyGraphCustomerById(customerId);
+        if (customer is not null)
+        {
+            SelectLegacyGraphCustomerInList(customer);
+            var displayCustomer = GetLegacyGraphDisplayCustomer(customer);
+            RenderLegacyGraphCustomer(displayCustomer);
+        }
+
+        UpdateLegacyGraphInspector(vehicle);
+        LegacyGraphStatusText.Text = $"検索結果から車両 {vehicle.DisplayName} をキャンバスで表示しました。";
+        LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private void ShowLegacyGraphSearchDocument(AbacusLegacyExportCandidateGraphDocument document)
+    {
+        if (IsLegacyGraphDocumentInTrash(document))
+        {
+            LegacyGraphTrashDocumentList.SelectedItem = document;
+            LegacyGraphTrashDocumentList.ScrollIntoView(document);
+            UpdateLegacyGraphInspector(document);
+            LegacyGraphStatusText.Text = $"検索結果からごみ箱の書類 {document.DocumentNumber} を表示しました。";
+            LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+            return;
+        }
+
+        if (IsLegacyGraphDocumentInTray(document))
+        {
+            var trayList = document.Kind == "販売書類"
+                ? LegacyGraphUnresolvedSalesList
+                : LegacyGraphUnresolvedMaintenanceList;
+            trayList.SelectedItem = document;
+            trayList.ScrollIntoView(document);
+            UpdateLegacyGraphInspector(document);
+            LegacyGraphStatusText.Text = $"検索結果から未確定トレイの書類 {document.DocumentNumber} を表示しました。";
+            LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+            return;
+        }
+
+        var customer = FindOriginalCustomerForDocument(document);
+        if (customer is null &&
+            legacyGraphManualDocumentCustomerLinks.TryGetValue(GetLegacyDocumentKey(document), out var groupKey))
+        {
+            customer = legacyExportCandidateGraphResult?.Customers.FirstOrDefault(candidate =>
+                string.Equals(GetLegacyCustomerMergeKey(candidate), groupKey, StringComparison.Ordinal));
+        }
+
+        if (customer is not null)
+        {
+            SelectLegacyGraphCustomerInList(customer);
+            RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(customer));
+        }
+
+        UpdateLegacyGraphInspector(document);
+        LegacyGraphStatusText.Text = $"検索結果から書類 {document.DocumentNumber} をキャンバスで表示しました。";
+        LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
+
+    private static string GetLegacyGraphSearchFilterValue(ComboBox comboBox) =>
+        comboBox.SelectedItem is ComboBoxItem item && item.Tag is string value
+            ? value
+            : "all";
+
+    private static string NormalizeLegacyGraphSearchText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        var normalized = value.Normalize(NormalizationForm.FormKC).ToUpperInvariant();
+        return string.Concat(normalized.Where(character =>
+            !char.IsWhiteSpace(character) && !IsLegacyGraphSearchHyphen(character)));
+    }
+
+    private static bool IsLegacyGraphSearchHyphen(char character) =>
+        character is '-' or '－' or '‐' or '‑' or '‒' or '–' or '—' or '−';
+
+    private (string Code, string Text) GetLegacyGraphSearchCustomerState(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        if (legacyGraphTrashCustomerIds.Contains(customer.CustomerId))
+        {
+            return ("trash", "ごみ箱");
+        }
+
+        var key = GetLegacyCustomerMergeKey(customer);
+        return TryGetLegacyGraphMergeGroup(key, out var group) &&
+               group.CustomerIds.Count > 1 &&
+               !legacyGraphAppliedCustomerMergeKeys.Contains(key)
+            ? ("unresolved", "未確定")
+            : ("confirmed", "確定");
+    }
+
+    private (string Code, string Text) GetLegacyGraphSearchCustomerMethod(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        var key = GetLegacyCustomerMergeKey(customer);
+        if (TryGetLegacyGraphMergeGroup(key, out var group) && group.Origin == "manual")
+        {
+            return ("manual", "手動紐づけ");
+        }
+
+        return TryGetLegacyGraphMergeGroup(key, out var candidateGroup) &&
+               candidateGroup.CustomerIds.Count > 1 &&
+               !legacyGraphAppliedCustomerMergeKeys.Contains(key)
+            ? ("recommended", "おすすめ")
+            : ("automatic", "自動紐づけ");
+    }
+
+    private (string Code, string Text) GetLegacyGraphSearchVehicleState(
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        if (IsLegacyGraphVehicleInTrash(vehicle))
+        {
+            return ("trash", "ごみ箱");
+        }
+
+        var isUnresolved = legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId) ||
+                           (!vehicle.HasCustomer && !legacyGraphManualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId));
+        return isUnresolved ? ("unresolved", "未確定") : ("confirmed", "確定");
+    }
+
+    private (string Code, string Text) GetLegacyGraphSearchVehicleMethod(
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        if (legacyGraphManualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId))
+        {
+            return ("manual", "手動紐づけ");
+        }
+
+        return vehicle.HasCustomer && !legacyGraphTrayVehicleIds.Contains(vehicle.VehicleId)
+            ? ("automatic", "自動紐づけ")
+            : ("recommended", "おすすめ");
+    }
+
+    private (string Code, string Text) GetLegacyGraphSearchDocumentState(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        if (IsLegacyGraphDocumentInTrash(document))
+        {
+            return ("trash", "ごみ箱");
+        }
+
+        return IsLegacyGraphDocumentInTray(document) || IsLegacyGraphDocumentUnconnected(document)
+            ? ("unresolved", "未確定")
+            : ("confirmed", "確定");
+    }
+
+    private (string Code, string Text) GetLegacyGraphSearchDocumentMethod(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var method = GetLegacyGraphDocumentLinkMethod(document);
+        if (method is "manual-vehicle" or "manual-customer-only")
+        {
+            return ("manual", "手動紐づけ");
+        }
+
+        return method == AbacusLinkMethods.Recommended || document.MatchStatus is "要確認" or "候補"
+            ? ("recommended", "おすすめ")
+            : ("automatic", "自動紐づけ");
     }
 
     private IReadOnlyList<LegacyGraphCustomerListEntry> BuildLegacyGraphCustomerListEntries()
@@ -4475,6 +4900,7 @@ public partial class MainWindow : Window
                     $"登録番号: {Fallback(document.RegistrationNumber)}\n" +
                     $"日付: {Fallback(document.DocumentDate)}\n" +
                     $"合計: {Fallback(document.TotalAmount)}\n" +
+                    BuildLegacyGraphDocumentDetailSummary(document) +
                     $"出典: {document.SourceLocation}\n" +
                     $"元候補ID: {GetLegacyDocumentKey(document)}\n" +
                     $"判断根拠: {linkReason}";
@@ -4499,6 +4925,49 @@ public partial class MainWindow : Window
                 LegacyGraphInspectorDetailsText.Text = "";
                 LegacyGraphInspectorEvidenceText.Text = "";
                 break;
+        }
+    }
+
+    private static string BuildLegacyGraphDocumentDetailSummary(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var documentType = AbacusDocumentClassification.NormalizeDocumentType(
+            document.DocumentType,
+            "請求書");
+        var text =
+            $"ABACUS書類種別（原文）: {Fallback(documentType.RawValue)}\n" +
+            $"ABACUS書類種別（正規化）: {documentType.Value}\n";
+        if (document.Kind == "整備書類")
+        {
+            var maintenanceCategory = AbacusDocumentClassification.NormalizeMaintenanceCategory(
+                document.MaintenanceCategory);
+            text +=
+                $"ABACUS入庫区分（原文）: {Fallback(maintenanceCategory.RawValue)}\n" +
+                $"ABACUS入庫区分（正規化）: {maintenanceCategory.Value}\n";
+        }
+
+        if (string.IsNullOrWhiteSpace(document.DetailsJson))
+        {
+            return text + "Gate19明細: 取得できない（DetailsJsonなし）\n";
+        }
+
+        try
+        {
+            var detail = JsonSerializer.Deserialize<AbacusDetailJsonDocument>(
+                document.DetailsJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (detail is null)
+            {
+                return text + "Gate19明細: 解析できない形式です\n";
+            }
+
+            return text +
+                   $"Gate19明細: {detail.Lines.Count:N0}行 / 金額のみ {detail.AmountOnlyRowCount:N0}行 / 除外 {detail.ExcludedDetailCount:N0}行\n" +
+                   $"明細合計: {detail.DetailAmount:N0} / ABACUS小計: {detail.AbacusSubtotal?.ToString("N0") ?? "未設定"} / ABACUS合計: {detail.AbacusTotal?.ToString("N0") ?? "未設定"}\n";
+        }
+        catch (JsonException)
+        {
+            return text + "Gate19明細: JSONを解析できません\n";
         }
     }
 
@@ -6469,6 +6938,7 @@ public partial class MainWindow : Window
         LegacyGraphUnresolvedMaintenanceList.ItemsSource = unresolved
             .Where(document => document.Kind == "整備書類")
             .ToArray();
+        RefreshLegacyGraphSearchResults();
     }
 
     private bool IsLegacyGraphDocumentInTray(
@@ -8421,6 +8891,10 @@ public partial class MainWindow : Window
         LegacyGraphTrashCustomerList.ItemsSource = null;
         LegacyGraphTrashVehicleList.ItemsSource = null;
         LegacyGraphTrashDocumentList.ItemsSource = null;
+        LegacyGraphSearchResultsList.ItemsSource = null;
+        LegacyGraphSearchOpenButton.IsEnabled = false;
+        LegacyGraphSearchStatusText.Text = "候補パッケージを読み込むと検索できます。";
+        LegacyGraphSearchTextBox.Clear();
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
         LegacyGraphPageDragPreviewCanvas.Children.Clear();
@@ -10645,6 +11119,21 @@ public partial class MainWindow : Window
         Brush BorderBrush,
         Brush StatusBrush,
         bool HasDifference);
+
+    private sealed record LegacyGraphSearchResult(
+        object Item,
+        string TypeCode,
+        string TypeText,
+        string Title,
+        string Subtitle,
+        string StateCode,
+        string StateText,
+        string MethodCode,
+        string MethodText,
+        string SearchText,
+        Brush StateBrush,
+        Brush BackgroundBrush,
+        Brush BorderBrush);
 
     private sealed record LegacyGraphEdge(UIElement Source, UIElement Target, Line Line);
 
