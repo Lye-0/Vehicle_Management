@@ -1427,6 +1427,7 @@
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定車両" />
                                     <ListBox x:Name="LegacyGraphUnresolvedVehicleList" Margin="0,7,0,0" Height="195"
                                              SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             RequestBringIntoView="LegacyGraphUnresolvedList_RequestBringIntoView"
                                              PreviewMouseLeftButtonDown="LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonDown"
                                              PreviewMouseMove="LegacyGraphUnresolvedVehicleList_PreviewMouseMove"
                                              PreviewMouseLeftButtonUp="LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonUp">
@@ -1456,6 +1457,7 @@
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定販売書類" />
                                     <ListBox x:Name="LegacyGraphUnresolvedSalesList" Margin="0,7,0,0" Height="195" AllowDrop="True"
                                              SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             RequestBringIntoView="LegacyGraphUnresolvedList_RequestBringIntoView"
                                              PreviewMouseLeftButtonDown="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonDown"
                                              PreviewMouseMove="LegacyGraphUnresolvedDocumentList_PreviewMouseMove"
                                              PreviewMouseLeftButtonUp="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp"
@@ -1494,6 +1496,7 @@
                                     <TextBlock FontWeight="SemiBold" Foreground="#10233F" Text="未確定整備書類" />
                                     <ListBox x:Name="LegacyGraphUnresolvedMaintenanceList" Margin="0,7,0,0" Height="195" AllowDrop="True"
                                              SelectionChanged="LegacyGraphUnresolvedSelectionChanged"
+                                             RequestBringIntoView="LegacyGraphUnresolvedList_RequestBringIntoView"
                                              PreviewMouseLeftButtonDown="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonDown"
                                              PreviewMouseMove="LegacyGraphUnresolvedDocumentList_PreviewMouseMove"
                                              PreviewMouseLeftButtonUp="LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp"

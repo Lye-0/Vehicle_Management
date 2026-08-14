@@ -2160,6 +2160,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void LegacyGraphUnresolvedList_RequestBringIntoView(
+        object sender,
+        RequestBringIntoViewEventArgs e)
+    {
+        // クリックによる選択時だけ、ListBoxItemの自動スクロールを抑止する。
+        // キーボード操作や明示的なスクロールは通常どおり動作させる。
+        if (e.TargetObject is ListBoxItem && Mouse.LeftButton == MouseButtonState.Pressed)
+        {
+            e.Handled = true;
+        }
+    }
+
     private async void LegacyGraphSaveWorkButton_Click(object sender, RoutedEventArgs e)
     {
         if (legacyGraphFinalPackageBusy || legacyGraphBulkMergeBusy)
@@ -3210,6 +3222,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        list.SelectedItem = vehicle;
         legacyGraphTrayDragVehicle = vehicle;
         legacyGraphTrayDragVehicleStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
@@ -3428,6 +3441,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        list.SelectedItem = document;
         legacyGraphTrayDragDocument = document;
         legacyGraphTrayDragStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
