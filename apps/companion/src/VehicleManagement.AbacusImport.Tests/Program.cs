@@ -7,6 +7,7 @@ var tests = new (string Name, Action Test)[]
     ("車台番号完全一致は車両おすすめになる", ExactChassisMatch),
     ("顧客名の軽微な誤字は顧客おすすめになる", FuzzyCustomerNameMatch),
     ("同姓同名は承認可能候補にならない", SameNameConflict),
+    ("顧客同士の一部一致は統合おすすめになる", CustomerIntegrationRecommendation),
     ("識別子競合は承認可能候補にならない", IdentifierConflict),
     ("顧客なし車両は顧客おすすめになる", UnconnectedVehicleMatch),
     ("入力順を変えても候補順と根拠が変わらない", DeterministicOutput),
@@ -68,6 +69,22 @@ static void SameNameConflict()
         !candidate.IsEligible &&
         candidate.Conflicts.Any(conflict => conflict.Contains("複数の顧客", StringComparison.Ordinal))),
         "同姓同名が競合として扱われていません。");
+}
+
+static void CustomerIntegrationRecommendation()
+{
+    var customers = new[]
+    {
+        Customer("c1", "山田太郎", phone: "03-1234-5678"),
+        Customer("c2", "山田太朗", phone: "03-1234-5678"),
+    };
+
+    var match = Build([], [], customers).Single(candidate =>
+        candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+        candidate.TargetKind == AbacusRecommendationEntityKinds.Customer);
+    Assert(match.IsEligible, "顧客同士の一部一致が承認可能な統合おすすめになっていません。");
+    Assert(match.MatchedFields.Any(field => field.Field == "phoneNumber"),
+        "顧客同士の統合おすすめに電話番号の一致根拠がありません。");
 }
 
 static void IdentifierConflict()
@@ -201,8 +218,8 @@ static IReadOnlyList<AbacusRecommendationCandidate> Build(
     IReadOnlyList<AbacusRecommendationCustomer> customers) =>
     new AbacusRecommendationEngine().Build(new AbacusRecommendationInput(documents, vehicles, customers));
 
-static AbacusRecommendationCustomer Customer(string id, string name) =>
-    new(id, new AbacusRecommendationProfile(CustomerName: name));
+static AbacusRecommendationCustomer Customer(string id, string name, string phone = "") =>
+    new(id, new AbacusRecommendationProfile(CustomerName: name, PhoneNumber: phone));
 
 static AbacusRecommendationVehicle Vehicle(
     string id,

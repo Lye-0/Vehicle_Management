@@ -201,6 +201,39 @@ public sealed class AbacusRecommendationEngine
             }
         }
 
+        // 顧客同士の候補は、完全一致の同名グループとは別に、
+        // 電話・住所・ふりがななどの一部一致をおすすめとして返します。
+        // 顧客名が完全一致する組み合わせは、補助アプリ側の既存の強い統合候補へ
+        // 委ね、同じ組み合わせを二重表示しません。
+        for (var sourceIndex = 0; sourceIndex < customers.Length; sourceIndex++)
+        {
+            for (var targetIndex = sourceIndex + 1; targetIndex < customers.Length; targetIndex++)
+            {
+                var source = customers[sourceIndex];
+                var target = customers[targetIndex];
+                var sourceName = NormalizeText(source.Profile.CustomerName);
+                var targetName = NormalizeText(target.Profile.CustomerName);
+                if (sourceName.Length > 0 &&
+                    string.Equals(sourceName, targetName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var evaluation = EvaluateProfiles(
+                    source.Profile,
+                    target.Profile,
+                    includeVehicleFields: false);
+                AddCandidate(
+                    candidates,
+                    AbacusRecommendationEntityKinds.Customer,
+                    source.CustomerId,
+                    AbacusRecommendationEntityKinds.Customer,
+                    target.CustomerId,
+                    target.CustomerId,
+                    evaluation);
+            }
+        }
+
         return candidates
             .OrderByDescending(candidate => candidate.IsEligible)
             .ThenByDescending(candidate => candidate.HasStrongEvidence)

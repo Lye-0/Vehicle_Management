@@ -10,15 +10,20 @@ public sealed class AbacusLegacyRecommendationEngine
     private readonly AbacusRecommendationEngine engine = new();
 
     public IReadOnlyList<AbacusRecommendationCandidate> Build(
-        AbacusLegacyExportCandidateGraphResult graph)
+        AbacusLegacyExportCandidateGraphResult graph,
+        Func<string, string>? customerNameResolver = null)
     {
         ArgumentNullException.ThrowIfNull(graph);
+
+        customerNameResolver ??= customerId => graph.Customers
+            .FirstOrDefault(customer => string.Equals(customer.CustomerId, customerId, StringComparison.Ordinal))
+            ?.CustomerName ?? "";
 
         var customers = graph.Customers
             .Select(customer => new AbacusRecommendationCustomer(
                 customer.CustomerId,
                 new AbacusRecommendationProfile(
-                    CustomerName: customer.CustomerName,
+                    CustomerName: customerNameResolver(customer.CustomerId),
                     NameKana: customer.NameKana,
                     PhoneNumber: customer.PhoneNumber,
                     PostalCode: customer.PostalCode,
@@ -34,7 +39,9 @@ public sealed class AbacusLegacyRecommendationEngine
                 vehicle.VehicleId,
                 vehicle.CustomerId,
                 new AbacusRecommendationProfile(
-                    CustomerName: vehicle.CustomerName,
+                    CustomerName: string.IsNullOrWhiteSpace(vehicle.CustomerId)
+                        ? vehicle.CustomerName
+                        : customerNameResolver(vehicle.CustomerId),
                     Maker: vehicle.Maker,
                     VehicleName: vehicle.VehicleName,
                     Model: vehicle.Model,

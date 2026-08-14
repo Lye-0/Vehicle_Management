@@ -99,7 +99,8 @@ public sealed record LegacyGraphWorkCheckpoint(
     LegacyGraphCheckpointDetailState[] DetailStates,
     LegacyGraphCheckpointImageMapping? ImageMapping,
     DateTimeOffset SavedAtUtc,
-    LegacyGraphCheckpointRecommendationState[]? RecommendationStates = null);
+    LegacyGraphCheckpointRecommendationState[]? RecommendationStates = null,
+    Dictionary<string, string>? CustomerNameOverrides = null);
 
 /// <summary>
 /// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
@@ -208,10 +209,12 @@ public sealed class LegacyGraphWorkCheckpointStore
             {
                 Version = LegacyGraphWorkCheckpointSchema.CurrentVersion,
                 RecommendationStates = [],
+                CustomerNameOverrides = new Dictionary<string, string>(),
             },
             LegacyGraphWorkCheckpointSchema.CurrentVersion => checkpoint with
             {
                 RecommendationStates = checkpoint.RecommendationStates ?? [],
+                CustomerNameOverrides = checkpoint.CustomerNameOverrides ?? new Dictionary<string, string>(),
             },
             _ => checkpoint,
         };
@@ -262,7 +265,8 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.VirtualCustomerMergeKeys is null ||
             checkpoint.CustomerGroupExpanded is null ||
             checkpoint.DetailStates is null ||
-            checkpoint.RecommendationStates is null)
+            checkpoint.RecommendationStates is null ||
+            checkpoint.CustomerNameOverrides is null)
         {
             throw new InvalidDataException("グラフ作業チェックポイントの必須状態が欠落しています。");
         }
@@ -278,7 +282,9 @@ public sealed class LegacyGraphWorkCheckpointStore
                 !AbacusRecommendationDecisionValues.IsSupported(state.Decision)) ||
             checkpoint.RecommendationStates
                 .GroupBy(state => state.CandidateId, StringComparer.OrdinalIgnoreCase)
-                .Any(group => group.Count() > 1))
+                .Any(group => group.Count() > 1) ||
+            checkpoint.CustomerNameOverrides.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)))
         {
             throw new InvalidDataException("グラフ作業チェックポイントの候補IDが不正です。");
         }
