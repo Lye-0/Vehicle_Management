@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using VehicleManagement.AbacusImport;
 
@@ -103,6 +104,7 @@ public sealed class LegacyGraphWorkCheckpointStore
 {
     private const string FileName = "graph-state.json";
     private const long MaximumCheckpointBytes = 64L * 1024 * 1024;
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -138,7 +140,7 @@ public sealed class LegacyGraphWorkCheckpointStore
                              FileShare.None,
                              64 * 1024,
                              FileOptions.Asynchronous | FileOptions.SequentialScan))
-            await using (var writer = new StreamWriter(stream))
+            await using (var writer = new StreamWriter(stream, Utf8NoBom, 64 * 1024))
             {
                 await writer.WriteAsync(json.AsMemory(), cancellationToken);
                 await writer.FlushAsync(cancellationToken);
@@ -169,17 +171,11 @@ public sealed class LegacyGraphWorkCheckpointStore
 
         try
         {
-            await using var stream = new FileStream(
-                checkpointPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                64 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var checkpoint = await JsonSerializer.DeserializeAsync<LegacyGraphWorkCheckpoint>(
-                stream,
-                JsonOptions,
-                cancellationToken);
+            var bytes = await File.ReadAllBytesAsync(checkpointPath, cancellationToken);
+            // 旧バージョンがUTF-8 BOM付きで保存したチェックポイントも再開できるようにする。
+            var checkpoint = JsonSerializer.Deserialize<LegacyGraphWorkCheckpoint>(
+                RemoveUtf8Bom(bytes),
+                JsonOptions);
             if (checkpoint is null)
             {
                 throw new InvalidDataException("グラフ作業チェックポイントが空です。");
@@ -193,6 +189,11 @@ public sealed class LegacyGraphWorkCheckpointStore
             throw new InvalidDataException("グラフ作業チェックポイントのJSONが不正です。", exception);
         }
     }
+
+    private static byte[] RemoveUtf8Bom(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
+            ? bytes[3..]
+            : bytes;
 
     private static void ValidateCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
     {
