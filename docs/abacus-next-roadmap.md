@@ -330,7 +330,7 @@
 - 点検予定は車検日を持つ車両概要だけを取得し、顧客・車両の全詳細を読み込みません。既存の全件APIはCSV・バックアップ等の互換処理用として残しています。
 - Web検証: `pnpm --filter web lint`、`pnpm --filter web build` 成功。API検証: 22テストファイル・174テスト成功。
 
-### Gate 28: おすすめ判定エンジン
+### Gate 28: おすすめ判定エンジン（実装済み・受入確認待ち）
 
 厳密一致による現在の自動紐づけを維持し、それ以外を説明可能なおすすめ候補として計算します。
 
@@ -353,7 +353,18 @@
 - 同姓同名と識別子競合を高得点だけで誤接続しません。
 - 同じ入力と設定から同じ候補順と根拠が得られます。
 
-### Gate 29: 顧客単位のマッチングUI
+実装記録:
+
+- 調査結果: Gate25〜27で固定した候補グラフの顧客・車両・書類モデルを入力境界にし、既存の「一意一致」書類をおすすめ計算から除外する方針を確定しました。固定列CSVで電話番号の列位置は確定情報がないため推測せず、候補CSVに電話番号が存在する場合だけ比較できる契約にしています。
+- データ契約: AbacusRecommendationProfileへ顧客名、ふりがな、電話番号、郵便番号、住所、メーカー、車名、型式、登録番号、車台番号を集約し、候補ごとに決定的な候補ID、一致項目、差異、競合、理由を保存可能にしました。合計点は永続化していません。
+- 判定サービス: apps/companion/src/VehicleManagement.AbacusImport/AbacusRecommendationEngine.csを追加し、完全一致・軽微な誤字／表記揺れ・同名競合・車台番号／登録番号の競合をUIから独立して判定します。apps/companion/src/VehicleManagement.Companion/Services/AbacusLegacyRecommendationEngine.csで候補グラフへ接続しました。
+- 既存処理との境界: おすすめ候補は既存のリンク辞書から分離し、承認されるまで自動紐付けと最終パッケージを変更しません。承認時の既存リンク反映、却下・保留状態の遷移口を補助アプリへ追加しました。
+- 詳細データ: AbacusDetailJsonDocumentへ任意のマッチングプロフィールを追加し、既存の詳細JSONを壊さずに書類側の顧客名・住所・車両識別子・型式を候補エンジンへ渡せるようにしました。候補グラフの車両モデルには車両CSVの型式を保持します。
+- 中断再開: LegacyGraphWorkCheckpointSchemaをv2へ上げ、おすすめの候補IDと承認・却下・保留状態を保存します。旧v1チェックポイントは状態を空配列で補完して再開できます。
+- 自動検証: apps/companion/src/VehicleManagement.AbacusImport.Tests/へ外部テスト依存なしの7シナリオ（完全一致、誤字、同姓同名、識別子競合、顧客なし車両、決定性、v1互換）を追加しました。
+- CLI検証: dotnet run --project apps/companion/src/VehicleManagement.AbacusImport.Tests/VehicleManagement.AbacusImport.Tests.csproj --no-restore --configuration Release、dotnet build apps/companion/VehicleManagement.Companion.slnx --no-restore --configuration Release、git diff --checkに成功しました。実データを使った候補件数・誤推薦の目視確認は未実施です。
+
+### Gate 29: 顧客単位のマッチングUI（実装済み・受入確認待ち）
 
 現行グラフUIを残し、同じ作業状態を使う別表示モードとして追加します。
 
@@ -367,6 +378,14 @@
 - 現行グラフUIとマッチングUIをいつでも何度でも切り替えられるようにします。
 - UI切替は表示だけを変更し、共通状態モデルの候補、リンク、ごみ箱、未確定、承認を変更しません。
 - 検索結果から該当顧客をマッチングUIで開けるようにします。
+
+実装記録:
+
+- 既存のグラフUIを残したまま、補助アプリ内に「グラフUI／顧客マッチングUI」の切替を追加しました。切替状態はGate25の作業チェックポイントのUiModeへ保存し、旧値はグラフUIとして復元します。
+- マッチングUIは顧客を順番に表示し、前後移動、進捗、確定済み車両・書類のコンパクト表示、おすすめ候補の専用ブロックを提供します。
+- おすすめブロックはGate28の候補ID・一致項目・差異・競合・理由・判定状態を表示し、承認・却下・保留・未処理への復帰を操作できます。承認時だけ既存リンク処理を呼び出し、却下・保留ではリンクを変更しません。
+- 検索結果から顧客・車両・書類に関連する顧客をマッチングUIで開けるようにしました。グラフUI側の顧客選択と候補判定状態も共通化しています。
+- 確認済み: dotnet build apps/companion/VehicleManagement.Companion.slnx --no-restore --configuration Release、Gate28 7シナリオ、git diff --check。WPF画面の実データ操作と表示密度の目視確認は未実施です。
 
 受入条件:
 

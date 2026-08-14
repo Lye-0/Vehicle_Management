@@ -249,7 +249,17 @@ public sealed class AbacusLegacyExportPreviewStore
             var detailMatch = detailMapper.Match("販売書類", document.Number, customerName, document.VehicleName, Text(source, 22), Text(source, 21));
             document = document with
             {
-                DetailsJson = AbacusDetailMapper.Serialize(detailMatch, Text(source, 2), null, documentType.Warning),
+                DetailsJson = AbacusDetailMapper.Serialize(
+                    detailMatch,
+                    Text(source, 2),
+                    null,
+                    documentType.Warning,
+                    BuildRecommendationProfile(
+                        customerSource,
+                        match.Vehicle,
+                        document.VehicleName,
+                        Text(source, 21),
+                        Text(source, 22))),
             };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             sales.Add(document);
@@ -316,7 +326,17 @@ public sealed class AbacusLegacyExportPreviewStore
             var detailMatch = detailMapper.Match("整備書類", document.Number, customerName, document.VehicleName, Text(source, 20), Text(source, 19));
             document = document with
             {
-                DetailsJson = AbacusDetailMapper.Serialize(detailMatch, Text(source, 2), Text(source, 24), string.Join(" / ", new[] { documentType.Warning, maintenanceCategory.Warning }.Where(value => !string.IsNullOrWhiteSpace(value)))),
+                DetailsJson = AbacusDetailMapper.Serialize(
+                    detailMatch,
+                    Text(source, 2),
+                    Text(source, 24),
+                    string.Join(" / ", new[] { documentType.Warning, maintenanceCategory.Warning }.Where(value => !string.IsNullOrWhiteSpace(value))),
+                    BuildRecommendationProfile(
+                        customerSource,
+                        match.Vehicle,
+                        document.VehicleName,
+                        Text(source, 19),
+                        Text(source, 20))),
             };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             var intakeDate = NormalizeCalendarDate(Text(source, 25));
@@ -605,6 +625,23 @@ public sealed class AbacusLegacyExportPreviewStore
             nameKana,
             NormalizePostalCode(postalCode),
             address);
+
+    private static AbacusRecommendationProfile BuildRecommendationProfile(
+        CustomerSource customer,
+        VehicleCandidate? vehicle,
+        string vehicleName,
+        string registrationNumber,
+        string chassisNumber) =>
+        new(
+            CustomerName: customer.Name,
+            NameKana: customer.NameKana,
+            PostalCode: customer.PostalCode,
+            Address: customer.Address,
+            Maker: vehicle?.Maker ?? "",
+            VehicleName: vehicleName,
+            Model: vehicle?.Model ?? "",
+            RegistrationNumber: registrationNumber,
+            ChassisNumber: chassisNumber);
 
     private static string BuildCustomerKey(string name, string address, string fileName, int rowNumber)
     {

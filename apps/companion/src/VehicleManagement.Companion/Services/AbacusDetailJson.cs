@@ -29,7 +29,8 @@ public sealed record AbacusDetailJsonDocument(
     long? AbacusTaxRate = null,
     string? RawDocumentType = null,
     string? RawMaintenanceCategory = null,
-    string? ClassificationWarning = null);
+    string? ClassificationWarning = null,
+    AbacusRecommendationProfile? MatchProfile = null);
 
 public sealed record AbacusDetailMatch(
     AbacusUcsDetailDocument? Document,
@@ -62,7 +63,8 @@ public sealed class AbacusDetailMapper
         AbacusDetailMatch match,
         string? rawDocumentType = null,
         string? rawMaintenanceCategory = null,
-        string? classificationWarning = null)
+        string? classificationWarning = null,
+        AbacusRecommendationProfile? matchProfile = null)
     {
         var document = match.Document;
         var payload = new AbacusDetailJsonDocument(
@@ -90,7 +92,8 @@ public sealed class AbacusDetailMapper
             document?.AbacusTaxRate,
             string.IsNullOrWhiteSpace(rawDocumentType) ? null : rawDocumentType.Trim(),
             string.IsNullOrWhiteSpace(rawMaintenanceCategory) ? null : rawMaintenanceCategory.Trim(),
-            string.IsNullOrWhiteSpace(classificationWarning) ? null : classificationWarning.Trim());
+            string.IsNullOrWhiteSpace(classificationWarning) ? null : classificationWarning.Trim(),
+            matchProfile);
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false });
     }
 

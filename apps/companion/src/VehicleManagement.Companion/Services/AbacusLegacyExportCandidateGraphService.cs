@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.VisualBasic.FileIO;
+using VehicleManagement.AbacusImport;
 
 namespace VehicleManagement.Companion.Services;
 
@@ -26,7 +27,8 @@ public sealed record AbacusLegacyExportCandidateGraphDocument(
     string MaintenanceCompletionDate = "",
     string DocumentType = "",
     string MaintenanceCategory = "",
-    string ClassificationWarning = "")
+    string ClassificationWarning = "",
+    AbacusRecommendationProfile? RecommendationProfile = null)
 {
     public bool IsLinked => !string.IsNullOrWhiteSpace(LinkedVehicleId);
 
@@ -56,7 +58,8 @@ public sealed record AbacusLegacyExportCandidateGraphVehicle(
     string ChassisNumber,
     IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> Documents,
     string SourceFileName = "",
-    int SourceRowNumber = 0)
+    int SourceRowNumber = 0,
+    string Model = "")
 {
     public bool HasCustomer => !string.IsNullOrWhiteSpace(CustomerId);
 
@@ -205,6 +208,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 customer?.DisplayName ?? Value(row.Fields, 2),
                 Value(row.Fields, 3),
                 Value(row.Fields, 4),
+                Value(row.Fields, 5),
                 Value(row.Fields, 8),
                 Value(row.Fields, 9),
                 Value(row.Fields, 10),
@@ -346,7 +350,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
                         vehicle.ChassisNumber,
                         vehicle.Documents.ToArray(),
                         vehicle.SourceFileName,
-                        vehicle.SourceRowNumber))
+                        vehicle.SourceRowNumber,
+                        vehicle.Model))
                     .ToArray(),
                 customer.UnresolvedDocuments.ToArray()))
             .ToArray();
@@ -368,7 +373,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
                 vehicle.ChassisNumber,
                 vehicle.Documents.ToArray(),
                 vehicle.SourceFileName,
-                vehicle.SourceRowNumber))
+                vehicle.SourceRowNumber,
+                vehicle.Model))
             .ToArray();
 
         var warnings = new List<string>
@@ -414,6 +420,14 @@ public sealed class AbacusLegacyExportCandidateGraphService
         var vehicleName = FirstNonEmpty(Value(row.Fields, vehicleNameIndex), detail?.VehicleName);
         var registrationNumber = FirstNonEmpty(Value(row.Fields, registrationIndex), detail?.RegistrationNumber);
         var chassisNumber = FirstNonEmpty(Value(row.Fields, chassisIndex), detail?.ChassisNumber);
+        var detailProfile = detail?.MatchProfile ?? new AbacusRecommendationProfile();
+        var recommendationProfile = detailProfile with
+        {
+            CustomerName = FirstNonEmpty(detailProfile.CustomerName, detail?.CustomerName ?? customerName),
+            VehicleName = FirstNonEmpty(detailProfile.VehicleName, vehicleName),
+            RegistrationNumber = FirstNonEmpty(detailProfile.RegistrationNumber, registrationNumber),
+            ChassisNumber = FirstNonEmpty(detailProfile.ChassisNumber, chassisNumber),
+        };
         var source = SourceMemoPattern.Match(memo);
         var sourceFileName = source.Success ? source.Groups["file"].Value : "";
         var sourceRowNumber = source.Success && int.TryParse(source.Groups["row"].Value, out var parsedRow) ? parsedRow : row.RowNumber;
@@ -463,7 +477,8 @@ public sealed class AbacusLegacyExportCandidateGraphService
             kind == "整備書類" ? Value(row.Fields, 9) : "",
             Value(row.Fields, 2),
             kind == "整備書類" ? Value(row.Fields, 3) : "",
-            detail?.ClassificationWarning ?? "");
+            detail?.ClassificationWarning ?? "",
+            recommendationProfile);
         if (linkedVehicleId is not null && vehicles.TryGetValue(linkedVehicleId, out var linkedVehicle))
         {
             linkedVehicle.Documents.Add(document);
@@ -685,6 +700,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
         string customerName,
         string maker,
         string vehicleName,
+        string model,
         string modelYear,
         string inspectionDate,
         string mileage,
@@ -700,6 +716,7 @@ public sealed class AbacusLegacyExportCandidateGraphService
         public string Maker { get; } = maker;
         public string VehicleName { get; } = vehicleName;
         public string DisplayName => string.IsNullOrWhiteSpace(VehicleName) ? "車名未設定" : VehicleName;
+        public string Model { get; } = model;
         public string ModelYear { get; } = modelYear;
         public string InspectionDate { get; } = inspectionDate;
         public string Mileage { get; } = mileage;

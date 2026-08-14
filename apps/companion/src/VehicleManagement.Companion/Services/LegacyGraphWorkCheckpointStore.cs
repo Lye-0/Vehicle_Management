@@ -7,7 +7,7 @@ namespace VehicleManagement.Companion.Services;
 
 public static class LegacyGraphWorkCheckpointSchema
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const string Kind = "abacus-legacy-graph-work-checkpoint";
 }
 
@@ -60,6 +60,10 @@ public sealed record LegacyGraphCheckpointImageMappingRow(
     string Status,
     string Evidence);
 
+public sealed record LegacyGraphCheckpointRecommendationState(
+    string CandidateId,
+    string Decision);
+
 public sealed record LegacyGraphWorkCheckpoint(
     string Kind,
     int Version,
@@ -94,11 +98,12 @@ public sealed record LegacyGraphWorkCheckpoint(
     Dictionary<string, bool> CustomerGroupExpanded,
     LegacyGraphCheckpointDetailState[] DetailStates,
     LegacyGraphCheckpointImageMapping? ImageMapping,
-    DateTimeOffset SavedAtUtc);
+    DateTimeOffset SavedAtUtc,
+    LegacyGraphCheckpointRecommendationState[]? RecommendationStates = null);
 
 /// <summary>
 /// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
-/// ここでは候補データを再生成せず、ユーザーが行った操作状態だけを保持します。
+/// ここでは候補データを再生成せず、ユーザーが行った操作状態とおすすめ判定状態だけを保持します。
 /// </summary>
 public sealed class LegacyGraphWorkCheckpointStore
 {
@@ -181,6 +186,7 @@ public sealed class LegacyGraphWorkCheckpointStore
                 throw new InvalidDataException("グラフ作業チェックポイントが空です。");
             }
 
+            checkpoint = UpgradeCheckpoint(checkpoint);
             ValidateCheckpoint(checkpoint);
             return checkpoint;
         }
@@ -194,6 +200,21 @@ public sealed class LegacyGraphWorkCheckpointStore
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
             ? bytes[3..]
             : bytes;
+
+    private static LegacyGraphWorkCheckpoint UpgradeCheckpoint(LegacyGraphWorkCheckpoint checkpoint) =>
+        checkpoint.Version switch
+        {
+            1 => checkpoint with
+            {
+                Version = LegacyGraphWorkCheckpointSchema.CurrentVersion,
+                RecommendationStates = [],
+            },
+            LegacyGraphWorkCheckpointSchema.CurrentVersion => checkpoint with
+            {
+                RecommendationStates = checkpoint.RecommendationStates ?? [],
+            },
+            _ => checkpoint,
+        };
 
     private static void ValidateCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
     {
@@ -240,7 +261,8 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.AppliedCustomerMergeKeys is null ||
             checkpoint.VirtualCustomerMergeKeys is null ||
             checkpoint.CustomerGroupExpanded is null ||
-            checkpoint.DetailStates is null)
+            checkpoint.DetailStates is null ||
+            checkpoint.RecommendationStates is null)
         {
             throw new InvalidDataException("グラフ作業チェックポイントの必須状態が欠落しています。");
         }
@@ -249,7 +271,14 @@ public sealed class LegacyGraphWorkCheckpointStore
                 group is null || string.IsNullOrWhiteSpace(group.GroupId) ||
                 group.CustomerIds is null || group.CustomerIds.Length == 0) ||
             checkpoint.DetailStates.Any(detail =>
-                detail is null || string.IsNullOrWhiteSpace(detail.DocumentKey)))
+                detail is null || string.IsNullOrWhiteSpace(detail.DocumentKey)) ||
+            checkpoint.RecommendationStates.Any(state =>
+                state is null ||
+                string.IsNullOrWhiteSpace(state.CandidateId) ||
+                !AbacusRecommendationDecisionValues.IsSupported(state.Decision)) ||
+            checkpoint.RecommendationStates
+                .GroupBy(state => state.CandidateId, StringComparer.OrdinalIgnoreCase)
+                .Any(group => group.Count() > 1))
         {
             throw new InvalidDataException("グラフ作業チェックポイントの候補IDが不正です。");
         }
