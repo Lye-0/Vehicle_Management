@@ -3210,7 +3210,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        list.SelectedItem = vehicle;
         legacyGraphTrayDragVehicle = vehicle;
         legacyGraphTrayDragVehicleStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
@@ -3429,7 +3428,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        list.SelectedItem = document;
         legacyGraphTrayDragDocument = document;
         legacyGraphTrayDragStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
