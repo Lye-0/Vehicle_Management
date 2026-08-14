@@ -2160,6 +2160,11 @@ public partial class MainWindow : Window
             LegacyGraphWorkStatusText.Text = $"作業状態を保存できません: {exception.Message}";
             LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
         }
+        catch (Exception exception)
+        {
+            LegacyGraphWorkStatusText.Text = $"作業状態の保存中に予期しないエラーが発生しました: {exception.Message}";
+            LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+        }
     }
 
     private async void LegacyGraphOpenWorkButton_Click(object sender, RoutedEventArgs e)
@@ -2285,6 +2290,20 @@ public partial class MainWindow : Window
             UnifiedImportStatusText.Text = "作業フォルダーの再開に失敗しました。現在の状態は変更していません。";
             UnifiedImportStatusText.Foreground = ToBrush("#A61B1B");
         }
+        catch (Exception exception)
+        {
+            unifiedImportOutputSession = previousSession;
+            fp5VehicleImageMapping = previousImageMapping;
+            UnifiedImportFolderPathTextBox.Text = previousSourcePath;
+            UnifiedImportOutputParentPathTextBox.Text = previousOutputParentPath;
+            LegacyExportPathTextBox.Text = previousLegacyExportPath;
+            LegacyExportPackagePathTextBox.Text = previousCandidatePackagePath;
+            legacyExportSubsetActive = previousLegacyExportSubsetActive;
+            LegacyGraphWorkStatusText.Text = $"作業再開中に予期しないエラーが発生しました: {exception.Message}";
+            LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+            UnifiedImportStatusText.Text = "作業フォルダーの再開に失敗しました。現在の状態は変更していません。";
+            UnifiedImportStatusText.Foreground = ToBrush("#A61B1B");
+        }
         finally
         {
             UpdateLegacyGraphImportConfirmationButton();
@@ -2365,6 +2384,14 @@ public partial class MainWindow : Window
             if (LegacyGraphWorkStatusText is not null)
             {
                 LegacyGraphWorkStatusText.Text = $"作業状態の自動保存に失敗しました: {exception.Message}";
+                LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+            }
+        }
+        catch (Exception exception)
+        {
+            if (LegacyGraphWorkStatusText is not null)
+            {
+                LegacyGraphWorkStatusText.Text = $"作業状態の自動保存中に予期しないエラーが発生しました: {exception.Message}";
                 LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
             }
         }
