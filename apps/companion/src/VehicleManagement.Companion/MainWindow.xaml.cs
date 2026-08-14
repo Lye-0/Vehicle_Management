@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -40,6 +41,8 @@ public partial class MainWindow : Window
     private readonly AbacusLegacyExportPreviewStore legacyExportPreviewStore = new();
     private readonly AbacusLegacyExportPreviewPackageReader legacyExportPackageReader = new();
     private readonly AbacusLegacyExportCandidateGraphService legacyExportCandidateGraphService = new();
+    private readonly LegacyGraphWorkCheckpointStore legacyGraphWorkCheckpointStore = new();
+    private readonly SemaphoreSlim legacyGraphCheckpointSaveGate = new(1, 1);
     private readonly AbacusFp5Inspector fp5Inspector = new();
     private readonly AbacusFp5CandidateExporter fp5CandidateExporter = new();
     private readonly AbacusImageLinkManifestStore imageLinkManifestStore = new();
@@ -85,6 +88,7 @@ public partial class MainWindow : Window
     private bool webImportRegistrationBusy;
     private bool legacyGraphFinalPackageBusy;
     private bool legacyGraphBulkMergeBusy;
+    private bool legacyGraphCheckpointSaveScheduled;
     // パッケージ生成中に発生したエラーを、状態更新処理で既定メッセージへ
     // 上書きしないための画面状態です。
     private bool legacyGraphFinalPackageHasError;
@@ -1496,19 +1500,33 @@ public partial class MainWindow : Window
         await ReadLegacyExportPackageAsync(packagePath, automatic: false);
     }
 
-    private async Task ReadLegacyExportPackageAsync(string packagePath, bool automatic)
+    private async Task<bool> ReadLegacyExportPackageAsync(
+        string packagePath,
+        bool automatic,
+        LegacyGraphWorkCheckpoint? checkpoint = null)
     {
+        var succeeded = false;
         ReadLegacyExportPackageButton.IsEnabled = false;
         SelectLegacyExportPackageFolderButton.IsEnabled = false;
         LegacyExportPackagePathTextBox.IsEnabled = false;
         LegacyExportPackageRowsGrid.ItemsSource = null;
         LegacyExportPackageResultText.Text = "";
-        ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
+        if (checkpoint is null)
+        {
+            ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
+        }
         LegacyExportPackageStatusText.Text = "マニフェストと候補CSVを再検証しています…";
         LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#52647A")!;
         try
         {
             var result = await legacyExportPackageReader.ReadAsync(packagePath);
+            if (checkpoint is not null &&
+                !string.Equals(result.ManifestSha256, checkpoint.CandidateManifestSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "候補パッケージのマニフェストSHA-256が作業チェックポイントと一致しません。"
+                    + "候補CSVを変更せず、元の作業フォルダーを選択してください。");
+            }
             LegacyExportPackageRowsGrid.ItemsSource = result.Rows;
             var statusSummary = result.Rows
                 .GroupBy(row => row.MatchStatus, StringComparer.Ordinal)
@@ -1531,6 +1549,9 @@ public partial class MainWindow : Window
             try
             {
                 var graph = await legacyExportCandidateGraphService.BuildAsync(result);
+                // 候補パッケージの再読込とグラフ構築に合格してから、画面上の
+                // グラフを置き換えます。再開に失敗した場合は既存のグラフを残します。
+                ResetLegacyCandidateGraph("候補パッケージを再検証すると、ここにグラフを表示します。");
                 legacyExportCandidateGraphResult = graph;
                 legacyGraphManualDocumentLinks.Clear();
                 legacyGraphManualVehicleCustomerLinks.Clear();
@@ -1555,18 +1576,32 @@ public partial class MainWindow : Window
                 RefreshLegacyGraphUnresolvedVehicleList();
                 RefreshLegacyGraphUnresolvedDocumentLists();
                 RefreshLegacyGraphTrashLists();
+                if (checkpoint is not null)
+                {
+                    RestoreLegacyGraphWorkCheckpoint(checkpoint, result, graph);
+                }
                 LegacyGraphStatusText.Text =
-                    $"グラフを作成しました。顧客 {graph.Customers.Count:N0}件 / 車両 {graph.Customers.Sum(customer => customer.Vehicles.Count):N0}台 / 書類 {graph.AllDocuments.Count:N0}件。" +
+                    $"{(checkpoint is null ? "グラフを作成しました" : "作業チェックポイントを検証し、グラフを再開しました")}。" +
+                    $"顧客 {graph.Customers.Count:N0}件 / 車両 {graph.Customers.Sum(customer => customer.Vehicles.Count):N0}台 / 書類 {graph.AllDocuments.Count:N0}件。" +
                     $"未確定車両 {GetLegacyGraphUnresolvedVehicleCount():N0}件 / 未確定トレイ {graph.AllDocuments.Count(IsLegacyGraphDocumentInTray):N0}件。" +
                     $"実線 {graph.SolidLinkCount:N0}件 / 要確認 {graph.ReviewLinkCount:N0}件 / 未確定 {graph.UnmatchedDocumentCount:N0}件。";
                 LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#17643A")!;
                 LegacyGraphLegendText.Text =
                     "車両右側と書類左側の●が接続ノードです。緑の実線は自動確定、青の点線は仮紐付け、赤の点線は未接続です。顧客・書類カードはドラッグできます。すべての操作が終わったら、下部の「インポート内容を確定」を押してください。";
                 UpdateLegacyGraphImportConfirmationButton();
+                ScheduleLegacyGraphCheckpointSave();
+                succeeded = true;
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException)
             {
-                ResetLegacyCandidateGraph($"グラフの作成に失敗しました: {exception.Message}");
+                if (checkpoint is null)
+                {
+                    ResetLegacyCandidateGraph($"グラフの作成に失敗しました: {exception.Message}");
+                }
+                else
+                {
+                    LegacyGraphStatusText.Text = $"作業チェックポイントの再開に失敗しました: {exception.Message}";
+                }
                 LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             }
         }
@@ -1574,7 +1609,15 @@ public partial class MainWindow : Window
                                            InvalidDataException or ArgumentException or NotSupportedException)
         {
             LegacyExportPackageRowsGrid.ItemsSource = null;
-            ResetLegacyCandidateGraph("候補パッケージの再検証に失敗したため、グラフをクリアしました。");
+            if (checkpoint is null)
+            {
+                ResetLegacyCandidateGraph("候補パッケージの再検証に失敗したため、グラフをクリアしました。");
+            }
+            else
+            {
+                LegacyGraphStatusText.Text = $"作業チェックポイントの再開に失敗しました: {exception.Message}";
+                LegacyGraphStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
+            }
             LegacyExportPackageStatusText.Text = $"候補パッケージの再検証に失敗しました: {exception.Message}";
             LegacyExportPackageStatusText.Foreground = (Brush)new BrushConverter().ConvertFromString("#A61B1B")!;
             LegacyExportPackageResultText.Text = "ハッシュ、見出し、列数、行数のいずれかが一致しない可能性があります。元の候補パッケージを変更せず、再作成してください。";
@@ -1585,6 +1628,8 @@ public partial class MainWindow : Window
             SelectLegacyExportPackageFolderButton.IsEnabled = true;
             LegacyExportPackagePathTextBox.IsEnabled = true;
         }
+
+        return succeeded;
     }
 
     private async void InspectAbacusMenuButton_Click(object sender, RoutedEventArgs e)
@@ -1723,6 +1768,7 @@ public partial class MainWindow : Window
         legacyGraphCustomerGroupExpanded[groupKey] =
             !legacyGraphCustomerGroupExpanded.GetValueOrDefault(groupKey);
         RefreshLegacyGraphCustomerList($"group:{groupKey}");
+        ScheduleLegacyGraphCheckpointSave();
         e.Handled = true;
     }
 
@@ -2091,6 +2137,782 @@ public partial class MainWindow : Window
         {
             legacyGraphSelectedItem = vehicle;
             UpdateLegacyGraphInspector(vehicle);
+        }
+    }
+
+    private async void LegacyGraphSaveWorkButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphFinalPackageBusy || legacyGraphBulkMergeBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            await SaveLegacyGraphCheckpointAsync("manual");
+            LegacyGraphWorkStatusText.Text =
+                $"作業状態を保存しました: {legacyGraphWorkCheckpointStore.GetCheckpointPath(unifiedImportOutputSession!.WorkCheckpointsPath)}";
+            LegacyGraphWorkStatusText.Foreground = ToBrush("#17643A");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            LegacyGraphWorkStatusText.Text = $"作業状態を保存できません: {exception.Message}";
+            LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+        }
+    }
+
+    private async void LegacyGraphOpenWorkButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphFinalPackageBusy || legacyGraphBulkMergeBusy)
+        {
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "保存済みのABACUS作業フォルダーを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        await ResumeLegacyGraphWorkAsync(dialog.FolderName);
+    }
+
+    private async Task ResumeLegacyGraphWorkAsync(string rootPath)
+    {
+        var previousSession = unifiedImportOutputSession;
+        var previousImageMapping = fp5VehicleImageMapping;
+        var previousSourcePath = UnifiedImportFolderPathTextBox.Text;
+        var previousOutputParentPath = UnifiedImportOutputParentPathTextBox.Text;
+        var previousLegacyExportPath = LegacyExportPathTextBox.Text;
+        var previousCandidatePackagePath = LegacyExportPackagePathTextBox.Text;
+        var previousLegacyExportSubsetActive = legacyExportSubsetActive;
+        LegacyGraphOpenWorkButton.IsEnabled = false;
+        LegacyGraphSaveWorkButton.IsEnabled = false;
+        LegacyGraphWorkStatusText.Text = "作業フォルダー、原本指紋、候補マニフェスト、画像を検証しています…";
+        LegacyGraphWorkStatusText.Foreground = ToBrush("#52647A");
+        try
+        {
+            var session = await importOutputPackageStore.OpenAsync(rootPath);
+            var checkpoint = await legacyGraphWorkCheckpointStore.ReadAsync(session.WorkCheckpointsPath);
+            if (!string.Equals(checkpoint.PackageId, session.PackageId, StringComparison.Ordinal) ||
+                !string.Equals(checkpoint.SourceFingerprint, session.SourceFingerprint, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    Path.GetFullPath(checkpoint.SourcePath),
+                    Path.GetFullPath(session.SourcePath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "作業チェックポイントが選択したABACUS作業フォルダーと一致しません。");
+            }
+
+            var candidatePackagePath = ResolveLegacyGraphCheckpointPath(
+                session.WorkIntermediatePath,
+                checkpoint.CandidatePackagePath,
+                "候補パッケージ");
+            var candidateManifestPath = Path.Combine(candidatePackagePath, "manifest.json");
+            var candidateManifestSha256 = await CalculateLegacyGraphSha256Async(candidateManifestPath);
+            if (!string.Equals(
+                    candidateManifestSha256,
+                    checkpoint.CandidateManifestSha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "候補パッケージのマニフェストが作業保存後に変更されています。"
+                    + "既存チェックポイントは適用せず、再解析してください。");
+            }
+
+            if (checkpoint.ImageMapping is not null)
+            {
+                await ValidateLegacyGraphCheckpointImageMappingAsync(
+                    checkpoint.ImageMapping,
+                    session.WorkPath,
+                    session.WorkAbacusCopyPath);
+            }
+
+            unifiedImportOutputSession = session;
+            UnifiedImportFolderPathTextBox.Text = session.SourcePath;
+            UnifiedImportOutputParentPathTextBox.Text =
+                Path.GetDirectoryName(session.RootPath) ?? "";
+            LegacyExportPathTextBox.Text = string.IsNullOrWhiteSpace(checkpoint.VehicleExportPath)
+                ? session.SourcePath
+                : checkpoint.VehicleExportPath;
+            legacyExportSubsetActive = checkpoint.LegacyExportSubsetActive;
+            fp5VehicleImageMapping = CreateImageMappingFromCheckpoint(checkpoint.ImageMapping);
+            UnifiedImportImageMappingStatusText.Text = fp5VehicleImageMapping?.IsFullyMatched == true
+                ? "保存済みのGate 14画像対応付けを検証して再利用しています。"
+                : "保存済みチェックポイントにGate 14画像対応付けがありません。";
+            UnifiedImportImageMappingStatusText.Foreground =
+                ToBrush(fp5VehicleImageMapping?.IsFullyMatched == true ? "#17643A" : "#805B10");
+            UnifiedImportImageMappingSummaryText.Text = fp5VehicleImageMapping is null
+                ? ""
+                : $"保存済み対応付け: 車両レコード {fp5VehicleImageMapping.InternalVehicleRecordCount:N0}件 / " +
+                  $"画像 {fp5VehicleImageMapping.MatchedImageCount:N0}件 / " +
+                  $"画像なし {fp5VehicleImageMapping.NoImageCount:N0}件";
+            LegacyExportPackagePathTextBox.Text = candidatePackagePath;
+            var resumed = await ReadLegacyExportPackageAsync(candidatePackagePath, automatic: false, checkpoint);
+            if (!resumed)
+            {
+                throw new InvalidDataException("候補パッケージの再検証またはグラフ復元に失敗しました。");
+            }
+
+            if (legacyExportCandidateGraphResult is not null)
+            {
+                UnifiedImportStatusText.Text = "作業状態を再開しました。前回の紐づけ・トレイ・ごみ箱の状態を確認してください。";
+                UnifiedImportStatusText.Foreground = ToBrush("#17643A");
+                UnifiedImportSummaryText.Text =
+                    $"作業フォルダー: {session.RootPath}\n候補パッケージ: {candidatePackagePath}";
+                ShowUnifiedImportGraph();
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            // 読み込みに失敗した場合は、現在のグラフ・チェックポイントを部分適用しません。
+            unifiedImportOutputSession = previousSession;
+            fp5VehicleImageMapping = previousImageMapping;
+            UnifiedImportFolderPathTextBox.Text = previousSourcePath;
+            UnifiedImportOutputParentPathTextBox.Text = previousOutputParentPath;
+            LegacyExportPathTextBox.Text = previousLegacyExportPath;
+            LegacyExportPackagePathTextBox.Text = previousCandidatePackagePath;
+            legacyExportSubsetActive = previousLegacyExportSubsetActive;
+            LegacyGraphWorkStatusText.Text = $"作業を再開できません: {exception.Message}";
+            LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+            UnifiedImportStatusText.Text = "作業フォルダーの再開に失敗しました。現在の状態は変更していません。";
+            UnifiedImportStatusText.Foreground = ToBrush("#A61B1B");
+        }
+        finally
+        {
+            UpdateLegacyGraphImportConfirmationButton();
+            LegacyGraphOpenWorkButton.IsEnabled = true;
+        }
+    }
+
+    private async Task SaveLegacyGraphCheckpointAsync(string reason)
+    {
+        if (legacyExportCandidateGraphResult is null || unifiedImportOutputSession is null)
+        {
+            throw new InvalidDataException("候補パッケージと作業フォルダーを読み込んでから保存してください。");
+        }
+
+        await legacyGraphCheckpointSaveGate.WaitAsync();
+        try
+        {
+            var graph = legacyExportCandidateGraphResult;
+            var session = unifiedImportOutputSession;
+            var candidatePackagePath = Path.GetFullPath(graph.PackagePath);
+            if (!IsSameOrSubPath(candidatePackagePath, session.WorkIntermediatePath))
+            {
+                throw new InvalidDataException("候補パッケージが作業用中間フォルダーの外側を指しています。");
+            }
+
+            var candidateManifestPath = Path.Combine(candidatePackagePath, "manifest.json");
+            var candidateManifestSha256 = await CalculateLegacyGraphSha256Async(candidateManifestPath);
+            var checkpoint = BuildLegacyGraphWorkCheckpoint(
+                graph,
+                session,
+                Path.GetRelativePath(session.WorkIntermediatePath, candidatePackagePath),
+                candidateManifestSha256);
+            await legacyGraphWorkCheckpointStore.SaveAsync(
+                session.WorkCheckpointsPath,
+                checkpoint);
+        }
+        finally
+        {
+            legacyGraphCheckpointSaveGate.Release();
+        }
+    }
+
+    private void ScheduleLegacyGraphCheckpointSave()
+    {
+        if (legacyGraphBulkMergeBusy ||
+            legacyExportCandidateGraphResult is null ||
+            unifiedImportOutputSession is null ||
+            legacyGraphCheckpointSaveScheduled)
+        {
+            return;
+        }
+
+        legacyGraphCheckpointSaveScheduled = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                legacyGraphCheckpointSaveScheduled = false;
+                _ = SaveLegacyGraphCheckpointInBackgroundAsync();
+            }));
+    }
+
+    private async Task SaveLegacyGraphCheckpointInBackgroundAsync()
+    {
+        try
+        {
+            await SaveLegacyGraphCheckpointAsync("automatic");
+            if (LegacyGraphWorkStatusText is not null)
+            {
+                LegacyGraphWorkStatusText.Text =
+                    $"作業状態を自動保存しました（{DateTime.Now:HH:mm:ss}）。アプリ終了後もこの作業フォルダーから再開できます。";
+                LegacyGraphWorkStatusText.Foreground = ToBrush("#52647A");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            if (LegacyGraphWorkStatusText is not null)
+            {
+                LegacyGraphWorkStatusText.Text = $"作業状態の自動保存に失敗しました: {exception.Message}";
+                LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+            }
+        }
+    }
+
+    private static string ResolveLegacyGraphCheckpointPath(
+        string rootPath,
+        string relativePath,
+        string label)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidDataException($"{label}の相対パスが不正です。");
+        }
+
+        var fullPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+        if (!IsSameOrSubPath(fullPath, rootPath) || !Directory.Exists(fullPath))
+        {
+            throw new InvalidDataException($"{label}が作業用中間フォルダーの外側、または存在しません。");
+        }
+
+        return fullPath;
+    }
+
+    private static async Task<string> CalculateLegacyGraphSha256Async(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidDataException($"ハッシュ対象ファイルが見つかりません: {path}");
+        }
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            1024 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream));
+    }
+
+    private LegacyGraphWorkCheckpoint BuildLegacyGraphWorkCheckpoint(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusImportOutputPackageSession session,
+        string candidatePackagePath,
+        string candidateManifestSha256) =>
+        new(
+            LegacyGraphWorkCheckpointSchema.Kind,
+            LegacyGraphWorkCheckpointSchema.CurrentVersion,
+            session.PackageId,
+            session.SourcePath,
+            session.SourceFingerprint,
+            candidatePackagePath,
+            candidateManifestSha256,
+            LegacyExportPathTextBox.Text.Trim(),
+            legacyExportSubsetActive,
+            LegacyPreparationExpander.IsExpanded ? "preparation" : "graph",
+            GetLegacyGraphSelectedCheckpointItem().Type,
+            GetLegacyGraphSelectedCheckpointItem().Id,
+            legacyGraphImportConfirmed,
+            new Dictionary<string, string>(legacyGraphManualDocumentLinks, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphManualVehicleCustomerLinks, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphManualDocumentCustomerLinks, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphDocumentLinkMethods, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(legacyGraphDocumentLinkReasons, StringComparer.OrdinalIgnoreCase),
+            legacyGraphUnconnectedDocumentKeys.ToArray(),
+            legacyGraphTrayDocumentKeys.ToArray(),
+            legacyGraphExcludedDocumentKeys.ToArray(),
+            legacyGraphTrayVehicleIds.ToArray(),
+            legacyGraphTrashCustomerIds.ToArray(),
+            legacyGraphTrashVehicleIds.ToArray(),
+            legacyGraphTrashDocumentKeys.ToArray(),
+            legacyGraphCustomerMergeGroups.Values
+                .Select(group => new LegacyGraphCheckpointMergeGroup(
+                    group.GroupId,
+                    group.Origin,
+                    group.CustomerIds.ToArray()))
+                .ToArray(),
+            new Dictionary<string, string>(
+                legacyGraphCustomerMergeGroupByCustomerId,
+                StringComparer.Ordinal),
+            legacyGraphCustomerMergeDrafts.ToDictionary(
+                pair => pair.Key,
+                pair => new LegacyGraphCheckpointMergeDraft(
+                    pair.Value.GroupKey,
+                    pair.Value.CandidateCustomerIds.ToArray(),
+                    new Dictionary<string, string>(pair.Value.FieldSelections, StringComparer.Ordinal),
+                    new Dictionary<string, string>(pair.Value.SelectedValues, StringComparer.Ordinal),
+                    pair.Value.SavedAtUtc),
+                StringComparer.Ordinal),
+            legacyGraphAppliedCustomerMergeKeys.ToArray(),
+            new Dictionary<string, string>(legacyGraphVirtualCustomerMergeKeys, StringComparer.Ordinal),
+            new Dictionary<string, bool>(legacyGraphCustomerGroupExpanded, StringComparer.Ordinal),
+            graph.AllDocuments
+                .Select(document => new LegacyGraphCheckpointDetailState(
+                    GetLegacyDocumentKey(document),
+                    document.DetailsJson,
+                    document.DocumentType,
+                    document.MaintenanceCategory,
+                    document.ClassificationWarning))
+                .ToArray(),
+            CreateCheckpointImageMapping(fp5VehicleImageMapping),
+            DateTimeOffset.UtcNow);
+
+    private (string? Type, string? Id) GetLegacyGraphSelectedCheckpointItem()
+    {
+        switch (legacyGraphSelectedItem)
+        {
+            case AbacusLegacyExportCandidateGraphCustomer customer:
+                return ("customer", GetLegacyGraphSourceCustomer(customer).CustomerId);
+            case AbacusLegacyExportCandidateGraphVehicle vehicle:
+                return ("vehicle", vehicle.VehicleId);
+            case AbacusLegacyExportCandidateGraphDocument document:
+                return ("document", GetLegacyDocumentKey(document));
+            default:
+                return (null, null);
+        }
+    }
+
+    private void RestoreLegacyGraphWorkCheckpoint(
+        LegacyGraphWorkCheckpoint checkpoint,
+        AbacusLegacyExportPreviewPackageResult package,
+        AbacusLegacyExportCandidateGraphResult graph)
+    {
+        if (!string.Equals(
+                Path.GetFullPath(package.PackagePath),
+                Path.GetFullPath(graph.PackagePath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("作業チェックポイントの候補パッケージが再読込結果と一致しません。");
+        }
+
+        ValidateLegacyGraphCheckpointDetails(checkpoint, graph);
+        var customerIds = graph.Customers
+            .Select(customer => customer.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var vehicles = graph.Customers
+            .SelectMany(customer => customer.Vehicles)
+            .Concat(graph.UnresolvedVehicleRows)
+            .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var documents = graph.AllDocuments
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var validMergeKeys = graph.Customers
+            .Select(GetLegacyCustomerMergeKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var checkpointGroupIds = checkpoint.CustomerMergeGroups
+            .Select(group => group.GroupId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (checkpointGroupIds.Count != checkpoint.CustomerMergeGroups.Length)
+        {
+            throw new InvalidDataException("チェックポイントの顧客統合グループIDが重複しています。");
+        }
+
+        var validGroupKeys = validMergeKeys
+            .Concat(checkpointGroupIds)
+            .ToHashSet(StringComparer.Ordinal);
+        var groupedCustomerIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in checkpoint.CustomerMergeGroups)
+        {
+            foreach (var customerId in group.CustomerIds)
+            {
+                if (!customerIds.Contains(customerId))
+                {
+                    throw new InvalidDataException("チェックポイントに存在しない顧客IDが含まれています。");
+                }
+
+                if (!groupedCustomerIds.Add(customerId))
+                {
+                    throw new InvalidDataException("チェックポイントで同じ顧客が複数の統合グループに含まれています。");
+                }
+            }
+        }
+
+        ValidateCheckpointKeys(
+            checkpoint.ManualDocumentVehicleLinks.Keys,
+            documents.Keys,
+            "手動書類・車両紐付け");
+        ValidateCheckpointKeys(
+            checkpoint.ManualDocumentCustomerGroupLinks.Keys,
+            documents.Keys,
+            "手動顧客のみ紐付け");
+        ValidateCheckpointKeys(
+            checkpoint.DocumentLinkMethods.Keys,
+            documents.Keys,
+            "書類紐付け方法");
+        ValidateCheckpointKeys(
+            checkpoint.DocumentLinkReasons.Keys,
+            documents.Keys,
+            "書類紐付け根拠");
+        ValidateCheckpointKeys(
+            checkpoint.UnconnectedDocumentKeys.Concat(checkpoint.TrayDocumentKeys)
+                .Concat(checkpoint.ExcludedDocumentKeys)
+                .Concat(checkpoint.TrashDocumentKeys),
+            documents.Keys,
+            "書類状態");
+        ValidateCheckpointKeys(
+            checkpoint.ManualVehicleCustomerLinks.Keys
+                .Concat(checkpoint.TrayVehicleIds)
+                .Concat(checkpoint.TrashVehicleIds),
+            vehicles.Keys,
+            "車両状態");
+        ValidateCheckpointKeys(
+            checkpoint.TrashCustomerIds,
+            customerIds,
+            "顧客状態");
+        foreach (var vehicleCustomerId in checkpoint.ManualVehicleCustomerLinks.Values)
+        {
+            if (!customerIds.Contains(vehicleCustomerId))
+            {
+                throw new InvalidDataException("チェックポイントの車両紐付け先顧客が存在しません。");
+            }
+        }
+
+        foreach (var pair in checkpoint.CustomerMergeGroupByCustomerId)
+        {
+            if (!customerIds.Contains(pair.Key) || !checkpointGroupIds.Contains(pair.Value))
+            {
+                throw new InvalidDataException("チェックポイントの顧客統合グループが候補パッケージに存在しません。");
+            }
+        }
+
+        foreach (var pair in checkpoint.CustomerMergeDrafts)
+        {
+            if (!string.Equals(pair.Key, pair.Value.GroupKey, StringComparison.Ordinal) ||
+                !validGroupKeys.Contains(pair.Value.GroupKey) ||
+                pair.Value.CandidateCustomerIds is null ||
+                pair.Value.CandidateCustomerIds.Any(customerId => !customerIds.Contains(customerId)))
+            {
+                throw new InvalidDataException("チェックポイントの顧客統合プレビューが候補パッケージに存在しません。");
+            }
+        }
+
+        foreach (var groupKey in checkpoint.AppliedCustomerMergeKeys
+                     .Concat(checkpoint.CustomerGroupExpanded.Keys)
+                     .Concat(checkpoint.CustomerMergeDrafts.Keys)
+                     .Concat(checkpoint.VirtualCustomerMergeKeys.Values))
+        {
+            if (!validGroupKeys.Contains(groupKey))
+            {
+                throw new InvalidDataException("チェックポイントの顧客統合グループが候補パッケージに存在しません。");
+            }
+        }
+
+        var groups = checkpoint.CustomerMergeGroups.ToDictionary(
+            group => group.GroupId,
+            group => new LegacyGraphCustomerMergeGroup(
+                group.GroupId,
+                group.Origin,
+                group.CustomerIds.ToList()),
+            StringComparer.Ordinal);
+        var drafts = checkpoint.CustomerMergeDrafts.ToDictionary(
+            pair => pair.Key,
+            pair => new LegacyGraphCustomerMergeDraft(
+                pair.Value.GroupKey,
+                pair.Value.CandidateCustomerIds,
+                pair.Value.FieldSelections,
+                pair.Value.SelectedValues,
+                pair.Value.SavedAtUtc),
+            StringComparer.Ordinal);
+
+        legacyGraphManualDocumentLinks.Clear();
+        CopyInto(legacyGraphManualDocumentLinks, checkpoint.ManualDocumentVehicleLinks);
+        legacyGraphManualVehicleCustomerLinks.Clear();
+        CopyInto(legacyGraphManualVehicleCustomerLinks, checkpoint.ManualVehicleCustomerLinks);
+        legacyGraphManualDocumentCustomerLinks.Clear();
+        CopyInto(legacyGraphManualDocumentCustomerLinks, checkpoint.ManualDocumentCustomerGroupLinks);
+        legacyGraphDocumentLinkMethods.Clear();
+        CopyInto(legacyGraphDocumentLinkMethods, checkpoint.DocumentLinkMethods);
+        legacyGraphDocumentLinkReasons.Clear();
+        CopyInto(legacyGraphDocumentLinkReasons, checkpoint.DocumentLinkReasons);
+        RestoreSet(legacyGraphUnconnectedDocumentKeys, checkpoint.UnconnectedDocumentKeys);
+        RestoreSet(legacyGraphTrayDocumentKeys, checkpoint.TrayDocumentKeys);
+        RestoreSet(legacyGraphExcludedDocumentKeys, checkpoint.ExcludedDocumentKeys);
+        RestoreSet(legacyGraphTrayVehicleIds, checkpoint.TrayVehicleIds);
+        RestoreSet(legacyGraphTrashCustomerIds, checkpoint.TrashCustomerIds);
+        RestoreSet(legacyGraphTrashVehicleIds, checkpoint.TrashVehicleIds);
+        RestoreSet(legacyGraphTrashDocumentKeys, checkpoint.TrashDocumentKeys);
+        legacyGraphCustomerMergeGroups.Clear();
+        foreach (var pair in groups)
+        {
+            legacyGraphCustomerMergeGroups[pair.Key] = pair.Value;
+        }
+
+        legacyGraphCustomerMergeGroupByCustomerId.Clear();
+        CopyInto(legacyGraphCustomerMergeGroupByCustomerId, checkpoint.CustomerMergeGroupByCustomerId);
+        legacyGraphCustomerMergeDrafts.Clear();
+        foreach (var pair in drafts)
+        {
+            legacyGraphCustomerMergeDrafts[pair.Key] = pair.Value;
+        }
+
+        RestoreSet(legacyGraphAppliedCustomerMergeKeys, checkpoint.AppliedCustomerMergeKeys);
+        legacyGraphVirtualCustomerMergeKeys.Clear();
+        CopyInto(legacyGraphVirtualCustomerMergeKeys, checkpoint.VirtualCustomerMergeKeys);
+        legacyGraphCustomerGroupExpanded.Clear();
+        foreach (var pair in checkpoint.CustomerGroupExpanded)
+        {
+            legacyGraphCustomerGroupExpanded[pair.Key] = pair.Value;
+        }
+
+        legacyGraphImportConfirmed = checkpoint.ImportConfirmed;
+        LegacyPreparationExpander.IsExpanded =
+            string.Equals(checkpoint.UiMode, "preparation", StringComparison.OrdinalIgnoreCase);
+        RefreshLegacyGraphCustomerList();
+        RefreshLegacyGraphUnresolvedVehicleList();
+        RefreshLegacyGraphUnresolvedDocumentLists();
+        RefreshLegacyGraphTrashLists();
+        RestoreLegacyGraphSelectedItem(checkpoint.SelectedItemType, checkpoint.SelectedItemId, graph);
+        UpdateLegacyGraphImportConfirmationButton();
+        LegacyGraphWorkStatusText.Text =
+            $"作業チェックポイントを復元しました（保存日時: {checkpoint.SavedAtUtc.ToLocalTime():yyyy/MM/dd HH:mm:ss}）。";
+        LegacyGraphWorkStatusText.Foreground = ToBrush("#17643A");
+    }
+
+    private static void ValidateCheckpointKeys(
+        IEnumerable<string> actualKeys,
+        IEnumerable<string> validKeys,
+        string label)
+    {
+        var valid = validKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (actualKeys.Any(key => !valid.Contains(key)))
+        {
+            throw new InvalidDataException($"チェックポイントの{label}に候補パッケージにないIDが含まれています。");
+        }
+    }
+
+    private void ValidateLegacyGraphCheckpointDetails(
+        LegacyGraphWorkCheckpoint checkpoint,
+        AbacusLegacyExportCandidateGraphResult graph)
+    {
+        var current = graph.AllDocuments
+            .Select(document => new LegacyGraphCheckpointDetailState(
+                GetLegacyDocumentKey(document),
+                document.DetailsJson,
+                document.DocumentType,
+                document.MaintenanceCategory,
+                document.ClassificationWarning))
+            .ToDictionary(detail => detail.DocumentKey, StringComparer.OrdinalIgnoreCase);
+        var saved = checkpoint.DetailStates
+            .ToDictionary(detail => detail.DocumentKey, StringComparer.OrdinalIgnoreCase);
+        if (current.Count != saved.Count ||
+            current.Any(pair =>
+                !saved.TryGetValue(pair.Key, out var detail) ||
+                !string.Equals(pair.Value.DetailsJson, detail.DetailsJson, StringComparison.Ordinal) ||
+                !string.Equals(pair.Value.DocumentType, detail.DocumentType, StringComparison.Ordinal) ||
+                !string.Equals(pair.Value.MaintenanceCategory, detail.MaintenanceCategory, StringComparison.Ordinal) ||
+                !string.Equals(pair.Value.ClassificationWarning, detail.ClassificationWarning, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException(
+                "候補CSVのGate 19明細または書類分類が作業保存後に変更されています。"
+                + "チェックポイントは適用しません。");
+        }
+    }
+
+    private void RestoreLegacyGraphSelectedItem(
+        string? selectedItemType,
+        string? selectedItemId,
+        AbacusLegacyExportCandidateGraphResult graph)
+    {
+        legacyGraphSelectedItem = null;
+        if (string.IsNullOrWhiteSpace(selectedItemType) || string.IsNullOrWhiteSpace(selectedItemId))
+        {
+            return;
+        }
+
+        object? selected = selectedItemType switch
+        {
+            "customer" => graph.Customers.FirstOrDefault(customer =>
+                string.Equals(customer.CustomerId, selectedItemId, StringComparison.Ordinal)),
+            "vehicle" => graph.Customers.SelectMany(customer => customer.Vehicles)
+                .Concat(graph.UnresolvedVehicleRows)
+                .FirstOrDefault(vehicle =>
+                    string.Equals(vehicle.VehicleId, selectedItemId, StringComparison.Ordinal)),
+            "document" => graph.AllDocuments.FirstOrDefault(document =>
+                string.Equals(GetLegacyDocumentKey(document), selectedItemId, StringComparison.OrdinalIgnoreCase)),
+            _ => null,
+        };
+        if (selected is null)
+        {
+            return;
+        }
+
+        legacyGraphSelectedItem = selected;
+        var customer = selected switch
+        {
+            AbacusLegacyExportCandidateGraphCustomer selectedCustomer => selectedCustomer,
+            AbacusLegacyExportCandidateGraphVehicle selectedVehicle =>
+                FindLegacyGraphCustomerById(
+                    legacyGraphManualVehicleCustomerLinks.TryGetValue(
+                        selectedVehicle.VehicleId,
+                        out var linkedCustomerId)
+                        ? linkedCustomerId
+                        : selectedVehicle.CustomerId),
+            AbacusLegacyExportCandidateGraphDocument selectedDocument =>
+                FindOriginalCustomerForDocument(selectedDocument),
+            _ => null,
+        };
+        if (customer is not null)
+        {
+            var entryId = GetLegacyGraphCustomerListEntryId(customer);
+            RefreshLegacyGraphCustomerList(entryId);
+            if (selected is AbacusLegacyExportCandidateGraphCustomer selectedCustomer)
+            {
+                var display = GetLegacyGraphDisplayCustomer(selectedCustomer);
+                legacyGraphSelectedItem = display;
+                UpdateLegacyGraphInspector(display);
+                RenderLegacyGraphCustomer(display);
+            }
+            else
+            {
+                UpdateLegacyGraphInspector(selected);
+                RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(customer));
+            }
+        }
+        else
+        {
+            UpdateLegacyGraphInspector(selected);
+        }
+    }
+
+    private static void CopyInto(
+        IDictionary<string, string> destination,
+        IReadOnlyDictionary<string, string> source)
+    {
+        foreach (var pair in source)
+        {
+            destination[pair.Key] = pair.Value;
+        }
+    }
+
+    private static void RestoreSet(
+        ISet<string> destination,
+        IEnumerable<string> source)
+    {
+        destination.Clear();
+        foreach (var value in source)
+        {
+            destination.Add(value);
+        }
+    }
+
+    private static LegacyGraphCheckpointImageMapping? CreateCheckpointImageMapping(
+        AbacusFp5VehicleImageMappingResult? mapping) =>
+        mapping is null
+            ? null
+            : new LegacyGraphCheckpointImageMapping(
+                mapping.OutputFolderPath,
+                mapping.ReportPath,
+                mapping.SourceFilePath,
+                mapping.InternalVehicleRecordCount,
+                mapping.VehicleCsvRowCount,
+                mapping.JpegImageCount,
+                mapping.GifPlaceholderCount,
+                mapping.MatchedImageCount,
+                mapping.NoImageCount,
+                mapping.ReviewCount,
+                mapping.UnmatchedCount,
+                mapping.MultipleCandidateCount,
+                mapping.UnknownImageReferenceCount,
+                mapping.DuplicateImageReferenceCount,
+                mapping.DuplicateImageSha256Count,
+                mapping.UnreferencedImageCount,
+                mapping.Mappings.Select(item => new LegacyGraphCheckpointImageMappingRow(
+                    item.Index,
+                    item.RecordIdHex,
+                    item.ImageIdHex,
+                    item.ImageRelativePath,
+                    item.ImageSha256,
+                    item.VehicleFileName,
+                    item.VehicleRowNumber,
+                    item.Status,
+                    item.Evidence)).ToArray());
+
+    private static AbacusFp5VehicleImageMappingResult? CreateImageMappingFromCheckpoint(
+        LegacyGraphCheckpointImageMapping? mapping) =>
+        mapping is null
+            ? null
+            : new AbacusFp5VehicleImageMappingResult(
+                mapping.OutputFolderPath,
+                mapping.ReportPath,
+                mapping.SourceFilePath,
+                mapping.InternalVehicleRecordCount,
+                mapping.VehicleCsvRowCount,
+                mapping.JpegImageCount,
+                mapping.GifPlaceholderCount,
+                mapping.MatchedImageCount,
+                mapping.NoImageCount,
+                mapping.ReviewCount,
+                mapping.UnmatchedCount,
+                mapping.MultipleCandidateCount,
+                mapping.UnknownImageReferenceCount,
+                mapping.DuplicateImageReferenceCount,
+                mapping.DuplicateImageSha256Count,
+                mapping.UnreferencedImageCount,
+                mapping.Mappings.Select(item => new AbacusFp5VehicleImageMapping(
+                    item.Index,
+                    item.RecordIdHex,
+                    item.ImageIdHex,
+                    item.ImageRelativePath,
+                    item.ImageSha256,
+                    item.VehicleFileName,
+                    item.VehicleRowNumber,
+                    item.Status,
+                    item.Evidence,
+                    null,
+                    null,
+                    null,
+                    null)).ToArray());
+
+    private async Task ValidateLegacyGraphCheckpointImageMappingAsync(
+        LegacyGraphCheckpointImageMapping mapping,
+        string workPath,
+        string workAbacusCopyPath)
+    {
+        if (!IsSameOrSubPath(mapping.OutputFolderPath, workPath) ||
+            !IsSameOrSubPath(mapping.ReportPath, workPath) ||
+            !IsSameOrSubPath(mapping.SourceFilePath, workAbacusCopyPath))
+        {
+            throw new InvalidDataException("保存済み画像対応付けが作業フォルダーの外側を指しています。");
+        }
+
+        if (!File.Exists(mapping.ReportPath))
+        {
+            throw new InvalidDataException("保存済み画像対応付けレポートが見つかりません。");
+        }
+
+        foreach (var image in mapping.Mappings.Where(item =>
+                     item.Status == "matched" &&
+                     !string.IsNullOrWhiteSpace(item.ImageRelativePath)))
+        {
+            var imagePath = Path.GetFullPath(Path.Combine(mapping.OutputFolderPath, image.ImageRelativePath!));
+            if (!IsSameOrSubPath(imagePath, mapping.OutputFolderPath) ||
+                !File.Exists(imagePath))
+            {
+                throw new InvalidDataException("保存済み画像対応付けの画像ファイルが見つかりません。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(image.ImageSha256))
+            {
+                var actual = await CalculateLegacyGraphSha256Async(imagePath);
+                if (!string.Equals(actual, image.ImageSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("保存済み画像のSHA-256が一致しません。画像を変更せず再解析してください。");
+                }
+            }
         }
     }
 
@@ -3349,6 +4171,7 @@ public partial class MainWindow : Window
         }
 
         RefreshLegacyGraphCustomerList($"customer:{customer.CustomerId}");
+        ScheduleLegacyGraphCheckpointSave();
     }
 
     private void UpdateLegacyGraphInspector(object? selected)
@@ -4149,6 +4972,7 @@ public partial class MainWindow : Window
             "統合候補を承認しました。顧客一覧を青色で表示しています。インポート全体の確定はまだ行っていません。元CSV・ABACUSフォルダーは変更していません。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
         UpdateLegacyGraphImportConfirmationButton();
+        ScheduleLegacyGraphCheckpointSave();
     }
 
     private async void LegacyGraphApproveAllMergeButton_Click(object sender, RoutedEventArgs e)
@@ -4177,6 +5001,7 @@ public partial class MainWindow : Window
         {
             legacyGraphBulkMergeBusy = false;
             UpdateLegacyGraphImportConfirmationButton();
+            ScheduleLegacyGraphCheckpointSave();
         }
     }
 
@@ -4458,6 +5283,7 @@ public partial class MainWindow : Window
             ? "インポート内容を確定しました。未確定トレイの書類はありません。元CSV・ABACUSフォルダーは変更していません。"
             : $"インポート内容を確定しました。書類{trayDocuments.Count:N0}件、未接続車両{unresolvedVehicleCount:N0}件は今回のインポートから除外します。元CSV・ABACUSフォルダーは変更していません。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+        ScheduleLegacyGraphCheckpointSave();
     }
 
     private async void LegacyGraphCreateFinalPackageButton_Click(object sender, RoutedEventArgs e)
@@ -4686,7 +5512,8 @@ public partial class MainWindow : Window
     {
         if (LegacyGraphFinalizeImportButton is null || LegacyGraphFinalizeImportStatusText is null ||
             LegacyGraphApproveAllMergeButton is null || LegacyGraphOpenFinalPackageButton is null ||
-            LegacyGraphFinalPackageNextStepText is null)
+            LegacyGraphFinalPackageNextStepText is null || LegacyGraphWorkStatusText is null ||
+            LegacyGraphSaveWorkButton is null || LegacyGraphOpenWorkButton is null)
         {
             return;
         }
@@ -4707,8 +5534,15 @@ public partial class MainWindow : Window
             LegacyGraphOpenFinalPackageButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.IsEnabled = false;
             LegacyGraphApproveAllMergeButton.Content = "統合候補を一括承認";
+            LegacyGraphSaveWorkButton.IsEnabled = false;
+            LegacyGraphOpenWorkButton.IsEnabled = !legacyGraphFinalPackageBusy && !legacyGraphBulkMergeBusy;
             return;
         }
+
+        LegacyGraphSaveWorkButton.IsEnabled = unifiedImportOutputSession is not null &&
+                                               !legacyGraphFinalPackageBusy &&
+                                               !legacyGraphBulkMergeBusy;
+        LegacyGraphOpenWorkButton.IsEnabled = !legacyGraphFinalPackageBusy && !legacyGraphBulkMergeBusy;
 
         if (legacyGraphImportConfirmed)
         {
@@ -5508,12 +6342,14 @@ public partial class MainWindow : Window
         if (!legacyGraphImportConfirmed && legacyGraphExcludedDocumentKeys.Count == 0)
         {
             UpdateLegacyGraphImportConfirmationButton();
+            ScheduleLegacyGraphCheckpointSave();
             return;
         }
 
         legacyGraphImportConfirmed = false;
         legacyGraphExcludedDocumentKeys.Clear();
         UpdateLegacyGraphImportConfirmationButton();
+        ScheduleLegacyGraphCheckpointSave();
     }
 
     private void RefreshLegacyGraphUnresolvedDocumentLists()
@@ -7428,6 +8264,7 @@ public partial class MainWindow : Window
     private void ResetLegacyCandidateGraph(string status)
     {
         legacyExportCandidateGraphResult = null;
+        legacyGraphCheckpointSaveScheduled = false;
         legacyGraphManualDocumentLinks.Clear();
         legacyGraphManualVehicleCustomerLinks.Clear();
         legacyGraphManualDocumentCustomerLinks.Clear();
@@ -7514,6 +8351,10 @@ public partial class MainWindow : Window
             "①インポート内容を確定し、②確定内容から登録前パッケージを作成します。作成後にWeb側でフォルダーを選択します。";
         LegacyGraphFinalPackageStatusText.Foreground = ToBrush("#52647A");
         LegacyGraphOpenFinalPackageButton.IsEnabled = false;
+        LegacyGraphWorkStatusText.Text = "候補パッケージを読み込むと、作業状態を保存できます。";
+        LegacyGraphWorkStatusText.Foreground = ToBrush("#52647A");
+        LegacyGraphSaveWorkButton.IsEnabled = false;
+        LegacyGraphOpenWorkButton.IsEnabled = !legacyGraphFinalPackageBusy && !legacyGraphBulkMergeBusy;
         LegacyGraphFinalPackageNextStepText.Text =
             "次の操作: グラフの操作を終えたら「インポート内容を確定」を押してください。";
         LegacyGraphFinalPackageNextStepText.Foreground = ToBrush("#1E40AF");

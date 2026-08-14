@@ -1,0 +1,328 @@
+using System.IO;
+using System.Text.Json;
+using VehicleManagement.AbacusImport;
+
+namespace VehicleManagement.Companion.Services;
+
+public static class LegacyGraphWorkCheckpointSchema
+{
+    public const int CurrentVersion = 1;
+    public const string Kind = "abacus-legacy-graph-work-checkpoint";
+}
+
+public sealed record LegacyGraphCheckpointMergeGroup(
+    string GroupId,
+    string Origin,
+    string[] CustomerIds);
+
+public sealed record LegacyGraphCheckpointMergeDraft(
+    string GroupKey,
+    string[] CandidateCustomerIds,
+    Dictionary<string, string> FieldSelections,
+    Dictionary<string, string> SelectedValues,
+    DateTimeOffset SavedAtUtc);
+
+public sealed record LegacyGraphCheckpointDetailState(
+    string DocumentKey,
+    string DetailsJson,
+    string DocumentType,
+    string MaintenanceCategory,
+    string ClassificationWarning);
+
+public sealed record LegacyGraphCheckpointImageMapping(
+    string OutputFolderPath,
+    string ReportPath,
+    string SourceFilePath,
+    int InternalVehicleRecordCount,
+    int VehicleCsvRowCount,
+    int JpegImageCount,
+    int GifPlaceholderCount,
+    int MatchedImageCount,
+    int NoImageCount,
+    int ReviewCount,
+    int UnmatchedCount,
+    int MultipleCandidateCount,
+    int UnknownImageReferenceCount,
+    int DuplicateImageReferenceCount,
+    int DuplicateImageSha256Count,
+    int UnreferencedImageCount,
+    LegacyGraphCheckpointImageMappingRow[] Mappings);
+
+public sealed record LegacyGraphCheckpointImageMappingRow(
+    int Index,
+    string RecordIdHex,
+    string? ImageIdHex,
+    string? ImageRelativePath,
+    string? ImageSha256,
+    string? VehicleFileName,
+    int? VehicleRowNumber,
+    string Status,
+    string Evidence);
+
+public sealed record LegacyGraphWorkCheckpoint(
+    string Kind,
+    int Version,
+    string PackageId,
+    string SourcePath,
+    string SourceFingerprint,
+    string CandidatePackagePath,
+    string CandidateManifestSha256,
+    string VehicleExportPath,
+    bool LegacyExportSubsetActive,
+    string UiMode,
+    string? SelectedItemType,
+    string? SelectedItemId,
+    bool ImportConfirmed,
+    Dictionary<string, string> ManualDocumentVehicleLinks,
+    Dictionary<string, string> ManualVehicleCustomerLinks,
+    Dictionary<string, string> ManualDocumentCustomerGroupLinks,
+    Dictionary<string, string> DocumentLinkMethods,
+    Dictionary<string, string> DocumentLinkReasons,
+    string[] UnconnectedDocumentKeys,
+    string[] TrayDocumentKeys,
+    string[] ExcludedDocumentKeys,
+    string[] TrayVehicleIds,
+    string[] TrashCustomerIds,
+    string[] TrashVehicleIds,
+    string[] TrashDocumentKeys,
+    LegacyGraphCheckpointMergeGroup[] CustomerMergeGroups,
+    Dictionary<string, string> CustomerMergeGroupByCustomerId,
+    Dictionary<string, LegacyGraphCheckpointMergeDraft> CustomerMergeDrafts,
+    string[] AppliedCustomerMergeKeys,
+    Dictionary<string, string> VirtualCustomerMergeKeys,
+    Dictionary<string, bool> CustomerGroupExpanded,
+    LegacyGraphCheckpointDetailState[] DetailStates,
+    LegacyGraphCheckpointImageMapping? ImageMapping,
+    DateTimeOffset SavedAtUtc);
+
+/// <summary>
+/// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
+/// ここでは候補データを再生成せず、ユーザーが行った操作状態だけを保持します。
+/// </summary>
+public sealed class LegacyGraphWorkCheckpointStore
+{
+    private const string FileName = "graph-state.json";
+    private const long MaximumCheckpointBytes = 64L * 1024 * 1024;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
+
+    public string GetCheckpointPath(string checkpointsPath) =>
+        Path.Combine(ValidateDirectory(checkpointsPath), FileName);
+
+    public async Task SaveAsync(
+        string checkpointsPath,
+        LegacyGraphWorkCheckpoint checkpoint,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        if (checkpoint.Version != LegacyGraphWorkCheckpointSchema.CurrentVersion ||
+            !string.Equals(checkpoint.Kind, LegacyGraphWorkCheckpointSchema.Kind, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("作業チェックポイントのスキーマバージョンが不正です。");
+        }
+
+        var directory = ValidateDirectory(checkpointsPath);
+        var checkpointPath = Path.Combine(directory, FileName);
+        var temporaryPath = $"{checkpointPath}.tmp-{Guid.NewGuid():N}";
+        try
+        {
+            var json = JsonSerializer.Serialize(checkpoint, JsonOptions);
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             64 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var writer = new StreamWriter(stream))
+            {
+                await writer.WriteAsync(json.AsMemory(), cancellationToken);
+                await writer.FlushAsync(cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(temporaryPath, checkpointPath, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteTemporaryFile(temporaryPath);
+            throw;
+        }
+    }
+
+    public async Task<LegacyGraphWorkCheckpoint> ReadAsync(
+        string checkpointsPath,
+        CancellationToken cancellationToken = default)
+    {
+        var directory = ValidateDirectory(checkpointsPath);
+        var checkpointPath = Path.Combine(directory, FileName);
+        var info = new FileInfo(checkpointPath);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            info.Length > MaximumCheckpointBytes)
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントが見つからないか、サイズが不正です。");
+        }
+
+        try
+        {
+            await using var stream = new FileStream(
+                checkpointPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                64 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var checkpoint = await JsonSerializer.DeserializeAsync<LegacyGraphWorkCheckpoint>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+            if (checkpoint is null)
+            {
+                throw new InvalidDataException("グラフ作業チェックポイントが空です。");
+            }
+
+            ValidateCheckpoint(checkpoint);
+            return checkpoint;
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントのJSONが不正です。", exception);
+        }
+    }
+
+    private static void ValidateCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
+    {
+        if (!string.Equals(checkpoint.Kind, LegacyGraphWorkCheckpointSchema.Kind, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの種類が不正です。");
+        }
+
+        if (checkpoint.Version != LegacyGraphWorkCheckpointSchema.CurrentVersion)
+        {
+            throw new InvalidDataException(
+                $"グラフ作業チェックポイントのバージョン{checkpoint.Version}には対応していません。"
+                + "候補パッケージを再作成してください。");
+        }
+
+        if (string.IsNullOrWhiteSpace(checkpoint.PackageId) ||
+            string.IsNullOrWhiteSpace(checkpoint.SourcePath) ||
+            string.IsNullOrWhiteSpace(checkpoint.SourceFingerprint) ||
+            checkpoint.SourceFingerprint.Length != 64 ||
+            !checkpoint.SourceFingerprint.All(Uri.IsHexDigit) ||
+            string.IsNullOrWhiteSpace(checkpoint.CandidatePackagePath) ||
+            string.IsNullOrWhiteSpace(checkpoint.CandidateManifestSha256) ||
+            checkpoint.CandidateManifestSha256.Length != 64 ||
+            !checkpoint.CandidateManifestSha256.All(Uri.IsHexDigit))
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの入力指紋または候補パスが不正です。");
+        }
+
+        if (checkpoint.ManualDocumentVehicleLinks is null ||
+            checkpoint.ManualVehicleCustomerLinks is null ||
+            checkpoint.ManualDocumentCustomerGroupLinks is null ||
+            checkpoint.DocumentLinkMethods is null ||
+            checkpoint.DocumentLinkReasons is null ||
+            checkpoint.UnconnectedDocumentKeys is null ||
+            checkpoint.TrayDocumentKeys is null ||
+            checkpoint.ExcludedDocumentKeys is null ||
+            checkpoint.TrayVehicleIds is null ||
+            checkpoint.TrashCustomerIds is null ||
+            checkpoint.TrashVehicleIds is null ||
+            checkpoint.TrashDocumentKeys is null ||
+            checkpoint.CustomerMergeGroups is null ||
+            checkpoint.CustomerMergeGroupByCustomerId is null ||
+            checkpoint.CustomerMergeDrafts is null ||
+            checkpoint.AppliedCustomerMergeKeys is null ||
+            checkpoint.VirtualCustomerMergeKeys is null ||
+            checkpoint.CustomerGroupExpanded is null ||
+            checkpoint.DetailStates is null)
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの必須状態が欠落しています。");
+        }
+
+        if (checkpoint.CustomerMergeGroups.Any(group =>
+                group is null || string.IsNullOrWhiteSpace(group.GroupId) ||
+                group.CustomerIds is null || group.CustomerIds.Length == 0) ||
+            checkpoint.DetailStates.Any(detail =>
+                detail is null || string.IsNullOrWhiteSpace(detail.DocumentKey)))
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの候補IDが不正です。");
+        }
+
+        if (checkpoint.ManualDocumentVehicleLinks.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.ManualVehicleCustomerLinks.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.ManualDocumentCustomerGroupLinks.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.DocumentLinkMethods.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.DocumentLinkReasons.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.CustomerMergeGroupByCustomerId.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.VirtualCustomerMergeKeys.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.CustomerGroupExpanded.Any(pair => string.IsNullOrWhiteSpace(pair.Key)) ||
+            checkpoint.CustomerMergeDrafts.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null ||
+                string.IsNullOrWhiteSpace(pair.Value.GroupKey) ||
+                pair.Value.CandidateCustomerIds is null ||
+                pair.Value.FieldSelections is null ||
+                pair.Value.SelectedValues is null))
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの辞書項目が不正です。");
+        }
+
+        if (checkpoint.ImageMapping is not null &&
+            (string.IsNullOrWhiteSpace(checkpoint.ImageMapping.OutputFolderPath) ||
+             string.IsNullOrWhiteSpace(checkpoint.ImageMapping.ReportPath) ||
+             string.IsNullOrWhiteSpace(checkpoint.ImageMapping.SourceFilePath) ||
+             checkpoint.ImageMapping.Mappings is null ||
+             checkpoint.ImageMapping.Mappings.Any(mapping => mapping is null)))
+        {
+            throw new InvalidDataException("グラフ作業チェックポイントの画像対応付けが不正です。");
+        }
+    }
+
+    private static string ValidateDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("チェックポイントフォルダーが空です。", nameof(path));
+        }
+
+        var fullPath = Path.GetFullPath(path);
+        if (!Directory.Exists(fullPath))
+        {
+            throw new DirectoryNotFoundException($"チェックポイントフォルダーが見つかりません: {fullPath}");
+        }
+
+        var info = new DirectoryInfo(fullPath);
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidDataException("チェックポイントフォルダーにシンボリックリンクは使用できません。");
+        }
+
+        return fullPath;
+    }
+
+    private static void TryDeleteTemporaryFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // 保存本体の例外を優先し、残った一時ファイルは次回保存時に置き換えます。
+        }
+    }
+}
