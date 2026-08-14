@@ -152,6 +152,15 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
 
   const filteredCustomers = customers
 
+  useEffect(() => {
+    if (filteredCustomers.some((customer) => customer.id === selectedCustomerId)) return
+    const nextCustomerId = filteredCustomers[0]?.id ?? ''
+    if (nextCustomerId === selectedCustomerId) return
+    setSelectedCustomerId(nextCustomerId)
+    setSelectedVehicleId('')
+    setSelectedVehiclelessCustomerId('')
+  }, [filteredCustomers, selectedCustomerId])
+
   async function loadMoreCustomers() {
     if (!customerHasMore || !customerNextCursor || loadingMoreCustomers) return
     setLoadingMoreCustomers(true)
