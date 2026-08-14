@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, like, lt, or, sql } from 'drizzle-orm'
 import { appSettings, customers, salesDocumentItems, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
@@ -61,6 +61,7 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
     }
 
     if (!documentMatch) throw new HttpError(404, '販売書類のAPIが見つかりません。')
+    if (request.method === 'GET') return await getSalesDocument(env, database, documentMatch[1], organizationId)
     if (request.method === 'PATCH') return await updateSalesDocument(request, env, database, documentMatch[1], organizationId)
     if (request.method === 'DELETE') return await archiveSalesDocument(env, database, documentMatch[1], organizationId, context.user.uid)
     throw new HttpError(405, 'この操作には対応していません。')
@@ -74,6 +75,7 @@ export async function handleSalesRoutes(request: Request, env: Env): Promise<Res
 
 async function listSalesDocuments(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const url = new URL(request.url)
+  if (url.searchParams.get('view') === 'summary') return await listSalesDocumentSummaries(url, env, database, organizationId)
   const query = url.searchParams.get('q')?.trim().toLocaleLowerCase() ?? ''
   const type = url.searchParams.get('type')?.trim() ?? ''
   const documents = await loadSalesDocuments(database, organizationId, url.searchParams.get('includeArchived') === 'true')
@@ -83,6 +85,130 @@ async function listSalesDocuments(request: Request, env: Env, database: ReturnTy
     return matchesType && (!query || searchable.includes(query))
   })
   return jsonResponse({ documents: filtered }, 200, env)
+}
+
+async function listSalesDocumentSummaries(url: URL, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 100)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+  const type = url.searchParams.get('type')?.trim() ?? ''
+  const status = url.searchParams.get('status')?.trim() ?? ''
+  const includeArchived = url.searchParams.get('includeArchived') === 'true'
+  const sortKey = normalizeSummarySortKey(url.searchParams.get('sortKey'))
+  const sortDirection = normalizeSummarySortDirection(url.searchParams.get('sortDirection'))
+  const cursor = decodeDocumentCursor(url.searchParams.get('cursor'))
+  const conditions = [eq(salesDocuments.organizationId, organizationId)]
+  if (!includeArchived) conditions.push(isNull(salesDocuments.archivedAt))
+  if (type && type !== 'すべて') conditions.push(eq(salesDocuments.type, type))
+  if (status && status !== 'すべて') conditions.push(eq(salesDocuments.status, status))
+  const sortExpression = salesSortExpression(sortKey, sortDirection)
+  if (cursor && cursor.sortKey === sortKey && cursor.sortDirection === sortDirection) {
+    const after = sortDirection === 'asc' ? gt(sortExpression, cursor.value) : lt(sortExpression, cursor.value)
+    const same = and(eq(sortExpression, cursor.value), sortDirection === 'asc' ? gt(salesDocuments.id, cursor.id) : lt(salesDocuments.id, cursor.id))
+    conditions.push(or(after, same)!)
+  }
+  if (q) {
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+    conditions.push(or(like(salesDocuments.number, pattern), like(customers.name, pattern), like(vehicles.name, pattern), like(vehicles.registrationNumber, pattern))!)
+  }
+  const rows = await database.select({ document: salesDocuments, customerName: customers.name, customerPhone: customers.phone, vehicleMaker: vehicles.maker, vehicleName: vehicles.name, plate: vehicles.registrationNumber })
+    .from(salesDocuments)
+    .leftJoin(customers, and(eq(customers.id, salesDocuments.customerId), eq(customers.organizationId, organizationId)))
+    .leftJoin(vehicles, and(eq(vehicles.id, salesDocuments.vehicleId), eq(vehicles.organizationId, organizationId)))
+    .where(and(...conditions))
+    .orderBy(sortDirection === 'asc' ? asc(sortExpression) : desc(sortExpression), sortDirection === 'asc' ? asc(salesDocuments.id) : desc(salesDocuments.id))
+    .limit(limit + 1)
+    .all()
+  const hasMore = rows.length > limit
+  const items = rows.slice(0, limit).map(({ document, customerName, customerPhone, vehicleMaker, vehicleName, plate }) => serializeSalesDocumentSummary(document, customerName ?? '', customerPhone ?? '', vehicleMaker, vehicleName, plate))
+  const lastRow = rows[Math.min(rows.length, limit) - 1]
+  return jsonResponse({ documents: items, nextCursor: hasMore && lastRow ? encodeDocumentCursor({ sortKey, sortDirection, value: salesSortValue(lastRow.document, lastRow.customerName, lastRow.vehicleMaker, lastRow.vehicleName, sortKey, sortDirection), id: lastRow.document.id }) : null, hasMore }, 200, env)
+}
+
+type SummarySortKey = 'issuedAt' | 'dueDate' | 'customerName' | 'vehicle'
+type SummarySortDirection = 'asc' | 'desc'
+type DocumentCursor = { sortKey: SummarySortKey; sortDirection: SummarySortDirection; value: string; id: string }
+
+function normalizeSummarySortKey(value: string | null): SummarySortKey {
+  return value === 'dueDate' || value === 'customerName' || value === 'vehicle' ? value : 'issuedAt'
+}
+
+function normalizeSummarySortDirection(value: string | null): SummarySortDirection {
+  return value === 'asc' ? 'asc' : 'desc'
+}
+
+function salesSortExpression(sortKey: SummarySortKey, sortDirection: SummarySortDirection) {
+  const emptyValue = sortDirection === 'asc' ? '\uffff' : ''
+  if (sortKey === 'dueDate') return sql`COALESCE(${salesDocuments.dueDate}, ${emptyValue})`
+  if (sortKey === 'customerName') return sql`COALESCE(${customers.name}, ${emptyValue})`
+  if (sortKey === 'vehicle') return sql`COALESCE(NULLIF(TRIM(COALESCE(${vehicles.maker}, '') || ' ' || COALESCE(${vehicles.name}, '')), ''), ${emptyValue})`
+  return sql`COALESCE(${salesDocuments.issuedAt}, ${emptyValue})`
+}
+
+function salesSortValue(document: typeof salesDocuments.$inferSelect, customerName: string | null | undefined, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, sortKey: SummarySortKey, sortDirection: SummarySortDirection) {
+  const raw = sortKey === 'dueDate' ? document.dueDate : sortKey === 'customerName' ? customerName : sortKey === 'vehicle' ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : document.issuedAt
+  return raw || (sortDirection === 'asc' ? '\uffff' : '')
+}
+
+function encodeDocumentCursor(value: DocumentCursor) {
+  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+function decodeDocumentCursor(value: string | null): DocumentCursor | null {
+  if (!value) return null
+  try {
+    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
+    const parsed = JSON.parse(atob(padded)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; id?: unknown; issuedAt?: unknown; number?: unknown }
+    if (typeof parsed.sortKey === 'string' && typeof parsed.sortDirection === 'string' && typeof parsed.value === 'string' && typeof parsed.id === 'string') {
+      const sortKey = normalizeSummarySortKey(parsed.sortKey)
+      const sortDirection = normalizeSummarySortDirection(parsed.sortDirection)
+      return { sortKey, sortDirection, value: parsed.value, id: parsed.id }
+    }
+    if (typeof parsed.issuedAt === 'string' && typeof parsed.number === 'string') return { sortKey: 'issuedAt', sortDirection: 'desc', value: parsed.issuedAt, id: parsed.number }
+    return null
+  } catch { return null }
+}
+
+function serializeSalesDocumentSummary(document: typeof salesDocuments.$inferSelect, customerName: string, phone: string, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, plate: string | null | undefined) {
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
+  return {
+    id: document.id,
+    number: document.number,
+    type: document.type,
+    status: normalizeSalesStatus(document.status),
+    customerId: document.customerId,
+    customerName,
+    phone,
+    vehicleId: document.vehicleId,
+    vehicle: vehicleMaker || vehicleName ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : 'なし',
+    plate: plate ?? '',
+    abacusImport,
+    isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
+    customerDetails: null,
+    vehicleDetails: null,
+    details: null,
+    issuedAt: document.issuedAt,
+    dueDate: document.dueDate,
+    taxRate: document.taxRate,
+    taxRounding: document.taxRounding,
+    note: document.note,
+    archivedAt: document.archivedAt,
+    archivedPreviousStatus: document.archivedPreviousStatus,
+    archivedBy: document.archivedBy,
+    purgeAt: document.purgeAt,
+    keepForever: document.keepForever,
+    subtotal: document.subtotal,
+    tax: document.tax,
+    total: document.total,
+    items: [],
+    summary: true,
+  }
+}
+
+async function getSalesDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const document = await findSalesDocument(database, decodeURIComponent(documentId), organizationId)
+  if (!document) throw new HttpError(404, '販売書類が見つかりません。')
+  return jsonResponse({ document }, 200, env)
 }
 
 async function createSalesDocument(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
@@ -452,8 +578,14 @@ async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, o
 }
 
 async function findSalesDocument(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
-  const documents = await loadSalesDocuments(database, organizationId)
-  return documents.find((document) => document.id === documentId) ?? null
+  const document = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).get()
+  if (!document) return null
+  const [items, customer, vehicle] = await Promise.all([
+    loadSalesItems(database, documentId, organizationId),
+    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId))).get(),
+    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId))).get() : Promise.resolve(undefined),
+  ])
+  return serializeSalesDocument(document, customer, vehicle, items)
 }
 
 async function loadSalesItems(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {

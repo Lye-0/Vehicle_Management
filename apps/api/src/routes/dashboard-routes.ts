@@ -138,7 +138,7 @@ export function buildCalendarEvents(
     const customer = customersById.get(document.customerId)?.name ?? '顧客未登録'
     const vehicle = vehicleLabel(document.vehicleId, vehiclesById)
     const method = payment.method ? `・${payment.method}` : ''
-    addCalendarEvent(events, payment.paymentDate, `payment-${payment.id}`, 'payment', `入金：${customer}`, `${payment.documentType} ・ ${vehicle}${method}`, '入金済み', payment.paidAmount, { section: 'payments', recordId: payment.id })
+    addCalendarEvent(events, payment.paymentDate, `payment-${payment.id}`, 'payment', `入金：${customer}`, `${payment.documentType} ・ ${vehicle}${method}`, '入金済み', payment.paidAmount, { section: 'payments', recordId: `${payment.documentType}:${payment.documentId}` })
   }
 
   for (const schedule of sharedScheduleRows) {

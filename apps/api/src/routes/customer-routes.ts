@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm'
 import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -15,7 +15,7 @@ const maximumAttachmentSize = 20 * 1024 * 1024
 export async function handleCustomerRoutes(request: Request, env: Env): Promise<Response | null> {
   const pathname = new URL(request.url).pathname.replace(/\/$/, '') || '/'
   const isCustomerRoute = pathname === '/api/customers' || pathname.startsWith('/api/customers/')
-  const isVehicleRoute = pathname.startsWith('/api/vehicles/')
+  const isVehicleRoute = pathname === '/api/vehicles' || pathname.startsWith('/api/vehicles/')
   if (!isCustomerRoute && !isVehicleRoute) return null
 
   try {
@@ -29,6 +29,11 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
+    if (pathname === '/api/vehicles') {
+      if (request.method === 'GET') return await listVehicleSummaries(request, env, database, organizationId)
+      throw new HttpError(405, 'この操作には対応していません。')
+    }
+
     const vehiclelessDocumentsMatch = pathname.match(/^\/api\/customers\/([^/]+)\/vehicleless-documents$/)
     if (vehiclelessDocumentsMatch) {
       if (request.method === 'GET') return await listVehiclelessDocuments(env, database, decodeURIComponent(vehiclelessDocumentsMatch[1]), organizationId)
@@ -37,6 +42,7 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
 
     const customerMatch = pathname.match(/^\/api\/customers\/([^/]+)$/)
     if (customerMatch) {
+      if (request.method === 'GET') return await getCustomer(env, database, customerMatch[1], organizationId)
       if (request.method === 'PATCH') return await updateCustomer(request, env, database, customerMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
@@ -68,6 +74,7 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
 
     const vehicleMatch = pathname.match(/^\/api\/vehicles\/([^/]+)$/)
     if (vehicleMatch) {
+      if (request.method === 'GET') return await getVehicle(env, database, vehicleMatch[1], organizationId)
       if (request.method === 'PATCH') return await updateVehicle(request, env, database, vehicleMatch[1], organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
@@ -82,10 +89,61 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
 }
 
 async function listCustomers(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const url = new URL(request.url)
+  if (url.searchParams.get('view') === 'summary') return await listCustomerSummaries(url, env, database, organizationId)
   const records = await loadCustomerRecords(database, organizationId)
-  const query = new URL(request.url).searchParams.get('q')?.trim().toLocaleLowerCase()
+  const query = url.searchParams.get('q')?.trim().toLocaleLowerCase()
   const filteredRecords = query ? records.filter((customer) => JSON.stringify(customer).toLocaleLowerCase().includes(query)) : records
   return jsonResponse({ customers: filteredRecords }, 200, env)
+}
+
+type CustomerSummary = { id: string; customerNumber: string; name: string; nameKana: string | null; phone: string | null; updatedAt: string; matchedVehicle?: { id: string; maker: string | null; name: string; registrationNumber: string | null; chassisNumber: string | null } | null }
+
+async function listCustomerSummaries(url: URL, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 30) || 30, 1), 100)
+  const query = url.searchParams.get('q')?.trim() ?? ''
+  const field = url.searchParams.get('field')?.trim() ?? 'すべて'
+  const cursor = decodeCustomerCursor(url.searchParams.get('cursor'))
+  const conditions = [eq(customers.organizationId, organizationId)]
+  if (cursor) conditions.push(or(gt(customers.name, cursor.name), and(eq(customers.name, cursor.name), gt(customers.id, cursor.id)))!)
+
+  const pattern = `%${query}%`
+  if (query) {
+    const customerSearch = field === '顧客名' ? like(customers.name, pattern)
+      : field === 'ふりがな' ? like(customers.nameKana, pattern)
+        : field === 'メールアドレス' ? like(customers.email, pattern)
+          : field === '電話番号' ? like(customers.phone, pattern)
+            : field === '住所' ? like(customers.address, pattern)
+              : field === '車名' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.name LIKE ${pattern})`
+                : field === '登録番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.registration_number LIKE ${pattern})`
+                  : field === '車台番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.chassis_number LIKE ${pattern})`
+                    : or(like(customers.name, pattern), like(customers.nameKana, pattern), like(customers.phone, pattern), like(customers.email, pattern), like(customers.address, pattern), sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND (search_vehicle.name LIKE ${pattern} OR search_vehicle.registration_number LIKE ${pattern} OR search_vehicle.chassis_number LIKE ${pattern}))`)!
+    conditions.push(customerSearch)
+  }
+
+  const rows = await database.select({ id: customers.id, customerNumber: customers.customerNumber, name: customers.name, nameKana: customers.nameKana, phone: customers.phone, updatedAt: customers.updatedAt })
+    .from(customers)
+    .where(and(...conditions))
+    .orderBy(asc(customers.name), asc(customers.id))
+    .limit(limit + 1)
+    .all()
+  const hasMore = rows.length > limit
+  const items = rows.slice(0, limit)
+  const last = items.at(-1)
+  return jsonResponse({ customers: items, nextCursor: hasMore && last ? encodeCustomerCursor({ name: last.name, id: last.id }) : null, hasMore }, 200, env)
+}
+
+function encodeCustomerCursor(value: { name: string; id: string }) {
+  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+function decodeCustomerCursor(value: string | null): { name: string; id: string } | null {
+  if (!value) return null
+  try {
+    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
+    const parsed = JSON.parse(atob(padded)) as { name?: unknown; id?: unknown }
+    return typeof parsed.name === 'string' && typeof parsed.id === 'string' ? { name: parsed.name, id: parsed.id } : null
+  } catch { return null }
 }
 
 async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, organizationId: string) {
@@ -154,7 +212,7 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
     employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
   }).run()
-  return jsonResponse({ customer: await findCustomer(database, id, organizationId) }, 201, env)
+  return jsonResponse({ customer: await loadCustomerRecordById(database, id, organizationId) }, 201, env)
 }
 
 async function updateCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
@@ -174,7 +232,7 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
   }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
-  return jsonResponse({ customer: await findCustomer(database, customerId, organizationId) }, 200, env)
+  return jsonResponse({ customer: await loadCustomerRecordById(database, customerId, organizationId) }, 200, env)
 }
 
 async function createVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
@@ -204,7 +262,7 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
     freeItem2: nullableString(body, 'freeItem2'),
     freeItem3: nullableString(body, 'freeItem3'),
   }).run()
-  return jsonResponse({ customer: await findCustomer(database, customerId, organizationId), vehicleId: id }, 201, env)
+  return jsonResponse({ customer: await loadCustomerRecordById(database, customerId, organizationId), vehicleId: id }, 201, env)
 }
 
 async function updateVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
@@ -294,9 +352,94 @@ async function downloadVehicleFile(_request: Request, env: Env, database: Return
   return new Response(response.body, { status: 200, headers })
 }
 
-async function findCustomer(database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  const records = await loadCustomerRecords(database, organizationId)
-  return records.find((customer) => customer.id === customerId) ?? null
+async function getCustomer(env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  const customer = await loadCustomerRecordById(database, decodeURIComponent(customerId), organizationId)
+  if (!customer) throw new HttpError(404, '顧客が見つかりません。')
+  return jsonResponse({ customer }, 200, env)
+}
+
+async function getVehicle(env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
+  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, decodeURIComponent(vehicleId)), eq(vehicles.organizationId, organizationId))).get()
+  if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
+  const [customer, files] = await Promise.all([
+    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
+    database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicle.id), eq(vehicleFiles.organizationId, organizationId))).orderBy(asc(vehicleFiles.createdAt)).all(),
+  ])
+  return jsonResponse({ vehicle: serializeVehicle(vehicle, files), customer: customer ? { id: customer.id, name: customer.name, nameKana: customer.nameKana, phone: customer.phone, updatedAt: customer.updatedAt } : null }, 200, env)
+}
+
+async function listVehicleSummaries(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const url = new URL(request.url)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 500) || 500, 1), 500)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+  const field = url.searchParams.get('field')?.trim() ?? 'すべて'
+  const conditions = [eq(vehicles.organizationId, organizationId), sql`${vehicles.inspectionDate} IS NOT NULL AND ${vehicles.inspectionDate} <> ''`]
+  if (q) {
+    const pattern = `%${q}%`
+    const search = field === '顧客名' ? like(customers.name, pattern)
+      : field === '車名' ? like(vehicles.name, pattern)
+        : field === '登録番号' ? like(vehicles.registrationNumber, pattern)
+          : field === '車台番号' ? like(vehicles.chassisNumber, pattern)
+            : or(like(customers.name, pattern), like(vehicles.name, pattern), like(vehicles.registrationNumber, pattern), like(vehicles.chassisNumber, pattern))!
+    conditions.push(search)
+  }
+  const rows = await database.select({ id: vehicles.id, customerId: vehicles.customerId, customerName: customers.name, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber, inspectionDate: vehicles.inspectionDate })
+    .from(vehicles)
+    .leftJoin(customers, and(eq(customers.id, vehicles.customerId), eq(customers.organizationId, organizationId)))
+    .where(and(...conditions))
+    .orderBy(asc(vehicles.inspectionDate), asc(vehicles.id))
+    .limit(limit + 1)
+    .all()
+  const hasMore = rows.length > limit
+  return jsonResponse({ vehicles: rows.slice(0, limit).map((row) => ({ id: row.id, customerId: row.customerId, customerName: row.customerName ?? '', vehicleName: [row.maker, row.name].filter(Boolean).join(' '), plate: row.registrationNumber ?? '', vin: row.chassisNumber ?? '', inspectionDate: row.inspectionDate ?? '' })), hasMore }, 200, env)
+}
+
+async function loadCustomerRecordById(database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
+  const customer = await database.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  if (!customer) return null
+  const vehicleRows = await database.select().from(vehicles).where(and(eq(vehicles.customerId, customerId), eq(vehicles.organizationId, organizationId))).orderBy(asc(vehicles.name)).all()
+  const fileRows = vehicleRows.length > 0 ? await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.organizationId, organizationId), inArray(vehicleFiles.vehicleId, vehicleRows.map((vehicle) => vehicle.id)))).orderBy(asc(vehicleFiles.createdAt)).all() : []
+  const filesByVehicle = groupBy(fileRows.filter((file) => vehicleRows.some((vehicle) => vehicle.id === file.vehicleId)), (file) => file.vehicleId)
+  return {
+    id: customer.id,
+    customerNumber: customer.customerNumber,
+    name: customer.name,
+    nameKana: customer.nameKana,
+    phone: customer.phone,
+    email: customer.email,
+    postalCode: customer.postalCode,
+    address: customer.address,
+    birthDate: normalizeStoredBirthDate(customer.birthDate),
+    employer: normalizeStoredEmployer(customer.employer),
+    memo: customer.memo,
+    updatedAt: customer.updatedAt,
+    vehicles: vehicleRows.map((vehicle) => serializeVehicle(vehicle, filesByVehicle.get(vehicle.id) ?? [])),
+  }
+}
+
+function serializeVehicle(vehicle: typeof vehicles.$inferSelect, files: Array<typeof vehicleFiles.$inferSelect>) {
+  return {
+    id: vehicle.id,
+    maker: vehicle.maker,
+    name: vehicle.name,
+    model: vehicle.model,
+    registrationNumber: vehicle.registrationNumber,
+    chassisNumber: vehicle.chassisNumber,
+    modelYear: vehicle.modelYear,
+    inspectionDate: vehicle.inspectionDate,
+    mileage: vehicle.mileage,
+    bodyColor: vehicle.bodyColor,
+    displacement: vehicle.displacement,
+    transmission: vehicle.transmission,
+    inspectionRecordAvailable: vehicle.inspectionRecordAvailable,
+    memo: vehicle.memo,
+    modelType: vehicle.model,
+    freeItem1: vehicle.freeItem1,
+    freeItem2: vehicle.freeItem2,
+    freeItem3: vehicle.freeItem3,
+    updatedAt: vehicle.updatedAt,
+    files: files.map(serializeFile),
+  }
 }
 
 type VehiclelessDocumentSummary = {
@@ -366,15 +509,16 @@ async function getVehicleHistory(env: Env, database: ReturnType<typeof createDat
   const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
 
-  const [customer, sales, maintenance, schedules, files, payments, mileageHistoryRows] = await Promise.all([
+  const [customer, sales, maintenance, schedules, files, mileageHistoryRows] = await Promise.all([
     database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId))).orderBy(desc(salesDocuments.issuedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
     database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
     database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).orderBy(desc(vehicleFiles.createdAt)).all(),
-    database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all(),
     database.select().from(mileageHistories).where(and(eq(mileageHistories.vehicleId, vehicleId), eq(mileageHistories.organizationId, organizationId))).all(),
   ])
+  const documentIds = [...sales.map((document) => document.id), ...maintenance.map((document) => document.id)]
+  const payments = documentIds.length > 0 ? await database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), inArray(paymentRecords.documentId, documentIds))).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all() : []
   const documentKeys = new Set([...sales.map((document) => `販売請求書:${document.id}`), ...maintenance.map((document) => `整備請求書:${document.id}`)])
   const relatedPayments = payments.filter((payment) => documentKeys.has(`${payment.documentType}:${payment.documentId}`))
   const salesById = new Map(sales.map((document) => [document.id, document]))

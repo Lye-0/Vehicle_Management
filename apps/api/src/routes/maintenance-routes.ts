@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, like, lt, or, sql } from 'drizzle-orm'
 import { customers, maintenanceItems, maintenanceDocuments, mileageHistories, vehicles } from '@vehicle-management/database'
 import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode } from '@vehicle-management/shared'
 import { UnauthorizedError } from '../auth/firebase'
@@ -88,6 +88,7 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
       return await restoreMaintenanceDocument(env, database, restoreMatch[1], organizationId)
     }
 
+    if (request.method === 'GET') return await getMaintenanceDocument(env, database, documentMatch![1], organizationId)
     if (request.method === 'PATCH') return await updateMaintenanceDocument(request, env, database, documentMatch![1], organizationId)
     if (request.method === 'DELETE') return await archiveMaintenanceDocument(env, database, documentMatch![1], organizationId, context.user.uid)
     throw new HttpError(405, 'この操作には対応していません。')
@@ -100,7 +101,142 @@ export async function handleMaintenanceRoutes(request: Request, env: Env): Promi
 }
 
 async function listMaintenanceDocuments(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const url = new URL(request.url)
+  if (url.searchParams.get('view') === 'summary') return await listMaintenanceDocumentSummaries(url, env, database, organizationId)
   return jsonResponse({ documents: await loadMaintenanceDocuments(database, organizationId, new URL(request.url).searchParams.get('includeArchived') === 'true') }, 200, env)
+}
+
+async function listMaintenanceDocumentSummaries(url: URL, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 100)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+  const type = url.searchParams.get('type')?.trim() ?? ''
+  const category = url.searchParams.get('category')?.trim() ?? ''
+  const status = url.searchParams.get('status')?.trim() ?? ''
+  const includeArchived = url.searchParams.get('includeArchived') === 'true'
+  const sortKey = normalizeSummarySortKey(url.searchParams.get('sortKey'))
+  const sortDirection = normalizeSummarySortDirection(url.searchParams.get('sortDirection'))
+  const cursor = decodeMaintenanceCursor(url.searchParams.get('cursor'))
+  const conditions = [eq(maintenanceDocuments.organizationId, organizationId)]
+  if (!includeArchived) conditions.push(isNull(maintenanceDocuments.archivedAt))
+  if (type && type !== 'すべて') conditions.push(eq(maintenanceDocuments.type, type))
+  if (category && category !== 'すべて') conditions.push(eq(maintenanceDocuments.category, category === '法定点検' ? '一般整備' : category))
+  if (status && status !== 'すべて') conditions.push(eq(maintenanceDocuments.status, status))
+  const sortExpression = maintenanceSortExpression(sortKey, sortDirection)
+  if (cursor && cursor.sortKey === sortKey && cursor.sortDirection === sortDirection) {
+    const after = sortDirection === 'asc' ? gt(sortExpression, cursor.value) : lt(sortExpression, cursor.value)
+    const same = and(eq(sortExpression, cursor.value), sortDirection === 'asc' ? gt(maintenanceDocuments.id, cursor.id) : lt(maintenanceDocuments.id, cursor.id))
+    conditions.push(or(after, same)!)
+  }
+  if (q) {
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+    conditions.push(or(like(maintenanceDocuments.number, pattern), like(customers.name, pattern), like(vehicles.name, pattern), like(vehicles.registrationNumber, pattern))!)
+  }
+  const rows = await database.select({ document: maintenanceDocuments, customerName: customers.name, customerPhone: customers.phone, vehicleMaker: vehicles.maker, vehicleName: vehicles.name, plate: vehicles.registrationNumber })
+    .from(maintenanceDocuments)
+    .leftJoin(customers, and(eq(customers.id, maintenanceDocuments.customerId), eq(customers.organizationId, organizationId)))
+    .leftJoin(vehicles, and(eq(vehicles.id, maintenanceDocuments.vehicleId), eq(vehicles.organizationId, organizationId)))
+    .where(and(...conditions))
+    .orderBy(sortDirection === 'asc' ? asc(sortExpression) : desc(sortExpression), sortDirection === 'asc' ? asc(maintenanceDocuments.id) : desc(maintenanceDocuments.id))
+    .limit(limit + 1)
+    .all()
+  const hasMore = rows.length > limit
+  const items = rows.slice(0, limit).map(({ document, customerName, customerPhone, vehicleMaker, vehicleName, plate }) => serializeMaintenanceDocumentSummary(document, customerName ?? '', customerPhone ?? '', vehicleMaker, vehicleName, plate))
+  const lastRow = rows[Math.min(rows.length, limit) - 1]
+  return jsonResponse({ documents: items, nextCursor: hasMore && lastRow ? encodeMaintenanceCursor({ sortKey, sortDirection, value: maintenanceSortValue(lastRow.document, lastRow.customerName, lastRow.vehicleMaker, lastRow.vehicleName, sortKey, sortDirection), id: lastRow.document.id }) : null, hasMore }, 200, env)
+}
+
+type SummarySortKey = 'issuedAt' | 'dueDate' | 'customerName' | 'vehicle'
+type SummarySortDirection = 'asc' | 'desc'
+type MaintenanceCursor = { sortKey: SummarySortKey; sortDirection: SummarySortDirection; value: string; id: string }
+
+function normalizeSummarySortKey(value: string | null): SummarySortKey {
+  return value === 'dueDate' || value === 'customerName' || value === 'vehicle' ? value : 'issuedAt'
+}
+
+function normalizeSummarySortDirection(value: string | null): SummarySortDirection {
+  return value === 'asc' ? 'asc' : 'desc'
+}
+
+function maintenanceSortExpression(sortKey: SummarySortKey, sortDirection: SummarySortDirection) {
+  const emptyValue = sortDirection === 'asc' ? '\uffff' : ''
+  if (sortKey === 'dueDate') return sql`COALESCE(${maintenanceDocuments.dueDate}, ${emptyValue})`
+  if (sortKey === 'customerName') return sql`COALESCE(${customers.name}, ${emptyValue})`
+  if (sortKey === 'vehicle') return sql`COALESCE(NULLIF(TRIM(COALESCE(${vehicles.maker}, '') || ' ' || COALESCE(${vehicles.name}, '')), ''), ${emptyValue})`
+  return sql`COALESCE(${maintenanceDocuments.issuedAt}, ${emptyValue})`
+}
+
+function maintenanceSortValue(document: typeof maintenanceDocuments.$inferSelect, customerName: string | null | undefined, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, sortKey: SummarySortKey, sortDirection: SummarySortDirection) {
+  const raw = sortKey === 'dueDate' ? document.dueDate : sortKey === 'customerName' ? customerName : sortKey === 'vehicle' ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : document.issuedAt
+  return raw || (sortDirection === 'asc' ? '\uffff' : '')
+}
+
+function encodeMaintenanceCursor(value: MaintenanceCursor) {
+  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+function decodeMaintenanceCursor(value: string | null): MaintenanceCursor | null {
+  if (!value) return null
+  try {
+    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
+    const parsed = JSON.parse(atob(padded)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; id?: unknown; issuedAt?: unknown; number?: unknown }
+    if (typeof parsed.sortKey === 'string' && typeof parsed.sortDirection === 'string' && typeof parsed.value === 'string' && typeof parsed.id === 'string') {
+      const sortKey = normalizeSummarySortKey(parsed.sortKey)
+      const sortDirection = normalizeSummarySortDirection(parsed.sortDirection)
+      return { sortKey, sortDirection, value: parsed.value, id: parsed.id }
+    }
+    if (typeof parsed.issuedAt === 'string' && typeof parsed.number === 'string') return { sortKey: 'issuedAt', sortDirection: 'desc', value: parsed.issuedAt, id: parsed.number }
+    return null
+  } catch { return null }
+}
+
+function serializeMaintenanceDocumentSummary(document: typeof maintenanceDocuments.$inferSelect, customerName: string, phone: string, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, plate: string | null | undefined) {
+  const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
+  const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
+  return {
+    id: document.id,
+    number: document.number,
+    type: document.type,
+    status: normalizeMaintenanceStatus(document.status),
+    category: document.category,
+    customerId: document.customerId,
+    customerName,
+    phone,
+    customerDetails: null,
+    vehicleId: document.vehicleId,
+    vehicle: vehicleMaker || vehicleName ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : 'なし',
+    plate: plate ?? '',
+    abacusImport,
+    isAbacusMigration: abacusDetails?.isAbacusMigration ?? false,
+    mileage: '',
+    vehicleDetails: null,
+    details: null,
+    intakeDate: document.intakeDate,
+    plannedReleaseDate: document.plannedReleaseDate,
+    completionDate: document.completionDate,
+    issuedAt: document.issuedAt,
+    dueDate: document.dueDate,
+    taxRate: document.taxRate,
+    taxRounding: document.taxRounding,
+    fees: { 自賠責: 0, 重量税: 0, 印紙代: 0, リサイクル料金: 0 },
+    adjustment: 0,
+    note: document.note,
+    archivedAt: document.archivedAt,
+    archivedPreviousStatus: document.archivedPreviousStatus,
+    archivedBy: document.archivedBy,
+    purgeAt: document.purgeAt,
+    keepForever: document.keepForever,
+    subtotal: document.subtotal,
+    tax: document.tax,
+    total: document.total,
+    items: [],
+    summary: true,
+  }
+}
+
+async function getMaintenanceDocument(env: Env, database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
+  const document = await findMaintenanceDocument(database, decodeURIComponent(documentId), organizationId)
+  if (!document) throw new HttpError(404, '整備書類が見つかりません。')
+  return jsonResponse({ document }, 200, env)
 }
 
 // ===================== POST (新規作成) =====================
@@ -658,8 +794,14 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
 }
 
 async function findMaintenanceDocument(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {
-  const documents = await loadMaintenanceDocuments(database, organizationId)
-  return documents.find((document) => document.id === documentId) ?? null
+  const document = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).get()
+  if (!document) return null
+  const [items, customer, vehicle] = await Promise.all([
+    loadMaintenanceItems(database, documentId, organizationId),
+    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId))).get(),
+    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId))).get() : Promise.resolve(undefined),
+  ])
+  return serializeMaintenanceDocument(document, customer, vehicle, items)
 }
 
 async function loadMaintenanceItems(database: ReturnType<typeof createDatabase>, documentId: string, organizationId: string) {

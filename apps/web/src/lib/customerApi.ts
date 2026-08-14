@@ -44,6 +44,15 @@ export type Customer = {
   memo: string
   updatedAt: string
   vehicles: Vehicle[]
+  isSummary?: boolean
+}
+
+export type CustomerSummary = {
+  id: string
+  name: string
+  kana: string
+  phone: string
+  updatedAt: string
 }
 
 export type CustomerInput = {
@@ -110,6 +119,15 @@ type ApiCustomer = {
   vehicles: ApiVehicle[]
 }
 
+type ApiCustomerSummary = {
+  id: string
+  customerNumber: string
+  name: string
+  nameKana: string | null
+  phone: string | null
+  updatedAt: string
+}
+
 type ApiVehicle = {
   id: string
   maker: string | null
@@ -147,6 +165,30 @@ type ApiVehiclelessDocument = VehiclelessDocument
 export async function fetchCustomers() {
   const response = await apiFetch<{ customers: ApiCustomer[] }>('/api/customers')
   return response.customers.map(mapCustomer)
+}
+
+/** 顧客選択・一覧用の軽量レスポンス。車両・添付ファイルは含まれません。 */
+export async function fetchCustomerSummaries(options: { q?: string; field?: string; cursor?: string | null; limit?: number } = {}) {
+  const params = new URLSearchParams({ view: 'summary', limit: String(options.limit ?? 50) })
+  if (options.q?.trim()) params.set('q', options.q.trim())
+  if (options.field && options.field !== 'すべて') params.set('field', options.field)
+  if (options.cursor) params.set('cursor', options.cursor)
+  const response = await apiFetch<{ customers: ApiCustomerSummary[]; nextCursor: string | null; hasMore: boolean }>(`/api/customers?${params.toString()}`)
+  return {
+    customers: response.customers.map(mapCustomerSummary),
+    nextCursor: response.nextCursor,
+    hasMore: response.hasMore,
+  }
+}
+
+export async function fetchCustomerDetail(customerId: string) {
+  const response = await apiFetch<{ customer: ApiCustomer }>(`/api/customers/${encodeURIComponent(customerId)}`)
+  return mapCustomer(response.customer)
+}
+
+export async function fetchVehicleDetail(vehicleId: string) {
+  const response = await apiFetch<{ vehicle: ApiVehicle }>(`/api/vehicles/${encodeURIComponent(vehicleId)}`)
+  return mapVehicle(response.vehicle)
 }
 
 export async function fetchVehiclelessDocuments(customerId: string) {
@@ -234,7 +276,12 @@ function mapCustomer(customer: ApiCustomer): Customer {
     memo: customer.memo ?? '',
     updatedAt: customer.updatedAt,
     vehicles: customer.vehicles.map(mapVehicle),
+    isSummary: false,
   }
+}
+
+function mapCustomerSummary(customer: ApiCustomerSummary): CustomerSummary {
+  return { id: customer.id, name: customer.name, kana: customer.nameKana ?? '', phone: customer.phone ?? '', updatedAt: customer.updatedAt }
 }
 
 function mapVehicle(vehicle: ApiVehicle): Vehicle {

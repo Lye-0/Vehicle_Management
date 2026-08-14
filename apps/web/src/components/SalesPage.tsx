@@ -18,13 +18,14 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomers, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
+import { fetchCustomerDetail, fetchCustomerSummaries, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
 import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
   createSalesDocument,
   archiveSalesDocument,
-  fetchSalesDocuments,
+  fetchSalesDocument,
+  fetchSalesDocumentSummaries,
   updateSalesDocument,
   type SalesDocument,
   type SalesDocumentLike,
@@ -139,6 +140,10 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [createForm, setCreateForm] = useState<SalesCreateForm>(emptyCreateForm())
   const [draftDocument, setDraftDocument] = useState<SalesDraftState>(null)
   const [loading, setLoading] = useState(true)
+  const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
+  const [documentHasMore, setDocumentHasMore] = useState(false)
+  const [loadingMoreDocuments, setLoadingMoreDocuments] = useState(false)
+  const [loadingDocumentDetailId, setLoadingDocumentDetailId] = useState('')
   const [syncError, setSyncError] = useState('')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -154,6 +159,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const draftCustomerDuplicateConfirmedRef = useRef(false)
   const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
+  const summaryFilterInitializedRef = useRef(false)
+  const initialSortRef = useRef({ sortKey, sortDirection })
 
   function replaceDocuments(updater: (current: SalesDocument[]) => SalesDocument[]) {
     const nextDocuments = updater(documentsRef.current)
@@ -164,14 +171,20 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchSalesDocuments(), fetchCustomers(), fetchSettings()])
-      .then(([nextDocuments, nextCustomers, nextSettings]) => {
+    Promise.all([fetchSalesDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchCustomerSummaries({ limit: 100 }), fetchSettings()])
+      .then(([documentPage, customerPage, nextSettings]) => {
         if (cancelled) return
-        documentsRef.current = nextDocuments
-        setDocuments(nextDocuments)
+        const nextDocuments = documentPage.documents
+        const nextCustomers = customerPage.customers.map(mapCustomerSummaryToRecord)
+        const detailedInitialDocument = documentsRef.current.find((document) => document.id === initialDocumentId && !document.isSummary)
+        const documentsWithInitialDetail = detailedInitialDocument ? [detailedInitialDocument, ...nextDocuments.filter((document) => document.id !== detailedInitialDocument.id)] : nextDocuments
+        documentsRef.current = documentsWithInitialDetail
+        setDocuments(documentsWithInitialDetail)
+        setDocumentNextCursor(documentPage.nextCursor)
+        setDocumentHasMore(documentPage.hasMore)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        const nextSelectedDocumentId = initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : ''
+        const nextSelectedDocumentId = initialDocumentId ?? documentsWithInitialDetail[0]?.id ?? ''
         setSelectedDocumentId(nextSelectedDocumentId)
         if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setSyncError('')
@@ -184,6 +197,42 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       })
     return () => { cancelled = true }
   }, [initialDocumentId])
+
+  useEffect(() => {
+    if (!summaryFilterInitializedRef.current) {
+      summaryFilterInitializedRef.current = true
+      return
+    }
+    let active = true
+    const timer = window.setTimeout(() => {
+      void fetchSalesDocumentSummaries({ q: query, type: filterType, status: statusFilter, sortKey, sortDirection, limit: 100 }).then((page) => {
+        if (!active) return
+        documentsRef.current = page.documents
+        setDocuments(page.documents)
+        setDocumentNextCursor(page.nextCursor)
+        setDocumentHasMore(page.hasMore)
+        setSelectedDocumentId((current) => current && page.documents.some((document) => document.id === current) ? current : page.documents[0]?.id ?? '')
+      }).catch((reason: unknown) => {
+        if (active) setSyncError(reason instanceof Error ? reason.message : '販売書類を検索できませんでした。')
+      })
+    }, query.trim() ? 280 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [filterType, query, sortDirection, sortKey, statusFilter])
+
+  async function loadMoreDocuments() {
+    if (!documentHasMore || !documentNextCursor || loadingMoreDocuments) return
+    setLoadingMoreDocuments(true)
+    try {
+      const page = await fetchSalesDocumentSummaries({ q: query, type: filterType, status: statusFilter, sortKey, sortDirection, cursor: documentNextCursor, limit: 100 })
+      replaceDocuments((current) => [...current, ...page.documents.filter((document) => !current.some((item) => item.id === document.id))])
+      setDocumentNextCursor(page.nextCursor)
+      setDocumentHasMore(page.hasMore)
+    } catch (reason: unknown) {
+      setSyncError(reason instanceof Error ? reason.message : '販売書類を追加で読み込めませんでした。')
+    } finally {
+      setLoadingMoreDocuments(false)
+    }
+  }
 
   const filteredDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -198,9 +247,65 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedSalesDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null
+  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : filteredDocuments[0] ?? null)
   const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
+
+  useEffect(() => {
+    if (!initialDocumentId || documents.some((document) => document.id === initialDocumentId)) return
+    let active = true
+    void fetchSalesDocument(initialDocumentId).then((detail) => {
+      if (!active) return
+      documentsRef.current = [detail, ...documentsRef.current]
+      setDocuments((current) => [detail, ...current])
+      setSelectedDocumentId(detail.id)
+    }).catch((reason: unknown) => {
+      if (active) setSyncError(reason instanceof Error ? reason.message : '指定された販売書類を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [documents, initialDocumentId])
+
+  useEffect(() => {
+    const target = selectedPersistedDocument
+    if (!target?.isSummary || loadingDocumentDetailId === target.id) return
+    let active = true
+    setLoadingDocumentDetailId(target.id)
+    void fetchSalesDocument(target.id).then((detail) => {
+      if (!active) return
+      replaceDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
+    }).catch((reason: unknown) => {
+      if (active) setSyncError(reason instanceof Error ? reason.message : '販売書類の詳細を読み込めませんでした。')
+    }).finally(() => {
+      if (active) setLoadingDocumentDetailId((current) => current === target.id ? '' : current)
+    })
+    return () => { active = false }
+  }, [loadingDocumentDetailId, selectedPersistedDocument, selectedPersistedDocument?.id, selectedPersistedDocument?.isSummary])
+
+  useEffect(() => {
+    const customerId = selectedPersistedDocument?.customerId
+    if (!customerId) return
+    const current = customers.find((customer) => customer.id === customerId)
+    if (!current?.isSummary) return
+    let active = true
+    void fetchCustomerDetail(customerId).then((detail) => {
+      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
+    }).catch((reason: unknown) => {
+      if (active) setSyncError(reason instanceof Error ? reason.message : '顧客情報を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [selectedPersistedDocument?.customerId, customers])
+
+  useEffect(() => {
+    const customerId = createForm.customerMode === 'existing' ? createForm.customerId : ''
+    if (!customerId) return
+    const current = customers.find((customer) => customer.id === customerId)
+    if (!current?.isSummary) return
+    let active = true
+    void fetchCustomerDetail(customerId).then((detail) => {
+      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [createForm.customerId, createForm.customerMode, customers])
 
   function setActiveDraft(nextDraft: SalesDocumentLike | null) {
     draftDocumentRef.current = nextDraft
@@ -475,9 +580,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
       // Re-fetch customers to get latest updatedAt
       try {
-        const nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
-        const foundCustomer = nextCustomers.find((c) => c.id === selectedPersistedDocument.customerId)
+        const foundCustomer = await fetchCustomerDetail(selectedPersistedDocument.customerId)
+        setCustomers((current) => upsertCustomer(current, foundCustomer))
         const foundVehicle = selectedPersistedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId) : null
         if (foundCustomer) {
           openedMasterSnapshotRef.current = {
@@ -697,10 +801,9 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       setDocumentView('edit')
 
       try {
-        const nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
+        const foundCustomer = await fetchCustomerDetail(nextDocument.customerId)
+        setCustomers((current) => upsertCustomer(current, foundCustomer))
         lastOpenedDocumentIdRef.current = nextDocument.id
-        const foundCustomer = nextCustomers.find((customer) => customer.id === nextDocument.customerId)
         const foundVehicle = nextDocument.vehicleId ? foundCustomer?.vehicles.find((vehicle) => vehicle.id === nextDocument.vehicleId) : null
         if (foundCustomer && (!nextDocument.vehicleId || foundVehicle)) {
           openedMasterSnapshotRef.current = {
@@ -737,9 +840,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       let nextCustomers = customers
       let customer = nextCustomers.find((item) => item.id === customerId)
       if (!customer) {
-        nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
-        customer = nextCustomers.find((item) => item.id === customerId)
+        customer = await fetchCustomerDetail(customerId)
+        setCustomers((current) => upsertCustomer(current, customer!))
       }
       if (!customer) throw new Error('選択した既存顧客を確認できません。顧客一覧を再読み込みしてください。')
 
@@ -889,7 +991,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className={`sales-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />販売書類一覧へ戻る</button>{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
+      <div className={`sales-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />販売書類一覧へ戻る</button>{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
       {salesDuplicateDialog && <SalesDuplicateConfirmationDialog state={salesDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleSalesDuplicateCancel} />}
       {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={undefined} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMasterSyncCancel} />}
@@ -897,7 +999,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   )
 }
 
-function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect }: { incompleteDocuments: SalesDocument[]; completedGroups: CompletedSalesGroup[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
+function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect, hasMore, loadingMore, onLoadMore }: { incompleteDocuments: SalesDocument[]; completedGroups: CompletedSalesGroup[]; selectedDocumentId: string; onSelect: (id: string) => void; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void }) {
   return <div className="sales-list-stack">
     <section className="panel sales-list-panel">
       <div className="sales-list-header"><div><h2>販売書類（未完了）</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{incompleteDocuments.length}件</span></div>
@@ -907,6 +1009,7 @@ function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocum
       <div className="sales-list-header"><div><h2>完了書類</h2><span>書類の作成月ごとに表示します</span></div><span className="results-count">{completedGroups.reduce((total, group) => total + group.documents.length, 0)}件</span></div>
       <div className="sales-completed-groups">{completedGroups.map((group) => <details className="sales-completed-group" key={group.key}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><SalesDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
     </section>}
+    {hasMore && <button className="button button-secondary document-list-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? '読み込み中…' : '次の書類を読み込む'}</button>}
   </div>
 }
 
@@ -1748,6 +1851,14 @@ function SalesDocumentDialog({ form, customers, onChange, onClose, onSubmit }: {
 
 function emptyCreateForm(): SalesCreateForm {
   return { type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' }
+}
+
+function mapCustomerSummaryToRecord(summary: { id: string; name: string; kana: string; phone: string; updatedAt: string }): Customer {
+  return { id: summary.id, name: summary.name, kana: summary.kana, phone: summary.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '', updatedAt: summary.updatedAt, vehicles: [], isSummary: true }
+}
+
+function upsertCustomer(current: Customer[], next: Customer) {
+  return current.some((customer) => customer.id === next.id) ? current.map((customer) => customer.id === next.id ? next : customer) : [next, ...current]
 }
 
 function dateAfter(days: number) {
