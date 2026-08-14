@@ -1148,6 +1148,119 @@
                             <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
                                        Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。すべての操作が終わった後のインポート確定時に、未確定トレイの書類を警告付きで除外します。" />
                         </Border>
+                        <Expander x:Name="LegacyGraphSearchExpander" Margin="0,14,0,0"
+                                  Header="顧客・車両・書類を検索"
+                                  ExpandDirection="Right"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  IsExpanded="False"
+                                  FontWeight="SemiBold">
+                            <Border Padding="10" Background="#F4F7FB" BorderBrush="#D8E1EC"
+                                    BorderThickness="1" CornerRadius="6">
+                                <Grid MinHeight="205">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="330" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Foreground="#52647A" FontSize="11" TextWrapping="Wrap"
+                                                   Text="検索語は空白・ハイフン・Unicode表記揺れを吸収します。原本やグラフ状態は変更しません。" />
+                                        <TextBox x:Name="LegacyGraphSearchTextBox" Margin="0,7,0,0" MinHeight="34" Padding="8,5"
+                                                 VerticalContentAlignment="Center"
+                                                 ToolTip="顧客名・電話番号・住所・登録番号・車台番号・書類番号・金額などを検索"
+                                                 TextChanged="LegacyGraphSearchTextBox_TextChanged" />
+                                        <Grid Margin="0,7,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="LegacyGraphSearchKindComboBox" MinHeight="32"
+                                                      SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
+                                                <ComboBoxItem Tag="all" Content="種類: すべて" IsSelected="True" />
+                                                <ComboBoxItem Tag="customer" Content="顧客" />
+                                                <ComboBoxItem Tag="vehicle" Content="車両" />
+                                                <ComboBoxItem Tag="document" Content="書類" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="LegacyGraphSearchStateComboBox" Grid.Column="2" MinHeight="32"
+                                                      SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
+                                                <ComboBoxItem Tag="all" Content="状態: すべて" IsSelected="True" />
+                                                <ComboBoxItem Tag="confirmed" Content="確定" />
+                                                <ComboBoxItem Tag="unresolved" Content="未確定" />
+                                                <ComboBoxItem Tag="trash" Content="ごみ箱" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <ComboBox x:Name="LegacyGraphSearchMethodComboBox" Margin="0,7,0,0" MinHeight="32"
+                                                  SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
+                                            <ComboBoxItem Tag="all" Content="紐づけ方法: すべて" IsSelected="True" />
+                                            <ComboBoxItem Tag="automatic" Content="自動紐づけ" />
+                                            <ComboBoxItem Tag="manual" Content="手動紐づけ" />
+                                            <ComboBoxItem Tag="recommended" Content="おすすめ" />
+                                        </ComboBox>
+                                        <TextBlock x:Name="LegacyGraphSearchStatusText" Margin="0,6,0,0"
+                                                   Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
+                                        <Button x:Name="LegacyGraphSearchOpenButton" Margin="0,8,0,0"
+                                                Content="選択項目をキャンバス／トレイで表示" IsEnabled="False"
+                                                Click="LegacyGraphSearchOpenButton_Click" />
+                                    </StackPanel>
+                                    <Border Grid.Column="2" Padding="8" Background="#FFFFFF"
+                                            BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="5">
+                                        <ListBox x:Name="LegacyGraphSearchResultsList"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 SelectionChanged="LegacyGraphSearchResultsList_SelectionChanged"
+                                                 MouseDoubleClick="LegacyGraphSearchResultsList_MouseDoubleClick">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="Padding" Value="0" />
+                                                    <Setter Property="Margin" Value="0,0,8,0" />
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <VirtualizingStackPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </ListBox.ItemsPanel>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Width="285" MinHeight="155" Padding="8"
+                                                            Background="{Binding BackgroundBrush}"
+                                                            BorderBrush="{Binding BorderBrush}" BorderThickness="1"
+                                                            CornerRadius="4">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto" />
+                                                                <RowDefinition Height="*" />
+                                                                <RowDefinition Height="Auto" />
+                                                            </Grid.RowDefinitions>
+                                                            <DockPanel>
+                                                                <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
+                                                                           Foreground="{Binding StateBrush}"
+                                                                           FontSize="10" FontWeight="SemiBold"
+                                                                           Text="{Binding StateText}" />
+                                                                <TextBlock Foreground="#52647A" FontSize="10"
+                                                                           FontWeight="SemiBold" Text="{Binding TypeText}" />
+                                                            </DockPanel>
+                                                            <StackPanel Grid.Row="1" Margin="0,6,0,0">
+                                                                <TextBlock FontWeight="SemiBold" Text="{Binding Title}"
+                                                                           TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Margin="0,4,0,0" Foreground="#52647A" FontSize="11"
+                                                                           Text="{Binding Subtitle}" TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                            <TextBlock Grid.Row="2" Margin="0,6,0,0" Foreground="#718096"
+                                                                       FontSize="10" Text="{Binding MethodText}" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </Expander>
                         <Grid Margin="0,14,0,0" Height="650">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="500" />
@@ -1163,7 +1276,6 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
@@ -1172,87 +1284,7 @@
                                     <TextBlock Grid.Row="2" x:Name="LegacyGraphCurrentCustomerSelectionText" Margin="0,7,0,0"
                                                Foreground="#1D4ED8" FontSize="12" FontWeight="SemiBold"
                                                Text="現在の選択: なし" TextWrapping="Wrap" />
-                                    <Expander Grid.Row="3" Margin="0,8,0,0" Header="顧客・車両・書類を検索"
-                                              IsExpanded="False" FontWeight="SemiBold">
-                                        <StackPanel Margin="0,8,0,0">
-                                            <TextBox x:Name="LegacyGraphSearchTextBox" MinHeight="34" Padding="8,5"
-                                                     VerticalContentAlignment="Center"
-                                                     ToolTip="顧客名・電話番号・住所・登録番号・車台番号・書類番号・金額などを検索"
-                                                     TextChanged="LegacyGraphSearchTextBox_TextChanged" />
-                                            <Grid Margin="0,7,0,0">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="8" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <ComboBox x:Name="LegacyGraphSearchKindComboBox" MinHeight="32"
-                                                          SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
-                                                    <ComboBoxItem Tag="all" Content="種類: すべて" IsSelected="True" />
-                                                    <ComboBoxItem Tag="customer" Content="顧客" />
-                                                    <ComboBoxItem Tag="vehicle" Content="車両" />
-                                                    <ComboBoxItem Tag="document" Content="書類" />
-                                                </ComboBox>
-                                                <ComboBox x:Name="LegacyGraphSearchStateComboBox" Grid.Column="2" MinHeight="32"
-                                                          SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
-                                                    <ComboBoxItem Tag="all" Content="状態: すべて" IsSelected="True" />
-                                                    <ComboBoxItem Tag="confirmed" Content="確定" />
-                                                    <ComboBoxItem Tag="unresolved" Content="未確定" />
-                                                    <ComboBoxItem Tag="trash" Content="ごみ箱" />
-                                                </ComboBox>
-                                            </Grid>
-                                            <ComboBox x:Name="LegacyGraphSearchMethodComboBox" Margin="0,7,0,0" MinHeight="32"
-                                                      SelectionChanged="LegacyGraphSearchFilter_SelectionChanged">
-                                                <ComboBoxItem Tag="all" Content="紐づけ方法: すべて" IsSelected="True" />
-                                                <ComboBoxItem Tag="automatic" Content="自動紐づけ" />
-                                                <ComboBoxItem Tag="manual" Content="手動紐づけ" />
-                                                <ComboBoxItem Tag="recommended" Content="おすすめ" />
-                                            </ComboBox>
-                                            <TextBlock x:Name="LegacyGraphSearchStatusText" Margin="0,6,0,0"
-                                                       Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
-                                            <ListBox x:Name="LegacyGraphSearchResultsList" Margin="0,6,0,0" Height="150"
-                                                     SelectionChanged="LegacyGraphSearchResultsList_SelectionChanged"
-                                                     MouseDoubleClick="LegacyGraphSearchResultsList_MouseDoubleClick">
-                                                <ListBox.ItemContainerStyle>
-                                                    <Style TargetType="ListBoxItem">
-                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                                        <Setter Property="Padding" Value="0" />
-                                                    </Style>
-                                                </ListBox.ItemContainerStyle>
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Border Margin="1,2" Padding="6" Background="{Binding BackgroundBrush}"
-                                                                BorderBrush="{Binding BorderBrush}" BorderThickness="1" CornerRadius="4">
-                                                            <Grid>
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Grid.Column="0" Margin="0,0,6,0" Foreground="#52647A"
-                                                                           FontSize="10" FontWeight="SemiBold" Text="{Binding TypeText}" />
-                                                                <StackPanel Grid.Column="1">
-                                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Title}"
-                                                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
-                                                                    <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="10"
-                                                                               Text="{Binding Subtitle}" TextWrapping="Wrap" />
-                                                                </StackPanel>
-                                                                <StackPanel Grid.Column="2" Margin="6,0,0,0">
-                                                                    <TextBlock HorizontalAlignment="Right" Foreground="{Binding StateBrush}"
-                                                                               FontSize="10" FontWeight="SemiBold" Text="{Binding StateText}" />
-                                                                    <TextBlock Margin="0,2,0,0" HorizontalAlignment="Right"
-                                                                               Foreground="#718096" FontSize="10" Text="{Binding MethodText}" />
-                                                                </StackPanel>
-                                                            </Grid>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </ListBox.ItemTemplate>
-                                            </ListBox>
-                                            <Button x:Name="LegacyGraphSearchOpenButton" Margin="0,7,0,0"
-                                                    Content="選択項目をキャンバス／トレイで表示" IsEnabled="False"
-                                                    Click="LegacyGraphSearchOpenButton_Click" />
-                                        </StackPanel>
-                                    </Expander>
-                                    <Grid Grid.Row="4" Margin="0,8,0,0" MinHeight="0">
+                                    <Grid Grid.Row="3" Margin="0,8,0,0" MinHeight="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition x:Name="LegacyGraphCustomerUngroupDropColumn" Width="0" />
@@ -1325,7 +1357,7 @@
                                                        Text="統合解除\nここへ顧客をドロップ" />
                                         </Border>
                                     </Grid>
-                                    <Button Grid.Row="5" x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
+                                    <Button Grid.Row="4" x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
                                             Content="現在の選択に戻る" Click="LegacyGraphReturnToCurrentSelectionButton_Click" />
                                 </Grid>
                             </Border>
