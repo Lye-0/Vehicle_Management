@@ -3193,11 +3193,15 @@ public partial class MainWindow : Window
         list.SelectedItem = vehicle;
         legacyGraphTrayDragVehicle = vehicle;
         legacyGraphTrayDragVehicleStartPoint = e.GetPosition(this);
+        // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
+        list.CaptureMouse();
+        e.Handled = true;
     }
 
     private void LegacyGraphUnresolvedVehicleList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (legacyGraphTrayDragVehicle is null || e.LeftButton != MouseButtonState.Pressed)
+        if (sender is not ListBox list ||
+            legacyGraphTrayDragVehicle is null || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
@@ -3214,13 +3218,23 @@ public partial class MainWindow : Window
         var data = new DataObject();
         data.SetData(typeof(LegacyGraphUnresolvedVehicleDragPayload),
             new LegacyGraphUnresolvedVehicleDragPayload(vehicle.VehicleId));
+        if (list.IsMouseCaptured)
+        {
+            list.ReleaseMouseCapture();
+        }
+
         ShowLegacyGraphTrashOverlay();
         try
         {
-            DragDrop.DoDragDrop(sender as UIElement ?? this, data, DragDropEffects.Link);
+            DragDrop.DoDragDrop(list, data, DragDropEffects.Link);
         }
         finally
         {
+            if (list.IsMouseCaptured)
+            {
+                list.ReleaseMouseCapture();
+            }
+
             ClearLegacyGraphCustomerDropHighlight();
             legacyGraphNativeDocumentDropTargetValid = false;
             HideLegacyGraphTrashOverlay();
@@ -3229,8 +3243,15 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) =>
+    private void LegacyGraphUnresolvedVehicleList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBox list && list.IsMouseCaptured)
+        {
+            list.ReleaseMouseCapture();
+        }
+
         legacyGraphTrayDragVehicle = null;
+    }
 
     private static LegacyGraphUnresolvedVehicleDragPayload? GetLegacyGraphUnresolvedVehicleDragPayload(IDataObject data) =>
         data.GetData(typeof(LegacyGraphUnresolvedVehicleDragPayload)) as LegacyGraphUnresolvedVehicleDragPayload;
@@ -3392,11 +3413,15 @@ public partial class MainWindow : Window
         list.SelectedItem = document;
         legacyGraphTrayDragDocument = document;
         legacyGraphTrayDragStartPoint = e.GetPosition(this);
+        // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
+        list.CaptureMouse();
+        e.Handled = true;
     }
 
     private void LegacyGraphUnresolvedDocumentList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (legacyGraphTrayDragDocument is null || e.LeftButton != MouseButtonState.Pressed)
+        if (sender is not ListBox list ||
+            legacyGraphTrayDragDocument is null || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
@@ -3420,13 +3445,23 @@ public partial class MainWindow : Window
             dragSource.GiveFeedback += LegacyGraphDocumentDrag_GiveFeedback;
         }
 
+        if (list.IsMouseCaptured)
+        {
+            list.ReleaseMouseCapture();
+        }
+
         ShowLegacyGraphTrashOverlay();
         try
         {
-            DragDrop.DoDragDrop(dragSource ?? this, data, DragDropEffects.Link);
+            DragDrop.DoDragDrop(list, data, DragDropEffects.Link);
         }
         finally
         {
+            if (list.IsMouseCaptured)
+            {
+                list.ReleaseMouseCapture();
+            }
+
             if (dragSource is not null)
             {
                 dragSource.GiveFeedback -= LegacyGraphDocumentDrag_GiveFeedback;
@@ -3451,6 +3486,11 @@ public partial class MainWindow : Window
 
     private void LegacyGraphUnresolvedDocumentList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (sender is ListBox list && list.IsMouseCaptured)
+        {
+            list.ReleaseMouseCapture();
+        }
+
         legacyGraphTrayDragDocument = null;
     }
 
