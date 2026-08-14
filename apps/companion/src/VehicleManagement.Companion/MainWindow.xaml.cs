@@ -2128,12 +2128,32 @@ public partial class MainWindow : Window
 
     private void LegacyGraphUnresolvedSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is ListBox list && list.SelectedItem is AbacusLegacyExportCandidateGraphDocument document)
+        if (sender is not ListBox list || list.SelectedItem is null)
+        {
+            return;
+        }
+
+        // 未確定トレイは3つのListBoxに分かれているため、別ブロックを選んだときに
+        // 前のListBoxの選択を残さず、画面全体で1項目だけを選択中にする。
+        foreach (var otherList in new[]
+                 {
+                     LegacyGraphUnresolvedVehicleList,
+                     LegacyGraphUnresolvedSalesList,
+                     LegacyGraphUnresolvedMaintenanceList,
+                 })
+        {
+            if (!ReferenceEquals(otherList, list))
+            {
+                otherList.SelectedItem = null;
+            }
+        }
+
+        if (list.SelectedItem is AbacusLegacyExportCandidateGraphDocument document)
         {
             legacyGraphSelectedItem = document;
             UpdateLegacyGraphInspector(document);
         }
-        else if (sender is ListBox vehicleList && vehicleList.SelectedItem is AbacusLegacyExportCandidateGraphVehicle vehicle)
+        else if (list.SelectedItem is AbacusLegacyExportCandidateGraphVehicle vehicle)
         {
             legacyGraphSelectedItem = vehicle;
             UpdateLegacyGraphInspector(vehicle);
@@ -3195,7 +3215,6 @@ public partial class MainWindow : Window
         legacyGraphTrayDragVehicleStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
         list.CaptureMouse();
-        e.Handled = true;
     }
 
     private void LegacyGraphUnresolvedVehicleList_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -3415,7 +3434,6 @@ public partial class MainWindow : Window
         legacyGraphTrayDragStartPoint = e.GetPosition(this);
         // カードからポインターが出ても移動イベントを受け取り、しきい値到達時に確実にドラッグを開始する。
         list.CaptureMouse();
-        e.Handled = true;
     }
 
     private void LegacyGraphUnresolvedDocumentList_PreviewMouseMove(object sender, MouseEventArgs e)
