@@ -8367,6 +8367,7 @@ public partial class MainWindow : Window
             .Where(document => !IsLegacyGraphDocumentInTray(document))
             .Where(document => !IsLegacyGraphDocumentUnconnected(document))
             .Where(document => !legacyGraphManualDocumentLinks.ContainsKey(GetLegacyDocumentKey(document)))
+            .Where(document => !legacyGraphManualDocumentCustomerLinks.ContainsKey(GetLegacyDocumentKey(document)))
             .Where(document => !IsLegacyGraphCustomerDirectDocument(document))
             .ToArray();
         if (unresolvedDocuments.Length > 0)
