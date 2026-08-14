@@ -122,7 +122,6 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
   const [documentHasMore, setDocumentHasMore] = useState(false)
   const [loadingMoreDocuments, setLoadingMoreDocuments] = useState(false)
-  const [loadingDocumentDetailId, setLoadingDocumentDetailId] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedDocumentId, setSavedDocumentId] = useState('')
   const [error, setError] = useState('')
@@ -230,19 +229,16 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   useEffect(() => {
     const target = selectedPersistedDocument
-    if (!target?.isSummary || loadingDocumentDetailId === target.id) return
+    if (!target?.isSummary) return
     let active = true
-    setLoadingDocumentDetailId(target.id)
     void fetchMaintenanceDocument(target.id).then((detail) => {
       if (!active) return
       setDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '整備書類の詳細を読み込めませんでした。')
-    }).finally(() => {
-      if (active) setLoadingDocumentDetailId((current) => current === target.id ? '' : current)
     })
     return () => { active = false }
-  }, [loadingDocumentDetailId, selectedPersistedDocument, selectedPersistedDocument?.id, selectedPersistedDocument?.isSummary])
+  }, [selectedPersistedDocument])
 
   useEffect(() => {
     const customerId = selectedPersistedDocument?.customerId

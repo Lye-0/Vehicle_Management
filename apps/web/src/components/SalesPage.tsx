@@ -143,7 +143,6 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
   const [documentHasMore, setDocumentHasMore] = useState(false)
   const [loadingMoreDocuments, setLoadingMoreDocuments] = useState(false)
-  const [loadingDocumentDetailId, setLoadingDocumentDetailId] = useState('')
   const [syncError, setSyncError] = useState('')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -267,19 +266,16 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   useEffect(() => {
     const target = selectedPersistedDocument
-    if (!target?.isSummary || loadingDocumentDetailId === target.id) return
+    if (!target?.isSummary) return
     let active = true
-    setLoadingDocumentDetailId(target.id)
     void fetchSalesDocument(target.id).then((detail) => {
       if (!active) return
       replaceDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
     }).catch((reason: unknown) => {
       if (active) setSyncError(reason instanceof Error ? reason.message : '販売書類の詳細を読み込めませんでした。')
-    }).finally(() => {
-      if (active) setLoadingDocumentDetailId((current) => current === target.id ? '' : current)
     })
     return () => { active = false }
-  }, [loadingDocumentDetailId, selectedPersistedDocument, selectedPersistedDocument?.id, selectedPersistedDocument?.isSummary])
+  }, [selectedPersistedDocument])
 
   useEffect(() => {
     const customerId = selectedPersistedDocument?.customerId
