@@ -47,7 +47,6 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   const [loadingMoreRecords, setLoadingMoreRecords] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [loadingRecordDetailId, setLoadingRecordDetailId] = useState('')
   const summaryFilterInitializedRef = useRef(false)
   const initialSortRef = useRef({ sortKey, sortDirection })
 
@@ -126,18 +125,15 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   }, [initialRecordId, records])
 
   useEffect(() => {
-    if (!selectedRecord?.isSummary || loadingRecordDetailId === selectedRecord.id) return
+    if (!selectedRecord?.isSummary) return
     let active = true
-    setLoadingRecordDetailId(selectedRecord.id)
     void fetchPaymentRecord(selectedRecord.documentType, selectedRecord.documentId).then((detail) => {
       if (active) setRecords((current) => current.map((record) => record.id === detail.id ? detail : record))
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '入金詳細を読み込めませんでした。')
-    }).finally(() => {
-      if (active) setLoadingRecordDetailId((current) => current === selectedRecord.id ? '' : current)
     })
     return () => { active = false }
-  }, [loadingRecordDetailId, selectedRecord?.documentId, selectedRecord?.documentType, selectedRecord?.id, selectedRecord?.isSummary, selectedRecordId])
+  }, [selectedRecord])
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
