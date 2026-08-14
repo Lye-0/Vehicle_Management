@@ -1334,6 +1334,46 @@
                                 </Grid>
                             </Border>
                         </Expander>
+                        <Border x:Name="LegacyMatchingTopHeader" Margin="0,14,0,0" Padding="12"
+                                Background="#F7F9FC" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8"
+                                Visibility="Collapsed">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <StackPanel>
+                                            <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
+                                                       Text="顧客単位のマッチング確認" />
+                                            <TextBlock x:Name="LegacyMatchingTopCustomerTitleText" Margin="0,4,0,0"
+                                                       FontSize="20" FontWeight="SemiBold" Foreground="#1D4ED8"
+                                                       Text="顧客を選択してください" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button x:Name="LegacyMatchingTopEditCustomerNameButton" Margin="12,13,0,0"
+                                                Padding="10,5" Content="顧客名を変更" IsEnabled="False"
+                                                Click="LegacyMatchingEditCustomerNameButton_Click" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="LegacyMatchingTopCustomerProgressText" Grid.Column="1" Margin="12,0,8,0"
+                                               VerticalAlignment="Center" Foreground="#52647A" FontWeight="SemiBold" />
+                                    <Button x:Name="LegacyMatchingTopPreviousButton" Grid.Column="2" Margin="0,0,8,0"
+                                            Content="← 前の顧客" IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
+                                    <Button x:Name="LegacyMatchingTopNextButton" Grid.Column="3" Margin="0"
+                                            Content="次の顧客 →" IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
+                                </Grid>
+                                <Border Grid.Row="1" Margin="0,10,0,0" Padding="9" Background="#EAF2FF" CornerRadius="5">
+                                    <TextBlock x:Name="LegacyMatchingTopCustomerSummaryText" Foreground="#1E40AF"
+                                               TextWrapping="Wrap" />
+                                </Border>
+                            </Grid>
+                        </Border>
                         <Grid x:Name="LegacyGraphWorkspaceGrid" Margin="0,14,0,0" Height="650">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="500" />
@@ -1352,8 +1392,8 @@
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
-                                    <TextBlock Grid.Row="1" Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="0" x:Name="LegacyGraphCustomerListTitleText" FontWeight="SemiBold" Foreground="#10233F" Text="顧客を選択" />
+                                    <TextBlock Grid.Row="1" x:Name="LegacyGraphCustomerListDescriptionText" Margin="0,4,0,0" Foreground="#52647A" FontSize="12" Text="候補とプレビュー保存済みは橙色、キャンバス承認済みは青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。" TextWrapping="Wrap" />
                                     <TextBlock Grid.Row="2" x:Name="LegacyGraphCurrentCustomerSelectionText" Margin="0,7,0,0"
                                                Foreground="#1D4ED8" FontSize="12" FontWeight="SemiBold"
                                                Text="現在の選択: なし" TextWrapping="Wrap" />
@@ -1470,11 +1510,17 @@
                                                   PreviewMouseMove="LegacyGraphInspectorScrollViewer_PreviewMouseMove"
                                                   PreviewMouseLeftButtonUp="LegacyGraphInspectorScrollViewer_PreviewMouseLeftButtonUp">
                                         <StackPanel>
-                                        <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
-                                                   Text="選択項目の詳細" />
-                                        <TextBlock x:Name="LegacyGraphInspectorTitleText" Margin="0,12,0,0"
-                                                   FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
-                                                   Text="顧客を選択してください" TextWrapping="Wrap" />
+                                         <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#10233F"
+                                                    Text="選択項目の詳細" />
+                                         <DockPanel Margin="0,12,0,0">
+                                             <Button x:Name="LegacyGraphEditCustomerNameButton" DockPanel.Dock="Right"
+                                                     Margin="8,0,0,0" Padding="8,4" Content="顧客名を変更"
+                                                     IsEnabled="False" Visibility="Collapsed"
+                                                     Click="LegacyMatchingEditCustomerNameButton_Click" />
+                                             <TextBlock x:Name="LegacyGraphInspectorTitleText"
+                                                        FontSize="17" FontWeight="SemiBold" Foreground="#10233F"
+                                                        Text="顧客を選択してください" TextWrapping="Wrap" />
+                                         </DockPanel>
                                         <Border x:Name="LegacyGraphInspectorStateBorder" Margin="0,8,0,0"
                                                 Padding="8" Background="#F4F7FB" CornerRadius="5">
                                             <TextBlock x:Name="LegacyGraphInspectorStateText" Foreground="#52647A"
@@ -1606,7 +1652,7 @@
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-                                <Grid>
+                                <Grid x:Name="LegacyMatchingLegacyHeader" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -1627,7 +1673,7 @@
                                     <Button x:Name="LegacyMatchingNextButton" Grid.Column="3" Margin="0"
                                             Content="次の顧客 →" IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
                                 </Grid>
-                                <Border Grid.Row="1" Margin="0,10,0,0" Padding="9" Background="#EAF2FF" CornerRadius="5">
+                                <Border x:Name="LegacyMatchingLegacySummary" Grid.Row="1" Margin="0,10,0,0" Padding="9" Background="#EAF2FF" CornerRadius="5" Visibility="Collapsed">
                                     <TextBlock x:Name="LegacyMatchingCustomerSummaryText" Foreground="#1E40AF"
                                                TextWrapping="Wrap" />
                                 </Border>
@@ -1637,7 +1683,7 @@
                                         <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="1.45*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Padding="10" Background="#FFFFFF"
+                                    <Border Grid.Column="0" Padding="10" Background="#FFFFFF" Visibility="Collapsed"
                                             BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="6">
                                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                                             <StackPanel>
@@ -1684,7 +1730,7 @@
                                             </StackPanel>
                                         </ScrollViewer>
                                     </Border>
-                                    <Border Grid.Column="2" Padding="10" Background="#FFFFFF"
+                                    <Border Grid.Column="0" Grid.ColumnSpan="3" Padding="10" Background="#FFFFFF"
                                             BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="6">
                                         <Grid>
                                             <Grid.RowDefinitions>
@@ -1694,7 +1740,7 @@
                                                 <RowDefinition Height="Auto" />
                                             </Grid.RowDefinitions>
                                             <TextBlock FontWeight="SemiBold" Foreground="#92400E"
-                                                       Text="この顧客へのおすすめ" />
+                                                       Text="この顧客へのおすすめ（顧客統合・車両・書類）" />
                                             <TextBlock Grid.Row="1" Margin="0,4,0,8" Foreground="#8A5A00" FontSize="11"
                                                        Text="一致項目・差異・競合を確認してから、承認・却下・保留を選択します。おすすめは自動確定されません。"
                                                        TextWrapping="Wrap" />
