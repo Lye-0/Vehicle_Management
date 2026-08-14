@@ -12341,7 +12341,10 @@ public partial class MainWindow : Window
             ? new GridLength(28)
             : new GridLength(0);
 
-        public Thickness BlockMargin => IsGroupHeader ||
+        public bool IsMatchingEntry => EntryId.StartsWith("matching-", StringComparison.Ordinal);
+
+        public Thickness BlockMargin => IsMatchingEntry ||
+                                         IsGroupHeader ||
                                          !GroupKey.StartsWith("same-name:", StringComparison.Ordinal) &&
                                          !GroupKey.StartsWith("manual:", StringComparison.Ordinal)
             ? new Thickness(1, 3, 1, 3)
