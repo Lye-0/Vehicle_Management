@@ -2272,6 +2272,8 @@ public partial class MainWindow : Window
                 UnifiedImportSummaryText.Text =
                     $"作業フォルダー: {session.RootPath}\n候補パッケージ: {candidatePackagePath}";
                 ShowUnifiedImportGraph();
+                LegacyPreparationExpander.IsExpanded =
+                    string.Equals(checkpoint.UiMode, "preparation", StringComparison.OrdinalIgnoreCase);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
