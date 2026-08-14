@@ -916,6 +916,32 @@
                              </StackPanel>
                          </Border>
 
+                        <Border Margin="0,10,0,0" Padding="12" Background="#F4F7FB"
+                                BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold" Foreground="#10233F"
+                                               Text="作業保存・中断再開" />
+                                    <TextBlock x:Name="LegacyGraphWorkStatusText" Margin="0,4,0,0"
+                                               Foreground="#52647A" TextWrapping="Wrap"
+                                               Text="候補パッケージを読み込むと、作業状態を保存できます。" />
+                                </StackPanel>
+                                <Button x:Name="LegacyGraphSaveWorkButton" Grid.Column="1" Margin="10,0,0,0"
+                                        Content="作業を保存" IsEnabled="False"
+                                        Click="LegacyGraphSaveWorkButton_Click"
+                                        ToolTip="現在の顧客統合・紐付け・トレイ・ごみ箱の状態を保存します。" />
+                                <Button x:Name="LegacyGraphOpenWorkButton" Grid.Column="2" Margin="10,0,0,0"
+                                        Content="作業フォルダーを開く"
+                                        Click="LegacyGraphOpenWorkButton_Click"
+                                        ToolTip="保存済みのABACUS-Import作業フォルダーを検証して再開します。" />
+                            </Grid>
+                        </Border>
+
                         <Expander x:Name="LegacyPreparationExpander" Margin="0,18,0,0"
                                   Header="詳細診断（必要な場合のみ）" IsExpanded="False">
                             <StackPanel Margin="0,8,0,0">
@@ -1121,31 +1147,6 @@
                         <Border Margin="0,10,0,0" Padding="12" Background="#FFF4D6" CornerRadius="8">
                             <TextBlock x:Name="LegacyGraphLegendText" Foreground="#805B10" TextWrapping="Wrap"
                                        Text="車両右側の●と書類左側の●が接続ノードです。書類・車両どちらの●からでも接続を開始できます。書類左側の×で切断し、顧客に直接紐付く車両未確定書類も確認できます。すべての操作が終わった後のインポート確定時に、未確定トレイの書類を警告付きで除外します。" />
-                        </Border>
-                        <Border Margin="0,10,0,0" Padding="12" Background="#F4F7FB"
-                                BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="8">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock FontWeight="SemiBold" Foreground="#10233F"
-                                               Text="作業保存・中断再開" />
-                                    <TextBlock x:Name="LegacyGraphWorkStatusText" Margin="0,4,0,0"
-                                               Foreground="#52647A" TextWrapping="Wrap"
-                                               Text="候補パッケージを読み込むと、作業状態を保存できます。" />
-                                </StackPanel>
-                                <Button x:Name="LegacyGraphSaveWorkButton" Grid.Column="1" Margin="10,0,0,0"
-                                        Content="作業を保存" IsEnabled="False"
-                                        Click="LegacyGraphSaveWorkButton_Click"
-                                        ToolTip="現在の顧客統合・紐付け・トレイ・ごみ箱の状態を保存します。" />
-                                <Button x:Name="LegacyGraphOpenWorkButton" Grid.Column="2" Margin="10,0,0,0"
-                                        Content="作業フォルダーを開く"
-                                        Click="LegacyGraphOpenWorkButton_Click"
-                                        ToolTip="保存済みのABACUS-Import作業フォルダーを検証して再開します。" />
-                            </Grid>
                         </Border>
                         <Grid Margin="0,14,0,0" Height="650">
                             <Grid.ColumnDefinitions>
