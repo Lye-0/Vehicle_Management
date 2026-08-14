@@ -10637,6 +10637,25 @@ public partial class MainWindow : Window
 
     private async Task FinishCloseAsync()
     {
+        if (!legacyGraphBulkMergeBusy &&
+            !legacyGraphFinalPackageBusy &&
+            legacyExportCandidateGraphResult is not null &&
+            unifiedImportOutputSession is not null)
+        {
+            try
+            {
+                // Dispatcherに積まれた自動保存より先に終了しても、最後の画面状態を
+                // チェックポイントへ確実に反映してからウィンドウを閉じます。
+                await SaveLegacyGraphCheckpointAsync("close");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                               InvalidDataException or ArgumentException or NotSupportedException)
+            {
+                LegacyGraphWorkStatusText.Text = $"終了前の作業保存に失敗しました: {exception.Message}";
+                LegacyGraphWorkStatusText.Foreground = ToBrush("#A61B1B");
+            }
+        }
+
         operationCancellation?.Cancel();
         CancelLegacyExportFolderDetection();
         IsEnabled = false;
