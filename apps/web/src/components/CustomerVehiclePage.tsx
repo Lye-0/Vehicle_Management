@@ -171,6 +171,13 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
   const selectedVehiclelessDocuments = selectedCustomer ? vehiclelessDocumentsByCustomer[selectedCustomer.id] ?? null : null
   const vehiclelessLoading = Boolean(selectedCustomer && vehiclelessLoadingCustomerId === selectedCustomer.id)
+  const selectedCustomerVehicleCount = selectedCustomer?.vehicles.length ?? 0
+  const selectedVehiclelessDocumentCount = selectedVehiclelessDocuments?.documents.length ?? 0
+
+  useEffect(() => {
+    if (!selectedCustomerId || selectedCustomerVehicleCount > 0 || selectedVehiclelessDocumentCount === 0 || selectedVehiclelessCustomerId === selectedCustomerId) return
+    setSelectedVehiclelessCustomerId(selectedCustomerId)
+  }, [selectedCustomerId, selectedCustomerVehicleCount, selectedVehiclelessCustomerId, selectedVehiclelessDocumentCount])
 
   useEffect(() => {
     if (!selectedCustomerId) return
