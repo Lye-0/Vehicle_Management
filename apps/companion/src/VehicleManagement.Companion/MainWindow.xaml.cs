@@ -1732,7 +1732,7 @@ public partial class MainWindow : Window
         {
             LegacyGraphCustomerListTitleText.Text = "統合候補欄";
             LegacyGraphCustomerListDescriptionText.Text =
-                "現在の顧客を先頭に、比較する顧客だけを表示します。強い統合候補とおすすめ統合候補を確認し、統合は右のおすすめ欄で判断します。統合済みの構成顧客は通常の巡回対象から除外されます。";
+                "基準顧客・追加統合済み・現在確認中・未処理・保留を分けて表示します。統合済みの構成顧客は通常の巡回対象から除外されます。";
             LegacyGraphLegendText.Text =
                 "中央キャンバスはグラフUIと共通です。顧客確認済みは青で表示します。おすすめ以外の車両・書類は、右側の未確定タブから検索してキャンバスへドラッグできます。";
             EnsureLegacyGraphMatchingCustomerSelection(GetLegacyGraphCustomerForCurrentSelection());
@@ -1744,7 +1744,7 @@ public partial class MainWindow : Window
         {
             LegacyGraphCustomerListTitleText.Text = "顧客を選択";
             LegacyGraphCustomerListDescriptionText.Text =
-                "未確認の顧客・候補は通常色、顧客単位の確認完了は青で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。";
+                "顧客単位の確認完了は青、内容変更後の再確認待ちは橙で表示します。顧客カードを別の顧客へドラッグすると、異なる名前でも候補に追加できます。";
             LegacyGraphLegendText.Text =
                 "顧客は確認完了を青、未確認を通常色で表示します。車両右側と書類左側の●が接続ノードです。緑の実線は自動確定、青の点線は仮紐付け、赤の点線は未接続です。下部の未確定トレイからもキャンバスへ接続できます。";
             var selectedGraphCustomer = string.IsNullOrWhiteSpace(legacyGraphMatchingCustomerId)
@@ -7402,19 +7402,38 @@ public partial class MainWindow : Window
             }
         }
 
-        foreach (var item in pendingRecommendations)
+        if (pendingRecommendations.Count > 0)
         {
-            entries.Add(CreateLegacyMatchingCustomerListEntry(
-                item.Customer,
-                IsCurrentCandidate(item.Recommendation)
-                    ? "現在確認中 / " + (item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補")
-                    : item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補",
-                item.Recommendation.IsManual ? "検索から追加した候補です" : item.Recommendation.Reason,
+            var groupKey = $"matching-pending:{focusSource.CustomerId}";
+            var expanded = legacyGraphCustomerGroupExpanded.GetValueOrDefault(groupKey, true);
+            entries.Add(CreateLegacyMatchingGroupHeader(
+                groupKey,
+                focusSource,
+                $"未処理候補 {pendingRecommendations.Count:N0}件",
+                "顧客・車両・書類の候補を確認",
+                expanded,
                 ToBrush("#FFF7ED"),
                 ToBrush("#FDBA74"),
-                ToBrush("#9A3412"),
-                isFocus: false,
-                item.Recommendation));
+                ToBrush("#9A3412")));
+            if (expanded)
+            {
+                foreach (var item in pendingRecommendations)
+                {
+                    entries.Add(CreateLegacyMatchingCustomerListEntry(
+                        item.Customer,
+                        IsCurrentCandidate(item.Recommendation)
+                            ? "現在確認中 / " + (item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補")
+                            : item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補",
+                        item.Recommendation.IsManual ? "検索から追加した候補です" : item.Recommendation.Reason,
+                        ToBrush("#FFF7ED"),
+                        ToBrush("#FDBA74"),
+                        ToBrush("#9A3412"),
+                        isFocus: false,
+                        item.Recommendation,
+                        isGroupChild: true,
+                        groupKeyOverride: groupKey));
+                }
+            }
         }
 
         var allHeld = heldAutomatic
