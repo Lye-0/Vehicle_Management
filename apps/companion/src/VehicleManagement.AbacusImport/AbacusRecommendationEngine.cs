@@ -67,6 +67,13 @@ public sealed record AbacusRecommendationDifference(
     string SourceValue,
     string CandidateValue);
 
+public sealed record AbacusRecommendationMissingField(
+    string Field,
+    string Label,
+    string SourceValue,
+    string CandidateValue,
+    string MissingSide);
+
 public sealed record AbacusRecommendationCandidate(
     string CandidateId,
     string SubjectKind,
@@ -76,6 +83,7 @@ public sealed record AbacusRecommendationCandidate(
     string TargetCustomerId,
     IReadOnlyList<AbacusRecommendationEvidence> MatchedFields,
     IReadOnlyList<AbacusRecommendationDifference> Differences,
+    IReadOnlyList<AbacusRecommendationMissingField> MissingFields,
     IReadOnlyList<string> Conflicts,
     string Reason)
 {
@@ -268,6 +276,7 @@ public sealed class AbacusRecommendationEngine
             targetCustomerId,
             evaluation.Matches.ToArray(),
             evaluation.Differences.ToArray(),
+            evaluation.MissingFields.ToArray(),
             evaluation.Conflicts.Distinct(StringComparer.Ordinal).ToArray(),
             BuildReason(evaluation)));
     }
@@ -307,6 +316,15 @@ public sealed class AbacusRecommendationEngine
     {
         if (string.IsNullOrWhiteSpace(sourceValue) || string.IsNullOrWhiteSpace(candidateValue))
         {
+            if (!string.IsNullOrWhiteSpace(sourceValue) || !string.IsNullOrWhiteSpace(candidateValue))
+            {
+                evaluation.MissingFields.Add(new AbacusRecommendationMissingField(
+                    field,
+                    label,
+                    sourceValue.Trim(),
+                    candidateValue.Trim(),
+                    string.IsNullOrWhiteSpace(sourceValue) ? "source" : "candidate"));
+            }
             return;
         }
 
@@ -314,6 +332,12 @@ public sealed class AbacusRecommendationEngine
         var candidateKey = identifier ? NormalizeIdentifier(candidateValue) : NormalizeText(candidateValue);
         if (sourceKey.Length == 0 || candidateKey.Length == 0)
         {
+            evaluation.MissingFields.Add(new AbacusRecommendationMissingField(
+                field,
+                label,
+                sourceValue.Trim(),
+                candidateValue.Trim(),
+                sourceKey.Length == 0 ? "source" : "candidate"));
             return;
         }
 
@@ -566,6 +590,11 @@ public sealed class AbacusRecommendationEngine
             reason += $" 差異: {string.Join("、", evaluation.Differences.Select(difference => difference.Label))}。";
         }
 
+        if (evaluation.MissingFields.Count > 0)
+        {
+            reason += $" 不足情報: {string.Join("、", evaluation.MissingFields.Select(field => field.Label))}。";
+        }
+
         if (evaluation.Conflicts.Count > 0)
         {
             reason += $" 競合: {string.Join("、", evaluation.Conflicts.Distinct(StringComparer.Ordinal))} 承認前に確認が必要です。";
@@ -642,6 +671,7 @@ public sealed class AbacusRecommendationEngine
     {
         public List<AbacusRecommendationEvidence> Matches { get; } = [];
         public List<AbacusRecommendationDifference> Differences { get; } = [];
+        public List<AbacusRecommendationMissingField> MissingFields { get; } = [];
         public List<string> Conflicts { get; } = [];
     }
 }

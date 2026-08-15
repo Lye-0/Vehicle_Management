@@ -7,7 +7,7 @@ namespace VehicleManagement.Companion.Services;
 
 public static class LegacyGraphWorkCheckpointSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const string Kind = "abacus-legacy-graph-work-checkpoint";
 }
 
@@ -62,7 +62,10 @@ public sealed record LegacyGraphCheckpointImageMappingRow(
 
 public sealed record LegacyGraphCheckpointRecommendationState(
     string CandidateId,
-    string Decision);
+    string Decision,
+    string Lifecycle = LegacyGraphRecommendationLifecycle.Active,
+    string? ResolutionReason = null,
+    DateTimeOffset? UpdatedAtUtc = null);
 
 public sealed record LegacyGraphWorkCheckpoint(
     string Kind,
@@ -202,22 +205,31 @@ public sealed class LegacyGraphWorkCheckpointStore
             ? bytes[3..]
             : bytes;
 
-    private static LegacyGraphWorkCheckpoint UpgradeCheckpoint(LegacyGraphWorkCheckpoint checkpoint) =>
-        checkpoint.Version switch
+    private static LegacyGraphWorkCheckpoint UpgradeCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
+    {
+        if (checkpoint.Version is not 1 and not 2 and not LegacyGraphWorkCheckpointSchema.CurrentVersion)
         {
-            1 => checkpoint with
-            {
-                Version = LegacyGraphWorkCheckpointSchema.CurrentVersion,
-                RecommendationStates = [],
-                CustomerNameOverrides = new Dictionary<string, string>(),
-            },
-            LegacyGraphWorkCheckpointSchema.CurrentVersion => checkpoint with
-            {
-                RecommendationStates = checkpoint.RecommendationStates ?? [],
-                CustomerNameOverrides = checkpoint.CustomerNameOverrides ?? new Dictionary<string, string>(),
-            },
-            _ => checkpoint,
+            return checkpoint;
+        }
+
+        return checkpoint with
+        {
+            Version = LegacyGraphWorkCheckpointSchema.CurrentVersion,
+            RecommendationStates = NormalizeRecommendationStates(checkpoint.RecommendationStates),
+            CustomerNameOverrides = checkpoint.CustomerNameOverrides ?? new Dictionary<string, string>(),
         };
+    }
+
+    private static LegacyGraphCheckpointRecommendationState[] NormalizeRecommendationStates(
+        IEnumerable<LegacyGraphCheckpointRecommendationState>? states) =>
+        (states ?? [])
+        .Select(state => state with
+        {
+            Lifecycle = string.IsNullOrWhiteSpace(state.Lifecycle)
+                ? LegacyGraphRecommendationLifecycle.Active
+                : state.Lifecycle,
+        })
+        .ToArray();
 
     private static void ValidateCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
     {
@@ -279,7 +291,8 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.RecommendationStates.Any(state =>
                 state is null ||
                 string.IsNullOrWhiteSpace(state.CandidateId) ||
-                !AbacusRecommendationDecisionValues.IsSupported(state.Decision)) ||
+                !AbacusRecommendationDecisionValues.IsSupported(state.Decision) ||
+                !LegacyGraphRecommendationLifecycle.IsSupported(state.Lifecycle)) ||
             checkpoint.RecommendationStates
                 .GroupBy(state => state.CandidateId, StringComparer.OrdinalIgnoreCase)
                 .Any(group => group.Count() > 1) ||
