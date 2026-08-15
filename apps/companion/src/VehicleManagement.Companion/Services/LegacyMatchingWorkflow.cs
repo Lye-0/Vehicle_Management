@@ -45,9 +45,16 @@ public sealed record LegacyMatchingCategorySummary(
     int Total,
     int Pending,
     int Held,
-    int Completed)
+    int Completed,
+    int Obsolete = 0)
 {
-    public string ProgressText => $"{Completed}/{Total}";
+    /// <summary>
+    /// 通常のおすすめ巡回で確認対象にする件数です。
+    /// 処理済み・無効候補は含めません。
+    /// </summary>
+    public int Active => Pending + Held;
+
+    public string ProgressText => $"{Pending}/{Active}";
 }
 
 /// <summary>
@@ -79,10 +86,11 @@ public static class LegacyMatchingWorkflow
                 var completed = categoryCandidates.Count(candidate =>
                     GetDecision(decisions, candidate) is AbacusRecommendationDecisionValues.Approved or
                         AbacusRecommendationDecisionValues.Rejected);
+                var active = pending + held;
                 return new LegacyMatchingCategorySummary(
                     kind,
                     LegacyMatchingCategoryKinds.GetLabel(kind),
-                    categoryCandidates.Length,
+                    active,
                     pending,
                     held,
                     completed);

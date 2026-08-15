@@ -1885,6 +1885,8 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentDecisionText.Text = "";
             LegacyMatchingCurrentAutoDecisionReasonText.Text = "";
             LegacyMatchingDetailsSubjectSummaryText.Text = "";
+            LegacyMatchingDetailsSourceHeadingText.Text = "";
+            LegacyMatchingDetailsCandidateHeadingText.Text = "";
             LegacyMatchingDetailsDecisionText.Text = "";
             LegacyMatchingDetailsReasonText.Text = "";
             LegacyMatchingDetailsAutoDecisionText.Text = "";
@@ -1899,6 +1901,7 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
             LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
             LegacyMatchingDetailsMergePreviewText.Text = "";
+            LegacyMatchingDetailsMergePreviewSection.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -2191,7 +2194,8 @@ public partial class MainWindow : Window
             legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Vehicle);
         ApplyLegacyMatchingCategoryButtonStyle(LegacyMatchingDocumentCategoryButton,
             legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Document);
-        LegacyMatchingRecommendationsTabButton.Content = $"おすすめ ({actionableRecommendations.Count:N0})";
+        var activeRecommendationCount = summaries.Sum(summary => summary.Total);
+        LegacyMatchingRecommendationsTabButton.Content = $"おすすめ ({activeRecommendationCount:N0})";
         LegacyMatchingCurrentCategoryText.Text = LegacyMatchingCategoryKinds.GetLabel(legacyGraphMatchingCategory);
         LegacyMatchingSideApproveButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
             ? "統合する"
@@ -2199,13 +2203,16 @@ public partial class MainWindow : Window
         LegacyMatchingSideRejectButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
             ? "別人"
             : "却下";
+        var queueLabel = summaries.Sum(summary => summary.Pending) > 0
+            ? "未処理"
+            : "保留再確認";
         LegacyMatchingCurrentProgressText.Text = categoryCandidates.Count == 0
-            ? "0 / 0"
-            : $"{legacyGraphMatchingRecommendationIndex + 1:N0} / {categoryCandidates.Count:N0}";
+            ? $"{queueLabel} 0 / 0"
+            : $"{queueLabel} {legacyGraphMatchingRecommendationIndex + 1:N0} / {categoryCandidates.Count:N0}";
 
         if (currentCandidate is null)
         {
-            LegacyMatchingCurrentSubjectText.Text = "このカテゴリに未処理のおすすめはありません";
+            LegacyMatchingCurrentSubjectText.Text = $"このカテゴリに{queueLabel}のおすすめはありません";
             LegacyMatchingCurrentTargetText.Text = "未確定タブで検索するか、別のカテゴリを選択してください。";
             LegacyMatchingCurrentRelationArrowText.Text = "→";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
@@ -2216,6 +2223,8 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentDecisionText.Text = "";
             LegacyMatchingCurrentAutoDecisionReasonText.Text = "";
             LegacyMatchingDetailsSubjectSummaryText.Text = "";
+            LegacyMatchingDetailsSourceHeadingText.Text = "";
+            LegacyMatchingDetailsCandidateHeadingText.Text = "";
             LegacyMatchingDetailsDecisionText.Text = "";
             LegacyMatchingDetailsReasonText.Text = "";
             LegacyMatchingDetailsAutoDecisionText.Text = "";
@@ -2230,6 +2239,7 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
             LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
             LegacyMatchingDetailsMergePreviewText.Text = "";
+            LegacyMatchingDetailsMergePreviewSection.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -2238,7 +2248,7 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentMissingBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentConflictBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
-            LegacyMatchingNoRecommendationText.Text = "このカテゴリに未処理のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。";
+            LegacyMatchingNoRecommendationText.Text = $"このカテゴリに{queueLabel}のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。";
             LegacyMatchingNoRecommendationText.Visibility = Visibility.Visible;
             LegacyMatchingDetailsButton.IsEnabled = false;
             ApplyLegacyMatchingDecisionBadgeStyle(null);
@@ -2307,7 +2317,12 @@ public partial class MainWindow : Window
             .Concat(differenceRows)
             .Concat(missingRows)
             .ToArray();
-        var entityRows = BuildLegacyMatchingEntityRows(currentCandidate);
+        var sourceEntitySections = BuildLegacyMatchingEntitySections(
+            currentCandidate.SubjectKind,
+            currentCandidate.SubjectId);
+        var candidateEntitySections = BuildLegacyMatchingEntitySections(
+            currentCandidate.TargetKind,
+            currentCandidate.TargetId);
         var evidenceItems = currentCandidate.MatchedFields
             .Select(field =>
                 $"{field.Label}: {DisplayLegacyMatchingValue(field.SourceValue)} → " +
@@ -2364,8 +2379,16 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentMissingItemsControl.ItemsSource = missingRows;
         LegacyMatchingCurrentConflictItemsControl.ItemsSource = conflictRows;
         LegacyMatchingDetailsSubjectSummaryText.Text = $"{item.SubjectText} → {item.TargetText}";
-        LegacyMatchingDetailsSourceItemsControl.ItemsSource = entityRows;
-        LegacyMatchingDetailsCandidateItemsControl.ItemsSource = entityRows;
+        LegacyMatchingDetailsSourceHeadingText.Text = GetLegacyMatchingEntityHeading(
+            currentCandidate.SubjectKind,
+            currentCandidate.TargetKind,
+            isSource: true);
+        LegacyMatchingDetailsCandidateHeadingText.Text = GetLegacyMatchingEntityHeading(
+            currentCandidate.SubjectKind,
+            currentCandidate.TargetKind,
+            isSource: false);
+        LegacyMatchingDetailsSourceItemsControl.ItemsSource = sourceEntitySections;
+        LegacyMatchingDetailsCandidateItemsControl.ItemsSource = candidateEntitySections;
         LegacyMatchingDetailsComparisonItemsControl.ItemsSource = comparisonRows;
         LegacyMatchingDetailsEvidenceItemsControl.ItemsSource = evidenceItems;
         LegacyMatchingDetailsDifferenceItemsControl.ItemsSource = differenceItems;
@@ -2376,6 +2399,9 @@ public partial class MainWindow : Window
             ? "この対象に対する別の候補はありません。"
             : $"同じ対象に対する別候補 {alternativeItems.Count:N0}件。候補を変更する操作はここでは行いません。";
         LegacyMatchingDetailsMergePreviewText.Text = BuildLegacyMatchingMergePreviewText(currentCandidate);
+        LegacyMatchingDetailsMergePreviewSection.Visibility = IsLegacyMatchingCustomerMerge(currentCandidate)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         LegacyMatchingDetailsInternalItemsControl.ItemsSource = internalRows;
         LegacyMatchingCurrentDifferenceBorder.Visibility = differenceRows.Length == 0
             ? Visibility.Collapsed
@@ -2442,6 +2468,9 @@ public partial class MainWindow : Window
     private static string DisplayLegacyMatchingValue(string value) =>
         string.IsNullOrWhiteSpace(value) ? "情報なし" : value;
 
+    private static string DisplayLegacyMatchingEntityValue(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
     private static string BuildLegacyMatchingShortReason(AbacusRecommendationCandidate candidate)
     {
         var labels = candidate.MatchedFields
@@ -2486,72 +2515,81 @@ public partial class MainWindow : Window
         return "おすすめは自動確定せず、承認操作で反映します。";
     }
 
-    private IReadOnlyList<LegacyMatchingDetailRow> BuildLegacyMatchingEntityRows(
-        AbacusRecommendationCandidate candidate)
-    {
-        var sourceFields = GetLegacyMatchingEntityFields(candidate.SubjectKind, candidate.SubjectId);
-        var candidateFields = GetLegacyMatchingEntityFields(candidate.TargetKind, candidate.TargetId);
-        var labels = sourceFields.Keys
-            .Concat(candidateFields.Keys)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        return labels
-            .Select(label => new LegacyMatchingDetailRow(
-                label,
-                sourceFields.TryGetValue(label, out var sourceValue)
-                    ? sourceValue
-                    : "情報なし",
-                candidateFields.TryGetValue(label, out var candidateValue)
-                    ? candidateValue
-                    : "情報なし",
-                "参考情報",
-                ToBrush("#64748B"),
-                "context",
-                ""))
-            .ToArray();
-    }
-
-    private IReadOnlyDictionary<string, string> GetLegacyMatchingEntityFields(
+    private IReadOnlyList<LegacyMatchingEntitySection> BuildLegacyMatchingEntitySections(
         string kind,
         string id)
     {
-        var fields = new List<(string Label, string Value)>();
+        var sections = new List<LegacyMatchingEntitySection>();
         switch (kind)
         {
             case AbacusRecommendationEntityKinds.Customer:
                 if (FindLegacyGraphCustomerById(id) is { } customer)
                 {
-                    fields.Add(("顧客ID", customer.CustomerId));
-                    fields.Add(("顧客番号", customer.CustomerNumber));
-                    fields.Add(("顧客名", GetLegacyGraphCustomerDisplayName(customer)));
-                    fields.Add(("ふりがな", customer.NameKana));
-                    fields.Add(("電話番号", customer.PhoneNumber));
-                    fields.Add(("メールアドレス", customer.EmailAddress));
-                    fields.Add(("郵便番号", customer.PostalCode));
-                    fields.Add(("住所", customer.Address));
-                    fields.Add(("メモ", customer.Memo));
-                    fields.Add(("車両数", $"{GetLegacyGraphVehiclesForDisplay(customer).Count:N0}台"));
-                    fields.Add(("書類数", $"{GetLegacyGraphDisplayedDocumentCount(customer):N0}件"));
-                    fields.Add(("出典", "顧客候補パッケージ / customers.csv"));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "基本情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("顧客番号", customer.CustomerNumber),
+                            CreateLegacyMatchingEntityRow("顧客名", GetLegacyGraphCustomerDisplayName(customer)),
+                            CreateLegacyMatchingEntityRow("ふりがな", customer.NameKana),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "連絡先",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("電話番号", customer.PhoneNumber),
+                            CreateLegacyMatchingEntityRow("メール", customer.EmailAddress),
+                            CreateLegacyMatchingEntityRow("郵便番号", customer.PostalCode),
+                            CreateLegacyMatchingEntityRow("住所", customer.Address),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "関連データ",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("車両数", $"{GetLegacyGraphVehiclesForDisplay(customer).Count:N0}台"),
+                            CreateLegacyMatchingEntityRow("書類数", $"{GetLegacyGraphDisplayedDocumentCount(customer):N0}件"),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "その他",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("メモ", customer.Memo),
+                            CreateLegacyMatchingEntityRow("出典", "顧客候補パッケージ / customers.csv"),
+                        }));
                 }
 
                 break;
             case AbacusRecommendationEntityKinds.Vehicle:
                 if (FindLegacyGraphVehicleById(id) is { } vehicle)
                 {
-                    fields.Add(("車両ID", vehicle.VehicleId));
-                    fields.Add(("顧客ID", vehicle.CustomerId));
-                    fields.Add(("顧客名", vehicle.CustomerName));
-                    fields.Add(("メーカー", vehicle.Maker));
-                    fields.Add(("車名", vehicle.VehicleName));
-                    fields.Add(("型式", vehicle.Model));
-                    fields.Add(("登録番号", vehicle.RegistrationNumber));
-                    fields.Add(("車台番号", vehicle.ChassisNumber));
-                    fields.Add(("年式", vehicle.ModelYear));
-                    fields.Add(("車検満了日", vehicle.InspectionDate));
-                    fields.Add(("走行距離", vehicle.Mileage));
-                    fields.Add(("書類数", $"{vehicle.Documents.Count:N0}件"));
-                    fields.Add(("出典", vehicle.SourceLocation));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "車両情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("車名", vehicle.VehicleName),
+                            CreateLegacyMatchingEntityRow("メーカー", vehicle.Maker),
+                            CreateLegacyMatchingEntityRow("型式", vehicle.Model),
+                            CreateLegacyMatchingEntityRow("所有者", vehicle.CustomerName),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "識別情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("登録番号", vehicle.RegistrationNumber),
+                            CreateLegacyMatchingEntityRow("車台番号", vehicle.ChassisNumber),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "管理情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("年式", vehicle.ModelYear),
+                            CreateLegacyMatchingEntityRow("車検満了日", vehicle.InspectionDate),
+                            CreateLegacyMatchingEntityRow("走行距離", vehicle.Mileage),
+                            CreateLegacyMatchingEntityRow("書類数", $"{vehicle.Documents.Count:N0}件"),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "出典",
+                        new[] { CreateLegacyMatchingEntityRow("出典", vehicle.SourceLocation) }));
                 }
 
                 break;
@@ -2559,35 +2597,73 @@ public partial class MainWindow : Window
                 if (FindLegacyRecommendationDocumentById(id) is { } document)
                 {
                     var profile = document.RecommendationProfile;
-                    fields.Add(("書類ID", GetLegacyDocumentKey(document)));
-                    fields.Add(("書類種別", document.Kind));
-                    fields.Add(("書類番号", document.DocumentNumber));
-                    fields.Add(("顧客名", FirstNonEmpty(document.CustomerName, profile?.CustomerName ?? "")));
-                    fields.Add(("ふりがな", profile?.NameKana ?? ""));
-                    fields.Add(("電話番号", profile?.PhoneNumber ?? ""));
-                    fields.Add(("郵便番号", profile?.PostalCode ?? ""));
-                    fields.Add(("住所", profile?.Address ?? ""));
-                    fields.Add(("車名", FirstNonEmpty(document.VehicleName, profile?.VehicleName ?? "")));
-                    fields.Add(("メーカー", profile?.Maker ?? ""));
-                    fields.Add(("型式", profile?.Model ?? ""));
-                    fields.Add(("登録番号", FirstNonEmpty(document.RegistrationNumber, profile?.RegistrationNumber ?? "")));
-                    fields.Add(("車台番号", profile?.ChassisNumber ?? ""));
-                    fields.Add(("日付", document.DocumentDate));
-                    fields.Add(("合計", document.TotalAmount));
-                    fields.Add(("明細", BuildLegacyGraphDocumentDetailSummary(document).Trim()));
-                    fields.Add(("出典", document.SourceLocation));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "書類情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("書類種別", document.Kind),
+                            CreateLegacyMatchingEntityRow("書類番号", document.DocumentNumber),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "顧客情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("顧客名", FirstNonEmpty(document.CustomerName, profile?.CustomerName ?? "")),
+                            CreateLegacyMatchingEntityRow("ふりがな", profile?.NameKana ?? ""),
+                            CreateLegacyMatchingEntityRow("電話番号", profile?.PhoneNumber ?? ""),
+                            CreateLegacyMatchingEntityRow("郵便番号", profile?.PostalCode ?? ""),
+                            CreateLegacyMatchingEntityRow("住所", profile?.Address ?? ""),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "車両情報",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("車名", FirstNonEmpty(document.VehicleName, profile?.VehicleName ?? "")),
+                            CreateLegacyMatchingEntityRow("メーカー", profile?.Maker ?? ""),
+                            CreateLegacyMatchingEntityRow("型式", profile?.Model ?? ""),
+                            CreateLegacyMatchingEntityRow("登録番号", FirstNonEmpty(document.RegistrationNumber, profile?.RegistrationNumber ?? "")),
+                            CreateLegacyMatchingEntityRow("車台番号", profile?.ChassisNumber ?? ""),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "金額・日付",
+                        new[]
+                        {
+                            CreateLegacyMatchingEntityRow("日付", document.DocumentDate),
+                            CreateLegacyMatchingEntityRow("合計", document.TotalAmount),
+                            CreateLegacyMatchingEntityRow("明細", BuildLegacyGraphDocumentDetailSummary(document).Trim()),
+                        }));
+                    sections.Add(new LegacyMatchingEntitySection(
+                        "出典",
+                        new[] { CreateLegacyMatchingEntityRow("出典", document.SourceLocation) }));
                 }
 
                 break;
         }
 
-        return fields
-            .GroupBy(item => item.Label, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => DisplayLegacyMatchingValue(group.First().Value),
-                StringComparer.Ordinal);
+        return sections;
     }
+
+    private static LegacyMatchingEntityRow CreateLegacyMatchingEntityRow(
+        string label,
+        string value) =>
+        new(label, DisplayLegacyMatchingEntityValue(value));
+
+    private static string GetLegacyMatchingEntityHeading(
+        string subjectKind,
+        string targetKind,
+        bool isSource) =>
+        (subjectKind, targetKind, isSource) switch
+        {
+            (AbacusRecommendationEntityKinds.Customer, AbacusRecommendationEntityKinds.Customer, true) => "現在の顧客",
+            (AbacusRecommendationEntityKinds.Customer, AbacusRecommendationEntityKinds.Customer, false) => "統合候補の顧客",
+            (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Customer, true) => "対象書類",
+            (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Customer, false) => "紐付け先候補の顧客",
+            (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Vehicle, true) => "対象書類",
+            (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Vehicle, false) => "紐付け先候補の車両",
+            (AbacusRecommendationEntityKinds.Vehicle, AbacusRecommendationEntityKinds.Customer, true) => "対象車両",
+            (AbacusRecommendationEntityKinds.Vehicle, AbacusRecommendationEntityKinds.Customer, false) => "紐付け先候補の顧客",
+            _ => isSource ? "対象の情報" : "候補・紐付け先の情報",
+        };
 
     private AbacusLegacyExportCandidateGraphDocument? FindLegacyRecommendationDocumentById(string id) =>
         legacyExportCandidateGraphResult?.AllDocuments.FirstOrDefault(document =>
@@ -2629,7 +2705,12 @@ public partial class MainWindow : Window
                     : $"要確認: {string.Join("、", candidate.Conflicts)}";
                 return new LegacyMatchingAlternativeRow(
                     targetText,
-                    $"一致: {matchedText}\n{differenceText}\n{conflictText}\n判定: {GetLegacyMatchingDecisionText(GetLegacyGraphRecommendationDecision(candidate))}");
+                    GetLegacyMatchingAlternativeIdentifier(candidate, sourceCustomerIds),
+                    matchedText,
+                    differenceText,
+                    conflictText,
+                    GetLegacyMatchingDecisionText(GetLegacyGraphRecommendationDecision(candidate)),
+                    candidate.CandidateId);
             })
             .ToArray();
         return alternatives;
@@ -2646,28 +2727,54 @@ public partial class MainWindow : Window
                 ? candidate.TargetId
                 : candidate.SubjectId;
             return FindLegacyGraphCustomerById(otherId) is { } customer
-                ? $"顧客候補: {GetLegacyGraphCustomerDisplayName(customer)} / {customer.CustomerId}"
-                : $"顧客候補: {otherId}";
+                ? GetLegacyGraphCustomerDisplayName(customer)
+                : "顧客候補";
         }
 
         return candidate.TargetKind switch
         {
             AbacusRecommendationEntityKinds.Customer when FindLegacyGraphCustomerById(candidate.TargetId) is { } customer =>
-                $"接続先顧客: {GetLegacyGraphCustomerDisplayName(customer)} / {customer.CustomerId}",
+                GetLegacyGraphCustomerDisplayName(customer),
             AbacusRecommendationEntityKinds.Vehicle when FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle =>
-                $"接続先車両: {Fallback(vehicle.Maker)} {vehicle.DisplayName} / {vehicle.VehicleId}",
-            _ => $"接続先: {candidate.TargetKind} {candidate.TargetId}",
+                $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
+            _ => "接続先候補",
+        };
+    }
+
+    private string GetLegacyMatchingAlternativeIdentifier(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlySet<string> sourceCustomerIds)
+    {
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            var otherId = sourceCustomerIds.Contains(candidate.SubjectId)
+                ? candidate.TargetId
+                : candidate.SubjectId;
+            return FindLegacyGraphCustomerById(otherId) is { } customer
+                ? $"顧客番号: {Fallback(customer.CustomerNumber)}"
+                : "顧客番号: —";
+        }
+
+        return candidate.TargetKind switch
+        {
+            AbacusRecommendationEntityKinds.Customer when FindLegacyGraphCustomerById(candidate.TargetId) is { } customer =>
+                $"顧客番号: {Fallback(customer.CustomerNumber)}",
+            AbacusRecommendationEntityKinds.Vehicle when FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle =>
+                $"登録番号: {Fallback(vehicle.RegistrationNumber)} / 車台番号: {Fallback(vehicle.ChassisNumber)}",
+            AbacusRecommendationEntityKinds.Document when FindLegacyRecommendationDocumentById(candidate.TargetId) is { } document =>
+                $"書類番号: {Fallback(document.DocumentNumber)}",
+            _ => "識別情報: —",
         };
     }
 
     private string BuildLegacyMatchingMergePreviewText(AbacusRecommendationCandidate candidate)
     {
-        if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Customer ||
-            candidate.TargetKind != AbacusRecommendationEntityKinds.Customer ||
+        if (!IsLegacyMatchingCustomerMerge(candidate) ||
             FindLegacyGraphCustomerById(candidate.SubjectId) is not { } sourceCustomer ||
             FindLegacyGraphCustomerById(candidate.TargetId) is not { } targetCustomer)
         {
-            return "顧客統合候補ではありません。車両・書類の接続先は中央キャンバスの承認後プレビューで確認できます。";
+            return "";
         }
 
         var mergeKey = GetLegacyCustomerMergeKey(sourceCustomer);
@@ -2713,6 +2820,10 @@ public partial class MainWindow : Window
                "採用値:\n" + string.Join("\n", fieldLines) +
                "\n差異がある項目は、既存の統合プレビューで採用値を選択してから確定します。";
     }
+
+    private static bool IsLegacyMatchingCustomerMerge(AbacusRecommendationCandidate candidate) =>
+        candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+        candidate.TargetKind == AbacusRecommendationEntityKinds.Customer;
 
     private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyMatchingDocumentsForCustomer(
         AbacusLegacyExportCandidateGraphCustomer customer)
@@ -3011,6 +3122,7 @@ public partial class MainWindow : Window
             .ToHashSet(StringComparer.Ordinal);
         return legacyGraphRecommendationCandidates
             .Where(candidate => IsLegacyGraphRecommendationForCustomer(candidate, sourceCustomerIds))
+            .Where(IsLegacyGraphRecommendationActive)
             .Where(candidate => candidate.SubjectKind != AbacusRecommendationEntityKinds.Document ||
                                 legacyExportCandidateGraphResult.AllDocuments.FirstOrDefault(document =>
                                     string.Equals(GetLegacyDocumentKey(document), candidate.SubjectId, StringComparison.OrdinalIgnoreCase)) is not { } document ||
@@ -3020,6 +3132,10 @@ public partial class MainWindow : Window
                                 !IsLegacyGraphVehicleInTrash(vehicle))
             .ToArray();
     }
+
+    private bool IsLegacyGraphRecommendationActive(AbacusRecommendationCandidate candidate) =>
+        !legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) ||
+        state.Lifecycle == LegacyGraphRecommendationLifecycle.Active;
 
     private void RebuildLegacyGraphRecommendationCandidates()
     {
@@ -9982,6 +10098,7 @@ public partial class MainWindow : Window
 
         LegacyMatchingRecommendationPreviewEdgesCanvas.Children.Clear();
         LegacyMatchingRecommendationPreviewCanvas.Children.Clear();
+        LegacyMatchingPreviewLegend.Visibility = Visibility.Collapsed;
     }
 
     private void RefreshLegacyMatchingRecommendationPreview(
@@ -9996,6 +10113,8 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        LegacyMatchingPreviewLegend.Visibility = Visibility.Visible;
 
         const double customerX = 30;
         const double vehicleX = 320;
@@ -10246,7 +10365,7 @@ public partial class MainWindow : Window
         {
             Stroke = ToBrush("#7C3AED"),
             Fill = ToBrush("#F5F3FF"),
-            StrokeThickness = 2,
+            StrokeThickness = 3,
             RadiusX = 7,
             RadiusY = 7,
             StrokeDashArray = new DoubleCollection { 6, 4 },
@@ -10310,23 +10429,25 @@ public partial class MainWindow : Window
         var line = new Line
         {
             Stroke = ToBrush("#7C3AED"),
-            StrokeThickness = 2,
+            StrokeThickness = 3,
+            Opacity = 0.98,
             StrokeDashArray = new DoubleCollection { 6, 4 },
             IsHitTestVisible = false,
         };
+        var parallelOffset = (LegacyMatchingRecommendationPreviewEdgesCanvas.Children.Count % 3 - 1) * 8;
         if (sourceLeft <= targetLeft)
         {
             line.X1 = sourceRight;
-            line.Y1 = sourceTop + sourceHeight / 2;
+            line.Y1 = sourceTop + sourceHeight / 2 + parallelOffset;
             line.X2 = targetLeft;
-            line.Y2 = targetTop + targetHeight / 2;
+            line.Y2 = targetTop + targetHeight / 2 + parallelOffset;
         }
         else
         {
             line.X1 = sourceLeft;
-            line.Y1 = sourceTop + sourceHeight / 2;
+            line.Y1 = sourceTop + sourceHeight / 2 + parallelOffset;
             line.X2 = targetRight;
-            line.Y2 = targetTop + targetHeight / 2;
+            line.Y2 = targetTop + targetHeight / 2 + parallelOffset;
         }
 
         LegacyMatchingRecommendationPreviewEdgesCanvas.Children.Add(line);
@@ -14428,7 +14549,20 @@ public partial class MainWindow : Window
 
     private sealed record LegacyMatchingAlternativeRow(
         string Title,
-        string Details);
+        string Identifier,
+        string Matched,
+        string Differences,
+        string Conflict,
+        string Decision,
+        string InternalId);
+
+    private sealed record LegacyMatchingEntitySection(
+        string Title,
+        IReadOnlyList<LegacyMatchingEntityRow> Rows);
+
+    private sealed record LegacyMatchingEntityRow(
+        string Label,
+        string Value);
 
     private sealed record LegacyMatchingInternalInfoRow(
         string Label,
