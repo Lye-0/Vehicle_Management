@@ -148,6 +148,7 @@ public partial class MainWindow : Window
     private int legacyGraphMatchingRecommendationIndex = -1;
     private const int LegacyMatchingUnresolvedPageSize = 50;
     private int legacyMatchingUnresolvedPageIndex;
+    private bool legacyMatchingDetailsVisible;
     private readonly List<LegacyMatchingChangeItem> legacyGraphMatchingChanges = [];
     private LegacyMatchingUnresolvedItem? legacyMatchingUnresolvedDragItem;
     private Point legacyMatchingUnresolvedDragStartPoint;
@@ -1855,6 +1856,7 @@ public partial class MainWindow : Window
         var customer = GetLegacyGraphMatchingCustomer();
         if (customer is null)
         {
+            legacyGraphSelectedRecommendation = null;
             SetLegacyMatchingHeader(
                 "顧客を選択してください",
                 "顧客 0 / 0",
@@ -1881,7 +1883,14 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentReasonText.Text = "";
             LegacyMatchingCurrentDecisionText.Text = "";
             LegacyMatchingCurrentAutoDecisionReasonText.Text = "";
-            LegacyMatchingCurrentDetailsText.Text = "";
+            LegacyMatchingDetailsSubjectSummaryText.Text = "";
+            LegacyMatchingDetailsDecisionText.Text = "";
+            LegacyMatchingDetailsReasonText.Text = "";
+            LegacyMatchingDetailsAutoDecisionText.Text = "";
+            LegacyMatchingDetailsSourceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsCandidateItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsComparisonItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -1889,9 +1898,11 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentDifferenceBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentMissingBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentConflictBorder.Visibility = Visibility.Collapsed;
-            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
             LegacyMatchingNoRecommendationText.Text = "顧客を選択すると、おすすめ欄を表示できます。";
             LegacyMatchingNoRecommendationText.Visibility = Visibility.Visible;
+            LegacyMatchingDetailsButton.IsEnabled = false;
+            ApplyLegacyMatchingDecisionBadgeStyle(null);
+            SetLegacyMatchingDetailsVisible(false);
             LegacyMatchingSideApproveButton.IsEnabled = false;
             LegacyMatchingSideRejectButton.IsEnabled = false;
             LegacyMatchingSideHoldButton.IsEnabled = false;
@@ -2195,7 +2206,14 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentReasonText.Text = "";
             LegacyMatchingCurrentDecisionText.Text = "";
             LegacyMatchingCurrentAutoDecisionReasonText.Text = "";
-            LegacyMatchingCurrentDetailsText.Text = "候補が選択されていません。";
+            LegacyMatchingDetailsSubjectSummaryText.Text = "";
+            LegacyMatchingDetailsDecisionText.Text = "";
+            LegacyMatchingDetailsReasonText.Text = "";
+            LegacyMatchingDetailsAutoDecisionText.Text = "";
+            LegacyMatchingDetailsSourceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsCandidateItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsComparisonItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -2206,6 +2224,9 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
             LegacyMatchingNoRecommendationText.Text = "このカテゴリに未処理のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。";
             LegacyMatchingNoRecommendationText.Visibility = Visibility.Visible;
+            LegacyMatchingDetailsButton.IsEnabled = false;
+            ApplyLegacyMatchingDecisionBadgeStyle(null);
+            SetLegacyMatchingDetailsVisible(false);
             LegacyMatchingSideStatusText.Text = "保留中の候補は通常の巡回後にもう一度確認できます。";
             LegacyMatchingSideApproveButton.IsEnabled = false;
             LegacyMatchingSideRejectButton.IsEnabled = false;
@@ -2220,33 +2241,83 @@ public partial class MainWindow : Window
         var matchedRows = currentCandidate.MatchedFields
             .Select(field => new LegacyMatchingDetailRow(
                 field.Label,
-                BuildLegacyMatchingValuePair(field.SourceValue, field.CandidateValue),
+                DisplayLegacyMatchingValue(field.SourceValue),
+                DisplayLegacyMatchingValue(field.CandidateValue),
                 GetLegacyMatchingMatchKindText(field.MatchKind),
-                ToBrush("#166534")))
+                ToBrush("#166534"),
+                field.MatchKind,
+                ""))
             .ToArray();
         var differenceRows = currentCandidate.Differences
             .Select(field => new LegacyMatchingDetailRow(
                 field.Label,
-                BuildLegacyMatchingValuePair(field.SourceValue, field.CandidateValue),
+                DisplayLegacyMatchingValue(field.SourceValue),
+                DisplayLegacyMatchingValue(field.CandidateValue),
                 "値が異なります",
-                ToBrush("#805B10")))
+                ToBrush("#805B10"),
+                "difference",
+                ""))
             .ToArray();
         var missingRows = currentCandidate.MissingFields
-            .Select(field => new LegacyMatchingDetailRow(
-                field.Label,
-                "",
-                $"{(field.MissingSide == "source" ? "元データ" : "候補側")}に情報なし",
-                ToBrush("#6B7280")))
+            .Select(field =>
+            {
+                var sourceValue = field.MissingSide == "source"
+                    ? "情報なし"
+                    : DisplayLegacyMatchingValue(field.SourceValue);
+                var candidateValue = field.MissingSide == "candidate"
+                    ? "情報なし"
+                    : DisplayLegacyMatchingValue(field.CandidateValue);
+                return new LegacyMatchingDetailRow(
+                    field.Label,
+                    sourceValue,
+                    candidateValue,
+                    field.MissingSide == "source" ? "対象側：情報なし" : "候補側：情報なし",
+                    ToBrush("#6B7280"),
+                    $"missing:{field.MissingSide}",
+                    "");
+            })
             .ToArray();
         var conflictRows = currentCandidate.Conflicts
             .Select(conflict => new LegacyMatchingDetailRow(
                 "確認内容",
-                conflict,
+                "",
+                "",
                 "要確認",
-                ToBrush("#B91C1C")))
+                ToBrush("#B91C1C"),
+                "conflict",
+                conflict))
             .ToArray();
+        var comparisonRows = matchedRows
+            .Concat(differenceRows)
+            .Concat(missingRows)
+            .ToArray();
+        var internalRows = new[]
+        {
+            new LegacyMatchingInternalInfoRow("判定エンジン", "Gate28", "Gate28"),
+            new LegacyMatchingInternalInfoRow(
+                "候補ID",
+                ShortenLegacyMatchingInternalValue(currentCandidate.CandidateId),
+                currentCandidate.CandidateId),
+            new LegacyMatchingInternalInfoRow(
+                "対象ID",
+                ShortenLegacyMatchingInternalValue($"{currentCandidate.SubjectKind}: {currentCandidate.SubjectId}"),
+                $"{currentCandidate.SubjectKind}: {currentCandidate.SubjectId}"),
+            new LegacyMatchingInternalInfoRow(
+                "紐付け先ID",
+                ShortenLegacyMatchingInternalValue($"{currentCandidate.TargetKind}: {currentCandidate.TargetId}"),
+                $"{currentCandidate.TargetKind}: {currentCandidate.TargetId}"),
+            new LegacyMatchingInternalInfoRow(
+                "内部判定",
+                currentCandidate.MatchedFields.Count == 0
+                    ? "なし"
+                    : string.Join("、", currentCandidate.MatchedFields.Select(field =>
+                        $"{field.Field}:{field.MatchKind}")),
+                string.Join("、", currentCandidate.MatchedFields.Select(field =>
+                    $"{field.Field}:{field.MatchKind}"))),
+        };
         LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
         LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Visible;
+        SetLegacyMatchingDetailsVisible(false);
         LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
         LegacyMatchingCurrentTargetText.Text = item.TargetText;
         LegacyMatchingCurrentRelationArrowText.Text = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
@@ -2260,6 +2331,11 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = differenceRows;
         LegacyMatchingCurrentMissingItemsControl.ItemsSource = missingRows;
         LegacyMatchingCurrentConflictItemsControl.ItemsSource = conflictRows;
+        LegacyMatchingDetailsSubjectSummaryText.Text = $"{item.SubjectText} → {item.TargetText}";
+        LegacyMatchingDetailsSourceItemsControl.ItemsSource = comparisonRows;
+        LegacyMatchingDetailsCandidateItemsControl.ItemsSource = comparisonRows;
+        LegacyMatchingDetailsComparisonItemsControl.ItemsSource = comparisonRows;
+        LegacyMatchingDetailsInternalItemsControl.ItemsSource = internalRows;
         LegacyMatchingCurrentDifferenceBorder.Visibility = differenceRows.Length == 0
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -2269,12 +2345,14 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentConflictBorder.Visibility = conflictRows.Length == 0
             ? Visibility.Collapsed
             : Visibility.Visible;
-        LegacyMatchingCurrentDecisionText.Text = $"現在の判定: {GetLegacyMatchingDecisionText(decision)}";
-        LegacyMatchingCurrentReasonText.Text = $"おすすめ理由\n{Fallback(currentCandidate.Reason)}";
-        LegacyMatchingCurrentAutoDecisionReasonText.Text = currentCandidate.IsEligible
-            ? "自動確定しない理由\nおすすめは自動確定せず、承認操作で反映します。"
-            : "自動確定しない理由\n競合または確認不足があるため、承認できません。必要ならグラフUIで手動確認してください。";
-        LegacyMatchingCurrentDetailsText.Text = BuildLegacyMatchingDetailsText(currentCandidate);
+        LegacyMatchingCurrentDecisionText.Text = GetLegacyMatchingDecisionText(decision);
+        ApplyLegacyMatchingDecisionBadgeStyle(decision);
+        LegacyMatchingCurrentReasonText.Text = $"おすすめ理由: {BuildLegacyMatchingShortReason(currentCandidate)}";
+        LegacyMatchingCurrentAutoDecisionReasonText.Text = BuildLegacyMatchingShortAutoDecisionReason(currentCandidate);
+        LegacyMatchingDetailsDecisionText.Text = $"現在の判定: {GetLegacyMatchingDecisionText(decision)}";
+        LegacyMatchingDetailsReasonText.Text = $"おすすめ理由: {BuildLegacyMatchingShortReason(currentCandidate)}";
+        LegacyMatchingDetailsAutoDecisionText.Text = BuildLegacyMatchingShortAutoDecisionReason(currentCandidate);
+        LegacyMatchingDetailsButton.IsEnabled = true;
         LegacyMatchingSideStatusText.Text = currentCandidate.IsEligible
             ? "承認すると、この候補関係を既存のリンク状態へ反映します。"
             : "この候補は自動承認できません。関係のない項目は未確定タブから手動処理できます。";
@@ -2320,41 +2398,141 @@ public partial class MainWindow : Window
         button.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
     }
 
-    private static string BuildLegacyMatchingDetailsText(AbacusRecommendationCandidate candidate)
+    private static string DisplayLegacyMatchingValue(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "情報なし" : value;
+
+    private static string BuildLegacyMatchingShortReason(AbacusRecommendationCandidate candidate)
     {
-        var matches = candidate.MatchedFields.Count == 0
-            ? "なし"
-            : string.Join("\n", candidate.MatchedFields.Select(field =>
-                $"一致 / {field.Label}: {field.SourceValue} ⇄ {field.CandidateValue} ({field.MatchKind})"));
-        var differences = candidate.Differences.Count == 0
-            ? "なし"
-            : string.Join("\n", candidate.Differences.Select(field =>
-                $"差異 / {field.Label}: {field.SourceValue} ⇄ {field.CandidateValue}"));
-        var missing = candidate.MissingFields.Count == 0
-            ? "なし"
-            : string.Join("\n", candidate.MissingFields.Select(field =>
-                $"情報なし / {field.Label}: {(field.MissingSide == "source" ? "元データ" : "候補側")}"));
-        var conflicts = candidate.Conflicts.Count == 0
-            ? "なし"
-            : string.Join("\n", candidate.Conflicts.Select(conflict => $"要確認 / {conflict}"));
-        return $"候補ID: {candidate.CandidateId}\n" +
-               $"一致項目:\n{matches}\n" +
-               $"差異:\n{differences}\n" +
-               $"情報なし:\n{missing}\n" +
-               $"要確認:\n{conflicts}\n" +
-               $"おすすめ理由:\n{candidate.Reason}\n" +
-               $"対象ID: {candidate.TargetKind} / {candidate.TargetId}";
+        var labels = candidate.MatchedFields
+            .Select(field => field.Label)
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var matchedText = labels.Length == 0
+            ? "一致する情報がある"
+            : string.Join("・", labels);
+        var hasFuzzyMatch = candidate.MatchedFields.Any(field => field.MatchKind == "fuzzy");
+        var reason = hasFuzzyMatch
+            ? $"{matchedText}が近いため"
+            : $"{matchedText}が一致したため";
+        if (candidate.Conflicts.Count > 0)
+        {
+            return $"{reason}。競合があるため確認が必要です。";
+        }
+
+        if (candidate.Differences.Count > 0 || candidate.MissingFields.Count > 0)
+        {
+            return $"{reason}。差異・不足情報を確認してください。";
+        }
+
+        return $"{reason}。";
     }
 
-    private static string BuildLegacyMatchingValuePair(string sourceValue, string candidateValue) =>
-        $"元データ: {Fallback(sourceValue)} / 候補: {Fallback(candidateValue)}";
+    private static string BuildLegacyMatchingShortAutoDecisionReason(AbacusRecommendationCandidate candidate)
+    {
+        if (candidate.Conflicts.Count > 0)
+        {
+            return "競合があるため自動確定しません。";
+        }
+
+        if (candidate.MatchedFields.Any(field => field.MatchKind == "fuzzy") ||
+            candidate.Differences.Count > 0 ||
+            candidate.MissingFields.Count > 0)
+        {
+            return "完全一致ではないため、自動確定しません。";
+        }
+
+        return "おすすめは自動確定せず、承認操作で反映します。";
+    }
+
+    private static string ShortenLegacyMatchingInternalValue(string value)
+    {
+        const int maxLength = 34;
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return $"{value[..20]}…{value[^12..]}";
+    }
 
     private static string GetLegacyMatchingMatchKindText(string matchKind) => matchKind switch
     {
         "exact" => "完全一致",
-        "fuzzy" => "軽微な誤字・表記揺れ",
-        _ => matchKind,
+        "fuzzy" => "軽微な表記差",
+        _ => "判定済み",
     };
+
+    private void ApplyLegacyMatchingDecisionBadgeStyle(string? decision)
+    {
+        var (background, border, foreground) = decision switch
+        {
+            AbacusRecommendationDecisionValues.Approved => ("#ECFDF5", "#86EFAC", "#166534"),
+            AbacusRecommendationDecisionValues.Rejected => ("#F8FAFC", "#CBD5E1", "#64748B"),
+            AbacusRecommendationDecisionValues.Hold => ("#FFFBEB", "#FCD34D", "#92400E"),
+            AbacusRecommendationDecisionValues.Pending => ("#FFF7ED", "#FDBA74", "#9A3412"),
+            _ => ("#F1F5F9", "#CBD5E1", "#52647A"),
+        };
+        LegacyMatchingCurrentDecisionBadge.Background = ToBrush(background);
+        LegacyMatchingCurrentDecisionBadge.BorderBrush = ToBrush(border);
+        LegacyMatchingCurrentDecisionText.Foreground = ToBrush(foreground);
+    }
+
+    private void SetLegacyMatchingDetailsVisible(bool visible)
+    {
+        legacyMatchingDetailsVisible = visible;
+        LegacyMatchingDetailsView.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        LegacyMatchingDetailsButton.Visibility = visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        LegacyMatchingBackToRecommendationButton.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (visible)
+        {
+            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
+            LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
+        }
+        else if (legacyGraphSelectedRecommendation is not null)
+        {
+            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Visible;
+            LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void LegacyMatchingDetailsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!legacyMatchingDetailsVisible && legacyGraphSelectedRecommendation is not null)
+        {
+            SetLegacyMatchingDetailsVisible(true);
+        }
+    }
+
+    private void LegacyMatchingBackToRecommendationButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyMatchingDetailsVisible)
+        {
+            SetLegacyMatchingDetailsVisible(false);
+        }
+    }
+
+    private void LegacyMatchingInternalValueCopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not string value || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        Clipboard.SetText(value);
+        LegacyGraphStatusText.Text = "内部情報をコピーしました。";
+        LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
+    }
 
     private void SetLegacyMatchingHeader(
         string title,
@@ -2797,11 +2975,13 @@ public partial class MainWindow : Window
         var matchedText = candidate.MatchedFields.Count == 0
             ? "一致: なし"
             : $"一致: {string.Join("、", candidate.MatchedFields.Select(evidence =>
-                $"{evidence.Label}={Fallback(evidence.SourceValue)}"))}";
+                $"{evidence.Label} {DisplayLegacyMatchingValue(evidence.SourceValue)} → " +
+                $"{DisplayLegacyMatchingValue(evidence.CandidateValue)}（{GetLegacyMatchingMatchKindText(evidence.MatchKind)}）"))}";
         var differenceText = candidate.Differences.Count == 0
             ? "差異: なし"
             : $"差異: {string.Join("、", candidate.Differences.Select(difference =>
-                $"{difference.Label}（{Fallback(difference.SourceValue)} / {Fallback(difference.CandidateValue)}）"))}";
+                $"{difference.Label}（{DisplayLegacyMatchingValue(difference.SourceValue)} → " +
+                $"{DisplayLegacyMatchingValue(difference.CandidateValue)}）"))}";
         var conflictText = candidate.Conflicts.Count == 0
             ? ""
             : $"競合: {string.Join("、", candidate.Conflicts)}";
@@ -2813,7 +2993,7 @@ public partial class MainWindow : Window
             matchedText,
             differenceText,
             conflictText,
-            candidate.Reason,
+            BuildLegacyMatchingShortReason(candidate),
             ToBrush(background),
             ToBrush(border),
             ToBrush(decisionBrush));
@@ -2829,6 +3009,7 @@ public partial class MainWindow : Window
         legacyGraphSelectedRecommendation = LegacyMatchingRecommendationsList.SelectedItem is LegacyMatchingRecommendationItem item
             ? item.Candidate
             : null;
+        SetLegacyMatchingDetailsVisible(false);
         RefreshLegacyMatchingRecommendationActions();
     }
 
@@ -2977,6 +3158,10 @@ public partial class MainWindow : Window
 
     private void SetLegacyMatchingSideTab(bool recommendationsVisible)
     {
+        if (recommendationsVisible)
+        {
+            SetLegacyMatchingDetailsVisible(false);
+        }
         LegacyMatchingRecommendationContent.Visibility = recommendationsVisible
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -3074,6 +3259,9 @@ public partial class MainWindow : Window
         }
 
         var search = LegacyMatchingUnresolvedSearchTextBox.Text.Trim();
+        LegacyMatchingUnresolvedSearchPlaceholderText.Visibility = string.IsNullOrWhiteSpace(search)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         var kindFilter = GetLegacyGraphSearchFilterValue(LegacyMatchingUnresolvedKindComboBox);
         var sortFilter = GetLegacyGraphSearchFilterValue(LegacyMatchingUnresolvedSortComboBox);
         var items = new List<LegacyMatchingUnresolvedItem>();
@@ -3084,7 +3272,10 @@ public partial class MainWindow : Window
                 "vehicle",
                 "vehicle",
                 $"車両: {Fallback(vehicle.Maker)} {Fallback(vehicle.DisplayName)}",
-                $"{Fallback(vehicle.CustomerName)} / 登録 {Fallback(vehicle.RegistrationNumber)} / 車台 {Fallback(vehicle.ChassisNumber)}",
+                $"顧客: {Fallback(vehicle.CustomerName)} / 車名: {Fallback(vehicle.Maker)} {Fallback(vehicle.DisplayName)} / " +
+                $"登録番号: {Fallback(vehicle.RegistrationNumber)} / 車台番号: {Fallback(vehicle.ChassisNumber)}",
+                string.Join(" ", vehicle.CustomerName, vehicle.Maker, vehicle.DisplayName,
+                    vehicle.RegistrationNumber, vehicle.ChassisNumber, vehicle.SourceLocation),
                 Fallback(vehicle.SourceLocation),
                 ToBrush("#FEF2F2"),
                 ToBrush("#FCA5A5")));
@@ -3097,7 +3288,12 @@ public partial class MainWindow : Window
                 document.Kind == "販売書類" ? "sales" : "maintenance",
                 "document",
                 $"{document.Kind}: {Fallback(document.DocumentNumber)}",
-                $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)} / {Fallback(document.DocumentDate)}",
+                $"顧客: {Fallback(document.CustomerName)} / 車名: {Fallback(document.VehicleName)} / " +
+                $"登録番号: {Fallback(document.RegistrationNumber)} / 日付: {Fallback(document.DocumentDate)} / " +
+                $"出典: {Fallback(document.SourceLocation)}",
+                string.Join(" ", document.CustomerName, document.VehicleName, document.DocumentNumber,
+                    document.RegistrationNumber, document.DocumentDate, document.SourceFileName,
+                    document.SourceRowNumber),
                 $"{Fallback(document.DocumentDate)} / {Fallback(document.SourceFileName)}",
                 ToBrush("#FFF7ED"),
                 ToBrush("#FDBA74")));
@@ -3106,7 +3302,7 @@ public partial class MainWindow : Window
         var filteredQuery = items
             .Where(item => kindFilter == "all" || item.CategoryCode == kindFilter)
             .Where(item => string.IsNullOrWhiteSpace(search) ||
-                           string.Join(" ", item.Title, item.Details)
+                           string.Join(" ", item.Title, item.Details, item.SearchText)
                                .Contains(search, StringComparison.OrdinalIgnoreCase));
         var filteredItems = sortFilter switch
         {
@@ -5139,6 +5335,9 @@ public partial class MainWindow : Window
                 ? vehicle.CustomerId
                 : null;
         var selectedCustomer = GetLegacyGraphListSelectedDisplayCustomer();
+        var originalCustomer = targetCustomerId is null
+            ? null
+            : FindLegacyGraphCustomerById(targetCustomerId);
 
         InvalidateLegacyGraphImportConfirmation();
         legacyGraphManualVehicleCustomerLinks.Remove(vehicle.VehicleId);
@@ -5186,10 +5385,14 @@ public partial class MainWindow : Window
             $"vehicle:{vehicle.VehicleId}",
             "vehicle",
             vehicle.VehicleId,
-            $"車両を未確定へ移動: {Fallback(vehicle.DisplayName)}",
-            relatedDocumentKeys.Count > 0
-                ? $"関連書類 {relatedDocumentKeys.Count:N0}件も未確定へ移動しました。今回の変更から復元できます。"
-                : "今回の変更から顧客への表示を復元できます。");
+            "取り外した項目",
+            $"車両: {Fallback(vehicle.DisplayName)}\n" +
+            $"↑\n顧客: {(originalCustomer is null ? "未設定" : GetLegacyGraphCustomerDisplayName(originalCustomer))}\n" +
+            $"変更後: 未確定" +
+            (relatedDocumentKeys.Count > 0
+                ? $"（関連書類 {relatedDocumentKeys.Count:N0}件も未確定）"
+                : "") +
+            " / 元に戻せます。");
         if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
         {
             RefreshLegacyGraphCustomerList();
@@ -8686,6 +8889,8 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphDocument document)
     {
         var key = GetLegacyDocumentKey(document);
+        var originalCustomer = FindOriginalCustomerForDocument(document);
+        var originalVehicle = FindOriginalVehicleForDocument(document);
         InvalidateLegacyGraphApprovalForDocument(document);
         legacyGraphManualDocumentLinks.Remove(key);
         legacyGraphManualDocumentCustomerLinks.Remove(key);
@@ -8700,8 +8905,11 @@ public partial class MainWindow : Window
             $"document:{key}",
             "document",
             key,
-            $"書類を未確定へ移動: {document.Kind} {Fallback(document.DocumentNumber)}",
-            "今回の変更から元の顧客・車両表示へ復元できます。");
+            "取り外した項目",
+            $"{document.Kind} {Fallback(document.DocumentNumber)}\n" +
+            $"↑\n車両: {(originalVehicle is null ? "未設定" : $"{Fallback(originalVehicle.Maker)} {originalVehicle.DisplayName}".Trim())}\n" +
+            $"顧客: {(originalCustomer is null ? "未設定" : GetLegacyGraphCustomerDisplayName(originalCustomer))}\n" +
+            "変更後: 未確定 / 元に戻せます。");
         if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
         {
             RefreshLegacyGraphCustomerList();
@@ -11061,12 +11269,17 @@ public partial class MainWindow : Window
         if (decision == AbacusRecommendationDecisionValues.Rejected)
         {
             var subject = CreateLegacyMatchingRecommendationItem(candidate);
+            var actionText = candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer
+                ? "別人と判断"
+                : "却下した提案";
             legacyGraphMatchingChanges.Insert(0, new LegacyMatchingChangeItem(
                 changeId,
                 "recommendation",
                 candidate.CandidateId,
-                $"却下: {subject.SubjectText}",
-                $"{subject.TargetText} / 元の判定: {GetLegacyMatchingDecisionText(previousDecision)}。今回の変更から戻せます。",
+                actionText,
+                $"対象: {subject.SubjectText}\n" +
+                $"紐付け先: {subject.TargetText}\n" +
+                $"元の判定: {GetLegacyMatchingDecisionText(previousDecision)} / 元に戻せます。",
                 DateTimeOffset.UtcNow,
                 GetLegacyMatchingChangeCustomerId()));
         }
@@ -13468,9 +13681,17 @@ public partial class MainWindow : Window
 
     private sealed record LegacyMatchingDetailRow(
         string FieldLabel,
-        string ValuesText,
+        string SourceValue,
+        string CandidateValue,
         string StatusText,
-        Brush StatusBrush);
+        Brush StatusBrush,
+        string InternalStatusText,
+        string ValuesText);
+
+    private sealed record LegacyMatchingInternalInfoRow(
+        string Label,
+        string DisplayValue,
+        string CopyValue);
 
     private sealed record LegacyMatchingChangeItem(
         string ChangeId,
@@ -13487,6 +13708,7 @@ public partial class MainWindow : Window
         string Kind,
         string Title,
         string Details,
+        string SearchText,
         string SortKey,
         Brush BackgroundBrush,
         Brush BorderBrush);

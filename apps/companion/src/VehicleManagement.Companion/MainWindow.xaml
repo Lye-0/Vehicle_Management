@@ -45,6 +45,27 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="LegacyMatchingSubcategoryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="#D8E1EC" />
+            <Setter Property="Foreground" Value="#52647A" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="5,5" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="30" />
+        </Style>
+        <Style x:Key="LegacyMatchingSecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="#CBD5E1" />
+            <Setter Property="Foreground" Value="#52647A" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="5,5" />
+            <Setter Property="MinWidth" Value="0" />
+        </Style>
         <Style x:Key="LegacyGraphModeSwitchRadioButton" TargetType="RadioButton">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -1657,25 +1678,32 @@
                                                     Margin="4,0,0,0" Padding="8,8" MinHeight="38" FontSize="13" FontWeight="SemiBold" Content="未確定"
                                                     Click="LegacyMatchingUnresolvedTabButton_Click" />
                                         </Grid>
-                                        <Grid Grid.Row="2" Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Button x:Name="LegacyMatchingCustomerCategoryButton" Grid.Column="0"
-                                                    Margin="0,0,3,0" Padding="4,5" FontSize="11" Content="顧客統合"
-                                                    Click="LegacyMatchingCustomerCategoryButton_Click" />
-                                            <Button x:Name="LegacyMatchingVehicleCategoryButton" Grid.Column="1"
-                                                    Margin="3,0" Padding="4,5" FontSize="11" Content="車両"
-                                                    Click="LegacyMatchingVehicleCategoryButton_Click" />
-                                            <Button x:Name="LegacyMatchingDocumentCategoryButton" Grid.Column="2"
-                                                    Margin="3,0,0,0" Padding="4,5" FontSize="11" Content="書類"
-                                                    Click="LegacyMatchingDocumentCategoryButton_Click" />
-                                        </Grid>
-                                        <Grid Grid.Row="3" Margin="0,8,0,0">
+                                        <Border Grid.Row="2" Margin="0,8,0,0" Padding="3"
+                                                Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="5">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Button x:Name="LegacyMatchingCustomerCategoryButton" Grid.Column="0"
+                                                        Margin="0,0,2,0" Content="顧客統合"
+                                                        Style="{StaticResource LegacyMatchingSubcategoryButton}"
+                                                        Click="LegacyMatchingCustomerCategoryButton_Click" />
+                                                <Button x:Name="LegacyMatchingVehicleCategoryButton" Grid.Column="1"
+                                                        Margin="2,0" Content="車両"
+                                                        Style="{StaticResource LegacyMatchingSubcategoryButton}"
+                                                        Click="LegacyMatchingVehicleCategoryButton_Click" />
+                                                <Button x:Name="LegacyMatchingDocumentCategoryButton" Grid.Column="2"
+                                                        Margin="2,0,0,0" Content="書類"
+                                                        Style="{StaticResource LegacyMatchingSubcategoryButton}"
+                                                        Click="LegacyMatchingDocumentCategoryButton_Click" />
+                                            </Grid>
+                                        </Border>
+                                        <Grid x:Name="LegacyMatchingSideContentGrid" Grid.Row="3" Margin="0,8,0,0" MinHeight="0">
                                             <Border x:Name="LegacyMatchingRecommendationContent" Padding="10"
-                                                    Background="#FFFFFF" BorderBrush="#F59E0B" BorderThickness="1.5" CornerRadius="6">
+                                                    Background="#FFFFFF" BorderBrush="#F59E0B" BorderThickness="1.5" CornerRadius="6"
+                                                    MinHeight="0">
                                                 <Grid>
                                                     <Grid.RowDefinitions>
                                                         <RowDefinition Height="Auto" />
@@ -1690,15 +1718,21 @@
                                                         <StackPanel>
                                                             <TextBlock x:Name="LegacyMatchingCurrentCategoryText" Foreground="#92400E"
                                                                        FontSize="12" FontWeight="SemiBold" />
-                                                            <TextBlock x:Name="LegacyMatchingCurrentDecisionText" Margin="0,3,0,0"
-                                                                       Foreground="#52647A" FontSize="11" FontWeight="SemiBold" />
+                                                            <Border x:Name="LegacyMatchingCurrentDecisionBadge" Margin="0,4,0,0"
+                                                                    HorizontalAlignment="Left" Padding="5,2"
+                                                                    Background="#F1F5F9" BorderBrush="#CBD5E1"
+                                                                    BorderThickness="1" CornerRadius="3">
+                                                                <TextBlock x:Name="LegacyMatchingCurrentDecisionText"
+                                                                           Foreground="#52647A" FontSize="10" FontWeight="SemiBold" />
+                                                            </Border>
                                                         </StackPanel>
                                                         <TextBlock Grid.Column="1" x:Name="LegacyMatchingCurrentProgressText"
                                                                    Foreground="#92400E" FontSize="11" FontWeight="SemiBold"
                                                                    VerticalAlignment="Center" />
                                                     </Grid>
                                                     <ScrollViewer x:Name="LegacyMatchingCurrentRecommendationScrollViewer" Grid.Row="1"
-                                                                  Margin="0,8,0,8" VerticalScrollBarVisibility="Auto">
+                                                                  Margin="0,8,0,8" VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
                                                         <StackPanel>
                                                             <Grid>
                                                                 <Grid.ColumnDefinitions>
@@ -1739,16 +1773,29 @@
                                                                                     <Grid.ColumnDefinitions>
                                                                                         <ColumnDefinition Width="18" />
                                                                                         <ColumnDefinition Width="*" />
-                                                                                        <ColumnDefinition Width="Auto" />
                                                                                     </Grid.ColumnDefinitions>
                                                                                     <TextBlock Foreground="#15803D" FontSize="13" Text="✓" />
                                                                                     <StackPanel Grid.Column="1">
-                                                                                        <TextBlock Foreground="#166534" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
-                                                                                        <TextBlock Margin="0,1,0,0" Foreground="#15803D" FontSize="10"
-                                                                                                   Text="{Binding ValuesText}" TextWrapping="Wrap" />
+                                                                                        <Grid>
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#166534" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="8,0,0,0" Foreground="{Binding StatusBrush}" FontSize="10"
+                                                                                                       Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                                                                        </Grid>
+                                                                                        <Grid Margin="0,1,0,0">
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#15803D" FontSize="10" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#15803D" FontSize="10" Text="→" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#15803D" FontSize="10" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        </Grid>
                                                                                     </StackPanel>
-                                                                                    <TextBlock Grid.Column="2" Margin="8,0,0,0" Foreground="#166534" FontSize="11"
-                                                                                               Text="{Binding StatusText}" TextWrapping="Wrap" />
                                                                                 </Grid>
                                                                             </DataTemplate>
                                                                         </ItemsControl.ItemTemplate>
@@ -1770,9 +1817,25 @@
                                                                                     </Grid.ColumnDefinitions>
                                                                                     <TextBlock Foreground="#B45309" FontSize="13" Text="▲" />
                                                                                     <StackPanel Grid.Column="1">
-                                                                                        <TextBlock Foreground="#805B10" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
-                                                                                        <TextBlock Margin="0,1,0,0" Foreground="#92400E" FontSize="11"
-                                                                                                   Text="{Binding ValuesText}" TextWrapping="Wrap" />
+                                                                                        <Grid>
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#805B10" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="8,0,0,0" Foreground="{Binding StatusBrush}" FontSize="10"
+                                                                                                       Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                                                                        </Grid>
+                                                                                        <Grid Margin="0,1,0,0">
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#92400E" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#B45309" FontSize="10" Text="→" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#92400E" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
                                                                             </DataTemplate>
@@ -1795,9 +1858,25 @@
                                                                                     </Grid.ColumnDefinitions>
                                                                                     <TextBlock Foreground="#6B7280" FontSize="13" Text="—" />
                                                                                     <StackPanel Grid.Column="1">
-                                                                                        <TextBlock Foreground="#4B5563" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
-                                                                                        <TextBlock Margin="0,1,0,0" Foreground="#6B7280" FontSize="11"
-                                                                                                   Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                                                                        <Grid>
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#4B5563" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="8,0,0,0" Foreground="{Binding StatusBrush}" FontSize="10"
+                                                                                                       Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                                                                        </Grid>
+                                                                                        <Grid Margin="0,1,0,0">
+                                                                                            <Grid.ColumnDefinitions>
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                <ColumnDefinition Width="*" />
+                                                                                            </Grid.ColumnDefinitions>
+                                                                                            <TextBlock Foreground="#6B7280" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#6B7280" FontSize="10" Text="→" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#6B7280" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
                                                                             </DataTemplate>
@@ -1831,17 +1910,157 @@
                                                                        Foreground="#805B10" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                             <TextBlock x:Name="LegacyMatchingCurrentAutoDecisionReasonText" Margin="0,4,0,0"
                                                                        Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
-                                                            <Expander x:Name="LegacyMatchingDetailsExpander" Margin="0,10,0,0"
-                                                                      Header="原データ・判定詳細">
-                                                                <TextBlock x:Name="LegacyMatchingCurrentDetailsText" Margin="0,6,0,0"
-                                                                           Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
-                                                            </Expander>
+                                                            <Button x:Name="LegacyMatchingDetailsButton" Margin="0,10,0,0"
+                                                                    HorizontalAlignment="Left" Content="原データ・判定詳細"
+                                                                    Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                    Click="LegacyMatchingDetailsButton_Click" />
                                                         </StackPanel>
                                                     </ScrollViewer>
                                                     <TextBlock x:Name="LegacyMatchingNoRecommendationText" Grid.Row="1" Visibility="Collapsed"
                                                                VerticalAlignment="Center" Margin="0,8,0,8"
                                                                Foreground="#52647A" TextWrapping="Wrap"
                                                                Text="このカテゴリに未処理のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。" />
+                                                    <Grid x:Name="LegacyMatchingDetailsView" Grid.Row="1" Visibility="Collapsed">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="*" />
+                                                        </Grid.RowDefinitions>
+                                                        <Button x:Name="LegacyMatchingBackToRecommendationButton"
+                                                                HorizontalAlignment="Left" Content="← おすすめに戻る"
+                                                                Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                Click="LegacyMatchingBackToRecommendationButton_Click" />
+                                                        <ScrollViewer Grid.Row="1" Margin="0,8,0,0"
+                                                                      VerticalScrollBarVisibility="Auto"
+                                                                      HorizontalScrollBarVisibility="Disabled"
+                                                                      CanContentScroll="False">
+                                                            <StackPanel>
+                                                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
+                                                                           Text="原データ" />
+                                                                <TextBlock x:Name="LegacyMatchingDetailsSubjectSummaryText" Margin="0,3,0,6"
+                                                                           Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
+                                                                <Border Padding="7" Background="#F8FAFC" BorderBrush="#CBD5E1"
+                                                                        BorderThickness="1" CornerRadius="4">
+                                                                    <ItemsControl x:Name="LegacyMatchingDetailsSourceItemsControl">
+                                                                        <ItemsControl.ItemTemplate>
+                                                                            <DataTemplate>
+                                                                                <Grid Margin="0,2,0,0">
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="82" />
+                                                                                        <ColumnDefinition Width="*" />
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    <TextBlock FontWeight="SemiBold" Foreground="#52647A"
+                                                                                               Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                    <TextBlock Grid.Column="1" Foreground="#10233F"
+                                                                                               Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                </Grid>
+                                                                            </DataTemplate>
+                                                                        </ItemsControl.ItemTemplate>
+                                                                    </ItemsControl>
+                                                                </Border>
+                                                                <TextBlock Margin="0,12,0,0" FontSize="14" FontWeight="SemiBold"
+                                                                           Foreground="#10233F" Text="候補・紐付け先" />
+                                                                <Border Margin="0,5,0,0" Padding="7" Background="#EFF6FF"
+                                                                        BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="4">
+                                                                    <ItemsControl x:Name="LegacyMatchingDetailsCandidateItemsControl">
+                                                                        <ItemsControl.ItemTemplate>
+                                                                            <DataTemplate>
+                                                                                <Grid Margin="0,2,0,0">
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="82" />
+                                                                                        <ColumnDefinition Width="*" />
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    <TextBlock FontWeight="SemiBold" Foreground="#1D4ED8"
+                                                                                               Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                    <TextBlock Grid.Column="1" Foreground="#1D4ED8"
+                                                                                               Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                </Grid>
+                                                                            </DataTemplate>
+                                                                        </ItemsControl.ItemTemplate>
+                                                                    </ItemsControl>
+                                                                </Border>
+                                                                <TextBlock Margin="0,12,0,0" FontSize="14" FontWeight="SemiBold"
+                                                                           Foreground="#10233F" Text="比較結果" />
+                                                                <ItemsControl x:Name="LegacyMatchingDetailsComparisonItemsControl" Margin="0,5,0,0">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Border Margin="0,0,0,5" Padding="7"
+                                                                                    Background="#FFFFFF" BorderBrush="#D8E1EC"
+                                                                                    BorderThickness="1" CornerRadius="4">
+                                                                                <Grid>
+                                                                                    <Grid.RowDefinitions>
+                                                                                        <RowDefinition Height="Auto" />
+                                                                                        <RowDefinition Height="Auto" />
+                                                                                    </Grid.RowDefinitions>
+                                                                                    <Grid>
+                                                                                        <Grid.ColumnDefinitions>
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                            <ColumnDefinition Width="Auto" />
+                                                                                        </Grid.ColumnDefinitions>
+                                                                                        <TextBlock FontWeight="SemiBold" Foreground="#36465A"
+                                                                                                   Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Grid.Column="1" Margin="8,0,0,0"
+                                                                                                   Foreground="{Binding StatusBrush}" FontSize="10"
+                                                                                                   Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                                                                    </Grid>
+                                                                                    <Grid Grid.Row="1" Margin="0,3,0,0">
+                                                                                        <Grid.ColumnDefinitions>
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                            <ColumnDefinition Width="Auto" />
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                        </Grid.ColumnDefinitions>
+                                                                                        <TextBlock Foreground="#10233F" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Grid.Column="1" Margin="7,0" Foreground="#64748B" Text="→" />
+                                                                                        <TextBlock Grid.Column="2" Foreground="#1D4ED8" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                    </Grid>
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                                <TextBlock Margin="0,12,0,0" FontSize="14" FontWeight="SemiBold"
+                                                                           Foreground="#10233F" Text="判定結果" />
+                                                                <Border Margin="0,5,0,0" Padding="7" Background="#FFFBEB"
+                                                                        BorderBrush="#FCD34D" BorderThickness="1" CornerRadius="4">
+                                                                    <StackPanel>
+                                                                        <TextBlock x:Name="LegacyMatchingDetailsDecisionText"
+                                                                                   Foreground="#92400E" FontWeight="SemiBold"
+                                                                                   TextWrapping="Wrap" />
+                                                                        <TextBlock x:Name="LegacyMatchingDetailsReasonText" Margin="0,4,0,0"
+                                                                                   Foreground="#805B10" TextWrapping="Wrap" />
+                                                                        <TextBlock x:Name="LegacyMatchingDetailsAutoDecisionText" Margin="0,4,0,0"
+                                                                                   Foreground="#52647A" TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                                <TextBlock Margin="0,12,0,0" FontSize="14" FontWeight="SemiBold"
+                                                                           Foreground="#10233F" Text="内部情報" />
+                                                                <Border Margin="0,5,0,0" Padding="7" Background="#F8FAFC"
+                                                                        BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4">
+                                                                    <ItemsControl x:Name="LegacyMatchingDetailsInternalItemsControl">
+                                                                        <ItemsControl.ItemTemplate>
+                                                                            <DataTemplate>
+                                                                                <Grid Margin="0,2,0,0">
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="82" />
+                                                                                        <ColumnDefinition Width="*" />
+                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    <TextBlock Foreground="#52647A" FontSize="10"
+                                                                                               Text="{Binding Label}" TextWrapping="Wrap" />
+                                                                                    <TextBlock Grid.Column="1" Foreground="#36465A" FontSize="10"
+                                                                                               Text="{Binding DisplayValue}" TextWrapping="Wrap" />
+                                                                                    <Button Grid.Column="2" Margin="6,0,0,0" Padding="4,2"
+                                                                                            MinWidth="0" Content="コピー"
+                                                                                            Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                                            Tag="{Binding CopyValue}"
+                                                                                            Click="LegacyMatchingInternalValueCopyButton_Click" />
+                                                                                </Grid>
+                                                                            </DataTemplate>
+                                                                        </ItemsControl.ItemTemplate>
+                                                                    </ItemsControl>
+                                                                </Border>
+                                                            </StackPanel>
+                                                        </ScrollViewer>
+                                                    </Grid>
                                                     <StackPanel Grid.Row="2">
                                                         <TextBlock x:Name="LegacyMatchingSideStatusText" Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
                                                         <Grid Margin="0,7,0,0">
@@ -1864,9 +2083,11 @@
                                                                 <ColumnDefinition Width="*" />
                                                             </Grid.ColumnDefinitions>
                                                             <Button x:Name="LegacyMatchingSidePreviousButton" Grid.Column="0" Margin="0,0,3,0"
-                                                                    Padding="5,5" Content="← 前の候補" Click="LegacyMatchingSidePreviousButton_Click" />
+                                                                    Padding="5,5" Content="‹ 前へ" Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                    Click="LegacyMatchingSidePreviousButton_Click" />
                                                             <Button x:Name="LegacyMatchingSideNextButton" Grid.Column="1" Margin="3,0,0,0"
-                                                                    Padding="5,5" Content="次の候補 →" Click="LegacyMatchingSideNextButton_Click" />
+                                                                    Padding="5,5" Content="次へ ›" Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                    Click="LegacyMatchingSideNextButton_Click" />
                                                         </Grid>
                                                     </StackPanel>
                                                 </Grid>
@@ -1880,9 +2101,16 @@
                                                         <RowDefinition Height="*" />
                                                         <RowDefinition Height="Auto" />
                                                     </Grid.RowDefinitions>
-                                                    <TextBox x:Name="LegacyMatchingUnresolvedSearchTextBox" Padding="7" MinHeight="32"
-                                                             TextChanged="LegacyMatchingUnresolvedSearchTextBox_TextChanged"
-                                                             ToolTip="書類番号、顧客名、車名、車台番号で検索" />
+                                                    <Grid>
+                                                        <TextBox x:Name="LegacyMatchingUnresolvedSearchTextBox" Padding="7" MinHeight="32"
+                                                                 TextChanged="LegacyMatchingUnresolvedSearchTextBox_TextChanged"
+                                                                 ToolTip="名前・車名・番号・住所などを検索" />
+                                                        <TextBlock x:Name="LegacyMatchingUnresolvedSearchPlaceholderText"
+                                                                   Margin="9,0" VerticalAlignment="Center"
+                                                                   Foreground="#94A3B8" FontSize="11"
+                                                                   IsHitTestVisible="False"
+                                                                   Text="名前・車名・番号・住所などを検索" />
+                                                    </Grid>
                                                     <Grid Grid.Row="1" Margin="0,7,0,0">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*" />
