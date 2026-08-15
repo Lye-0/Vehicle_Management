@@ -11,6 +11,18 @@ public static class LegacyGraphWorkCheckpointSchema
     public const string Kind = "abacus-legacy-graph-work-checkpoint";
 }
 
+/// <summary>
+/// 顧客単位の最終確認状態です。候補の判定状態とは別に保存します。
+/// </summary>
+public static class LegacyGraphCustomerReviewStateValues
+{
+    public const string Unreviewed = "unreviewed";
+    public const string NeedsReview = "needs-review";
+    public const string Approved = "approved";
+
+    public static bool IsSupported(string value) => value is Unreviewed or NeedsReview or Approved;
+}
+
 public sealed record LegacyGraphCheckpointMergeGroup(
     string GroupId,
     string Origin,
@@ -118,7 +130,8 @@ public sealed record LegacyGraphWorkCheckpoint(
     LegacyGraphCheckpointMatchingChange[]? MatchingChanges = null,
     Dictionary<string, string>? LogicalCustomerMergeGroupByCustomerId = null,
     Dictionary<string, string[]>? MatchingManualCustomerCandidateTargets = null,
-    Dictionary<string, bool>? CustomerApprovalStates = null);
+    Dictionary<string, bool>? CustomerApprovalStates = null,
+    Dictionary<string, string>? CustomerReviewStates = null);
 
 /// <summary>
 /// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
@@ -242,6 +255,14 @@ public sealed class LegacyGraphWorkCheckpointStore
             MatchingManualCustomerCandidateTargets = checkpoint.MatchingManualCustomerCandidateTargets ??
                                                     new Dictionary<string, string[]>(),
             CustomerApprovalStates = checkpoint.CustomerApprovalStates ?? new Dictionary<string, bool>(),
+            CustomerReviewStates = checkpoint.CustomerReviewStates ??
+                                   (checkpoint.CustomerApprovalStates ?? new Dictionary<string, bool>())
+                                       .ToDictionary(
+                                           pair => pair.Key,
+                                           pair => pair.Value
+                                               ? LegacyGraphCustomerReviewStateValues.Approved
+                                               : LegacyGraphCustomerReviewStateValues.Unreviewed,
+                                           StringComparer.Ordinal),
         };
     }
 
@@ -307,7 +328,8 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.MatchingChanges is null ||
             checkpoint.LogicalCustomerMergeGroupByCustomerId is null ||
             checkpoint.MatchingManualCustomerCandidateTargets is null ||
-            checkpoint.CustomerApprovalStates is null)
+            checkpoint.CustomerApprovalStates is null ||
+            checkpoint.CustomerReviewStates is null)
         {
             throw new InvalidDataException("グラフ作業チェックポイントの必須状態が欠落しています。");
         }
@@ -338,7 +360,9 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.MatchingManualCustomerCandidateTargets.Any(pair =>
                 string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null ||
                 pair.Value.Any(string.IsNullOrWhiteSpace)) ||
-            checkpoint.CustomerApprovalStates.Any(pair => string.IsNullOrWhiteSpace(pair.Key)))
+            checkpoint.CustomerApprovalStates.Any(pair => string.IsNullOrWhiteSpace(pair.Key)) ||
+            checkpoint.CustomerReviewStates.Any(pair => string.IsNullOrWhiteSpace(pair.Key) ||
+                !LegacyGraphCustomerReviewStateValues.IsSupported(pair.Value)))
         {
             throw new InvalidDataException("グラフ作業チェックポイントの候補IDが不正です。");
         }

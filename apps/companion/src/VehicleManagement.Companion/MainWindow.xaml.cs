@@ -147,6 +147,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, HashSet<string>> legacyGraphMatchingManualCustomerCandidateTargets = new(StringComparer.Ordinal);
     // 論理顧客ごとの最終確認状態です。統合候補の処理完了とは別の状態です。
     private readonly Dictionary<string, bool> legacyGraphCustomerApprovalStates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> legacyGraphCustomerReviewStates = new(StringComparer.Ordinal);
     private object? legacyGraphSelectedItem;
     private string legacyGraphUiMode = "graph";
     private string? legacyGraphMatchingCustomerId;
@@ -1600,6 +1601,7 @@ public partial class MainWindow : Window
                 legacyGraphLogicalCustomerMergeGroupByCustomerId.Clear();
                 legacyGraphMatchingManualCustomerCandidateTargets.Clear();
                 legacyGraphCustomerApprovalStates.Clear();
+                legacyGraphCustomerReviewStates.Clear();
                 InitializeLegacyGraphCustomerMergeGroups();
                 legacyGraphSelectedItem = null;
                 RefreshLegacyGraphCustomerList();
@@ -1706,6 +1708,8 @@ public partial class MainWindow : Window
 
         // マッチングUIも同じキャンバスを使い、左の統合候補欄と右のおすすめ欄だけを切り替えます。
         LegacyGraphWorkspaceGrid.Visibility = Visibility.Visible;
+        LegacyGraphCustomersList.Visibility = isMatching ? Visibility.Collapsed : Visibility.Visible;
+        LegacyMatchingCustomerQueueList.Visibility = isMatching ? Visibility.Visible : Visibility.Collapsed;
         LegacyMatchingTopHeader.Visibility = isMatching ? Visibility.Visible : Visibility.Collapsed;
         LegacyGraphMatchingWorkspace.Visibility = Visibility.Collapsed;
         LegacyGraphInspectorLayer.Visibility = Visibility.Visible;
@@ -2121,6 +2125,12 @@ public partial class MainWindow : Window
             legacyGraphTrayDocumentKeys.Remove(key);
             legacyGraphUnconnectedDocumentKeys.Remove(key);
             legacyGraphExcludedDocumentKeys.Remove(key);
+            InvalidateLegacyGraphApprovalForDocument(document);
+        }
+
+        if (vehicle.HasCustomer && FindLegacyGraphCustomerById(vehicle.CustomerId) is { } vehicleCustomer)
+        {
+            InvalidateLegacyGraphCustomerApproval(vehicleCustomer);
         }
 
         InvalidateLegacyGraphImportConfirmation();
@@ -3414,6 +3424,8 @@ public partial class MainWindow : Window
                 legacyGraphRecommendationDecisions[candidate.CandidateId] = state.Decision;
             }
         }
+
+        ReconcileLegacyGraphCustomerReviewStates();
     }
 
     private void RebuildLegacyGraphRecommendationCandidatesForCustomers(
@@ -3472,6 +3484,32 @@ public partial class MainWindow : Window
             {
                 legacyGraphRecommendationDecisions[candidate.CandidateId] = state.Decision;
             }
+        }
+
+        ReconcileLegacyGraphCustomerReviewStates(affectedCustomerIds);
+    }
+
+    private void ReconcileLegacyGraphCustomerReviewStates(
+        IReadOnlySet<string>? affectedCustomerIds = null)
+    {
+        if (legacyExportCandidateGraphResult is null || legacyGraphCustomerReviewStates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var customer in legacyExportCandidateGraphResult.Customers)
+        {
+            var sourceCustomer = GetLegacyGraphSourceCustomer(customer);
+            var key = GetLegacyGraphCustomerApprovalKey(sourceCustomer);
+            if (!legacyGraphCustomerReviewStates.TryGetValue(key, out var state) ||
+                !string.Equals(state, LegacyGraphCustomerReviewStateValues.Approved, StringComparison.Ordinal) ||
+                affectedCustomerIds is not null &&
+                !affectedCustomerIds.Contains(sourceCustomer.CustomerId))
+            {
+                continue;
+            }
+
+            _ = GetLegacyGraphCustomerReviewSnapshot(sourceCustomer);
         }
     }
 
@@ -4253,35 +4291,42 @@ public partial class MainWindow : Window
             var displayCustomer = entry.IsGroupHeader
                 ? GetLegacyGraphDisplayCustomer(entry.Customer)
                 : entry.Customer;
-            if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
-            {
-                if (entry.IsMatchingFocus)
-                {
-                    EnsureLegacyGraphMatchingCustomerSelection(displayCustomer);
-                    legacyGraphSelectedRecommendation = null;
-                    RefreshLegacyMatchingView();
-                }
-                else
-                {
-                    legacyGraphSelectedItem = displayCustomer;
-                    legacyGraphSelectedRecommendation = entry.MatchingRecommendation;
-                    var focusCustomer = GetLegacyGraphMatchingCustomer();
-                    if (focusCustomer is not null)
-                    {
-                        RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(focusCustomer));
-                    }
-
-                    UpdateLegacyGraphInspector(displayCustomer);
-                    RefreshLegacyMatchingMergeRemovalButton();
-                    RefreshLegacyMatchingRecommendationActions();
-                }
-                return;
-            }
-
             legacyGraphSelectedItem = displayCustomer;
             UpdateLegacyGraphInspector(displayCustomer);
             RenderLegacyGraphCustomer(displayCustomer);
         }
+    }
+
+    private void LegacyMatchingCustomerQueueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateLegacyGraphCurrentCustomerSelectionText();
+        if (LegacyMatchingCustomerQueueList.SelectedItem is not LegacyGraphCustomerListEntry entry)
+        {
+            return;
+        }
+
+        var displayCustomer = entry.IsGroupHeader
+            ? GetLegacyGraphDisplayCustomer(entry.Customer)
+            : entry.Customer;
+        if (entry.IsMatchingFocus)
+        {
+            EnsureLegacyGraphMatchingCustomerSelection(displayCustomer);
+            legacyGraphSelectedRecommendation = null;
+            RefreshLegacyMatchingView();
+            return;
+        }
+
+        legacyGraphSelectedItem = displayCustomer;
+        legacyGraphSelectedRecommendation = entry.MatchingRecommendation;
+        var focusCustomer = GetLegacyGraphMatchingCustomer();
+        if (focusCustomer is not null)
+        {
+            RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(focusCustomer));
+        }
+
+        UpdateLegacyGraphInspector(displayCustomer);
+        RefreshLegacyMatchingMergeRemovalButton();
+        RefreshLegacyMatchingRecommendationActions();
     }
 
     private void UpdateLegacyGraphCurrentCustomerSelectionText()
@@ -4299,7 +4344,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        LegacyGraphCurrentCustomerSelectionText.Text = LegacyGraphCustomersList.SelectedItem is LegacyGraphCustomerListEntry entry
+        var selectedItem = string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase)
+            ? LegacyMatchingCustomerQueueList.SelectedItem
+            : LegacyGraphCustomersList.SelectedItem;
+        LegacyGraphCurrentCustomerSelectionText.Text = selectedItem is LegacyGraphCustomerListEntry entry
             ? $"現在の選択: {entry.DisplayName}"
             : "現在の選択: なし";
     }
@@ -5257,6 +5305,9 @@ public partial class MainWindow : Window
                  StringComparer.Ordinal),
              new Dictionary<string, bool>(
                  legacyGraphCustomerApprovalStates,
+                 StringComparer.Ordinal),
+             new Dictionary<string, string>(
+                 legacyGraphCustomerReviewStates,
                  StringComparer.Ordinal));
 
     private (string? Type, string? Id) GetLegacyGraphSelectedCheckpointItem()
@@ -5433,7 +5484,8 @@ public partial class MainWindow : Window
                      .Concat(checkpoint.CustomerGroupExpanded.Keys)
                      .Concat(checkpoint.CustomerMergeDrafts.Keys)
                      .Concat(checkpoint.VirtualCustomerMergeKeys.Values)
-                     .Concat((checkpoint.CustomerApprovalStates ?? []).Keys))
+                     .Concat((checkpoint.CustomerApprovalStates ?? []).Keys)
+                     .Concat((checkpoint.CustomerReviewStates ?? []).Keys))
         {
             if (!validGroupKeys.Contains(groupKey))
             {
@@ -5559,6 +5611,13 @@ public partial class MainWindow : Window
         foreach (var pair in checkpoint.CustomerApprovalStates ?? [])
         {
             legacyGraphCustomerApprovalStates[pair.Key] = pair.Value;
+        }
+        legacyGraphCustomerReviewStates.Clear();
+        foreach (var pair in checkpoint.CustomerReviewStates ?? [])
+        {
+            legacyGraphCustomerReviewStates[pair.Key] = pair.Value;
+            legacyGraphCustomerApprovalStates[pair.Key] =
+                string.Equals(pair.Value, LegacyGraphCustomerReviewStateValues.Approved, StringComparison.Ordinal);
         }
         RebuildLegacyGraphRecommendationCandidates();
 
@@ -7056,10 +7115,17 @@ public partial class MainWindow : Window
 
     private void RefreshLegacyGraphCustomerList(string? selectedEntryId = null)
     {
-        var isMatching = string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase);
-        var entries = isMatching
-            ? BuildLegacyMatchingCustomerListEntries()
-            : BuildLegacyGraphCustomerListEntries();
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            RefreshLegacyMatchingCustomerQueue();
+            UpdateLegacyGraphCurrentCustomerSelectionText();
+            UpdateLegacyGraphImportConfirmationButton();
+            RefreshLegacyGraphSearchResults();
+            return;
+        }
+
+        LegacyMatchingCustomerQueueList.ItemsSource = null;
+        var entries = BuildLegacyGraphCustomerListEntries();
         LegacyGraphCustomersList.ItemsSource = entries;
         if (entries.Count == 0)
         {
@@ -7073,15 +7139,31 @@ public partial class MainWindow : Window
             return;
         }
 
-        var selectedEntry = isMatching
-            ? entries.FirstOrDefault(entry => entry.IsMatchingFocus) ?? entries[0]
-            : selectedEntryId is null
+        var selectedEntry = selectedEntryId is null
                 ? entries[0]
                 : entries.FirstOrDefault(entry => string.Equals(entry.EntryId, selectedEntryId, StringComparison.Ordinal));
         LegacyGraphCustomersList.SelectedItem = selectedEntry ?? entries[0];
         UpdateLegacyGraphCurrentCustomerSelectionText();
         UpdateLegacyGraphImportConfirmationButton();
         RefreshLegacyGraphSearchResults();
+    }
+
+    private void RefreshLegacyMatchingCustomerQueue()
+    {
+        var entries = BuildLegacyMatchingCustomerListEntries();
+        LegacyGraphCustomersList.ItemsSource = null;
+        LegacyMatchingCustomerQueueList.ItemsSource = entries;
+        if (entries.Count == 0)
+        {
+            LegacyMatchingCustomerQueueList.SelectedIndex = -1;
+            legacyGraphEdges.Clear();
+            LegacyGraphCanvas.Children.Clear();
+            LegacyGraphEdgesCanvas.Children.Clear();
+            return;
+        }
+
+        LegacyMatchingCustomerQueueList.SelectedItem =
+            entries.FirstOrDefault(entry => entry.IsMatchingFocus) ?? entries[0];
     }
 
     private IReadOnlyList<LegacyGraphCustomerListEntry> BuildLegacyMatchingCustomerListEntries()
@@ -7093,16 +7175,24 @@ public partial class MainWindow : Window
         }
 
         var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
-        var focusApproved = IsLegacyGraphCustomerApproved(focusSource);
+        var focusSnapshot = GetLegacyGraphCustomerReviewSnapshot(focusSource);
+        var focusApproved = string.Equals(
+            focusSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
+        var focusNeedsReview = string.Equals(
+            focusSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.NeedsReview,
+            StringComparison.Ordinal);
         var entries = new List<LegacyGraphCustomerListEntry>
         {
             CreateLegacyMatchingCustomerListEntry(
                 focusCustomer,
-                focusApproved ? "顧客確認済み" : "現在確認中（未確認）",
-                focusApproved ? "現在の顧客 / 確認完了" : "現在の顧客 / 確認待ち",
-                ToBrush(focusApproved ? "#EAF2FF" : "#F4F7FB"),
-                ToBrush(focusApproved ? "#2563EB" : "#718096"),
-                ToBrush(focusApproved ? "#1D4ED8" : "#52647A"),
+                focusApproved ? "顧客確認済み" : focusNeedsReview ? "再確認待ち" : "基準顧客",
+                focusApproved ? "現在の論理顧客 / 確認完了" : focusNeedsReview ? "現在の論理顧客 / 再確認が必要" : "現在の論理顧客 / 確認待ち",
+                ToBrush(focusApproved ? "#EAF2FF" : focusNeedsReview ? "#FFF7ED" : "#F4F7FB"),
+                ToBrush(focusApproved ? "#2563EB" : focusNeedsReview ? "#D97706" : "#718096"),
+                ToBrush(focusApproved ? "#1D4ED8" : focusNeedsReview ? "#9A3412" : "#52647A"),
                 isFocus: true),
         };
 
@@ -8499,6 +8589,9 @@ public partial class MainWindow : Window
         legacyGraphCustomerApprovalStates.Remove(sourceKey);
         legacyGraphCustomerApprovalStates.Remove(targetKey);
         legacyGraphCustomerApprovalStates.Remove(mergeGroup.GroupId);
+        legacyGraphCustomerReviewStates.Remove(sourceKey);
+        legacyGraphCustomerReviewStates.Remove(targetKey);
+        legacyGraphCustomerReviewStates.Remove(mergeGroup.GroupId);
         InvalidateLegacyGraphImportConfirmation();
         RebuildLegacyGraphRecommendationCandidatesForCustomers(
             mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
@@ -8920,6 +9013,7 @@ public partial class MainWindow : Window
                 fieldSelections,
                 selectedValues,
                 DateTimeOffset.UtcNow);
+            InvalidateLegacyGraphCustomerApprovalForMergeKey(mergeKey);
             InvalidateLegacyGraphImportConfirmation();
             dialog.DialogResult = true;
         };
@@ -9247,6 +9341,7 @@ public partial class MainWindow : Window
 
             legacyGraphAppliedCustomerMergeKeys.Add(appliedMergeKey);
             legacyGraphCustomerApprovalStates.Remove(appliedMergeKey);
+            legacyGraphCustomerReviewStates.Remove(appliedMergeKey);
 
             if ((index + 1) % 16 == 0)
             {
@@ -9540,42 +9635,137 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer customer) =>
         GetLegacyGraphLogicalCustomerKey(customer);
 
+    private string GetLegacyGraphStoredCustomerReviewState(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        var key = GetLegacyGraphCustomerApprovalKey(customer);
+        if (legacyGraphCustomerReviewStates.TryGetValue(key, out var state) &&
+            LegacyGraphCustomerReviewStateValues.IsSupported(state))
+        {
+            return state;
+        }
+
+        return legacyGraphCustomerApprovalStates.TryGetValue(key, out var approved) && approved
+            ? LegacyGraphCustomerReviewStateValues.Approved
+            : LegacyGraphCustomerReviewStateValues.Unreviewed;
+    }
+
+    private void SetLegacyGraphCustomerReviewState(
+        AbacusLegacyExportCandidateGraphCustomer customer,
+        string state)
+    {
+        if (!LegacyGraphCustomerReviewStateValues.IsSupported(state))
+        {
+            throw new ArgumentException("顧客確認状態が不正です。", nameof(state));
+        }
+
+        var key = GetLegacyGraphCustomerApprovalKey(customer);
+        legacyGraphCustomerReviewStates[key] = state;
+        // 旧チェックポイント・最終化処理との互換性のため、承認済みだけをboolにも投影します。
+        legacyGraphCustomerApprovalStates[key] =
+            string.Equals(state, LegacyGraphCustomerReviewStateValues.Approved, StringComparison.Ordinal);
+    }
+
+    private LegacyGraphCustomerReviewSnapshot GetLegacyGraphCustomerReviewSnapshot(
+        AbacusLegacyExportCandidateGraphCustomer customer,
+        IReadOnlyList<AbacusRecommendationCandidate>? recommendations = null)
+    {
+        var visibleRecommendations = recommendations ?? GetLegacyGraphMatchingRecommendations(customer);
+        var pendingCount = visibleRecommendations.Count(candidate =>
+            GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Pending);
+        var heldCount = visibleRecommendations.Count(candidate =>
+            GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold);
+        var logicalKey = GetLegacyGraphLogicalCustomerKey(customer);
+        var requiresCustomerPreview = TryGetLegacyGraphMergeGroup(logicalKey, out var logicalGroup) &&
+            IsLegacyGraphLogicalCustomerGroup(logicalKey) &&
+            logicalGroup.CustomerIds.Count > 1 &&
+            !legacyGraphCustomerMergeDrafts.ContainsKey(logicalKey);
+        var canApprove = pendingCount == 0 && heldCount == 0 && !requiresCustomerPreview;
+        var storedState = GetLegacyGraphStoredCustomerReviewState(customer);
+        if (string.Equals(storedState, LegacyGraphCustomerReviewStateValues.Approved, StringComparison.Ordinal) &&
+            !canApprove)
+        {
+            SetLegacyGraphCustomerReviewState(customer, LegacyGraphCustomerReviewStateValues.NeedsReview);
+            storedState = LegacyGraphCustomerReviewStateValues.NeedsReview;
+        }
+
+        var reason = pendingCount > 0
+            ? $"未処理候補 {pendingCount:N0}件があります。"
+            : heldCount > 0
+            ? $"保留候補 {heldCount:N0}件があります。"
+            : requiresCustomerPreview
+            ? "統合済み顧客の採用値をプレビューして保存してください。"
+            : string.Equals(storedState, LegacyGraphCustomerReviewStateValues.NeedsReview, StringComparison.Ordinal)
+            ? "承認後に内容が変更されたため、再確認が必要です。"
+            : "まだ顧客単位の確認を完了していません。";
+
+        return new LegacyGraphCustomerReviewSnapshot(
+            GetLegacyGraphCustomerApprovalKey(customer),
+            pendingCount,
+            heldCount,
+            requiresCustomerPreview,
+            canApprove,
+            storedState,
+            reason);
+    }
+
     private bool IsLegacyGraphCustomerApproved(
         AbacusLegacyExportCandidateGraphCustomer customer) =>
-        legacyGraphCustomerApprovalStates.TryGetValue(
-            GetLegacyGraphCustomerApprovalKey(customer),
-            out var approved) && approved;
+        string.Equals(
+            GetLegacyGraphCustomerReviewSnapshot(customer).Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
 
     private bool CanApproveLegacyGraphCustomer(
         AbacusLegacyExportCandidateGraphCustomer customer,
         IReadOnlyList<AbacusRecommendationCandidate>? recommendations = null)
-    {
-        var mergeKey = GetLegacyGraphLogicalCustomerKey(customer);
-        if (TryGetLegacyGraphMergeGroup(mergeKey, out var mergeGroup) &&
-            IsLegacyGraphLogicalCustomerGroup(mergeKey) &&
-            mergeGroup.CustomerIds.Count > 1 &&
-            !legacyGraphCustomerMergeDrafts.ContainsKey(mergeKey))
-        {
-            return false;
-        }
-
-        var visibleRecommendations = recommendations ?? GetLegacyGraphMatchingRecommendations(customer);
-        return !visibleRecommendations.Any(candidate =>
-        {
-            var decision = GetLegacyGraphRecommendationDecision(candidate);
-            return decision is AbacusRecommendationDecisionValues.Pending or
-                AbacusRecommendationDecisionValues.Hold;
-        });
-    }
+        => GetLegacyGraphCustomerReviewSnapshot(customer, recommendations).CanApprove;
 
     private void RefreshLegacyGraphCustomerApproval(
         AbacusLegacyExportCandidateGraphCustomer? customer,
         IReadOnlyList<AbacusRecommendationCandidate> recommendations)
     {
+        RefreshLegacyGraphCustomerApprovalPanel(customer, recommendations);
+        RefreshLegacyMatchingCustomerApprovalPanel(customer, recommendations);
+    }
+
+    private void RefreshLegacyGraphCustomerApprovalPanel(
+        AbacusLegacyExportCandidateGraphCustomer? customer,
+        IReadOnlyList<AbacusRecommendationCandidate> recommendations)
+    {
+        if (LegacyGraphCustomerApproveButton is null)
+        {
+            return;
+        }
+
+        var hasGraphCustomer = customer is not null &&
+                               !string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase);
+        LegacyGraphCustomerApproveButton.Visibility = hasGraphCustomer
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        LegacyGraphCustomerApproveButton.IsEnabled = false;
+        LegacyGraphCustomerApproveButton.Content = "キャンバスを承認";
+        if (!hasGraphCustomer)
+        {
+            return;
+        }
+
+        var snapshot = GetLegacyGraphCustomerReviewSnapshot(customer!, recommendations);
+        var approved = string.Equals(
+            snapshot.Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
+        LegacyGraphCustomerApproveButton.Content = approved ? "顧客確認済み" : "キャンバスを承認";
+        LegacyGraphCustomerApproveButton.IsEnabled = !approved && snapshot.CanApprove;
+    }
+
+    private void RefreshLegacyMatchingCustomerApprovalPanel(
+        AbacusLegacyExportCandidateGraphCustomer? customer,
+        IReadOnlyList<AbacusRecommendationCandidate> recommendations)
+    {
         if (LegacyMatchingCustomerApprovalBorder is null ||
             LegacyMatchingCustomerApprovalStatusText is null ||
-            LegacyMatchingCustomerApproveButton is null ||
-            LegacyGraphCustomerApproveButton is null)
+            LegacyMatchingCustomerApproveButton is null)
         {
             return;
         }
@@ -9585,64 +9775,46 @@ public partial class MainWindow : Window
         LegacyMatchingCustomerApprovalBorder.Visibility = hasMatchingCustomer
             ? Visibility.Visible
             : Visibility.Collapsed;
-        LegacyGraphCustomerApproveButton.Visibility = customer is null || hasMatchingCustomer
-            ? Visibility.Collapsed
-            : Visibility.Visible;
         LegacyMatchingCustomerApproveButton.IsEnabled = false;
-        LegacyGraphCustomerApproveButton.IsEnabled = false;
         if (customer is null)
         {
-            LegacyGraphCustomerApproveButton.Content = "キャンバスを承認";
             LegacyMatchingCustomerApprovalStatusText.Text = "顧客を選択すると、顧客単位の確定状態を表示します。";
             return;
         }
 
-        var approved = IsLegacyGraphCustomerApproved(customer);
-        var canApprove = CanApproveLegacyGraphCustomer(customer, recommendations);
-        var pendingCount = recommendations.Count(candidate =>
-        {
-            var decision = GetLegacyGraphRecommendationDecision(candidate);
-            return decision == AbacusRecommendationDecisionValues.Pending;
-        });
-        var heldCount = recommendations.Count(candidate =>
-            GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold);
-        var logicalKey = GetLegacyGraphLogicalCustomerKey(customer);
-        var requiresCustomerPreview = TryGetLegacyGraphMergeGroup(logicalKey, out var logicalGroup) &&
-            IsLegacyGraphLogicalCustomerGroup(logicalKey) &&
-            logicalGroup.CustomerIds.Count > 1 &&
-            !legacyGraphCustomerMergeDrafts.ContainsKey(logicalKey);
-
+        var snapshot = GetLegacyGraphCustomerReviewSnapshot(customer, recommendations);
+        var approved = string.Equals(
+            snapshot.Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
         if (approved)
         {
             LegacyMatchingCustomerApprovalStatusText.Text =
                 "✓ この顧客の確認は完了しています。変更した場合は再確認が必要です。";
             LegacyMatchingCustomerApproveButton.Content = "顧客確認済み";
-            LegacyGraphCustomerApproveButton.Content = "顧客確認済み";
             return;
         }
 
         LegacyMatchingCustomerApproveButton.Content = "この顧客を確定";
-        LegacyGraphCustomerApproveButton.Content = "キャンバスを承認";
-        LegacyMatchingCustomerApprovalStatusText.Text = requiresCustomerPreview
-            ? "統合済み顧客の採用値を決めるため、顧客情報をプレビューしてください。"
-            : canApprove
+        LegacyMatchingCustomerApprovalStatusText.Text = snapshot.Status ==
+                LegacyGraphCustomerReviewStateValues.NeedsReview
+            ? $"⚠ 再確認待ち: {snapshot.Reason}"
+            : snapshot.CanApprove
             ? "候補処理が完了しました。顧客情報とキャンバスを確認して確定してください。"
-            : $"顧客を確定する前に、未処理 {pendingCount:N0}件" +
-              (heldCount > 0 ? $" / 保留 {heldCount:N0}件" : "") +
-              "の候補を処理してください。";
-        LegacyMatchingCustomerApproveButton.IsEnabled = canApprove;
-        LegacyGraphCustomerApproveButton.IsEnabled = canApprove;
+            : snapshot.Reason;
+        LegacyMatchingCustomerApproveButton.IsEnabled = snapshot.CanApprove;
     }
 
     private bool ApproveLegacyGraphCustomer(
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
-        if (IsLegacyGraphCustomerApproved(customer))
+        var snapshot = GetLegacyGraphCustomerReviewSnapshot(customer);
+        if (string.Equals(snapshot.Status, LegacyGraphCustomerReviewStateValues.Approved, StringComparison.Ordinal))
         {
             return true;
         }
 
-        if (!CanApproveLegacyGraphCustomer(customer))
+        if (!snapshot.CanApprove)
         {
             LegacyGraphStatusText.Text =
                 "未処理または保留中の候補があるため、この顧客を確定できません。";
@@ -9650,7 +9822,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        legacyGraphCustomerApprovalStates[GetLegacyGraphCustomerApprovalKey(customer)] = true;
+        SetLegacyGraphCustomerReviewState(customer, LegacyGraphCustomerReviewStateValues.Approved);
         InvalidateLegacyGraphImportConfirmation();
         LegacyGraphStatusText.Text =
             $"顧客 {GetLegacyGraphCustomerDisplayName(customer)} の確認を完了しました。";
@@ -9682,7 +9854,13 @@ public partial class MainWindow : Window
     private void InvalidateLegacyGraphCustomerApproval(
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
-        legacyGraphCustomerApprovalStates.Remove(GetLegacyGraphCustomerApprovalKey(customer));
+        var key = GetLegacyGraphCustomerApprovalKey(customer);
+        var hadReviewState = legacyGraphCustomerReviewStates.ContainsKey(key) ||
+                             legacyGraphCustomerApprovalStates.TryGetValue(key, out var approved) && approved;
+        if (hadReviewState)
+        {
+            SetLegacyGraphCustomerReviewState(customer, LegacyGraphCustomerReviewStateValues.NeedsReview);
+        }
     }
 
     private void InvalidateLegacyGraphCustomerApprovalForMergeKey(string mergeKey)
@@ -10020,6 +10198,7 @@ public partial class MainWindow : Window
         legacyGraphCustomerMergeDrafts.Remove(groupKey);
         legacyGraphAppliedCustomerMergeKeys.Remove(groupKey);
         legacyGraphCustomerApprovalStates.Remove(groupKey);
+        legacyGraphCustomerReviewStates.Remove(groupKey);
         foreach (var virtualCustomerId in legacyGraphVirtualCustomerMergeKeys
                      .Where(pair => string.Equals(pair.Value, groupKey, StringComparison.Ordinal))
                      .Select(pair => pair.Key)
@@ -10408,7 +10587,10 @@ public partial class MainWindow : Window
 
     private AbacusLegacyExportCandidateGraphCustomer? GetLegacyGraphListSelectedDisplayCustomer()
     {
-        if (LegacyGraphCustomersList.SelectedItem is not LegacyGraphCustomerListEntry entry)
+        var selectedItem = string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase)
+            ? LegacyMatchingCustomerQueueList.SelectedItem
+            : LegacyGraphCustomersList.SelectedItem;
+        if (selectedItem is not LegacyGraphCustomerListEntry entry)
         {
             return null;
         }
@@ -13150,6 +13332,7 @@ public partial class MainWindow : Window
         legacyGraphLogicalCustomerMergeGroupByCustomerId.Clear();
         legacyGraphMatchingManualCustomerCandidateTargets.Clear();
         legacyGraphCustomerApprovalStates.Clear();
+        legacyGraphCustomerReviewStates.Clear();
         legacyGraphCustomerMergeGroups.Clear();
         legacyGraphCustomerMergeGroupByCustomerId.Clear();
         legacyGraphCustomerNameOverrides.Clear();
@@ -13186,6 +13369,7 @@ public partial class MainWindow : Window
         EndLegacyGraphConnectionPreview();
         legacyGraphEdges.Clear();
         LegacyGraphCustomersList.ItemsSource = null;
+        LegacyMatchingCustomerQueueList.ItemsSource = null;
         LegacyGraphUnresolvedVehicleList.ItemsSource = null;
         LegacyGraphUnresolvedSalesList.ItemsSource = null;
         LegacyGraphUnresolvedMaintenanceList.ItemsSource = null;
@@ -15712,6 +15896,15 @@ public partial class MainWindow : Window
             ? IsGroupHeader ? new Thickness(0) : new Thickness(22, 0, 0, 0)
             : new Thickness(0);
     }
+
+    private sealed record LegacyGraphCustomerReviewSnapshot(
+        string CustomerKey,
+        int PendingCount,
+        int HeldCount,
+        bool RequiresCustomerPreview,
+        bool CanApprove,
+        string Status,
+        string Reason);
 
     private sealed record LegacyGraphCustomerSourceSummary(
         string Title,

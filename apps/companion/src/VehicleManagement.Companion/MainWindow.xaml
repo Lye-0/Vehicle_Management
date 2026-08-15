@@ -1493,6 +1493,56 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                         </ListBox>
+                                        <ListBox x:Name="LegacyMatchingCustomerQueueList" VerticalAlignment="Stretch"
+                                                 Padding="0,0,14,0" Visibility="Collapsed"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 SelectionChanged="LegacyMatchingCustomerQueueList_SelectionChanged">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="Padding" Value="0" />
+                                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                                    <Setter Property="BorderThickness" Value="2" />
+                                                    <Setter Property="Background" Value="Transparent" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#2563EB" />
+                                                            <Setter Property="Background" Value="#DBEAFE" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Margin="{Binding BlockMargin}" Padding="6" HorizontalAlignment="Stretch"
+                                                            Background="{Binding BackgroundBrush}"
+                                                            BorderBrush="{Binding BorderBrush}" BorderThickness="1" CornerRadius="5">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="{Binding ExpandColumnWidth}" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Button Grid.Column="0" Width="24" Height="24" MinWidth="0"
+                                                                    Padding="0" Margin="0,0,4,0" Content="{Binding ExpandGlyph}"
+                                                                    Visibility="{Binding ExpandButtonVisibility}"
+                                                                    Tag="{Binding GroupKey}" IsEnabled="{Binding IsGroupHeader}"
+                                                                    Click="LegacyGraphCustomerGroupToggleButton_Click" />
+                                                            <StackPanel Grid.Column="1">
+                                                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}"
+                                                                           TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="12"
+                                                                           Text="{Binding Summary}" TextWrapping="Wrap" />
+                                                                <TextBlock Margin="0,2,0,0" Foreground="#718096" FontSize="11"
+                                                                           Text="{Binding AddressSummary}" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Margin="0,3,0,0" Foreground="{Binding StatusBrush}"
+                                                                           FontSize="11" FontWeight="SemiBold" Text="{Binding StatusText}"
+                                                                           TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
                                         <Border x:Name="LegacyGraphCustomerUngroupDropZone" Grid.Column="1" Margin="8,0,0,0" Padding="8"
                                                 VerticalAlignment="Stretch"
                                                 Background="#FFF7ED" BorderBrush="#D97706" BorderThickness="1"
