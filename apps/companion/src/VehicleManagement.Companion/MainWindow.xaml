@@ -2094,13 +2094,38 @@
                                                                                                 </Grid>
                                                                                             </DataTemplate>
                                                                                         </ItemsControl.ItemTemplate>
-                                                                                    </ItemsControl>
-                                                                                </StackPanel>
-                                                                            </DataTemplate>
-                                                                        </ItemsControl.ItemTemplate>
-                                                                    </ItemsControl>
-                                                                </Border>
-                                                                <TextBlock x:Name="LegacyMatchingDetailsCandidateHeadingText" Margin="0,12,0,0"
+                                                                                     </ItemsControl>
+                                                                                     <Expander Margin="0,5,0,0" Visibility="{Binding ExpandableDetailVisibility}">
+                                                                                         <Expander.Header>
+                                                                                             <StackPanel Orientation="Horizontal">
+                                                                                                 <TextBlock FontWeight="SemiBold" Foreground="#52647A">
+                                                                                                     <TextBlock.Style>
+                                                                                                         <Style TargetType="{x:Type TextBlock}">
+                                                                                                             <Setter Property="Text" Value="明細を表示" />
+                                                                                                             <Style.Triggers>
+                                                                                                                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType={x:Type Expander}}, Path=IsExpanded}" Value="True">
+                                                                                                                     <Setter Property="Text" Value="明細を閉じる" />
+                                                                                                                 </DataTrigger>
+                                                                                                             </Style.Triggers>
+                                                                                                         </Style>
+                                                                                                     </TextBlock.Style>
+                                                                                                 </TextBlock>
+                                                                                                 <TextBlock Margin="6,0,0,0" Foreground="#64748B"
+                                                                                                            Text="{Binding ExpandableDetail.Summary}" TextWrapping="Wrap" />
+                                                                                             </StackPanel>
+                                                                                         </Expander.Header>
+                                                                                         <Border Margin="0,3,0,0" Padding="6" Background="#FFFFFF"
+                                                                                                 BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="3">
+                                                                                             <TextBlock Foreground="#36465A" Text="{Binding ExpandableDetail.FullText}"
+                                                                                                        TextWrapping="Wrap" />
+                                                                                         </Border>
+                                                                                     </Expander>
+                                                                                 </StackPanel>
+                                                                             </DataTemplate>
+                                                                         </ItemsControl.ItemTemplate>
+                                                                     </ItemsControl>
+                                                                 </Border>
+                                                                 <TextBlock x:Name="LegacyMatchingDetailsCandidateHeadingText" Margin="0,12,0,0"
                                                                            FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
                                                                            Text="候補・紐付け先の情報" />
                                                                 <Border Margin="0,5,0,0" Padding="7" Background="#EFF6FF"
@@ -2121,40 +2146,87 @@
                                                                                                     </Grid.ColumnDefinitions>
                                                                                                     <TextBlock Foreground="#2563EB" FontSize="11"
                                                                                                                Text="{Binding Label}" TextWrapping="Wrap" />
-                                                                                                    <TextBlock Grid.Column="1" Foreground="#1D4ED8"
-                                                                                                               Text="{Binding Value}" TextWrapping="Wrap" />
-                                                                                                </Grid>
-                                                                                            </DataTemplate>
-                                                                                        </ItemsControl.ItemTemplate>
-                                                                                    </ItemsControl>
-                                                                                </StackPanel>
+                                                                                                     <TextBlock Grid.Column="1" Foreground="#1D4ED8"
+                                                                                                                Text="{Binding Value}" TextWrapping="Wrap" />
+                                                                                                 </Grid>
+                                                                                             </DataTemplate>
+                                                                                         </ItemsControl.ItemTemplate>
+                                                                                     </ItemsControl>
+                                                                                     <Expander Margin="0,5,0,0" Visibility="{Binding ExpandableDetailVisibility}">
+                                                                                         <Expander.Header>
+                                                                                             <StackPanel Orientation="Horizontal">
+                                                                                                 <TextBlock FontWeight="SemiBold" Foreground="#1D4ED8">
+                                                                                                     <TextBlock.Style>
+                                                                                                         <Style TargetType="{x:Type TextBlock}">
+                                                                                                             <Setter Property="Text" Value="明細を表示" />
+                                                                                                             <Style.Triggers>
+                                                                                                                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType={x:Type Expander}}, Path=IsExpanded}" Value="True">
+                                                                                                                     <Setter Property="Text" Value="明細を閉じる" />
+                                                                                                                 </DataTrigger>
+                                                                                                             </Style.Triggers>
+                                                                                                         </Style>
+                                                                                                     </TextBlock.Style>
+                                                                                                 </TextBlock>
+                                                                                                 <TextBlock Margin="6,0,0,0" Foreground="#2563EB"
+                                                                                                            Text="{Binding ExpandableDetail.Summary}" TextWrapping="Wrap" />
+                                                                                             </StackPanel>
+                                                                                         </Expander.Header>
+                                                                                         <Border Margin="0,3,0,0" Padding="6" Background="#FFFFFF"
+                                                                                                 BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="3">
+                                                                                             <TextBlock Foreground="#1D4ED8" Text="{Binding ExpandableDetail.FullText}"
+                                                                                                        TextWrapping="Wrap" />
+                                                                                         </Border>
+                                                                                     </Expander>
+                                                                                 </StackPanel>
                                                                             </DataTemplate>
                                                                         </ItemsControl.ItemTemplate>
                                                                     </ItemsControl>
                                                                 </Border>
-                                                                <TextBlock Margin="0,12,0,0" FontSize="14" FontWeight="SemiBold"
-                                                                           Foreground="#10233F" Text="他の候補" />
+                                                                 <TextBlock x:Name="LegacyMatchingDetailsAlternativesHeadingText" Margin="0,12,0,0"
+                                                                            FontSize="14" FontWeight="SemiBold" Foreground="#10233F" />
                                                                 <TextBlock x:Name="LegacyMatchingDetailsAlternativesPlaceholderText" Margin="0,4,0,0"
                                                                            Foreground="#52647A" TextWrapping="Wrap" />
                                                                 <ItemsControl x:Name="LegacyMatchingDetailsAlternativesItemsControl" Margin="0,5,0,0">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate>
-                                                                            <Border Margin="0,0,0,5" Padding="7" Background="#FFFFFF"
-                                                                                    BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="4">
-                                                                                <StackPanel>
-                                                                                    <TextBlock FontWeight="SemiBold" Foreground="#10233F"
-                                                                                               Text="{Binding Title}" TextWrapping="Wrap" />
-                                                                                    <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="11"
-                                                                                               Text="{Binding Identifier}" TextWrapping="Wrap" />
-                                                                                    <TextBlock Margin="0,3,0,0" Foreground="#166534"
-                                                                                               Text="{Binding Matched, StringFormat=一致: {0}}" TextWrapping="Wrap" />
-                                                                                    <TextBlock Margin="0,2,0,0" Foreground="#805B10"
-                                                                                               Text="{Binding Differences, StringFormat=差異: {0}}" TextWrapping="Wrap" />
-                                                                                    <TextBlock Margin="0,2,0,0" Foreground="#B91C1C"
-                                                                                               Text="{Binding Conflict}" TextWrapping="Wrap" />
-                                                                                    <TextBlock Margin="0,2,0,0" Foreground="#52647A"
-                                                                                               Text="{Binding Decision, StringFormat=判定: {0}}" TextWrapping="Wrap" />
-                                                                                </StackPanel>
+                                                                             <Border Margin="0,0,0,4" Padding="6" Background="#FFFFFF"
+                                                                                     BorderBrush="#D8E1EC" BorderThickness="1" CornerRadius="4">
+                                                                                 <StackPanel>
+                                                                                     <Grid>
+                                                                                         <Grid.ColumnDefinitions>
+                                                                                             <ColumnDefinition Width="*" />
+                                                                                             <ColumnDefinition Width="Auto" />
+                                                                                         </Grid.ColumnDefinitions>
+                                                                                         <TextBlock FontWeight="SemiBold" Foreground="#10233F"
+                                                                                                    Text="{Binding Title}" TextWrapping="Wrap" />
+                                                                                         <TextBlock Grid.Column="1" Margin="8,0,0,0" Foreground="#52647A" FontSize="11"
+                                                                                                    Text="{Binding Decision}" TextWrapping="Wrap" />
+                                                                                     </Grid>
+                                                                                     <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="11"
+                                                                                                Text="{Binding Identifier}" TextWrapping="Wrap" />
+                                                                                     <ItemsControl Margin="0,3,0,0" ItemsSource="{Binding ComparisonLines}">
+                                                                                         <ItemsControl.ItemsPanel>
+                                                                                             <ItemsPanelTemplate>
+                                                                                                 <WrapPanel />
+                                                                                             </ItemsPanelTemplate>
+                                                                                         </ItemsControl.ItemsPanel>
+                                                                                         <ItemsControl.ItemTemplate>
+                                                                                             <DataTemplate>
+                                                                                                 <Border Margin="0,0,5,2" Padding="3,1" Background="#F8FAFC"
+                                                                                                         BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="3">
+                                                                                                     <StackPanel Orientation="Horizontal">
+                                                                                                         <TextBlock FontWeight="SemiBold" Foreground="{Binding Foreground}"
+                                                                                                                    Text="{Binding Symbol}" />
+                                                                                                         <TextBlock Margin="3,0,0,0" Foreground="{Binding Foreground}"
+                                                                                                                    Text="{Binding Text}" TextWrapping="Wrap" />
+                                                                                                     </StackPanel>
+                                                                                                 </Border>
+                                                                                             </DataTemplate>
+                                                                                         </ItemsControl.ItemTemplate>
+                                                                                     </ItemsControl>
+                                                                                     <TextBlock Margin="0,2,0,0" Foreground="{Binding ConflictBrush}"
+                                                                                                Text="{Binding ConflictText}" TextWrapping="Wrap" />
+                                                                                 </StackPanel>
                                                                             </Border>
                                                                         </DataTemplate>
                                                                     </ItemsControl.ItemTemplate>

@@ -1899,6 +1899,7 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsConflictItemsControl.ItemsSource = null;
             LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = null;
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesHeadingText.Text = "";
             LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
             LegacyMatchingDetailsMergePreviewText.Text = "";
             LegacyMatchingDetailsMergePreviewSection.Visibility = Visibility.Collapsed;
@@ -2237,6 +2238,7 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsConflictItemsControl.ItemsSource = null;
             LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = null;
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesHeadingText.Text = "";
             LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
             LegacyMatchingDetailsMergePreviewText.Text = "";
             LegacyMatchingDetailsMergePreviewSection.Visibility = Visibility.Collapsed;
@@ -2395,9 +2397,10 @@ public partial class MainWindow : Window
         LegacyMatchingDetailsMissingItemsControl.ItemsSource = missingItems;
         LegacyMatchingDetailsConflictItemsControl.ItemsSource = currentCandidate.Conflicts;
         LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = alternativeItems;
+        LegacyMatchingDetailsAlternativesHeadingText.Text = $"他の候補 {alternativeItems.Count:N0}件";
         LegacyMatchingDetailsAlternativesPlaceholderText.Text = alternativeItems.Count == 0
-            ? "この対象に対する別の候補はありません。"
-            : $"同じ対象に対する別候補 {alternativeItems.Count:N0}件。候補を変更する操作はここでは行いません。";
+            ? "他の候補はありません。"
+            : "※ここでは比較のみ";
         LegacyMatchingDetailsMergePreviewText.Text = BuildLegacyMatchingMergePreviewText(currentCandidate);
         LegacyMatchingDetailsMergePreviewSection.Visibility = IsLegacyMatchingCustomerMerge(currentCandidate)
             ? Visibility.Visible
@@ -2630,8 +2633,8 @@ public partial class MainWindow : Window
                         {
                             CreateLegacyMatchingEntityRow("日付", document.DocumentDate),
                             CreateLegacyMatchingEntityRow("合計", document.TotalAmount),
-                            CreateLegacyMatchingEntityRow("明細", BuildLegacyGraphDocumentDetailSummary(document).Trim()),
-                        }));
+                        },
+                        BuildLegacyMatchingDocumentDetail(document)));
                     sections.Add(new LegacyMatchingEntitySection(
                         "出典",
                         new[] { CreateLegacyMatchingEntityRow("出典", document.SourceLocation) }));
@@ -2647,6 +2650,53 @@ public partial class MainWindow : Window
         string label,
         string value) =>
         new(label, DisplayLegacyMatchingEntityValue(value));
+
+    private static LegacyMatchingExpandableDetail BuildLegacyMatchingDocumentDetail(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var fullText = BuildLegacyGraphDocumentDetailSummary(document).Trim();
+        if (string.IsNullOrWhiteSpace(document.DetailsJson))
+        {
+            return new LegacyMatchingExpandableDetail(
+                "明細",
+                "明細情報を取得できません",
+                fullText);
+        }
+
+        try
+        {
+            var detail = JsonSerializer.Deserialize<AbacusDetailJsonDocument>(
+                document.DetailsJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (detail is null)
+            {
+                return new LegacyMatchingExpandableDetail(
+                    "明細",
+                    "明細情報を解析できません",
+                    fullText);
+            }
+
+            var summary = $"{detail.Lines.Count:N0}行 / 明細合計 {detail.DetailAmount:N0}";
+            if (detail.AmountOnlyRowCount > 0)
+            {
+                summary += $" / 金額のみ {detail.AmountOnlyRowCount:N0}行";
+            }
+
+            if (detail.ExcludedDetailCount > 0)
+            {
+                summary += $" / 除外 {detail.ExcludedDetailCount:N0}行";
+            }
+
+            return new LegacyMatchingExpandableDetail("明細", summary, fullText);
+        }
+        catch (JsonException)
+        {
+            return new LegacyMatchingExpandableDetail(
+                "明細",
+                "明細情報を解析できません",
+                fullText);
+        }
+    }
 
     private static string GetLegacyMatchingEntityHeading(
         string subjectKind,
@@ -2694,22 +2744,41 @@ public partial class MainWindow : Window
             .Select(candidate =>
             {
                 var targetText = GetLegacyMatchingTargetText(candidate, sourceCustomerIds);
-                var matchedText = candidate.MatchedFields.Count == 0
-                    ? "一致情報なし"
-                    : string.Join("・", candidate.MatchedFields.Select(field => field.Label).Distinct(StringComparer.Ordinal));
-                var differenceText = candidate.Differences.Count == 0
-                    ? "差異なし"
-                    : $"差異: {string.Join("・", candidate.Differences.Select(field => field.Label))}";
+                var comparisonLines = candidate.MatchedFields
+                    .GroupBy(field => field.Label, StringComparer.Ordinal)
+                    .Select(group => new LegacyMatchingAlternativeLine(
+                        "✓",
+                        $"{group.Key}：一致",
+                        ToBrush("#166534")))
+                    .Concat(candidate.Differences
+                        .GroupBy(field => field.Label, StringComparer.Ordinal)
+                        .Select(group => new LegacyMatchingAlternativeLine(
+                            "▲",
+                            $"{group.Key}：差異",
+                            ToBrush("#805B10"))))
+                    .ToArray();
+                if (comparisonLines.Length == 0)
+                {
+                    comparisonLines =
+                    [
+                        new LegacyMatchingAlternativeLine(
+                            "—",
+                            "一致・差異なし",
+                            ToBrush("#64748B")),
+                    ];
+                }
+
                 var conflictText = candidate.Conflicts.Count == 0
-                    ? "競合なし"
-                    : $"要確認: {string.Join("、", candidate.Conflicts)}";
+                    ? "要確認なし"
+                    : $"! 要確認あり（{candidate.Conflicts.Count:N0}件）";
+                var conflictBrush = ToBrush(candidate.Conflicts.Count == 0 ? "#166534" : "#B91C1C");
                 return new LegacyMatchingAlternativeRow(
                     targetText,
                     GetLegacyMatchingAlternativeIdentifier(candidate, sourceCustomerIds),
-                    matchedText,
-                    differenceText,
+                    comparisonLines,
                     conflictText,
-                    GetLegacyMatchingDecisionText(GetLegacyGraphRecommendationDecision(candidate)),
+                    conflictBrush,
+                    $"判定：{GetLegacyMatchingDecisionText(GetLegacyGraphRecommendationDecision(candidate))}",
                     candidate.CandidateId);
             })
             .ToArray();
@@ -14547,18 +14616,34 @@ public partial class MainWindow : Window
         string InternalStatusText,
         string ValuesText);
 
+    private sealed record LegacyMatchingAlternativeLine(
+        string Symbol,
+        string Text,
+        Brush Foreground);
+
     private sealed record LegacyMatchingAlternativeRow(
         string Title,
         string Identifier,
-        string Matched,
-        string Differences,
-        string Conflict,
+        IReadOnlyList<LegacyMatchingAlternativeLine> ComparisonLines,
+        string ConflictText,
+        Brush ConflictBrush,
         string Decision,
         string InternalId);
 
     private sealed record LegacyMatchingEntitySection(
         string Title,
-        IReadOnlyList<LegacyMatchingEntityRow> Rows);
+        IReadOnlyList<LegacyMatchingEntityRow> Rows,
+        LegacyMatchingExpandableDetail? ExpandableDetail = null)
+    {
+        public Visibility ExpandableDetailVisibility => ExpandableDetail is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private sealed record LegacyMatchingExpandableDetail(
+        string Title,
+        string Summary,
+        string FullText);
 
     private sealed record LegacyMatchingEntityRow(
         string Label,
