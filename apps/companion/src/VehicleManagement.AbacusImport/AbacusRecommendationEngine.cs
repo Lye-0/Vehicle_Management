@@ -85,11 +85,14 @@ public sealed record AbacusRecommendationCandidate(
     IReadOnlyList<AbacusRecommendationDifference> Differences,
     IReadOnlyList<AbacusRecommendationMissingField> MissingFields,
     IReadOnlyList<string> Conflicts,
-    string Reason)
+    string Reason,
+    string Origin = "recommendation")
 {
     public bool HasStrongEvidence => MatchedFields.Any(evidence => evidence.IsStrong);
 
     public bool IsEligible => MatchedFields.Count > 0 && Conflicts.Count == 0;
+
+    public bool IsManual => string.Equals(Origin, "manual", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

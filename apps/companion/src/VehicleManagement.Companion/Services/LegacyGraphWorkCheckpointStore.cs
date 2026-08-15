@@ -7,7 +7,7 @@ namespace VehicleManagement.Companion.Services;
 
 public static class LegacyGraphWorkCheckpointSchema
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
     public const string Kind = "abacus-legacy-graph-work-checkpoint";
 }
 
@@ -115,7 +115,10 @@ public sealed record LegacyGraphWorkCheckpoint(
     Dictionary<string, string>? CustomerNameOverrides = null,
     string? MatchingCategory = null,
     int MatchingRecommendationIndex = -1,
-    LegacyGraphCheckpointMatchingChange[]? MatchingChanges = null);
+    LegacyGraphCheckpointMatchingChange[]? MatchingChanges = null,
+    Dictionary<string, string>? LogicalCustomerMergeGroupByCustomerId = null,
+    Dictionary<string, string[]>? MatchingManualCustomerCandidateTargets = null,
+    Dictionary<string, bool>? CustomerApprovalStates = null);
 
 /// <summary>
 /// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
@@ -219,7 +222,7 @@ public sealed class LegacyGraphWorkCheckpointStore
 
     private static LegacyGraphWorkCheckpoint UpgradeCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
     {
-        if (checkpoint.Version is not 1 and not 2 and not 3 and not LegacyGraphWorkCheckpointSchema.CurrentVersion)
+        if (checkpoint.Version is not 1 and not 2 and not 3 and not 4 and not LegacyGraphWorkCheckpointSchema.CurrentVersion)
         {
             return checkpoint;
         }
@@ -234,6 +237,11 @@ public sealed class LegacyGraphWorkCheckpointStore
                 : checkpoint.MatchingCategory,
             MatchingRecommendationIndex = checkpoint.MatchingRecommendationIndex,
             MatchingChanges = checkpoint.MatchingChanges ?? [],
+            LogicalCustomerMergeGroupByCustomerId = checkpoint.LogicalCustomerMergeGroupByCustomerId ??
+                                                    new Dictionary<string, string>(),
+            MatchingManualCustomerCandidateTargets = checkpoint.MatchingManualCustomerCandidateTargets ??
+                                                    new Dictionary<string, string[]>(),
+            CustomerApprovalStates = checkpoint.CustomerApprovalStates ?? new Dictionary<string, bool>(),
         };
     }
 
@@ -296,7 +304,10 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.DetailStates is null ||
             checkpoint.RecommendationStates is null ||
             checkpoint.CustomerNameOverrides is null ||
-            checkpoint.MatchingChanges is null)
+            checkpoint.MatchingChanges is null ||
+            checkpoint.LogicalCustomerMergeGroupByCustomerId is null ||
+            checkpoint.MatchingManualCustomerCandidateTargets is null ||
+            checkpoint.CustomerApprovalStates is null)
         {
             throw new InvalidDataException("グラフ作業チェックポイントの必須状態が欠落しています。");
         }
@@ -321,7 +332,13 @@ public sealed class LegacyGraphWorkCheckpointStore
                     LegacyMatchingCategoryKinds.Vehicle or LegacyMatchingCategoryKinds.Document) ||
             checkpoint.MatchingChanges.Any(change =>
                 change is null || string.IsNullOrWhiteSpace(change.ChangeId) ||
-                string.IsNullOrWhiteSpace(change.Kind) || string.IsNullOrWhiteSpace(change.SubjectId)))
+                string.IsNullOrWhiteSpace(change.Kind) || string.IsNullOrWhiteSpace(change.SubjectId)) ||
+            checkpoint.LogicalCustomerMergeGroupByCustomerId.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
+            checkpoint.MatchingManualCustomerCandidateTargets.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null ||
+                pair.Value.Any(string.IsNullOrWhiteSpace)) ||
+            checkpoint.CustomerApprovalStates.Any(pair => string.IsNullOrWhiteSpace(pair.Key)))
         {
             throw new InvalidDataException("グラフ作業チェックポイントの候補IDが不正です。");
         }
