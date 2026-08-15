@@ -1697,7 +1697,8 @@
                                                                    Foreground="#92400E" FontSize="11" FontWeight="SemiBold"
                                                                    VerticalAlignment="Center" />
                                                     </Grid>
-                                                    <ScrollViewer Grid.Row="1" Margin="0,8,0,8" VerticalScrollBarVisibility="Auto">
+                                                    <ScrollViewer x:Name="LegacyMatchingCurrentRecommendationScrollViewer" Grid.Row="1"
+                                                                  Margin="0,8,0,8" VerticalScrollBarVisibility="Auto">
                                                         <StackPanel>
                                                             <Grid>
                                                                 <Grid.ColumnDefinitions>
@@ -1838,6 +1839,7 @@
                                                         </StackPanel>
                                                     </ScrollViewer>
                                                     <TextBlock x:Name="LegacyMatchingNoRecommendationText" Grid.Row="1" Visibility="Collapsed"
+                                                               VerticalAlignment="Center" Margin="0,8,0,8"
                                                                Foreground="#52647A" TextWrapping="Wrap"
                                                                Text="このカテゴリに未処理のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。" />
                                                     <StackPanel Grid.Row="2">

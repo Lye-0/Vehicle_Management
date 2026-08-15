@@ -1889,6 +1889,9 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentDifferenceBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentMissingBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentConflictBorder.Visibility = Visibility.Collapsed;
+            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
+            LegacyMatchingNoRecommendationText.Text = "顧客を選択すると、おすすめ欄を表示できます。";
+            LegacyMatchingNoRecommendationText.Visibility = Visibility.Visible;
             LegacyMatchingSideApproveButton.IsEnabled = false;
             LegacyMatchingSideRejectButton.IsEnabled = false;
             LegacyMatchingSideHoldButton.IsEnabled = false;
@@ -2200,6 +2203,8 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentDifferenceBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentMissingBorder.Visibility = Visibility.Collapsed;
             LegacyMatchingCurrentConflictBorder.Visibility = Visibility.Collapsed;
+            LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Collapsed;
+            LegacyMatchingNoRecommendationText.Text = "このカテゴリに未処理のおすすめはありません。別のカテゴリまたは未確定タブを確認してください。";
             LegacyMatchingNoRecommendationText.Visibility = Visibility.Visible;
             LegacyMatchingSideStatusText.Text = "保留中の候補は通常の巡回後にもう一度確認できます。";
             LegacyMatchingSideApproveButton.IsEnabled = false;
@@ -2241,6 +2246,7 @@ public partial class MainWindow : Window
                 ToBrush("#B91C1C")))
             .ToArray();
         LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
+        LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Visible;
         LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
         LegacyMatchingCurrentTargetText.Text = item.TargetText;
         LegacyMatchingCurrentRelationArrowText.Text = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
