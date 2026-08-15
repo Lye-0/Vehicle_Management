@@ -76,13 +76,16 @@ public static class LegacyMatchingWorkflow
                     GetDecision(decisions, candidate) == AbacusRecommendationDecisionValues.Pending);
                 var held = categoryCandidates.Count(candidate =>
                     GetDecision(decisions, candidate) == AbacusRecommendationDecisionValues.Hold);
+                var completed = categoryCandidates.Count(candidate =>
+                    GetDecision(decisions, candidate) is AbacusRecommendationDecisionValues.Approved or
+                        AbacusRecommendationDecisionValues.Rejected);
                 return new LegacyMatchingCategorySummary(
                     kind,
                     LegacyMatchingCategoryKinds.GetLabel(kind),
                     categoryCandidates.Length,
                     pending,
                     held,
-                    categoryCandidates.Length - pending);
+                    completed);
             })
             .ToArray();
 

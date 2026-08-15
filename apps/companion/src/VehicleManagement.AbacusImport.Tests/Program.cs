@@ -185,6 +185,19 @@ static void MatchingCategoriesAreOrdered()
             [LegacyMatchingCategoryKinds.Customer, LegacyMatchingCategoryKinds.Vehicle, LegacyMatchingCategoryKinds.Document]),
         "顧客単位カテゴリの順序が仕様どおりではありません。");
     Assert(summaries[0].Total > 0, "顧客統合カテゴリが集計されていません。");
+
+    var heldCustomer = candidates.First(candidate =>
+        LegacyMatchingCategoryKinds.GetKind(candidate) == LegacyMatchingCategoryKinds.Customer);
+    var heldSummaries = LegacyMatchingWorkflow.BuildCategorySummaries(
+        candidates,
+        new Dictionary<string, string>
+        {
+            [heldCustomer.CandidateId] = AbacusRecommendationDecisionValues.Hold,
+        });
+    var customerSummary = heldSummaries.First(summary =>
+        summary.Kind == LegacyMatchingCategoryKinds.Customer);
+    Assert(customerSummary.Held == 1 && customerSummary.Completed == 0,
+        "保留中のおすすめを完了件数として扱っています。");
 }
 
 static void LegacyCheckpointUpgrade()

@@ -73,7 +73,8 @@ public sealed record LegacyGraphCheckpointMatchingChange(
     string SubjectId,
     string Title,
     string Details,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? CustomerId = null);
 
 public sealed record LegacyGraphWorkCheckpoint(
     string Kind,
