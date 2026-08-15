@@ -14,6 +14,7 @@ var tests = new (string Name, Action Test)[]
     ("不足情報は差異と分離して保存される", MissingInformationIsStructured),
     ("顧客単位カテゴリは顧客統合を先頭にする", MatchingCategoriesAreOrdered),
     ("同一論理書類の候補は1操作に集約される", SameLogicalDocumentRecommendationsAreGrouped),
+    ("未処理の自動統合候補先は顧客巡回から除外され却下後に戻る", PendingAutomaticCustomerTargetsAreHidden),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -219,6 +220,45 @@ static void SameLogicalDocumentRecommendationsAreGrouped()
         "論理書類に属する元候補がグループへ保持されていません。");
     Assert(groups[0].Representative.CandidateId == "candidate-a",
         "候補グループの代表が決定的に選ばれていません。");
+}
+
+static void PendingAutomaticCustomerTargetsAreHidden()
+{
+    var relations = new[]
+    {
+        new LegacyMatchingCustomerMergeRelation(
+            "customer-a",
+            "customer-b",
+            "automatic",
+            AbacusRecommendationDecisionValues.Pending),
+        new LegacyMatchingCustomerMergeRelation(
+            "customer-b",
+            "customer-c",
+            "automatic",
+            AbacusRecommendationDecisionValues.Hold),
+        new LegacyMatchingCustomerMergeRelation(
+            "customer-d",
+            "customer-e",
+            "automatic",
+            AbacusRecommendationDecisionValues.Rejected),
+    };
+
+    var hidden = LegacyMatchingWorkflow.GetPendingAutomaticCustomerIdsToHide(relations);
+    Assert(hidden.SetEquals(["customer-b", "customer-c"]),
+        "未処理・保留の自動統合候補先だけが巡回から除外されていません。");
+
+    var afterReject = relations
+        .Select(relation => relation with
+        {
+            Decision = relation.SubjectCustomerId == "customer-a" &&
+                       relation.TargetCustomerId == "customer-b"
+                ? AbacusRecommendationDecisionValues.Rejected
+                : relation.Decision,
+        })
+        .ToArray();
+    var hiddenAfterReject = LegacyMatchingWorkflow.GetPendingAutomaticCustomerIdsToHide(afterReject);
+    Assert(hiddenAfterReject.SetEquals(["customer-c"]),
+        "自動統合候補を却下した後、候補先顧客が巡回対象へ戻る状態を判定できていません。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

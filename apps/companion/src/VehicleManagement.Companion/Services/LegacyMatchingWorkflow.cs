@@ -22,6 +22,8 @@ public static class LegacyMatchingCategoryKinds
     public const string Vehicle = "vehicle";
     public const string Document = "document";
 
+    public static IReadOnlyList<string> All { get; } = [Customer, Vehicle, Document];
+
     public static string GetLabel(string kind) => kind switch
     {
         Customer => "顧客統合",
@@ -56,6 +58,16 @@ public sealed record LegacyMatchingCategorySummary(
 
     public string ProgressText => $"{Pending}/{Active}";
 }
+
+/// <summary>
+/// 顧客巡回から除外する未処理の自動統合候補を表します。
+/// 顧客単位UIでは、候補として表示される側を独立顧客としてもう一度巡回しません。
+/// </summary>
+public sealed record LegacyMatchingCustomerMergeRelation(
+    string SubjectCustomerId,
+    string TargetCustomerId,
+    string Origin,
+    string Decision);
 
 /// <summary>
 /// 顧客単位UIの表示順・カテゴリ集計を、WPFの状態から切り離して決めます。
@@ -134,6 +146,26 @@ public static class LegacyMatchingWorkflow
         candidate.TargetCustomerId is not null && customerIds.Contains(candidate.TargetCustomerId) ||
         candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer && customerIds.Contains(candidate.SubjectId) ||
         candidate.TargetKind == AbacusRecommendationEntityKinds.Customer && customerIds.Contains(candidate.TargetId);
+
+    public static IReadOnlySet<string> GetPendingAutomaticCustomerIdsToHide(
+        IEnumerable<LegacyMatchingCustomerMergeRelation> relations)
+    {
+        var hiddenCustomerIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var relation in relations)
+        {
+            if (!string.Equals(relation.Origin, "automatic", StringComparison.OrdinalIgnoreCase) ||
+                relation.Decision is not AbacusRecommendationDecisionValues.Pending and
+                    not AbacusRecommendationDecisionValues.Hold ||
+                string.IsNullOrWhiteSpace(relation.TargetCustomerId))
+            {
+                continue;
+            }
+
+            hiddenCustomerIds.Add(relation.TargetCustomerId);
+        }
+
+        return hiddenCustomerIds;
+    }
 
     private static string GetDecision(
         IReadOnlyDictionary<string, string> decisions,

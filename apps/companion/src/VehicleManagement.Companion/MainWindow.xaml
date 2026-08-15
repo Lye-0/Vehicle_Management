@@ -1763,12 +1763,6 @@
                                                 <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="#92400E" Text="おすすめ欄" />
                                                 <TextBlock x:Name="LegacyMatchingSideCustomerText" Margin="0,3,0,0"
                                                            Foreground="#52647A" FontSize="11" TextWrapping="Wrap" />
-                                                <Button x:Name="LegacyMatchingOpenCustomerMergePreviewButton" Margin="0,6,0,0"
-                                                        HorizontalAlignment="Left" Padding="7,4"
-                                                        Content="顧客情報をプレビュー" Visibility="Collapsed"
-                                                        Click="LegacyMatchingOpenCustomerMergePreviewButton_Click" />
-                                                <TextBlock x:Name="LegacyMatchingCustomerMergePreviewStatusText" Margin="0,3,0,0"
-                                                           Foreground="#52647A" FontSize="10" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </DockPanel>
                                         <Grid Grid.Row="1" Margin="0,10,0,0">
@@ -2477,8 +2471,40 @@
                                                 </Grid>
                                             </Border>
                                         </Grid>
-                                        <TextBlock Grid.Row="4" Margin="0,8,0,0" Foreground="#52647A" FontSize="10" TextWrapping="Wrap"
-                                                   Text="承認は既存のリンク状態へ反映します。却下・保留は元データとリンクを変更しません。" />
+                                        <Border Grid.Row="4" Margin="0,8,0,0" Padding="8"
+                                                Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="5">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Right" Foreground="#52647A" FontSize="10"
+                                                               Text="顧客単位" />
+                                                    <TextBlock FontWeight="SemiBold" Foreground="#36465A"
+                                                               Text="この顧客の最終確認" />
+                                                </DockPanel>
+                                                <TextBlock x:Name="LegacyMatchingCustomerReviewSummaryText" Margin="0,4,0,0"
+                                                           Foreground="#52647A" FontSize="10" TextWrapping="Wrap" />
+                                                <Button x:Name="LegacyMatchingOpenCustomerMergePreviewButton" Margin="0,6,0,0"
+                                                        HorizontalAlignment="Left" Padding="7,4"
+                                                        Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                        Content="顧客情報を確認・統一" Visibility="Collapsed"
+                                                        Click="LegacyMatchingOpenCustomerMergePreviewButton_Click" />
+                                                <TextBlock x:Name="LegacyMatchingCustomerMergePreviewStatusText" Margin="0,3,0,0"
+                                                           Foreground="#52647A" FontSize="10" TextWrapping="Wrap" />
+                                                <Border x:Name="LegacyMatchingCustomerApprovalBorder" Margin="0,6,0,0"
+                                                        Padding="7" Background="#F0FDF4" BorderBrush="#86EFAC"
+                                                        BorderThickness="1" CornerRadius="4">
+                                                    <StackPanel>
+                                                        <TextBlock x:Name="LegacyMatchingCustomerApprovalStatusText"
+                                                                   Foreground="#166534" FontSize="11" TextWrapping="Wrap" />
+                                                        <Button x:Name="LegacyMatchingCustomerApproveButton" Margin="0,6,0,0"
+                                                                Style="{StaticResource LegacyGraphApproveButton}"
+                                                                Content="この顧客を確定" IsEnabled="False"
+                                                                Click="LegacyMatchingCustomerApproveButton_Click" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <TextBlock Margin="0,6,0,0" Foreground="#52647A" FontSize="10" TextWrapping="Wrap"
+                                                           Text="承認は既存のリンク状態へ反映します。却下・保留は元データとリンクを変更しません。" />
+                                            </StackPanel>
+                                        </Border>
                                     </Grid>
                                     <Border x:Name="LegacyGraphTrashOverlay"
                                             Width="0" Height="0"
@@ -2692,18 +2718,6 @@
                                             <StackPanel Grid.Row="3" Margin="0,10,0,0">
                                                 <TextBlock x:Name="LegacyMatchingRecommendationStatusText" Foreground="#52647A"
                                                            TextWrapping="Wrap" />
-                                                <Border x:Name="LegacyMatchingCustomerApprovalBorder" Margin="0,8,0,0"
-                                                        Padding="7" Background="#F0FDF4" BorderBrush="#86EFAC"
-                                                        BorderThickness="1" CornerRadius="4">
-                                                    <StackPanel>
-                                                        <TextBlock x:Name="LegacyMatchingCustomerApprovalStatusText"
-                                                                   Foreground="#166534" FontSize="11" TextWrapping="Wrap" />
-                                                        <Button x:Name="LegacyMatchingCustomerApproveButton" Margin="0,6,0,0"
-                                                                Style="{StaticResource LegacyGraphApproveButton}"
-                                                                Content="この顧客を確定" IsEnabled="False"
-                                                                Click="LegacyMatchingCustomerApproveButton_Click" />
-                                                    </StackPanel>
-                                                </Border>
                                                 <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
                                                     <Button x:Name="LegacyMatchingApproveButton" Style="{StaticResource LegacyGraphApproveButton}"
                                                             Content="承認" IsEnabled="False" Click="LegacyMatchingApproveButton_Click" />
