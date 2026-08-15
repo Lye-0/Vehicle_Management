@@ -1714,7 +1714,7 @@
                                                                                    TextWrapping="Wrap" />
                                                                     </StackPanel>
                                                                 </Border>
-                                                                <TextBlock Grid.Column="1" Margin="7,0" VerticalAlignment="Center"
+                                                                <TextBlock x:Name="LegacyMatchingCurrentRelationArrowText" Grid.Column="1" Margin="7,0" VerticalAlignment="Center"
                                                                            Foreground="#F59E0B" FontSize="20" FontWeight="SemiBold" Text="→" />
                                                                 <Border Grid.Column="2" Padding="8" Background="#EFF6FF"
                                                                         BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="5">
@@ -1741,7 +1741,11 @@
                                                                                         <ColumnDefinition Width="Auto" />
                                                                                     </Grid.ColumnDefinitions>
                                                                                     <TextBlock Foreground="#15803D" FontSize="13" Text="✓" />
-                                                                                    <TextBlock Grid.Column="1" Foreground="#166534" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                    <StackPanel Grid.Column="1">
+                                                                                        <TextBlock Foreground="#166534" Text="{Binding FieldLabel}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Margin="0,1,0,0" Foreground="#15803D" FontSize="10"
+                                                                                                   Text="{Binding ValuesText}" TextWrapping="Wrap" />
+                                                                                    </StackPanel>
                                                                                     <TextBlock Grid.Column="2" Margin="8,0,0,0" Foreground="#166534" FontSize="11"
                                                                                                Text="{Binding StatusText}" TextWrapping="Wrap" />
                                                                                 </Grid>

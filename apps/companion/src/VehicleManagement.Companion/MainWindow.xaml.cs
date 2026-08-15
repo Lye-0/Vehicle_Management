@@ -1873,6 +1873,7 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentProgressText.Text = "0 / 0";
             LegacyMatchingCurrentSubjectText.Text = "顧客を選択してください";
             LegacyMatchingCurrentTargetText.Text = "候補パッケージを読み込むと、おすすめ欄を表示できます。";
+            LegacyMatchingCurrentRelationArrowText.Text = "→";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
             LegacyMatchingCurrentDifferenceText.Text = "差異: なし";
             LegacyMatchingCurrentMissingText.Text = "不足情報: なし";
@@ -2184,6 +2185,7 @@ public partial class MainWindow : Window
         {
             LegacyMatchingCurrentSubjectText.Text = "このカテゴリに未処理のおすすめはありません";
             LegacyMatchingCurrentTargetText.Text = "未確定タブで検索するか、別のカテゴリを選択してください。";
+            LegacyMatchingCurrentRelationArrowText.Text = "→";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
             LegacyMatchingCurrentDifferenceText.Text = "差異: なし";
             LegacyMatchingCurrentMissingText.Text = "不足情報: なし";
@@ -2242,6 +2244,9 @@ public partial class MainWindow : Window
         LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
         LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
         LegacyMatchingCurrentTargetText.Text = item.TargetText;
+        LegacyMatchingCurrentRelationArrowText.Text = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+            ? "⇄"
+            : "→";
         LegacyMatchingCurrentMatchedText.Text = $"一致 {matchedRows.Length:N0}件";
         LegacyMatchingCurrentDifferenceText.Text = $"差異 {differenceRows.Length:N0}件";
         LegacyMatchingCurrentMissingText.Text = $"情報なし {missingRows.Length:N0}件";
