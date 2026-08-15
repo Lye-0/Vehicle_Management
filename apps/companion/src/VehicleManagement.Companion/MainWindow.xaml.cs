@@ -2225,7 +2225,7 @@ public partial class MainWindow : Window
         RefreshLegacyMatchingCustomerMergePreviewAction(sourceCustomer);
 
         LegacyMatchingSideCustomerText.Text =
-            $"対象: {GetLegacyGraphCustomerDisplayName(sourceCustomer)} / 「何を → どこへ」を確認";
+            $"基準顧客: {GetLegacyGraphCustomerDisplayName(sourceCustomer)} / 候補の接続先と承認後の変更を確認";
         LegacyMatchingSideProgressText.Text =
             $"未処理 {categorySummary.Pending:N0} / 保留 {categorySummary.Held:N0}";
         LegacyMatchingCustomerCategoryButton.Content = BuildLegacyMatchingCategoryButtonText(
@@ -2301,6 +2301,9 @@ public partial class MainWindow : Window
             ApplyLegacyMatchingDecisionBadgeStyle(null);
             SetLegacyMatchingDetailsVisible(false);
             LegacyMatchingSideStatusText.Text = "保留中の候補は通常の巡回後にもう一度確認できます。";
+            LegacyMatchingSideApproveButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+                ? "統合する"
+                : "承認";
             LegacyMatchingSideApproveButton.IsEnabled = false;
             LegacyMatchingSideRejectButton.IsEnabled = false;
             LegacyMatchingSideHoldButton.IsEnabled = false;
@@ -2483,12 +2486,22 @@ public partial class MainWindow : Window
         LegacyMatchingDetailsReasonText.Text = $"おすすめ理由: {BuildLegacyMatchingShortReason(currentCandidate)}";
         LegacyMatchingDetailsAutoDecisionText.Text = BuildLegacyMatchingShortAutoDecisionReason(currentCandidate);
         LegacyMatchingDetailsButton.IsEnabled = true;
-        var canApproveCurrentCandidate = currentCandidate.IsEligible || currentCandidate.IsManual;
+        var canApproveCurrentCandidate = CanManuallyApproveLegacyMatchingCandidate(currentCandidate);
+        var requiresApprovalConfirmation = RequiresLegacyMatchingApprovalConfirmation(currentCandidate);
         LegacyMatchingSideStatusText.Text = canApproveCurrentCandidate
-            ? currentCandidate.IsManual
-                ? "検索から追加した顧客候補です。承認すると、現在の論理顧客へ統合します。"
-                : "承認すると、この候補関係を既存のリンク状態へ反映します。"
-            : "この候補は自動承認できません。関係のない項目は未確定タブから手動処理できます。";
+            ? requiresApprovalConfirmation
+                ? "競合があるため自動承認はできません。内容を確認してから手動承認できます。"
+                : currentCandidate.IsManual
+                    ? "検索から追加した顧客候補です。承認すると、現在の論理顧客へ統合します。"
+                    : "承認すると、この候補関係を既存のリンク状態へ反映します。"
+            : "対象データまたは接続先を特定できないため、この候補は承認できません。";
+        LegacyMatchingSideApproveButton.Content = requiresApprovalConfirmation
+            ? legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+                ? "確認して統合"
+                : "確認して承認"
+            : legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+                ? "統合する"
+                : "承認";
         LegacyMatchingSideApproveButton.IsEnabled = canApproveCurrentCandidate &&
             decision != AbacusRecommendationDecisionValues.Approved;
         LegacyMatchingSideRejectButton.IsEnabled = decision != AbacusRecommendationDecisionValues.Approved;
@@ -3795,14 +3808,7 @@ public partial class MainWindow : Window
                 GetLegacyGraphCustomerDisplayName(customer),
             _ => $"{candidate.SubjectKind}: {candidate.SubjectId}",
         };
-        var targetText = candidate.TargetKind switch
-        {
-            AbacusRecommendationEntityKinds.Vehicle when FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle =>
-                $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
-            AbacusRecommendationEntityKinds.Customer when FindLegacyGraphCustomerById(candidate.TargetId) is { } customer =>
-                GetLegacyGraphCustomerDisplayName(customer),
-            _ => $"紐付け先: {candidate.TargetKind} {candidate.TargetId}",
-        };
+        var targetText = BuildLegacyMatchingTargetText(candidate, focusCustomer);
         if (focusCustomer is not null &&
             candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
             candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
@@ -3872,6 +3878,47 @@ public partial class MainWindow : Window
         legacyExportCandidateGraphResult?.AllDocuments.FirstOrDefault(document =>
             string.Equals(GetLegacyDocumentKey(document), candidate.SubjectId, StringComparison.OrdinalIgnoreCase));
 
+    private string BuildLegacyMatchingTargetText(
+        AbacusRecommendationCandidate candidate,
+        AbacusLegacyExportCandidateGraphCustomer? focusCustomer)
+    {
+        var targetText = candidate.TargetKind switch
+        {
+            AbacusRecommendationEntityKinds.Vehicle when FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle =>
+                $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
+            AbacusRecommendationEntityKinds.Customer when FindLegacyGraphCustomerById(candidate.TargetId) is { } customer =>
+                GetLegacyGraphCustomerDisplayName(customer),
+            _ => $"紐付け先: {candidate.TargetKind} {candidate.TargetId}",
+        };
+
+        if (focusCustomer is null)
+        {
+            return targetText;
+        }
+
+        var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
+        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
+            .Select(customer => customer.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
+            FindLegacyGraphCustomerById(candidate.TargetId) is { } targetCustomer)
+        {
+            return focusCustomerIds.Contains(targetCustomer.CustomerId)
+                ? $"{targetText}（現在の論理顧客）"
+                : $"{targetText}（別顧客候補）";
+        }
+
+        if (candidate.TargetKind == AbacusRecommendationEntityKinds.Vehicle &&
+            FindLegacyGraphVehicleById(candidate.TargetId) is { } targetVehicle)
+        {
+            return focusCustomerIds.Contains(targetVehicle.CustomerId)
+                ? $"{targetText}（現在の顧客の車両）"
+                : $"{targetText}（別顧客の車両候補）";
+        }
+
+        return targetText;
+    }
+
     private void LegacyMatchingRecommendationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         legacyGraphSelectedRecommendation = LegacyMatchingRecommendationsList.SelectedItem is LegacyMatchingRecommendationItem item
@@ -3893,6 +3940,7 @@ public partial class MainWindow : Window
         var candidate = legacyGraphSelectedRecommendation;
         if (candidate is null)
         {
+            LegacyMatchingApproveButton.Content = "承認";
             LegacyMatchingApproveButton.IsEnabled = false;
             LegacyMatchingRejectButton.IsEnabled = false;
             LegacyMatchingHoldButton.IsEnabled = false;
@@ -3903,15 +3951,18 @@ public partial class MainWindow : Window
 
         var decision = GetLegacyGraphRecommendationDecision(candidate);
         var isApproved = decision == AbacusRecommendationDecisionValues.Approved;
-        var canApprove = candidate.IsEligible || candidate.IsManual;
+        var canApprove = CanManuallyApproveLegacyMatchingCandidate(candidate);
+        var requiresApprovalConfirmation = RequiresLegacyMatchingApprovalConfirmation(candidate);
+        LegacyMatchingApproveButton.Content = requiresApprovalConfirmation ? "確認して承認" : "承認";
         LegacyMatchingApproveButton.IsEnabled = canApprove && !isApproved;
         LegacyMatchingRejectButton.IsEnabled = !isApproved;
         LegacyMatchingHoldButton.IsEnabled = !isApproved;
         LegacyMatchingResetButton.IsEnabled = !isApproved && decision != AbacusRecommendationDecisionValues.Pending;
         LegacyMatchingRecommendationStatusText.Text = canApprove
-            ? $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。承認すると既存のグラフ・最終パッケージのリンク状態へ反映します。"
-            : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。競合があるため承認できません。"
-              + "差異を確認し、必要なら既存UIで手動紐付けしてください。";
+            ? requiresApprovalConfirmation
+                ? $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。競合がありますが、内容を確認して手動承認できます。"
+                : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。承認すると既存のグラフ・最終パッケージのリンク状態へ反映します。"
+            : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。対象データまたは接続先を特定できないため承認できません。";
     }
 
     private static string GetLegacyMatchingDecisionText(string decision) => decision switch
@@ -3931,10 +3982,17 @@ public partial class MainWindow : Window
         }
 
         if (decision == AbacusRecommendationDecisionValues.Approved &&
-            !candidate.IsEligible && !candidate.IsManual)
+            !CanManuallyApproveLegacyMatchingCandidate(candidate))
         {
-            LegacyMatchingRecommendationStatusText.Text = "競合を含む候補は承認できません。差異と競合を確認してください。";
+            LegacyMatchingRecommendationStatusText.Text = "対象データまたは接続先を特定できないため、この候補は承認できません。";
             LegacyMatchingRecommendationStatusText.Foreground = ToBrush("#B91C1C");
+            return;
+        }
+
+        if (decision == AbacusRecommendationDecisionValues.Approved &&
+            RequiresLegacyMatchingApprovalConfirmation(candidate) &&
+            !ConfirmLegacyMatchingManualApproval(candidate))
+        {
             return;
         }
 
@@ -3980,6 +4038,31 @@ public partial class MainWindow : Window
 
     private void LegacyMatchingResetButton_Click(object sender, RoutedEventArgs e) =>
         ApplyLegacyMatchingDecision(AbacusRecommendationDecisionValues.Pending);
+
+    private bool ConfirmLegacyMatchingManualApproval(
+        AbacusRecommendationCandidate candidate)
+    {
+        var item = CreateLegacyMatchingRecommendationItem(
+            candidate,
+            GetLegacyGraphMatchingCustomer());
+        var conflictText = candidate.Conflicts.Count == 0
+            ? "なし"
+            : string.Join("\n", candidate.Conflicts.Select(conflict => $"・{conflict}"));
+        var message =
+            "この候補は自動承認の条件を満たしていません。\n\n" +
+            $"対象: {item.SubjectText}\n" +
+            $"接続先: {item.TargetText}\n\n" +
+            $"一致: {item.MatchedText}\n" +
+            $"差異: {item.DifferenceText}\n" +
+            $"要確認:\n{conflictText}\n\n" +
+            "内容を確認したうえで、手動承認してリンク状態へ反映しますか？";
+        return MessageBox.Show(
+                this,
+                message,
+                "要確認候補の手動承認",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) == MessageBoxResult.Yes;
+    }
 
     private void LegacyMatchingSideApproveButton_Click(object sender, RoutedEventArgs e) =>
         ApplyLegacyMatchingDecision(AbacusRecommendationDecisionValues.Approved);
@@ -11643,6 +11726,7 @@ public partial class MainWindow : Window
         const double blockHeight = 112;
         const double documentHeight = 118;
         var previewY = GetLegacyMatchingRecommendationPreviewBottom() + 24;
+        var focusCustomer = GetLegacyGraphMatchingCustomer();
         var targetCustomer = ResolveLegacyMatchingRecommendationTargetCustomer(candidate);
         var customerBlock = FindLegacyMatchingCanvasCustomer(targetCustomer);
 
@@ -11654,12 +11738,14 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                var vehicleCustomerRole = GetLegacyMatchingPreviewCustomerRole(targetCustomer, focusCustomer);
                 customerBlock ??= CreateLegacyMatchingPreviewCustomerBlock(
                     targetCustomer,
                     customerX,
                     previewY,
                     customerWidth,
-                    blockHeight);
+                    blockHeight,
+                    vehicleCustomerRole);
                 var vehicleBlock = FindLegacyMatchingCanvasVehicle(vehicle.VehicleId) ??
                     CreateLegacyMatchingPreviewVehicleBlock(
                         vehicle,
@@ -11668,7 +11754,10 @@ public partial class MainWindow : Window
                         vehicleWidth,
                         blockHeight,
                         GetLegacyMatchingCurrentLinkSummary(vehicle));
-                AddLegacyMatchingPreviewEdge(customerBlock, vehicleBlock, "承認後");
+                AddLegacyMatchingPreviewEdge(
+                    customerBlock,
+                    vehicleBlock,
+                    GetLegacyMatchingPreviewEdgeLabel(vehicleCustomerRole, "承認後"));
                 break;
 
             case (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Vehicle):
@@ -11683,12 +11772,14 @@ public partial class MainWindow : Window
                 var targetVehicleBlock = FindLegacyMatchingCanvasVehicle(targetVehicle.VehicleId);
                 if (targetVehicleBlock is null)
                 {
+                    var documentVehicleCustomerRole = GetLegacyMatchingPreviewCustomerRole(targetCustomer, focusCustomer);
                     customerBlock ??= CreateLegacyMatchingPreviewCustomerBlock(
                         targetCustomer,
                         customerX,
                         previewY,
                         customerWidth,
-                        blockHeight);
+                        blockHeight,
+                        documentVehicleCustomerRole);
                     targetVehicleBlock = CreateLegacyMatchingPreviewVehicleBlock(
                         targetVehicle,
                         previewY,
@@ -11696,7 +11787,10 @@ public partial class MainWindow : Window
                         vehicleWidth,
                         blockHeight,
                         "候補接続先");
-                    AddLegacyMatchingPreviewEdge(customerBlock, targetVehicleBlock, "接続先");
+                    AddLegacyMatchingPreviewEdge(
+                        customerBlock,
+                        targetVehicleBlock,
+                        GetLegacyMatchingPreviewEdgeLabel(documentVehicleCustomerRole, "接続先"));
                 }
 
                 var documentBlock = FindLegacyMatchingCanvasDocument(document) ??
@@ -11717,13 +11811,15 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                var directCustomerRole = GetLegacyMatchingPreviewCustomerRole(targetCustomer, focusCustomer);
                 customerBlock = FindLegacyMatchingCanvasCustomer(targetCustomer) ??
                     CreateLegacyMatchingPreviewCustomerBlock(
                         targetCustomer,
                         customerX,
                         previewY,
                         customerWidth,
-                        blockHeight);
+                        blockHeight,
+                        directCustomerRole);
                 var directDocumentBlock = FindLegacyMatchingCanvasDocument(directDocument) ??
                     CreateLegacyMatchingPreviewDocumentBlock(
                         directDocument,
@@ -11732,7 +11828,10 @@ public partial class MainWindow : Window
                         documentWidth,
                         documentHeight,
                         GetLegacyMatchingCurrentLinkSummary(directDocument));
-                AddLegacyMatchingPreviewEdge(customerBlock, directDocumentBlock, "顧客へ直接・承認後");
+                AddLegacyMatchingPreviewEdge(
+                    customerBlock,
+                    directDocumentBlock,
+                    GetLegacyMatchingPreviewEdgeLabel(directCustomerRole, "顧客へ直接・承認後"));
                 break;
         }
 
@@ -11784,6 +11883,31 @@ public partial class MainWindow : Window
             : null;
     }
 
+    private string GetLegacyMatchingPreviewCustomerRole(
+        AbacusLegacyExportCandidateGraphCustomer? targetCustomer,
+        AbacusLegacyExportCandidateGraphCustomer? focusCustomer)
+    {
+        if (targetCustomer is null || focusCustomer is null)
+        {
+            return "候補顧客 / 承認後";
+        }
+
+        var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
+        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
+            .Select(customer => customer.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        return focusCustomerIds.Contains(targetCustomer.CustomerId)
+            ? "現在の顧客 / 承認後"
+            : "候補顧客 / 承認後";
+    }
+
+    private static string GetLegacyMatchingPreviewEdgeLabel(
+        string customerRole,
+        string currentLabel) =>
+        customerRole == "現在の顧客 / 承認後"
+            ? currentLabel
+            : "別顧客候補・承認後";
+
     private FrameworkElement? FindLegacyMatchingCanvasCustomer(
         AbacusLegacyExportCandidateGraphCustomer? targetCustomer)
     {
@@ -11821,10 +11945,11 @@ public partial class MainWindow : Window
         double left,
         double top,
         double width,
-        double height) =>
+        double height,
+        string roleText = "候補顧客 / 承認後") =>
         AddLegacyMatchingPreviewBlock(
-            $"顧客: {GetLegacyGraphCustomerDisplayName(customer)}",
-            $"顧客番号: {Fallback(customer.CustomerNumber)}\n候補接続先 / 承認後",
+            $"{(roleText.StartsWith("現在の", StringComparison.Ordinal) ? "基準顧客" : "候補顧客")}: {GetLegacyGraphCustomerDisplayName(customer)}",
+            $"顧客番号: {Fallback(customer.CustomerNumber)}\n{roleText}",
             left,
             top,
             width,
@@ -13689,8 +13814,66 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Gate29から利用するGate28の状態遷移です。
-    /// 承認可能性を満たさない候補は承認できず、承認時だけ既存リンク状態へ反映します。
+    /// 自動承認の適格性と、ユーザーが確認したうえで手動承認できるかを分離し、
+    /// 承認時だけ既存リンク状態へ反映します。
     /// </summary>
+    private bool CanManuallyApproveLegacyMatchingCandidate(
+        AbacusRecommendationCandidate candidate) =>
+        IsLegacyGraphRecommendationActive(candidate) &&
+        (candidate.IsManual || candidate.MatchedFields.Count > 0) &&
+        CanApplyLegacyGraphRecommendation(candidate);
+
+    private static bool RequiresLegacyMatchingApprovalConfirmation(
+        AbacusRecommendationCandidate candidate) =>
+        !candidate.IsManual && candidate.Conflicts.Count > 0;
+
+    private bool CanApplyLegacyGraphRecommendation(
+        AbacusRecommendationCandidate candidate)
+    {
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return false;
+        }
+
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            var sourceCustomer = FindLegacyGraphCustomerById(candidate.SubjectId);
+            var targetCustomer = FindLegacyGraphCustomerById(candidate.TargetId);
+            return sourceCustomer is not null &&
+                   targetCustomer is not null &&
+                   !string.Equals(sourceCustomer.CustomerId, targetCustomer.CustomerId, StringComparison.Ordinal);
+        }
+
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Document)
+        {
+            var document = FindLegacyRecommendationDocumentById(candidate.SubjectId);
+            if (document is null)
+            {
+                return false;
+            }
+
+            return candidate.TargetKind switch
+            {
+                AbacusRecommendationEntityKinds.Vehicle =>
+                    FindLegacyGraphVehicleById(candidate.TargetId) is { HasCustomer: true },
+                AbacusRecommendationEntityKinds.Customer =>
+                    FindLegacyGraphCustomerById(candidate.TargetId) is not null,
+                _ => false,
+            };
+        }
+
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Vehicle &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            var vehicle = FindLegacyGraphVehicleById(candidate.SubjectId);
+            var customer = FindLegacyGraphCustomerById(candidate.TargetId);
+            return vehicle is not null && customer is not null && !vehicle.HasCustomer;
+        }
+
+        return false;
+    }
+
     private bool SetLegacyGraphRecommendationDecision(
         AbacusRecommendationCandidate candidate,
         string decision)
@@ -13706,7 +13889,7 @@ public partial class MainWindow : Window
 
         if (decision == AbacusRecommendationDecisionValues.Approved)
         {
-            if ((!candidate.IsEligible && !candidate.IsManual) ||
+            if (!CanManuallyApproveLegacyMatchingCandidate(candidate) ||
                 !ApplyLegacyGraphRecommendation(candidate))
             {
                 return false;
