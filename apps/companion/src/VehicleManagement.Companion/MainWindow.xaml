@@ -65,6 +65,32 @@
             <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="5,5" />
             <Setter Property="MinWidth" Value="0" />
+            </Style>
+        <Style x:Key="LegacyMatchingNavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#EFF6FF" />
+            <Setter Property="BorderBrush" Value="#2563EB" />
+            <Setter Property="Foreground" Value="#1D4ED8" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="5,5" />
+            <Setter Property="MinWidth" Value="0" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#DBEAFE" />
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="Foreground" Value="#1E3A8A" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="#1E3A8A" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#F8FAFC" />
+                    <Setter Property="BorderBrush" Value="#CBD5E1" />
+                    <Setter Property="Foreground" Value="#94A3B8" />
+                    <Setter Property="FontWeight" Value="Normal" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style x:Key="LegacyGraphModeSwitchRadioButton" TargetType="RadioButton">
             <Setter Property="Background" Value="Transparent" />
@@ -1398,9 +1424,11 @@
                                     <TextBlock x:Name="LegacyMatchingTopCustomerProgressText" Grid.Column="1" Margin="12,0,8,0"
                                                VerticalAlignment="Center" Foreground="#52647A" FontWeight="SemiBold" />
                                     <Button x:Name="LegacyMatchingTopPreviousButton" Grid.Column="2" Margin="0,0,8,0"
-                                            Content="← 前の顧客" IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
+                                            Content="← 前の顧客" Style="{StaticResource LegacyMatchingNavigationButton}"
+                                            IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
                                     <Button x:Name="LegacyMatchingTopNextButton" Grid.Column="3" Margin="0"
-                                            Content="次の顧客 →" IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
+                                            Content="次の顧客 →" Style="{StaticResource LegacyMatchingNavigationButton}"
+                                            IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
                                 </Grid>
                                 <Border Grid.Row="1" Margin="0,10,0,0" Padding="9" Background="#EAF2FF" CornerRadius="5">
                                     <TextBlock x:Name="LegacyMatchingTopCustomerSummaryText" Foreground="#1E40AF"
@@ -2359,10 +2387,10 @@
                                                                 <ColumnDefinition Width="*" />
                                                             </Grid.ColumnDefinitions>
                                                             <Button x:Name="LegacyMatchingSidePreviousButton" Grid.Column="0" Margin="0,0,3,0"
-                                                                    Padding="5,5" Content="‹ 前へ" Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                    Padding="5,5" Content="‹ 前へ" Style="{StaticResource LegacyMatchingNavigationButton}"
                                                                     Click="LegacyMatchingSidePreviousButton_Click" />
                                                             <Button x:Name="LegacyMatchingSideNextButton" Grid.Column="1" Margin="3,0,0,0"
-                                                                    Padding="5,5" Content="次へ ›" Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                                    Padding="5,5" Content="次へ ›" Style="{StaticResource LegacyMatchingNavigationButton}"
                                                                     Click="LegacyMatchingSideNextButton_Click" />
                                                         </Grid>
                                                     </StackPanel>
@@ -2547,9 +2575,11 @@
                                     <TextBlock x:Name="LegacyMatchingCustomerProgressText" Grid.Column="1" Margin="12,0,8,0"
                                                VerticalAlignment="Center" Foreground="#52647A" FontWeight="SemiBold" />
                                     <Button x:Name="LegacyMatchingPreviousButton" Grid.Column="2" Margin="0,0,8,0"
-                                            Content="← 前の顧客" IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
+                                            Content="← 前の顧客" Style="{StaticResource LegacyMatchingNavigationButton}"
+                                            IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
                                     <Button x:Name="LegacyMatchingNextButton" Grid.Column="3" Margin="0"
-                                            Content="次の顧客 →" IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
+                                            Content="次の顧客 →" Style="{StaticResource LegacyMatchingNavigationButton}"
+                                            IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
                                 </Grid>
                                 <Border x:Name="LegacyMatchingLegacySummary" Grid.Row="1" Margin="0,10,0,0" Padding="9" Background="#EAF2FF" CornerRadius="5" Visibility="Collapsed">
                                     <TextBlock x:Name="LegacyMatchingCustomerSummaryText" Foreground="#1E40AF"

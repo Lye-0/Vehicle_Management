@@ -13,6 +13,7 @@ var tests = new (string Name, Action Test)[]
     ("入力順を変えても候補順と根拠が変わらない", DeterministicOutput),
     ("不足情報は差異と分離して保存される", MissingInformationIsStructured),
     ("顧客単位カテゴリは顧客統合を先頭にする", MatchingCategoriesAreOrdered),
+    ("同一論理書類の候補は1操作に集約される", SameLogicalDocumentRecommendationsAreGrouped),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -199,6 +200,43 @@ static void MatchingCategoriesAreOrdered()
     Assert(customerSummary.Held == 1 && customerSummary.Completed == 0,
         "保留中のおすすめを完了件数として扱っています。");
 }
+
+static void SameLogicalDocumentRecommendationsAreGrouped()
+{
+    var candidates = new[]
+    {
+        RecommendationCandidate("candidate-a", "a"),
+        RecommendationCandidate("candidate-b", "b"),
+        RecommendationCandidate("candidate-c", "c"),
+    };
+
+    var groups = LegacyMatchingRecommendationGrouping.Group(
+        candidates,
+        candidate => $"document:{candidate.SubjectId}:logical:merged-customer");
+
+    Assert(groups.Count == 1, "同一論理書類が複数の操作単位に分かれています。");
+    Assert(groups[0].Candidates.Count == 3,
+        "論理書類に属する元候補がグループへ保持されていません。");
+    Assert(groups[0].Representative.CandidateId == "candidate-a",
+        "候補グループの代表が決定的に選ばれていません。");
+}
+
+static AbacusRecommendationCandidate RecommendationCandidate(
+    string candidateId,
+    string targetCustomerId) =>
+    new(
+        candidateId,
+        AbacusRecommendationEntityKinds.Document,
+        "document-1",
+        AbacusRecommendationEntityKinds.Customer,
+        targetCustomerId,
+        targetCustomerId,
+        [],
+        [],
+        [],
+        [],
+        "テスト用のおすすめ",
+        "test");
 
 static void LegacyCheckpointUpgrade()
 {
