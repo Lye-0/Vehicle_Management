@@ -8084,12 +8084,22 @@ public partial class MainWindow : Window
             var isApplied = IsLegacyGraphLogicalCustomerGroup(groupKey) ||
                             legacyGraphAppliedCustomerMergeKeys.Contains(groupKey);
             var representative = GetLegacyGraphDisplayCustomer(customers[0]);
-            var isCustomerApproved = IsLegacyGraphCustomerApproved(customers[0]);
+            var customerReviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(customers[0]);
+            var isCustomerApproved = string.Equals(
+                customerReviewSnapshot.Status,
+                LegacyGraphCustomerReviewStateValues.Approved,
+                StringComparison.Ordinal);
+            var customerNeedsReview = string.Equals(
+                customerReviewSnapshot.Status,
+                LegacyGraphCustomerReviewStateValues.NeedsReview,
+                StringComparison.Ordinal);
             var expanded = legacyGraphCustomerGroupExpanded.GetValueOrDefault(groupKey);
             var vehicleCount = GetLegacyGraphVehiclesForDisplay(representative).Count;
             var documentCount = GetLegacyGraphDisplayedDocumentCount(representative);
             var (background, border, statusBrush, statusText) = isCustomerApproved
                 ? ("#EAF2FF", "#2563EB", "#1D4ED8", "顧客確認済み")
+                : customerNeedsReview
+                    ? ("#FFF7ED", "#D97706", "#9A3412", "再確認待ち")
                 : isApplied
                     ? ("#FFF7ED", "#D97706", "#9A3412", "統合済み・確認待ち")
                 : hasDraft
@@ -8153,7 +8163,15 @@ public partial class MainWindow : Window
     private LegacyGraphCustomerListEntry CreateLegacyGraphCustomerListEntry(
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
-        var isCustomerApproved = IsLegacyGraphCustomerApproved(customer);
+        var customerReviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(customer);
+        var isCustomerApproved = string.Equals(
+            customerReviewSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
+        var customerNeedsReview = string.Equals(
+            customerReviewSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.NeedsReview,
+            StringComparison.Ordinal);
         return new(
             $"customer:{customer.CustomerId}",
             false,
@@ -8163,10 +8181,10 @@ public partial class MainWindow : Window
             string.IsNullOrWhiteSpace(customer.Address) ? "住所未設定" : customer.Address,
             GetLegacyCustomerMergeKey(customer),
             "",
-            ToBrush(isCustomerApproved ? "#EAF2FF" : "#FFFFFF"),
-            ToBrush(isCustomerApproved ? "#2563EB" : "#D8E1EC"),
-            ToBrush(isCustomerApproved ? "#1D4ED8" : "#718096"),
-            isCustomerApproved ? "顧客確認済み" : "");
+            ToBrush(isCustomerApproved ? "#EAF2FF" : customerNeedsReview ? "#FFF7ED" : "#FFFFFF"),
+            ToBrush(isCustomerApproved ? "#2563EB" : customerNeedsReview ? "#D97706" : "#D8E1EC"),
+            ToBrush(isCustomerApproved ? "#1D4ED8" : customerNeedsReview ? "#9A3412" : "#718096"),
+            isCustomerApproved ? "顧客確認済み" : customerNeedsReview ? "再確認待ち" : "");
     }
 
     private void SelectLegacyGraphCustomerInList(
@@ -8243,7 +8261,15 @@ public partial class MainWindow : Window
                                     legacyGraphCustomerMergeDrafts.ContainsKey(mergeKey);
                 var isAppliedMerge = IsLegacyGraphLogicalCustomerGroup(mergeKey) ||
                                      legacyGraphAppliedCustomerMergeKeys.Contains(mergeKey);
-                var isCustomerApproved = IsLegacyGraphCustomerApproved(customerSource);
+                var customerReviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(customerSource);
+                var isCustomerApproved = string.Equals(
+                    customerReviewSnapshot.Status,
+                    LegacyGraphCustomerReviewStateValues.Approved,
+                    StringComparison.Ordinal);
+                var customerNeedsReview = string.Equals(
+                    customerReviewSnapshot.Status,
+                    LegacyGraphCustomerReviewStateValues.NeedsReview,
+                    StringComparison.Ordinal);
                 var hasMergeGroup = TryGetLegacyGraphMergeGroup(mergeKey, out var mergeGroup) &&
                                     mergeGroup.CustomerIds.Count > 1;
                 legacyGraphCustomerMergeDrafts.TryGetValue(mergeKey, out var mergeDraft);
@@ -8276,6 +8302,8 @@ public partial class MainWindow : Window
                 var isManualMerge = mergeGroup?.Origin == "manual";
                 LegacyGraphInspectorStateText.Text = isCustomerApproved
                     ? "● 顧客確認済み"
+                    : customerNeedsReview
+                        ? "● 顧客再確認待ち"
                     : isAppliedMerge
                         ? "● 統合済み・顧客確認待ち"
                     : hasMergeDraft
@@ -8285,17 +8313,17 @@ public partial class MainWindow : Window
                             : "● 顧客確認待ち";
                 LegacyGraphInspectorStateText.Foreground = ToBrush(isCustomerApproved
                     ? "#1D4ED8"
-                    : isAppliedMerge || hasMergeDraft || hasMergeGroup
+                    : customerNeedsReview || isAppliedMerge || hasMergeDraft || hasMergeGroup
                         ? "#9A3412"
                         : "#52647A");
                 LegacyGraphInspectorStateBorder.Background = ToBrush(isCustomerApproved
                     ? "#EAF2FF"
-                    : isAppliedMerge || hasMergeDraft || hasMergeGroup
+                    : customerNeedsReview || isAppliedMerge || hasMergeDraft || hasMergeGroup
                         ? "#FFF7ED"
                         : "#F4F7FB");
                 LegacyGraphInspectorTitleText.Text = $"顧客: {GetLegacyGraphCustomerDisplayName(customer)}";
                 LegacyGraphInspectorStatusText.Text =
-                    (isCustomerApproved ? "顧客確認済み\n" :
+                    (isCustomerApproved ? "顧客確認済み\n" : customerNeedsReview ? "顧客再確認待ち\n" :
                         isAppliedMerge ? "統合済み・顧客確認待ち（画面上のみ）\n" :
                         hasMergeGroup ? "統合候補キャンバス（画面上のみ）\n" : "顧客確認待ち\n") +
                     $"顧客ID: {customer.CustomerId}\n車両 {GetLegacyGraphVehiclesForDisplay(customer).Count:N0}台 / 書類 {GetLegacyGraphDisplayedDocumentCount(customer):N0}件" +
@@ -11358,21 +11386,31 @@ public partial class MainWindow : Window
         var isCustomerMergeGroup = TryGetLegacyGraphMergeGroup(customerMergeKey, out var customerMergeGroup) &&
                                     customerMergeGroup.CustomerIds.Count > 1;
         var customerSource = GetLegacyGraphSourceCustomer(customer);
-        var isCustomerApproved = IsLegacyGraphCustomerApproved(customerSource);
+        var customerReviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(customerSource);
+        var isCustomerApproved = string.Equals(
+            customerReviewSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.Approved,
+            StringComparison.Ordinal);
+        var customerNeedsReview = string.Equals(
+            customerReviewSnapshot.Status,
+            LegacyGraphCustomerReviewStateValues.NeedsReview,
+            StringComparison.Ordinal);
         var isCustomerMergeApplied = IsLegacyGraphLogicalCustomerGroup(customerMergeKey) ||
                                       legacyGraphAppliedCustomerMergeKeys.Contains(customerMergeKey);
         var customerStroke = isCustomerApproved
             ? "#2563EB"
-            : isCustomerMergeGroup || isCustomerMergeApplied
+            : customerNeedsReview || isCustomerMergeGroup || isCustomerMergeApplied
                 ? "#D97706"
                 : "#718096";
         var customerFill = isCustomerApproved
             ? "#EAF2FF"
-            : isCustomerMergeGroup || isCustomerMergeApplied
+            : customerNeedsReview || isCustomerMergeGroup || isCustomerMergeApplied
                 ? "#FFF7ED"
                 : "#F4F7FB";
         var customerBadge = isCustomerApproved
             ? "顧客確認済み"
+            : customerNeedsReview
+                ? "再確認待ち"
             : isCustomerMergeApplied
                 ? "統合済み・確認待ち"
                 : isCustomerMergeGroup
