@@ -2169,7 +2169,6 @@ public partial class MainWindow : Window
         ApplyLegacyMatchingCategoryButtonStyle(LegacyMatchingDocumentCategoryButton,
             legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Document);
         LegacyMatchingRecommendationsTabButton.Content = $"おすすめ ({actionableRecommendations.Count:N0})";
-        LegacyMatchingUnresolvedTabButton.Content = "未確定";
         LegacyMatchingCurrentCategoryText.Text = LegacyMatchingCategoryKinds.GetLabel(legacyGraphMatchingCategory);
         LegacyMatchingSideApproveButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
             ? "統合する"
