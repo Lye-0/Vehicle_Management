@@ -1733,6 +1733,7 @@ public partial class MainWindow : Window
         }
 
         RefreshLegacyMatchingChanges();
+        RefreshLegacyMatchingMergeRemovalButton();
 
         if (scheduleCheckpoint)
         {
@@ -1959,6 +1960,26 @@ public partial class MainWindow : Window
             : $"{legacyGraphMatchingChanges.Count:N0}件 / 元に戻せます";
     }
 
+    private void RefreshLegacyMatchingMergeRemovalButton()
+    {
+        if (LegacyMatchingRemoveCustomerFromMergeButton is null)
+        {
+            return;
+        }
+
+        var selectedCustomer = legacyGraphSelectedItem as AbacusLegacyExportCandidateGraphCustomer ??
+            GetLegacyGraphMatchingCustomer();
+        var sourceCustomer = selectedCustomer is null ? null : GetLegacyGraphSourceCustomer(selectedCustomer);
+        var groupKey = sourceCustomer is null ? null : GetLegacyCustomerMergeKey(sourceCustomer);
+        LegacyMatchingRemoveCustomerFromMergeButton.Visibility =
+            string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase) &&
+            groupKey is not null &&
+            legacyGraphAppliedCustomerMergeKeys.Contains(groupKey) &&
+            TryGetLegacyGraphMergeGroup(groupKey, out var group) && group.CustomerIds.Count >= 2
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
     private void LegacyMatchingChangeUndoButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not LegacyMatchingChangeItem change)
@@ -2050,10 +2071,7 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
         IReadOnlyList<AbacusRecommendationCandidate> allRecommendations)
     {
-        var actionableRecommendations = allRecommendations
-            .Where(candidate => GetLegacyGraphRecommendationDecision(candidate) is
-                AbacusRecommendationDecisionValues.Pending or AbacusRecommendationDecisionValues.Hold)
-            .ToArray();
+        var actionableRecommendations = GetLegacyMatchingActionableRecommendations(allRecommendations);
         var summaries = LegacyMatchingWorkflow.BuildCategorySummaries(allRecommendations, legacyGraphRecommendationDecisions);
         var categorySummary = summaries.FirstOrDefault(summary => summary.Kind == legacyGraphMatchingCategory)
             ?? summaries.FirstOrDefault(summary => summary.Total > 0)
@@ -2069,9 +2087,12 @@ public partial class MainWindow : Window
             legacyGraphMatchingCategory,
             legacyGraphRecommendationDecisions,
             includeCompleted: true);
-        if (categoryCandidates.Count == 0 && actionableRecommendations.Length > 0)
+        if (categoryCandidates.Count == 0 && actionableRecommendations.Count > 0)
         {
-            var fallbackCategory = summaries.FirstOrDefault(summary => summary.Total > 0)?.Kind
+            var fallbackCategory = actionableRecommendations
+                .Select(LegacyMatchingCategoryKinds.GetKind)
+                .Distinct(StringComparer.Ordinal)
+                .FirstOrDefault()
                 ?? LegacyMatchingCategoryKinds.Customer;
             legacyGraphMatchingCategory = fallbackCategory;
             categoryCandidates = LegacyMatchingWorkflow.OrderCandidates(
@@ -2092,17 +2113,23 @@ public partial class MainWindow : Window
         LegacyMatchingSideCustomerText.Text =
             $"対象: {GetLegacyGraphCustomerDisplayName(sourceCustomer)} / 「何を → どこへ」を確認";
         LegacyMatchingSideProgressText.Text =
-            $"候補 {actionableRecommendations.Length:N0}件";
+            $"候補 {actionableRecommendations.Count:N0}件";
         LegacyMatchingCustomerCategoryButton.Content = BuildLegacyMatchingCategoryButtonText(
             summaries, LegacyMatchingCategoryKinds.Customer);
         LegacyMatchingVehicleCategoryButton.Content = BuildLegacyMatchingCategoryButtonText(
             summaries, LegacyMatchingCategoryKinds.Vehicle);
         LegacyMatchingDocumentCategoryButton.Content = BuildLegacyMatchingCategoryButtonText(
             summaries, LegacyMatchingCategoryKinds.Document);
-        LegacyMatchingRecommendationsTabButton.Content = $"おすすめ ({actionableRecommendations.Length:N0})";
+        LegacyMatchingRecommendationsTabButton.Content = $"おすすめ ({actionableRecommendations.Count:N0})";
         LegacyMatchingUnresolvedTabButton.Content = "未確定";
         LegacyMatchingCurrentCategoryText.Text =
             $"{LegacyMatchingCategoryKinds.GetLabel(legacyGraphMatchingCategory)} / {categoryCandidates.Count:N0}件";
+        LegacyMatchingSideApproveButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+            ? "統合する"
+            : "承認";
+        LegacyMatchingSideRejectButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
+            ? "別人"
+            : "却下";
         LegacyMatchingCurrentProgressText.Text = categoryCandidates.Count == 0
             ? "0 / 0"
             : $"{legacyGraphMatchingRecommendationIndex + 1:N0} / {categoryCandidates.Count:N0}";
@@ -2157,6 +2184,22 @@ public partial class MainWindow : Window
         LegacyMatchingSideHoldButton.IsEnabled = decision != AbacusRecommendationDecisionValues.Approved;
         LegacyMatchingSidePreviousButton.IsEnabled = legacyGraphMatchingRecommendationIndex > 0;
         LegacyMatchingSideNextButton.IsEnabled = legacyGraphMatchingRecommendationIndex < categoryCandidates.Count - 1;
+    }
+
+    private IReadOnlyList<AbacusRecommendationCandidate> GetLegacyMatchingActionableRecommendations(
+        IEnumerable<AbacusRecommendationCandidate> recommendations)
+    {
+        var pending = recommendations
+            .Where(candidate => GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Pending)
+            .ToArray();
+        if (pending.Length > 0)
+        {
+            return pending;
+        }
+
+        return recommendations
+            .Where(candidate => GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold)
+            .ToArray();
     }
 
     private static string BuildLegacyMatchingCategoryButtonText(
@@ -2694,9 +2737,7 @@ public partial class MainWindow : Window
         }
 
         var candidates = LegacyMatchingWorkflow.OrderCandidates(
-            GetLegacyGraphMatchingRecommendations(customer)
-                .Where(candidate => GetLegacyGraphRecommendationDecision(candidate) is
-                    AbacusRecommendationDecisionValues.Pending or AbacusRecommendationDecisionValues.Hold),
+            GetLegacyMatchingActionableRecommendations(GetLegacyGraphMatchingRecommendations(customer)),
             legacyGraphMatchingCategory,
             legacyGraphRecommendationDecisions,
             includeCompleted: true);
@@ -2803,13 +2844,17 @@ public partial class MainWindow : Window
                 ToBrush("#FDBA74")));
         }
 
-        LegacyMatchingUnresolvedList.ItemsSource = items
+        var filteredItems = items
             .Where(item => string.IsNullOrWhiteSpace(search) ||
                            string.Join(" ", item.Title, item.Details)
                                .Contains(search, StringComparison.OrdinalIgnoreCase))
             .OrderBy(item => item.Kind, StringComparer.Ordinal)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        LegacyMatchingUnresolvedList.ItemsSource = filteredItems;
+        LegacyMatchingUnresolvedTabButton.Content = string.IsNullOrWhiteSpace(search)
+            ? $"未確定 {items.Count:N0}"
+            : $"未確定 {filteredItems.Length:N0}/{items.Count:N0}";
     }
 
     private void LegacyMatchingUnresolvedList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -2906,6 +2951,8 @@ public partial class MainWindow : Window
         legacyGraphMatchingCustomerId = GetLegacyGraphSourceCustomer(customers[legacyGraphMatchingCustomerIndex]).CustomerId;
         legacyGraphSelectedItem = customers[legacyGraphMatchingCustomerIndex];
         legacyGraphSelectedRecommendation = null;
+        legacyGraphMatchingCategory = LegacyMatchingCategoryKinds.Customer;
+        legacyGraphMatchingRecommendationIndex = 0;
         RefreshLegacyGraphCustomerList();
         RefreshLegacyMatchingView();
         ScheduleLegacyGraphCheckpointSave();
@@ -2938,6 +2985,7 @@ public partial class MainWindow : Window
                     }
 
                     UpdateLegacyGraphInspector(displayCustomer);
+                    RefreshLegacyMatchingMergeRemovalButton();
                     RefreshLegacyMatchingRecommendationActions();
                 }
                 return;
@@ -3466,6 +3514,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private void LegacyMatchingOpenCustomerSearchButton_Click(object sender, RoutedEventArgs e)
+    {
+        LegacyGraphSearchExpander.IsExpanded = true;
+        LegacyGraphSearchTextBox.Focus();
+        LegacyGraphSearchTextBox.SelectAll();
+    }
+
+    private void LegacyMatchingRemoveCustomerFromMergeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (legacyGraphSelectedItem is not AbacusLegacyExportCandidateGraphCustomer)
+        {
+            legacyGraphSelectedItem = GetLegacyGraphMatchingCustomer();
+        }
+
+        LegacyGraphRemoveCustomerFromMergeButton_Click(sender, e);
+        RefreshLegacyMatchingMergeRemovalButton();
+    }
+
     private void LegacyGraphUnresolvedList_RequestBringIntoView(
         object sender,
         RequestBringIntoViewEventArgs e)
@@ -3838,16 +3904,19 @@ public partial class MainWindow : Window
                 .ToArray(),
              CreateCheckpointImageMapping(fp5VehicleImageMapping),
              DateTimeOffset.UtcNow,
-             legacyGraphRecommendationDecisions
-                 .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                 .Select(pair => legacyGraphRecommendationStates.TryGetValue(pair.Key, out var state)
-                     ? new LegacyGraphCheckpointRecommendationState(
+             legacyGraphRecommendationStates
+                 .Concat(legacyGraphRecommendationDecisions
+                     .Where(pair => !legacyGraphRecommendationStates.ContainsKey(pair.Key))
+                     .Select(pair => new KeyValuePair<string, LegacyGraphRecommendationState>(
                          pair.Key,
-                         state.Decision,
-                         state.Lifecycle,
-                         state.ResolutionReason,
-                         state.UpdatedAtUtc)
-                     : new LegacyGraphCheckpointRecommendationState(pair.Key, pair.Value))
+                         new LegacyGraphRecommendationState(pair.Value))))
+                 .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                 .Select(pair => new LegacyGraphCheckpointRecommendationState(
+                     pair.Key,
+                     pair.Value.Decision,
+                     pair.Value.Lifecycle,
+                     pair.Value.ResolutionReason,
+                     pair.Value.UpdatedAtUtc))
                  .ToArray(),
              new Dictionary<string, string>(legacyGraphCustomerNameOverrides, StringComparer.Ordinal),
              legacyGraphMatchingCategory,
@@ -4814,6 +4883,11 @@ public partial class MainWindow : Window
             relatedDocumentKeys.Count > 0
                 ? $"関連書類 {relatedDocumentKeys.Count:N0}件も未確定へ移動しました。今回の変更から復元できます。"
                 : "今回の変更から顧客への表示を復元できます。");
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            RefreshLegacyGraphCustomerList();
+            RefreshLegacyMatchingView();
+        }
     }
 
     private void ClearLegacyGraphManualVehicleCustomerLink(
@@ -8316,6 +8390,11 @@ public partial class MainWindow : Window
             key,
             $"書類を未確定へ移動: {document.Kind} {Fallback(document.DocumentNumber)}",
             "今回の変更から元の顧客・車両表示へ復元できます。");
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            RefreshLegacyGraphCustomerList();
+            RefreshLegacyMatchingView();
+        }
     }
 
     private bool ConfirmLegacyGraphTrashMove(

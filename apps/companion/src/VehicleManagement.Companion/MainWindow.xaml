@@ -1470,8 +1470,15 @@
                                                        Text="統合解除\nここへ顧客をドロップ" />
                                         </Border>
                                     </Grid>
-                                    <Button Grid.Row="4" x:Name="LegacyGraphReturnToCurrentSelectionButton" Margin="0,8,0,0"
-                                            Content="現在の選択に戻る" Click="LegacyGraphReturnToCurrentSelectionButton_Click" />
+                                    <StackPanel Grid.Row="4" Margin="0,8,0,0">
+                                        <Button x:Name="LegacyGraphReturnToCurrentSelectionButton"
+                                                Content="現在の選択に戻る" Click="LegacyGraphReturnToCurrentSelectionButton_Click" />
+                                        <Button x:Name="LegacyMatchingOpenCustomerSearchButton" Margin="0,6,0,0"
+                                                Content="＋ 別の顧客を検索" Click="LegacyMatchingOpenCustomerSearchButton_Click" />
+                                        <Button x:Name="LegacyMatchingRemoveCustomerFromMergeButton" Margin="0,6,0,0"
+                                                Content="選択顧客を統合から外す" Visibility="Collapsed"
+                                                Click="LegacyMatchingRemoveCustomerFromMergeButton_Click" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                             <Border Grid.Column="2" Padding="8" Background="#F7F9FC" BorderBrush="#D8E1EC"
