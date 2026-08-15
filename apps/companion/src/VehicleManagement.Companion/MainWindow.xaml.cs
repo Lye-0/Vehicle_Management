@@ -4511,6 +4511,7 @@ public partial class MainWindow : Window
         {
             EnsureLegacyGraphMatchingCustomerSelection(GetLegacyGraphCustomerForCurrentSelection());
             legacyGraphSelectedRecommendation = null;
+            RefreshLegacyGraphCustomerList();
             RefreshLegacyMatchingView();
         }
         UpdateLegacyGraphImportConfirmationButton();
@@ -6086,6 +6087,7 @@ public partial class MainWindow : Window
         SetLegacyGraphUiMode("matching");
         EnsureLegacyGraphMatchingCustomerSelection(customer);
         legacyGraphSelectedRecommendation = null;
+        RefreshLegacyGraphCustomerList();
         RefreshLegacyMatchingView();
         LegacyGraphStatusText.Text = $"検索結果から顧客 {GetLegacyGraphCustomerDisplayName(customer)} をマッチングUIで表示しました。";
         LegacyGraphStatusText.Foreground = ToBrush("#2563EB");
