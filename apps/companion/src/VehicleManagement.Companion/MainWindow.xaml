@@ -1835,7 +1835,9 @@
                                                                 <Border Grid.Column="2" Padding="8" Background="#EFF6FF"
                                                                         BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="5">
                                                                     <StackPanel>
-                                                                        <TextBlock Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Text="紐付け先" />
+                                                                        <TextBlock x:Name="LegacyMatchingCurrentTargetHeadingText"
+                                                                                   Foreground="#64748B" FontSize="10" FontWeight="SemiBold"
+                                                                                   Text="紐付け先" />
                                                                         <TextBlock x:Name="LegacyMatchingCurrentTargetText" Margin="0,4,0,0"
                                                                                    FontSize="14" FontWeight="SemiBold" Foreground="#1D4ED8"
                                                                                    TextWrapping="Wrap" />

@@ -1901,6 +1901,7 @@ public partial class MainWindow : Window
             LegacyMatchingCurrentCategoryText.Text = "顧客統合 / 0件";
             LegacyMatchingCurrentProgressText.Text = "0 / 0";
             LegacyMatchingCurrentSubjectText.Text = "顧客を選択してください";
+            LegacyMatchingCurrentTargetHeadingText.Text = "紐付け先";
             LegacyMatchingCurrentTargetText.Text = "候補パッケージを読み込むと、おすすめ欄を表示できます。";
             LegacyMatchingCurrentRelationArrowText.Text = "→";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
@@ -2259,6 +2260,7 @@ public partial class MainWindow : Window
         if (currentCandidate is null)
         {
             LegacyMatchingCurrentSubjectText.Text = $"このカテゴリに{queueLabel}のおすすめはありません";
+            LegacyMatchingCurrentTargetHeadingText.Text = "紐付け先";
             LegacyMatchingCurrentTargetText.Text = "未確定タブで検索するか、別のカテゴリを選択してください。";
             LegacyMatchingCurrentRelationArrowText.Text = "→";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
@@ -2431,6 +2433,7 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Visible;
         SetLegacyMatchingDetailsVisible(false);
         LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
+        LegacyMatchingCurrentTargetHeadingText.Text = GetLegacyMatchingTargetHeading(currentCandidate, sourceCustomer);
         LegacyMatchingCurrentTargetText.Text = item.TargetText;
         LegacyMatchingCurrentRelationArrowText.Text = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
             ? "⇄"
@@ -3917,6 +3920,38 @@ public partial class MainWindow : Window
         }
 
         return targetText;
+    }
+
+    private string GetLegacyMatchingTargetHeading(
+        AbacusRecommendationCandidate candidate,
+        AbacusLegacyExportCandidateGraphCustomer focusCustomer)
+    {
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            return "統合先（現在の顧客）";
+        }
+
+        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusCustomer)
+            .Select(customer => customer.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
+            FindLegacyGraphCustomerById(candidate.TargetId) is { } targetCustomer)
+        {
+            return focusCustomerIds.Contains(targetCustomer.CustomerId)
+                ? "紐付け先（現在の顧客）"
+                : "候補接続先（別顧客）";
+        }
+
+        if (candidate.TargetKind == AbacusRecommendationEntityKinds.Vehicle &&
+            FindLegacyGraphVehicleById(candidate.TargetId) is { } targetVehicle)
+        {
+            return focusCustomerIds.Contains(targetVehicle.CustomerId)
+                ? "紐付け先車両（現在の顧客）"
+                : "候補接続先車両（別顧客）";
+        }
+
+        return "紐付け先";
     }
 
     private void LegacyMatchingRecommendationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
