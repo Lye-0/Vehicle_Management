@@ -252,6 +252,27 @@ static void LegacyCheckpointUpgrade()
             "旧チェックポイントのスキーマバージョンが更新されていません。");
         Assert(restored.RecommendationStates is { Length: 0 },
             "旧チェックポイントのおすすめ状態が空配列へ補完されていません。");
+
+        var reviewCheckpoint = checkpoint with
+        {
+            Version = LegacyGraphWorkCheckpointSchema.CurrentVersion,
+            CustomerApprovalStates = new Dictionary<string, bool>
+            {
+                ["customer:c1"] = true,
+            },
+            CustomerReviewStates = new Dictionary<string, string>
+            {
+                ["customer:c1"] = LegacyGraphCustomerReviewStateValues.NeedsReview,
+            },
+        };
+        File.WriteAllText(Path.Combine(directory, "graph-state.json"), JsonSerializer.Serialize(
+            reviewCheckpoint,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        var reviewed = new LegacyGraphWorkCheckpointStore().ReadAsync(directory).GetAwaiter().GetResult();
+        Assert(reviewed.CustomerReviewStates is not null &&
+               reviewed.CustomerReviewStates.TryGetValue("customer:c1", out var reviewState) &&
+               reviewState == LegacyGraphCustomerReviewStateValues.NeedsReview,
+            "顧客の再確認待ち状態がチェックポイントから復元されていません。");
     }
     finally
     {

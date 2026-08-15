@@ -154,6 +154,7 @@ public partial class MainWindow : Window
     private int legacyGraphMatchingCustomerIndex = -1;
     private string legacyGraphMatchingCategory = LegacyMatchingCategoryKinds.Customer;
     private int legacyGraphMatchingRecommendationIndex = -1;
+    private bool legacyGraphRefreshingMatchingCustomerQueue;
     private const int LegacyMatchingUnresolvedPageSize = 50;
     private int legacyMatchingUnresolvedPageIndex;
     private bool legacyMatchingDetailsVisible;
@@ -1971,8 +1972,9 @@ public partial class MainWindow : Window
                 $"{item.OwnerLabel} / {Fallback(item.Document.DocumentDate)} / {Fallback(item.Document.TotalAmount)}"))
             .ToArray();
         var allRecommendations = GetLegacyGraphMatchingRecommendations(customer);
+        var reviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(sourceCustomer, allRecommendations);
         var recommendationItems = allRecommendations
-            .Select(CreateLegacyMatchingRecommendationItem)
+            .Select(candidate => CreateLegacyMatchingRecommendationItem(candidate, sourceCustomer))
             .ToArray();
 
         SetLegacyMatchingHeader(
@@ -1986,8 +1988,13 @@ public partial class MainWindow : Window
             $"おすすめ {allRecommendations.Count(candidate =>
                 GetLegacyGraphRecommendationDecision(candidate) is AbacusRecommendationDecisionValues.Pending or
                     AbacusRecommendationDecisionValues.Hold):N0}件 / 保留 {allRecommendations.Count(candidate =>
-                GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold):N0}件 / " +
-            $"顧客確認: {(IsLegacyGraphCustomerApproved(sourceCustomer) ? "完了" : "未完了")}",
+                    GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold):N0}件 / " +
+            $"顧客確認: {reviewSnapshot.Status switch
+            {
+                LegacyGraphCustomerReviewStateValues.Approved => "完了",
+                LegacyGraphCustomerReviewStateValues.NeedsReview => "再確認待ち",
+                _ => "未完了",
+            }}",
             hasCustomer: true,
             canGoPrevious: legacyGraphMatchingCustomerIndex > 0,
             canGoNext: legacyGraphMatchingCustomerIndex >= 0 &&
@@ -2017,6 +2024,7 @@ public partial class MainWindow : Window
         RefreshLegacyMatchingRecommendationPreview(legacyGraphSelectedRecommendation);
         RefreshLegacyMatchingChanges();
         RefreshLegacyMatchingRecommendationActions();
+        RefreshLegacyMatchingCustomerQueue();
     }
 
     private void RefreshLegacyMatchingChanges()
@@ -2303,7 +2311,7 @@ public partial class MainWindow : Window
         return;
     }
 
-        var item = CreateLegacyMatchingRecommendationItem(currentCandidate);
+        var item = CreateLegacyMatchingRecommendationItem(currentCandidate, sourceCustomer);
         var decision = GetLegacyGraphRecommendationDecision(currentCandidate);
         var matchedRows = currentCandidate.MatchedFields
             .Select(field => new LegacyMatchingDetailRow(
@@ -2358,12 +2366,25 @@ public partial class MainWindow : Window
             .Concat(differenceRows)
             .Concat(missingRows)
             .ToArray();
+        var displaySubjectId = currentCandidate.SubjectId;
+        var displayTargetId = currentCandidate.TargetId;
+        if (IsLegacyMatchingCustomerMerge(currentCandidate))
+        {
+            var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(sourceCustomer)
+                .Select(item => item.CustomerId)
+                .ToHashSet(StringComparer.Ordinal);
+            if (logicalCustomerIds.Contains(displaySubjectId) &&
+                !logicalCustomerIds.Contains(displayTargetId))
+            {
+                (displaySubjectId, displayTargetId) = (displayTargetId, displaySubjectId);
+            }
+        }
         var sourceEntitySections = BuildLegacyMatchingEntitySections(
             currentCandidate.SubjectKind,
-            currentCandidate.SubjectId);
+            displaySubjectId);
         var candidateEntitySections = BuildLegacyMatchingEntitySections(
             currentCandidate.TargetKind,
-            currentCandidate.TargetId);
+            displayTargetId);
         var evidenceItems = currentCandidate.MatchedFields
             .Select(field =>
                 $"{field.Label}: {DisplayLegacyMatchingValue(field.SourceValue)} → " +
@@ -3761,7 +3782,8 @@ public partial class MainWindow : Window
     }
 
     private LegacyMatchingRecommendationItem CreateLegacyMatchingRecommendationItem(
-        AbacusRecommendationCandidate candidate)
+        AbacusRecommendationCandidate candidate,
+        AbacusLegacyExportCandidateGraphCustomer? focusCustomer = null)
     {
         var subjectText = candidate.SubjectKind switch
         {
@@ -3781,6 +3803,25 @@ public partial class MainWindow : Window
                 GetLegacyGraphCustomerDisplayName(customer),
             _ => $"紐付け先: {candidate.TargetKind} {candidate.TargetId}",
         };
+        if (focusCustomer is not null &&
+            candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
+            var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
+                .Select(item => item.CustomerId)
+                .ToHashSet(StringComparer.Ordinal);
+            var otherCustomerId = logicalCustomerIds.Contains(candidate.SubjectId)
+                ? candidate.TargetId
+                : logicalCustomerIds.Contains(candidate.TargetId)
+                    ? candidate.SubjectId
+                    : null;
+            if (otherCustomerId is not null && FindLegacyGraphCustomerById(otherCustomerId) is { } otherCustomer)
+            {
+                subjectText = GetLegacyGraphCustomerDisplayName(otherCustomer);
+                targetText = $"{GetLegacyGraphCustomerDisplayName(focusSource)}（現在の顧客）";
+            }
+        }
         var decision = GetLegacyGraphRecommendationDecision(candidate);
         var decisionText = decision switch
         {
@@ -3836,6 +3877,7 @@ public partial class MainWindow : Window
         legacyGraphSelectedRecommendation = LegacyMatchingRecommendationsList.SelectedItem is LegacyMatchingRecommendationItem item
             ? item.Candidate
             : null;
+        RefreshLegacyMatchingCustomerQueue();
         SetLegacyMatchingDetailsVisible(false);
         RefreshLegacyMatchingRecommendationActions();
         RefreshLegacyMatchingRecommendationPreview(legacyGraphSelectedRecommendation);
@@ -4300,6 +4342,11 @@ public partial class MainWindow : Window
     private void LegacyMatchingCustomerQueueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateLegacyGraphCurrentCustomerSelectionText();
+        if (legacyGraphRefreshingMatchingCustomerQueue)
+        {
+            return;
+        }
+
         if (LegacyMatchingCustomerQueueList.SelectedItem is not LegacyGraphCustomerListEntry entry)
         {
             return;
@@ -4321,12 +4368,30 @@ public partial class MainWindow : Window
         var focusCustomer = GetLegacyGraphMatchingCustomer();
         if (focusCustomer is not null)
         {
+            if (entry.MatchingRecommendation is { } selectedRecommendation)
+            {
+                legacyGraphMatchingCategory = LegacyMatchingCategoryKinds.GetKind(selectedRecommendation);
+                var categoryCandidates = LegacyMatchingWorkflow.OrderCandidates(
+                    GetLegacyMatchingActionableRecommendations(GetLegacyGraphMatchingRecommendations(focusCustomer)),
+                    legacyGraphMatchingCategory,
+                    legacyGraphRecommendationDecisions,
+                    includeCompleted: true);
+                var selectedIndex = categoryCandidates
+                    .Select((candidate, index) => (candidate, index))
+                    .FirstOrDefault(item => string.Equals(
+                        item.candidate.CandidateId,
+                        selectedRecommendation.CandidateId,
+                        StringComparison.OrdinalIgnoreCase))
+                    .index;
+                legacyGraphMatchingRecommendationIndex = selectedIndex;
+            }
+
             RenderLegacyGraphCustomer(GetLegacyGraphDisplayCustomer(focusCustomer));
         }
 
         UpdateLegacyGraphInspector(displayCustomer);
         RefreshLegacyMatchingMergeRemovalButton();
-        RefreshLegacyMatchingRecommendationActions();
+        RefreshLegacyMatchingView();
     }
 
     private void UpdateLegacyGraphCurrentCustomerSelectionText()
@@ -7151,19 +7216,33 @@ public partial class MainWindow : Window
     private void RefreshLegacyMatchingCustomerQueue()
     {
         var entries = BuildLegacyMatchingCustomerListEntries();
-        LegacyGraphCustomersList.ItemsSource = null;
-        LegacyMatchingCustomerQueueList.ItemsSource = entries;
-        if (entries.Count == 0)
+        legacyGraphRefreshingMatchingCustomerQueue = true;
+        try
         {
-            LegacyMatchingCustomerQueueList.SelectedIndex = -1;
-            legacyGraphEdges.Clear();
-            LegacyGraphCanvas.Children.Clear();
-            LegacyGraphEdgesCanvas.Children.Clear();
-            return;
-        }
+            LegacyGraphCustomersList.ItemsSource = null;
+            LegacyMatchingCustomerQueueList.ItemsSource = entries;
+            if (entries.Count == 0)
+            {
+                LegacyMatchingCustomerQueueList.SelectedIndex = -1;
+                legacyGraphEdges.Clear();
+                LegacyGraphCanvas.Children.Clear();
+                LegacyGraphEdgesCanvas.Children.Clear();
+                return;
+            }
 
-        LegacyMatchingCustomerQueueList.SelectedItem =
-            entries.FirstOrDefault(entry => entry.IsMatchingFocus) ?? entries[0];
+            var selectedRecommendationId = legacyGraphSelectedRecommendation?.CandidateId;
+            LegacyMatchingCustomerQueueList.SelectedItem =
+                entries.FirstOrDefault(entry => entry.MatchingRecommendation is not null &&
+                                                string.Equals(
+                                                    entry.MatchingRecommendation.CandidateId,
+                                                    selectedRecommendationId,
+                                                    StringComparison.OrdinalIgnoreCase)) ??
+                entries.FirstOrDefault(entry => entry.IsMatchingFocus) ?? entries[0];
+        }
+        finally
+        {
+            legacyGraphRefreshingMatchingCustomerQueue = false;
+        }
     }
 
     private IReadOnlyList<LegacyGraphCustomerListEntry> BuildLegacyMatchingCustomerListEntries()
@@ -7207,7 +7286,7 @@ public partial class MainWindow : Window
             entries.Add(CreateLegacyMatchingGroupHeader(
                 logicalKey,
                 focusSource,
-                $"統合済み {logicalMembers.Length:N0}件",
+                $"追加統合済み {logicalMembers.Length:N0}件",
                 $"現在の論理顧客 / 車両 {logicalMembers.SelectMany(GetLegacyGraphVehiclesForDisplay).Count():N0}台",
                 expanded,
                 ToBrush(logicalApproved ? "#EAF2FF" : "#FFF7ED"),
@@ -7219,8 +7298,8 @@ public partial class MainWindow : Window
                 {
                     entries.Add(CreateLegacyMatchingCustomerListEntry(
                         candidate,
-                        "統合済み構成",
-                        "この顧客は現在の論理顧客へ統合済みです",
+                        "追加統合済み",
+                        BuildLegacyMatchingCustomerIdentitySummary(candidate),
                         ToBrush("#F4F7FB"),
                         ToBrush("#CBD5E1"),
                         ToBrush("#52647A"),
@@ -7264,6 +7343,12 @@ public partial class MainWindow : Window
         var heldAutomatic = automaticChildren
             .Where(item => GetLegacyGraphRecommendationDecision(item.Recommendation) == AbacusRecommendationDecisionValues.Hold)
             .ToArray();
+        bool IsCurrentCandidate(AbacusRecommendationCandidate recommendation) =>
+            legacyGraphSelectedRecommendation is not null &&
+            string.Equals(
+                legacyGraphSelectedRecommendation.CandidateId,
+                recommendation.CandidateId,
+                StringComparison.OrdinalIgnoreCase);
         if (pendingAutomatic.Length > 0)
         {
             var groupKey = $"matching-group:{candidateGroupKey}";
@@ -7283,7 +7368,7 @@ public partial class MainWindow : Window
                 {
                     entries.Add(CreateLegacyMatchingCustomerListEntry(
                         item.Customer,
-                        "自動統合候補",
+                        IsCurrentCandidate(item.Recommendation) ? "現在確認中 / 自動統合候補" : "自動統合候補",
                         item.Recommendation.Reason,
                         ToBrush("#FFF7ED"),
                         ToBrush("#F59E0B"),
@@ -7321,7 +7406,9 @@ public partial class MainWindow : Window
         {
             entries.Add(CreateLegacyMatchingCustomerListEntry(
                 item.Customer,
-                item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補",
+                IsCurrentCandidate(item.Recommendation)
+                    ? "現在確認中 / " + (item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補")
+                    : item.Recommendation.IsManual ? "手動追加候補" : "おすすめ統合候補",
                 item.Recommendation.IsManual ? "検索から追加した候補です" : item.Recommendation.Reason,
                 ToBrush("#FFF7ED"),
                 ToBrush("#FDBA74"),
@@ -7353,7 +7440,7 @@ public partial class MainWindow : Window
                 {
                     entries.Add(CreateLegacyMatchingCustomerListEntry(
                         item.Customer,
-                        "保留中の統合候補",
+                        IsCurrentCandidate(item.Recommendation) ? "現在確認中 / 保留候補" : "保留中の統合候補",
                         item.Recommendation.Reason,
                         ToBrush("#FFFBEB"),
                         ToBrush("#FCD34D"),
@@ -7422,6 +7509,11 @@ public partial class MainWindow : Window
             statusText,
             recommendation,
             isFocus);
+
+    private string BuildLegacyMatchingCustomerIdentitySummary(
+        AbacusLegacyExportCandidateGraphCustomer customer) =>
+        $"顧客番号: {Fallback(customer.CustomerNumber)} / ふりがな: {Fallback(customer.NameKana)} / " +
+        $"住所: {Fallback(customer.Address)}";
 
     private void LegacyGraphSearchTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
         RefreshLegacyGraphSearchResults();
@@ -9779,6 +9871,9 @@ public partial class MainWindow : Window
         if (customer is null)
         {
             LegacyMatchingCustomerApprovalStatusText.Text = "顧客を選択すると、顧客単位の確定状態を表示します。";
+            LegacyMatchingCustomerApprovalBorder.Background = ToBrush("#F4F7FB");
+            LegacyMatchingCustomerApprovalBorder.BorderBrush = ToBrush("#CBD5E1");
+            LegacyMatchingCustomerApprovalStatusText.Foreground = ToBrush("#52647A");
             return;
         }
 
@@ -9792,6 +9887,9 @@ public partial class MainWindow : Window
             LegacyMatchingCustomerApprovalStatusText.Text =
                 "✓ この顧客の確認は完了しています。変更した場合は再確認が必要です。";
             LegacyMatchingCustomerApproveButton.Content = "顧客確認済み";
+            LegacyMatchingCustomerApprovalBorder.Background = ToBrush("#EAF2FF");
+            LegacyMatchingCustomerApprovalBorder.BorderBrush = ToBrush("#93C5FD");
+            LegacyMatchingCustomerApprovalStatusText.Foreground = ToBrush("#1D4ED8");
             return;
         }
 
@@ -9802,6 +9900,24 @@ public partial class MainWindow : Window
             : snapshot.CanApprove
             ? "候補処理が完了しました。顧客情報とキャンバスを確認して確定してください。"
             : snapshot.Reason;
+        LegacyMatchingCustomerApprovalBorder.Background = snapshot.Status ==
+                LegacyGraphCustomerReviewStateValues.NeedsReview
+            ? ToBrush("#FFF7ED")
+            : snapshot.CanApprove
+            ? ToBrush("#F0FDF4")
+            : ToBrush("#FFF7ED");
+        LegacyMatchingCustomerApprovalBorder.BorderBrush = snapshot.Status ==
+                LegacyGraphCustomerReviewStateValues.NeedsReview
+            ? ToBrush("#FDBA74")
+            : snapshot.CanApprove
+            ? ToBrush("#86EFAC")
+            : ToBrush("#FCD34D");
+        LegacyMatchingCustomerApprovalStatusText.Foreground = snapshot.Status ==
+                LegacyGraphCustomerReviewStateValues.NeedsReview
+            ? ToBrush("#9A3412")
+            : snapshot.CanApprove
+            ? ToBrush("#166534")
+            : ToBrush("#92400E");
         LegacyMatchingCustomerApproveButton.IsEnabled = snapshot.CanApprove;
     }
 
@@ -9896,7 +10012,7 @@ public partial class MainWindow : Window
         return legacyExportCandidateGraphResult.Customers
             .Where(customer => !legacyGraphTrashCustomerIds.Contains(customer.CustomerId))
             .GroupBy(GetLegacyGraphLogicalCustomerKey, StringComparer.Ordinal)
-            .Count(group => !legacyGraphCustomerApprovalStates.TryGetValue(group.Key, out var approved) || !approved);
+            .Count(group => !IsLegacyGraphCustomerApproved(group.First()));
     }
 
     private AbacusLegacyGraphFinalizationSnapshot BuildLegacyGraphFinalizationSnapshot()
@@ -9922,7 +10038,7 @@ public partial class MainWindow : Window
                 return new AbacusLegacyGraphFinalCustomerGroup(
                     grouping.Key,
                     hasMergeGroup ? mergeGroup!.Origin : "single",
-                    legacyGraphCustomerApprovalStates.TryGetValue(grouping.Key, out var approved) && approved,
+                    IsLegacyGraphCustomerApproved(sourceCustomers[0]),
                     sourceCustomers.Select(customer => customer.CustomerId).ToArray(),
                     displayCustomer.CustomerId,
                     displayCustomer.CustomerNumber,
