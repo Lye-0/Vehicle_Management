@@ -1648,7 +1648,8 @@
                                         </TabControl>
                                         </StackPanel>
                                     </ScrollViewer>
-                                    <Grid x:Name="LegacyMatchingSidePanel" Visibility="Collapsed" Background="#FFFFFF">
+                                    <Grid x:Name="LegacyMatchingSidePanel" Visibility="Collapsed" Background="#FFFFFF"
+                                          VerticalAlignment="Stretch" MinHeight="0" ClipToBounds="True">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
@@ -1700,11 +1701,12 @@
                                                         Click="LegacyMatchingDocumentCategoryButton_Click" />
                                             </Grid>
                                         </Border>
-                                        <Grid x:Name="LegacyMatchingSideContentGrid" Grid.Row="3" Margin="0,8,0,0" MinHeight="0">
+                                        <Grid x:Name="LegacyMatchingSideContentGrid" Grid.Row="3" Margin="0,8,0,0"
+                                              VerticalAlignment="Stretch" MinHeight="0" ClipToBounds="True">
                                             <Border x:Name="LegacyMatchingRecommendationContent" Padding="10"
                                                     Background="#FFFFFF" BorderBrush="#F59E0B" BorderThickness="1.5" CornerRadius="6"
-                                                    MinHeight="0">
-                                                <Grid>
+                                                    VerticalAlignment="Stretch" MinHeight="0" ClipToBounds="True">
+                                                <Grid VerticalAlignment="Stretch" MinHeight="0">
                                                     <Grid.RowDefinitions>
                                                         <RowDefinition Height="Auto" />
                                                         <RowDefinition Height="*" />
@@ -1732,7 +1734,9 @@
                                                     </Grid>
                                                     <ScrollViewer x:Name="LegacyMatchingCurrentRecommendationScrollViewer" Grid.Row="1"
                                                                   Margin="0,8,0,8" VerticalScrollBarVisibility="Auto"
-                                                                  HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+                                                                  HorizontalScrollBarVisibility="Disabled" CanContentScroll="False"
+                                                                  VerticalAlignment="Stretch" MinHeight="0"
+                                                                  PanningMode="VerticalOnly" Focusable="True">
                                                         <StackPanel>
                                                             <Grid>
                                                                 <Grid.ColumnDefinitions>
@@ -1929,10 +1933,12 @@
                                                                 HorizontalAlignment="Left" Content="← おすすめに戻る"
                                                                 Style="{StaticResource LegacyMatchingSecondaryButton}"
                                                                 Click="LegacyMatchingBackToRecommendationButton_Click" />
-                                                        <ScrollViewer Grid.Row="1" Margin="0,8,0,0"
+                                                        <ScrollViewer x:Name="LegacyMatchingDetailsScrollViewer" Grid.Row="1" Margin="0,8,0,0"
                                                                       VerticalScrollBarVisibility="Auto"
                                                                       HorizontalScrollBarVisibility="Disabled"
-                                                                      CanContentScroll="False">
+                                                                      CanContentScroll="False"
+                                                                      VerticalAlignment="Stretch" MinHeight="0"
+                                                                      PanningMode="VerticalOnly" Focusable="True">
                                                             <StackPanel>
                                                                 <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
                                                                            Text="原データ" />

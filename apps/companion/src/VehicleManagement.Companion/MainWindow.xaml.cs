@@ -5751,6 +5751,18 @@ public partial class MainWindow : Window
             }
         }
 
+        var matchingPanel = FindVisualAncestor<ScrollViewer>(source);
+        if (ReferenceEquals(matchingPanel, LegacyMatchingCurrentRecommendationScrollViewer) ||
+            ReferenceEquals(matchingPanel, LegacyMatchingDetailsScrollViewer))
+        {
+            matchingPanel.UpdateLayout();
+            if (TryScrollVertical(matchingPanel, e.Delta))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
         // グラフ上のホイールは、グラフ内のScrollViewerではなくページを動かします。
         TryScrollLegacyGraphPageByWheel(e.Delta);
         e.Handled = true;
