@@ -2470,6 +2470,93 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RebuildLegacyGraphRecommendationCandidatesForCustomers(
+        IReadOnlySet<string> affectedCustomerIds)
+    {
+        if (legacyExportCandidateGraphResult is null || affectedCustomerIds.Count == 0)
+        {
+            return;
+        }
+
+        var affectedExisting = legacyGraphRecommendationCandidates
+            .Where(candidate => IsLegacyGraphRecommendationAffected(candidate, affectedCustomerIds))
+            .ToHashSet();
+        var recalculated = legacyRecommendationEngine.BuildForCustomers(
+            legacyExportCandidateGraphResult,
+            affectedCustomerIds,
+            GetLegacyGraphCustomerNameById);
+        legacyGraphRecommendationCandidates = legacyGraphRecommendationCandidates
+            .Where(candidate => !affectedExisting.Contains(candidate))
+            .Concat(recalculated)
+            .GroupBy(candidate => candidate.CandidateId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderByDescending(candidate => candidate.IsEligible)
+            .ThenByDescending(candidate => candidate.HasStrongEvidence)
+            .ThenByDescending(candidate => candidate.MatchedFields.Count)
+            .ThenBy(candidate => candidate.SubjectKind, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.SubjectId, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.TargetKind, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.TargetId, StringComparer.Ordinal)
+            .ToArray();
+
+        var validCandidateIds = legacyGraphRecommendationCandidates
+            .Select(candidate => candidate.CandidateId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidateId in legacyGraphRecommendationStates.Keys
+                     .Where(candidateId => affectedExisting.Any(candidate =>
+                         string.Equals(candidate.CandidateId, candidateId, StringComparison.OrdinalIgnoreCase)) &&
+                         !validCandidateIds.Contains(candidateId))
+                     .ToArray())
+        {
+            var state = legacyGraphRecommendationStates[candidateId];
+            legacyGraphRecommendationStates[candidateId] = state with
+            {
+                Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
+                ResolutionReason = "統合状態の変更後に候補が解消されました。",
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+        }
+
+        legacyGraphRecommendationDecisions.Clear();
+        foreach (var candidate in legacyGraphRecommendationCandidates)
+        {
+            if (legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) &&
+                state.Lifecycle == LegacyGraphRecommendationLifecycle.Active)
+            {
+                legacyGraphRecommendationDecisions[candidate.CandidateId] = state.Decision;
+            }
+        }
+    }
+
+    private bool IsLegacyGraphRecommendationAffected(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlySet<string> affectedCustomerIds)
+    {
+        if (candidate.TargetCustomerId is not null && affectedCustomerIds.Contains(candidate.TargetCustomerId) ||
+            candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            affectedCustomerIds.Contains(candidate.SubjectId) ||
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
+            affectedCustomerIds.Contains(candidate.TargetId))
+        {
+            return true;
+        }
+
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Vehicle &&
+            FindLegacyGraphVehicleById(candidate.SubjectId) is { } vehicle)
+        {
+            return vehicle.HasCustomer && affectedCustomerIds.Contains(vehicle.CustomerId);
+        }
+
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Document &&
+            FindLegacyRecommendationDocument(candidate) is { } document)
+        {
+            return FindOriginalCustomerForDocument(document) is { } customer &&
+                   affectedCustomerIds.Contains(customer.CustomerId);
+        }
+
+        return false;
+    }
+
     private IReadOnlyList<(AbacusRecommendationCandidate Recommendation,
         AbacusLegacyExportCandidateGraphCustomer Customer)> GetLegacyGraphCustomerIntegrationRecommendations(
         AbacusLegacyExportCandidateGraphCustomer customer)
@@ -3441,6 +3528,16 @@ public partial class MainWindow : Window
             legacyGraphCustomerMergeGroups.Remove(groupKey);
             legacyGraphCustomerGroupExpanded.Remove(groupKey);
         }
+
+        var affectedCustomerIds = new HashSet<string>(StringComparer.Ordinal)
+        {
+            sourceCustomer.CustomerId,
+        };
+        foreach (var customerId in group.CustomerIds)
+        {
+            affectedCustomerIds.Add(customerId);
+        }
+        RebuildLegacyGraphRecommendationCandidatesForCustomers(affectedCustomerIds);
 
         var remaining = group.CustomerIds
             .Select(FindLegacyGraphCustomerById)
@@ -7937,6 +8034,8 @@ public partial class MainWindow : Window
         mergeGroup.Origin = "manual";
         legacyGraphCustomerGroupExpanded[mergeGroup.GroupId] = true;
         InvalidateLegacyGraphMergeGroupState(mergeGroup.GroupId);
+        RebuildLegacyGraphRecommendationCandidatesForCustomers(
+            mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
         return mergeGroup.GroupId;
     }
 
@@ -8018,6 +8117,8 @@ public partial class MainWindow : Window
         }
 
         InvalidateLegacyGraphMergeGroupState(groupKey);
+        RebuildLegacyGraphRecommendationCandidatesForCustomers(
+            customerIds.ToHashSet(StringComparer.Ordinal));
         var firstCustomer = FindLegacyGraphCustomerById(customerIds[0]);
         if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase) &&
             firstCustomer is not null)
