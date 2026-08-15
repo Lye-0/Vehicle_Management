@@ -11,6 +11,8 @@ var tests = new (string Name, Action Test)[]
     ("識別子競合は承認可能候補にならない", IdentifierConflict),
     ("顧客なし車両は顧客おすすめになる", UnconnectedVehicleMatch),
     ("入力順を変えても候補順と根拠が変わらない", DeterministicOutput),
+    ("不足情報は差異と分離して保存される", MissingInformationIsStructured),
+    ("顧客単位カテゴリは顧客統合を先頭にする", MatchingCategoriesAreOrdered),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -148,6 +150,41 @@ static void DeterministicOutput()
     Assert(first.Select(candidate => candidate.Reason)
             .SequenceEqual(second.Select(candidate => candidate.Reason), StringComparer.Ordinal),
         "候補根拠が入力順の影響を受けています。");
+}
+
+static void MissingInformationIsStructured()
+{
+    var customer = Customer("c1", "山田太郎");
+    var document = Document("d1", new AbacusRecommendationProfile(
+        CustomerName: "山田太郎",
+        PhoneNumber: "03-1234-5678"));
+
+    var match = Build([document], [], [customer]).Single();
+    Assert(match.MissingFields.Any(field => field.Field == "phoneNumber" && field.MissingSide == "candidate"),
+        "候補側の不足情報が構造化されていません。");
+    Assert(match.Differences.All(field => field.Field != "phoneNumber"),
+        "不足情報が差異として重複保存されています。");
+}
+
+static void MatchingCategoriesAreOrdered()
+{
+    var customers = new[]
+    {
+        Customer("c1", "山田太郎", phone: "03-1234-5678"),
+        Customer("c2", "山田太朗", phone: "03-1234-5678"),
+    };
+    var candidates = Build(
+        [Document("d1", new AbacusRecommendationProfile(CustomerName: "山田太郎"))],
+        [Vehicle("v1", "", "山田太郎")],
+        customers);
+
+    var summaries = LegacyMatchingWorkflow.BuildCategorySummaries(
+        candidates,
+        new Dictionary<string, string>());
+    Assert(summaries.Select(summary => summary.Kind).SequenceEqual(
+            [LegacyMatchingCategoryKinds.Customer, LegacyMatchingCategoryKinds.Vehicle, LegacyMatchingCategoryKinds.Document]),
+        "顧客単位カテゴリの順序が仕様どおりではありません。");
+    Assert(summaries[0].Total > 0, "顧客統合カテゴリが集計されていません。");
 }
 
 static void LegacyCheckpointUpgrade()
