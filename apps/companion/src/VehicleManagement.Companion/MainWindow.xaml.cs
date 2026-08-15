@@ -10306,7 +10306,7 @@ public partial class MainWindow : Window
         double height) =>
         AddLegacyMatchingPreviewBlock(
             $"顧客: {GetLegacyGraphCustomerDisplayName(customer)}",
-            $"顧客ID: {customer.CustomerId}\n候補接続先 / 承認後",
+            $"顧客番号: {Fallback(customer.CustomerNumber)}\n候補接続先 / 承認後",
             left,
             top,
             width,
