@@ -1857,6 +1857,7 @@ public partial class MainWindow : Window
         if (customer is null)
         {
             legacyGraphSelectedRecommendation = null;
+            ClearLegacyMatchingRecommendationPreview();
             SetLegacyMatchingHeader(
                 "顧客を選択してください",
                 "顧客 0 / 0",
@@ -1890,7 +1891,14 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsSourceItemsControl.ItemsSource = null;
             LegacyMatchingDetailsCandidateItemsControl.ItemsSource = null;
             LegacyMatchingDetailsComparisonItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsEvidenceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsDifferenceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsMissingItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsConflictItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = null;
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
+            LegacyMatchingDetailsMergePreviewText.Text = "";
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -1975,6 +1983,7 @@ public partial class MainWindow : Window
         RenderLegacyGraphCustomer(displayCustomer);
         UpdateLegacyGraphInspector(displayCustomer);
         RefreshLegacyMatchingSidePanel(sourceCustomer, allRecommendations);
+        RefreshLegacyMatchingRecommendationPreview(legacyGraphSelectedRecommendation);
         RefreshLegacyMatchingChanges();
         RefreshLegacyMatchingRecommendationActions();
     }
@@ -2213,7 +2222,14 @@ public partial class MainWindow : Window
             LegacyMatchingDetailsSourceItemsControl.ItemsSource = null;
             LegacyMatchingDetailsCandidateItemsControl.ItemsSource = null;
             LegacyMatchingDetailsComparisonItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsEvidenceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsDifferenceItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsMissingItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsConflictItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = null;
             LegacyMatchingDetailsInternalItemsControl.ItemsSource = null;
+            LegacyMatchingDetailsAlternativesPlaceholderText.Text = "";
+            LegacyMatchingDetailsMergePreviewText.Text = "";
             LegacyMatchingCurrentMatchedItemsControl.ItemsSource = null;
             LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = null;
             LegacyMatchingCurrentMissingItemsControl.ItemsSource = null;
@@ -2291,6 +2307,22 @@ public partial class MainWindow : Window
             .Concat(differenceRows)
             .Concat(missingRows)
             .ToArray();
+        var entityRows = BuildLegacyMatchingEntityRows(currentCandidate);
+        var evidenceItems = currentCandidate.MatchedFields
+            .Select(field =>
+                $"{field.Label}: {DisplayLegacyMatchingValue(field.SourceValue)} → " +
+                $"{DisplayLegacyMatchingValue(field.CandidateValue)}（{GetLegacyMatchingMatchKindText(field.MatchKind)}）")
+            .ToArray();
+        var differenceItems = currentCandidate.Differences
+            .Select(field =>
+                $"{field.Label}: {DisplayLegacyMatchingValue(field.SourceValue)} → " +
+                $"{DisplayLegacyMatchingValue(field.CandidateValue)}（値が異なります）")
+            .ToArray();
+        var missingItems = currentCandidate.MissingFields
+            .Select(field =>
+                $"{field.Label}: {(field.MissingSide == "source" ? "対象側" : "候補側")}に情報がありません")
+            .ToArray();
+        var alternativeItems = BuildLegacyMatchingAlternativeRows(currentCandidate, sourceCustomer, allRecommendations);
         var internalRows = new[]
         {
             new LegacyMatchingInternalInfoRow("判定エンジン", "Gate28", "Gate28"),
@@ -2332,9 +2364,18 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentMissingItemsControl.ItemsSource = missingRows;
         LegacyMatchingCurrentConflictItemsControl.ItemsSource = conflictRows;
         LegacyMatchingDetailsSubjectSummaryText.Text = $"{item.SubjectText} → {item.TargetText}";
-        LegacyMatchingDetailsSourceItemsControl.ItemsSource = comparisonRows;
-        LegacyMatchingDetailsCandidateItemsControl.ItemsSource = comparisonRows;
+        LegacyMatchingDetailsSourceItemsControl.ItemsSource = entityRows;
+        LegacyMatchingDetailsCandidateItemsControl.ItemsSource = entityRows;
         LegacyMatchingDetailsComparisonItemsControl.ItemsSource = comparisonRows;
+        LegacyMatchingDetailsEvidenceItemsControl.ItemsSource = evidenceItems;
+        LegacyMatchingDetailsDifferenceItemsControl.ItemsSource = differenceItems;
+        LegacyMatchingDetailsMissingItemsControl.ItemsSource = missingItems;
+        LegacyMatchingDetailsConflictItemsControl.ItemsSource = currentCandidate.Conflicts;
+        LegacyMatchingDetailsAlternativesItemsControl.ItemsSource = alternativeItems;
+        LegacyMatchingDetailsAlternativesPlaceholderText.Text = alternativeItems.Count == 0
+            ? "この対象に対する別の候補はありません。"
+            : $"同じ対象に対する別候補 {alternativeItems.Count:N0}件。候補を変更する操作はここでは行いません。";
+        LegacyMatchingDetailsMergePreviewText.Text = BuildLegacyMatchingMergePreviewText(currentCandidate);
         LegacyMatchingDetailsInternalItemsControl.ItemsSource = internalRows;
         LegacyMatchingCurrentDifferenceBorder.Visibility = differenceRows.Length == 0
             ? Visibility.Collapsed
@@ -2443,6 +2484,249 @@ public partial class MainWindow : Window
         }
 
         return "おすすめは自動確定せず、承認操作で反映します。";
+    }
+
+    private IReadOnlyList<LegacyMatchingDetailRow> BuildLegacyMatchingEntityRows(
+        AbacusRecommendationCandidate candidate)
+    {
+        var sourceFields = GetLegacyMatchingEntityFields(candidate.SubjectKind, candidate.SubjectId);
+        var candidateFields = GetLegacyMatchingEntityFields(candidate.TargetKind, candidate.TargetId);
+        var labels = sourceFields.Keys
+            .Concat(candidateFields.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return labels
+            .Select(label => new LegacyMatchingDetailRow(
+                label,
+                sourceFields.TryGetValue(label, out var sourceValue)
+                    ? sourceValue
+                    : "情報なし",
+                candidateFields.TryGetValue(label, out var candidateValue)
+                    ? candidateValue
+                    : "情報なし",
+                "参考情報",
+                ToBrush("#64748B"),
+                "context",
+                ""))
+            .ToArray();
+    }
+
+    private IReadOnlyDictionary<string, string> GetLegacyMatchingEntityFields(
+        string kind,
+        string id)
+    {
+        var fields = new List<(string Label, string Value)>();
+        switch (kind)
+        {
+            case AbacusRecommendationEntityKinds.Customer:
+                if (FindLegacyGraphCustomerById(id) is { } customer)
+                {
+                    fields.Add(("顧客ID", customer.CustomerId));
+                    fields.Add(("顧客番号", customer.CustomerNumber));
+                    fields.Add(("顧客名", GetLegacyGraphCustomerDisplayName(customer)));
+                    fields.Add(("ふりがな", customer.NameKana));
+                    fields.Add(("電話番号", customer.PhoneNumber));
+                    fields.Add(("メールアドレス", customer.EmailAddress));
+                    fields.Add(("郵便番号", customer.PostalCode));
+                    fields.Add(("住所", customer.Address));
+                    fields.Add(("メモ", customer.Memo));
+                    fields.Add(("車両数", $"{GetLegacyGraphVehiclesForDisplay(customer).Count:N0}台"));
+                    fields.Add(("書類数", $"{GetLegacyGraphDisplayedDocumentCount(customer):N0}件"));
+                    fields.Add(("出典", "顧客候補パッケージ / customers.csv"));
+                }
+
+                break;
+            case AbacusRecommendationEntityKinds.Vehicle:
+                if (FindLegacyGraphVehicleById(id) is { } vehicle)
+                {
+                    fields.Add(("車両ID", vehicle.VehicleId));
+                    fields.Add(("顧客ID", vehicle.CustomerId));
+                    fields.Add(("顧客名", vehicle.CustomerName));
+                    fields.Add(("メーカー", vehicle.Maker));
+                    fields.Add(("車名", vehicle.VehicleName));
+                    fields.Add(("型式", vehicle.Model));
+                    fields.Add(("登録番号", vehicle.RegistrationNumber));
+                    fields.Add(("車台番号", vehicle.ChassisNumber));
+                    fields.Add(("年式", vehicle.ModelYear));
+                    fields.Add(("車検満了日", vehicle.InspectionDate));
+                    fields.Add(("走行距離", vehicle.Mileage));
+                    fields.Add(("書類数", $"{vehicle.Documents.Count:N0}件"));
+                    fields.Add(("出典", vehicle.SourceLocation));
+                }
+
+                break;
+            case AbacusRecommendationEntityKinds.Document:
+                if (FindLegacyRecommendationDocumentById(id) is { } document)
+                {
+                    var profile = document.RecommendationProfile;
+                    fields.Add(("書類ID", GetLegacyDocumentKey(document)));
+                    fields.Add(("書類種別", document.Kind));
+                    fields.Add(("書類番号", document.DocumentNumber));
+                    fields.Add(("顧客名", FirstNonEmpty(document.CustomerName, profile?.CustomerName ?? "")));
+                    fields.Add(("ふりがな", profile?.NameKana ?? ""));
+                    fields.Add(("電話番号", profile?.PhoneNumber ?? ""));
+                    fields.Add(("郵便番号", profile?.PostalCode ?? ""));
+                    fields.Add(("住所", profile?.Address ?? ""));
+                    fields.Add(("車名", FirstNonEmpty(document.VehicleName, profile?.VehicleName ?? "")));
+                    fields.Add(("メーカー", profile?.Maker ?? ""));
+                    fields.Add(("型式", profile?.Model ?? ""));
+                    fields.Add(("登録番号", FirstNonEmpty(document.RegistrationNumber, profile?.RegistrationNumber ?? "")));
+                    fields.Add(("車台番号", profile?.ChassisNumber ?? ""));
+                    fields.Add(("日付", document.DocumentDate));
+                    fields.Add(("合計", document.TotalAmount));
+                    fields.Add(("明細", BuildLegacyGraphDocumentDetailSummary(document).Trim()));
+                    fields.Add(("出典", document.SourceLocation));
+                }
+
+                break;
+        }
+
+        return fields
+            .GroupBy(item => item.Label, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => DisplayLegacyMatchingValue(group.First().Value),
+                StringComparer.Ordinal);
+    }
+
+    private AbacusLegacyExportCandidateGraphDocument? FindLegacyRecommendationDocumentById(string id) =>
+        legacyExportCandidateGraphResult?.AllDocuments.FirstOrDefault(document =>
+            string.Equals(GetLegacyDocumentKey(document), id, StringComparison.OrdinalIgnoreCase));
+
+    private static string FirstNonEmpty(params string[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "";
+
+    private IReadOnlyList<LegacyMatchingAlternativeRow> BuildLegacyMatchingAlternativeRows(
+        AbacusRecommendationCandidate currentCandidate,
+        AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
+        IReadOnlyList<AbacusRecommendationCandidate> allRecommendations)
+    {
+        var sourceCustomerIds = GetLegacyGraphCustomerMergeCandidates(sourceCustomer)
+            .Select(customer => customer.CustomerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var alternatives = allRecommendations
+            .Where(candidate => !string.Equals(candidate.CandidateId, currentCandidate.CandidateId, StringComparison.OrdinalIgnoreCase))
+            .Where(candidate => currentCandidate.SubjectKind == AbacusRecommendationEntityKinds.Customer
+                ? candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+                  candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
+                  (sourceCustomerIds.Contains(candidate.SubjectId) || sourceCustomerIds.Contains(candidate.TargetId))
+                : string.Equals(candidate.SubjectKind, currentCandidate.SubjectKind, StringComparison.Ordinal) &&
+                  string.Equals(candidate.SubjectId, currentCandidate.SubjectId, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(candidate => candidate.TargetKind, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.TargetId, StringComparer.Ordinal)
+            .Take(12)
+            .Select(candidate =>
+            {
+                var targetText = GetLegacyMatchingTargetText(candidate, sourceCustomerIds);
+                var matchedText = candidate.MatchedFields.Count == 0
+                    ? "一致情報なし"
+                    : string.Join("・", candidate.MatchedFields.Select(field => field.Label).Distinct(StringComparer.Ordinal));
+                var differenceText = candidate.Differences.Count == 0
+                    ? "差異なし"
+                    : $"差異: {string.Join("・", candidate.Differences.Select(field => field.Label))}";
+                var conflictText = candidate.Conflicts.Count == 0
+                    ? "競合なし"
+                    : $"要確認: {string.Join("、", candidate.Conflicts)}";
+                return new LegacyMatchingAlternativeRow(
+                    targetText,
+                    $"一致: {matchedText}\n{differenceText}\n{conflictText}\n判定: {GetLegacyMatchingDecisionText(GetLegacyGraphRecommendationDecision(candidate))}");
+            })
+            .ToArray();
+        return alternatives;
+    }
+
+    private string GetLegacyMatchingTargetText(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlySet<string> sourceCustomerIds)
+    {
+        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
+            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            var otherId = sourceCustomerIds.Contains(candidate.SubjectId)
+                ? candidate.TargetId
+                : candidate.SubjectId;
+            return FindLegacyGraphCustomerById(otherId) is { } customer
+                ? $"顧客候補: {GetLegacyGraphCustomerDisplayName(customer)} / {customer.CustomerId}"
+                : $"顧客候補: {otherId}";
+        }
+
+        return candidate.TargetKind switch
+        {
+            AbacusRecommendationEntityKinds.Customer when FindLegacyGraphCustomerById(candidate.TargetId) is { } customer =>
+                $"接続先顧客: {GetLegacyGraphCustomerDisplayName(customer)} / {customer.CustomerId}",
+            AbacusRecommendationEntityKinds.Vehicle when FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle =>
+                $"接続先車両: {Fallback(vehicle.Maker)} {vehicle.DisplayName} / {vehicle.VehicleId}",
+            _ => $"接続先: {candidate.TargetKind} {candidate.TargetId}",
+        };
+    }
+
+    private string BuildLegacyMatchingMergePreviewText(AbacusRecommendationCandidate candidate)
+    {
+        if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Customer ||
+            candidate.TargetKind != AbacusRecommendationEntityKinds.Customer ||
+            FindLegacyGraphCustomerById(candidate.SubjectId) is not { } sourceCustomer ||
+            FindLegacyGraphCustomerById(candidate.TargetId) is not { } targetCustomer)
+        {
+            return "顧客統合候補ではありません。車両・書類の接続先は中央キャンバスの承認後プレビューで確認できます。";
+        }
+
+        var mergeKey = GetLegacyCustomerMergeKey(sourceCustomer);
+        var customers = TryGetLegacyGraphMergeGroup(mergeKey, out var mergeGroup) &&
+                        mergeGroup.CustomerIds.Contains(targetCustomer.CustomerId, StringComparer.Ordinal)
+            ? GetLegacyGraphCustomerMergeCandidates(sourceCustomer)
+            : new[] { sourceCustomer, targetCustomer };
+        var vehicles = customers
+            .SelectMany(GetLegacyGraphVehiclesForDisplay)
+            .Where(vehicle => !IsLegacyGraphVehicleInTrash(vehicle))
+            .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var documents = customers
+            .SelectMany(GetLegacyMatchingDocumentsForCustomer)
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        var fieldLines = GetLegacyGraphCustomerMergeFields()
+            .Select(field =>
+            {
+                legacyGraphCustomerMergeDrafts.TryGetValue(mergeKey, out var draft);
+                if (draft?.SelectedValues.TryGetValue(field.Key, out var selectedValue) == true &&
+                    !string.IsNullOrWhiteSpace(selectedValue))
+                {
+                    return $"{field.Label}: {Fallback(selectedValue)}";
+                }
+
+                var values = customers.Select(field.ValueSelector)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                return values.Length switch
+                {
+                    0 => $"{field.Label}: 情報なし",
+                    1 => $"{field.Label}: {Fallback(values[0])}",
+                    _ => $"{field.Label}: 要選択（{string.Join(" / ", values.Select(Fallback))}）",
+                };
+            });
+
+        return $"統合候補: {string.Join(" / ", customers.Select(GetLegacyGraphCustomerDisplayName))}\n" +
+               $"統合後の構成: 車両 {vehicles.Length:N0}台 / 書類 {documents.Length:N0}件\n" +
+               "採用値:\n" + string.Join("\n", fieldLines) +
+               "\n差異がある項目は、既存の統合プレビューで採用値を選択してから確定します。";
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyMatchingDocumentsForCustomer(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        var documents = GetLegacyGraphVehiclesForDisplay(customer)
+            .SelectMany(vehicle => vehicle.Documents)
+            .Concat(GetLegacyGraphCustomerDirectDocuments(customer))
+            .Where(document => !IsLegacyGraphDocumentInTrash(document) &&
+                               !IsLegacyGraphDocumentInTray(document))
+            .ToList();
+        return documents
+            .GroupBy(GetLegacyDocumentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
     }
 
     private static string ShortenLegacyMatchingInternalValue(string value)
@@ -3011,6 +3295,7 @@ public partial class MainWindow : Window
             : null;
         SetLegacyMatchingDetailsVisible(false);
         RefreshLegacyMatchingRecommendationActions();
+        RefreshLegacyMatchingRecommendationPreview(legacyGraphSelectedRecommendation);
     }
 
     private void RefreshLegacyMatchingRecommendationActions()
@@ -3194,7 +3479,12 @@ public partial class MainWindow : Window
             : FontWeights.SemiBold;
         if (!recommendationsVisible)
         {
+            ClearLegacyMatchingRecommendationPreview();
             RefreshLegacyMatchingUnresolvedList();
+        }
+        else if (GetLegacyGraphMatchingCustomer() is { } customer)
+        {
+            RefreshLegacyMatchingRecommendationPreview(legacyGraphSelectedRecommendation);
         }
     }
 
@@ -9456,6 +9746,7 @@ public partial class MainWindow : Window
         EndLegacyGraphConnectionPreview();
         LegacyGraphCanvas.Children.Clear();
         LegacyGraphEdgesCanvas.Children.Clear();
+        ClearLegacyMatchingRecommendationPreview();
         LegacyGraphPageDragPreviewCanvas.Children.Clear();
         LegacyGraphBoardGrid.Width = 1120;
         LegacyGraphBoardGrid.Height = LegacyGraphMinimumCanvasHeight;
@@ -9463,6 +9754,10 @@ public partial class MainWindow : Window
         LegacyGraphCanvas.Height = LegacyGraphMinimumCanvasHeight;
         LegacyGraphEdgesCanvas.Width = 1120;
         LegacyGraphEdgesCanvas.Height = LegacyGraphMinimumCanvasHeight;
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Width = 1120;
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Height = LegacyGraphMinimumCanvasHeight;
+        LegacyMatchingRecommendationPreviewCanvas.Width = 1120;
+        LegacyMatchingRecommendationPreviewCanvas.Height = LegacyGraphMinimumCanvasHeight;
         legacyGraphEdges.Clear();
         const double customerX = 30;
         const double customerY = 32;
@@ -9667,10 +9962,433 @@ public partial class MainWindow : Window
         LegacyGraphCanvas.Height = Math.Max(LegacyGraphMinimumCanvasHeight, contentBottom + 70);
         LegacyGraphEdgesCanvas.Width = LegacyGraphCanvas.Width;
         LegacyGraphEdgesCanvas.Height = LegacyGraphCanvas.Height;
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Width = LegacyGraphCanvas.Width;
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Height = LegacyGraphCanvas.Height;
+        LegacyMatchingRecommendationPreviewCanvas.Width = LegacyGraphCanvas.Width;
+        LegacyMatchingRecommendationPreviewCanvas.Height = LegacyGraphCanvas.Height;
         LegacyGraphBoardGrid.Width = LegacyGraphCanvas.Width;
         LegacyGraphBoardGrid.Height = LegacyGraphCanvas.Height;
         LegacyGraphCanvas.UpdateLayout();
         UpdateLegacyGraphEdges();
+    }
+
+    private void ClearLegacyMatchingRecommendationPreview()
+    {
+        if (LegacyMatchingRecommendationPreviewEdgesCanvas is null ||
+            LegacyMatchingRecommendationPreviewCanvas is null)
+        {
+            return;
+        }
+
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Children.Clear();
+        LegacyMatchingRecommendationPreviewCanvas.Children.Clear();
+    }
+
+    private void RefreshLegacyMatchingRecommendationPreview(
+        AbacusRecommendationCandidate? candidate)
+    {
+        ClearLegacyMatchingRecommendationPreview();
+        if (!string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase) ||
+            LegacyMatchingRecommendationContent.Visibility != Visibility.Visible ||
+            candidate is null ||
+            GetLegacyGraphRecommendationDecision(candidate) is not (AbacusRecommendationDecisionValues.Pending or
+                AbacusRecommendationDecisionValues.Hold))
+        {
+            return;
+        }
+
+        const double customerX = 30;
+        const double vehicleX = 320;
+        const double documentX = 690;
+        const double customerWidth = 225;
+        const double vehicleWidth = 290;
+        const double documentWidth = 390;
+        const double blockHeight = 112;
+        const double documentHeight = 118;
+        var previewY = GetLegacyMatchingRecommendationPreviewBottom() + 24;
+        var targetCustomer = ResolveLegacyMatchingRecommendationTargetCustomer(candidate);
+        var customerBlock = FindLegacyMatchingCanvasCustomer(targetCustomer);
+
+        switch (candidate.SubjectKind, candidate.TargetKind)
+        {
+            case (AbacusRecommendationEntityKinds.Vehicle, AbacusRecommendationEntityKinds.Customer):
+                if (FindLegacyGraphVehicleById(candidate.SubjectId) is not { } vehicle || targetCustomer is null)
+                {
+                    return;
+                }
+
+                customerBlock ??= CreateLegacyMatchingPreviewCustomerBlock(
+                    targetCustomer,
+                    customerX,
+                    previewY,
+                    customerWidth,
+                    blockHeight);
+                var vehicleBlock = FindLegacyMatchingCanvasVehicle(vehicle.VehicleId) ??
+                    CreateLegacyMatchingPreviewVehicleBlock(
+                        vehicle,
+                        previewY,
+                        vehicleX,
+                        vehicleWidth,
+                        blockHeight,
+                        GetLegacyMatchingCurrentLinkSummary(vehicle));
+                AddLegacyMatchingPreviewEdge(customerBlock, vehicleBlock, "承認後");
+                break;
+
+            case (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Vehicle):
+                if (FindLegacyRecommendationDocumentById(candidate.SubjectId) is not { } document ||
+                    FindLegacyGraphVehicleById(candidate.TargetId) is not { } targetVehicle ||
+                    (targetCustomer = FindLegacyGraphCustomerById(targetVehicle.CustomerId)) is null)
+                {
+                    return;
+                }
+
+                customerBlock = FindLegacyMatchingCanvasCustomer(targetCustomer);
+                var targetVehicleBlock = FindLegacyMatchingCanvasVehicle(targetVehicle.VehicleId);
+                if (targetVehicleBlock is null)
+                {
+                    customerBlock ??= CreateLegacyMatchingPreviewCustomerBlock(
+                        targetCustomer,
+                        customerX,
+                        previewY,
+                        customerWidth,
+                        blockHeight);
+                    targetVehicleBlock = CreateLegacyMatchingPreviewVehicleBlock(
+                        targetVehicle,
+                        previewY,
+                        vehicleX,
+                        vehicleWidth,
+                        blockHeight,
+                        "候補接続先");
+                    AddLegacyMatchingPreviewEdge(customerBlock, targetVehicleBlock, "接続先");
+                }
+
+                var documentBlock = FindLegacyMatchingCanvasDocument(document) ??
+                    CreateLegacyMatchingPreviewDocumentBlock(
+                        document,
+                        previewY,
+                        documentX,
+                        documentWidth,
+                        documentHeight,
+                        GetLegacyMatchingCurrentLinkSummary(document));
+                AddLegacyMatchingPreviewEdge(targetVehicleBlock, documentBlock, "承認後");
+                break;
+
+            case (AbacusRecommendationEntityKinds.Document, AbacusRecommendationEntityKinds.Customer):
+                if (FindLegacyRecommendationDocumentById(candidate.SubjectId) is not { } directDocument ||
+                    (targetCustomer = FindLegacyGraphCustomerById(candidate.TargetId)) is null)
+                {
+                    return;
+                }
+
+                customerBlock = FindLegacyMatchingCanvasCustomer(targetCustomer) ??
+                    CreateLegacyMatchingPreviewCustomerBlock(
+                        targetCustomer,
+                        customerX,
+                        previewY,
+                        customerWidth,
+                        blockHeight);
+                var directDocumentBlock = FindLegacyMatchingCanvasDocument(directDocument) ??
+                    CreateLegacyMatchingPreviewDocumentBlock(
+                        directDocument,
+                        previewY,
+                        documentX,
+                        documentWidth,
+                        documentHeight,
+                        GetLegacyMatchingCurrentLinkSummary(directDocument));
+                AddLegacyMatchingPreviewEdge(customerBlock, directDocumentBlock, "顧客へ直接・承認後");
+                break;
+        }
+
+        LegacyMatchingRecommendationPreviewEdgesCanvas.UpdateLayout();
+        LegacyMatchingRecommendationPreviewCanvas.UpdateLayout();
+        var previewBottom = LegacyMatchingRecommendationPreviewCanvas.Children
+            .OfType<FrameworkElement>()
+            .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
+            .DefaultIfEmpty(LegacyGraphMinimumCanvasHeight)
+            .Max();
+        var canvasHeight = Math.Max(
+            LegacyGraphMinimumCanvasHeight,
+            Math.Max(LegacyGraphCanvas.Height, previewBottom + 50));
+        LegacyGraphCanvas.Height = canvasHeight;
+        LegacyGraphEdgesCanvas.Height = canvasHeight;
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Height = canvasHeight;
+        LegacyMatchingRecommendationPreviewCanvas.Height = canvasHeight;
+        LegacyGraphBoardGrid.Height = canvasHeight;
+    }
+
+    private double GetLegacyMatchingRecommendationPreviewBottom()
+    {
+        var graphBottom = LegacyGraphCanvas.Children
+            .OfType<FrameworkElement>()
+            .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
+            .DefaultIfEmpty(32)
+            .Max();
+        var previewBottom = LegacyMatchingRecommendationPreviewCanvas.Children
+            .OfType<FrameworkElement>()
+            .Select(element => Canvas.GetTop(element) + GetLegacyGraphElementHeight(element))
+            .DefaultIfEmpty(32)
+            .Max();
+        return Math.Max(graphBottom, previewBottom);
+    }
+
+    private AbacusLegacyExportCandidateGraphCustomer? ResolveLegacyMatchingRecommendationTargetCustomer(
+        AbacusRecommendationCandidate candidate)
+    {
+        if (candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
+        {
+            return FindLegacyGraphCustomerById(candidate.TargetId);
+        }
+
+        return candidate.TargetKind == AbacusRecommendationEntityKinds.Vehicle
+            ? FindLegacyGraphVehicleById(candidate.TargetId) is { } vehicle &&
+              !string.IsNullOrWhiteSpace(vehicle.CustomerId)
+                ? FindLegacyGraphCustomerById(vehicle.CustomerId)
+                : null
+            : null;
+    }
+
+    private FrameworkElement? FindLegacyMatchingCanvasCustomer(
+        AbacusLegacyExportCandidateGraphCustomer? targetCustomer)
+    {
+        if (targetCustomer is null)
+        {
+            return null;
+        }
+
+        var targetMergeKey = GetLegacyCustomerMergeKey(targetCustomer);
+        return LegacyGraphCanvas.Children
+            .OfType<FrameworkElement>()
+            .FirstOrDefault(element => element.Tag is AbacusLegacyExportCandidateGraphCustomer customer &&
+                (string.Equals(customer.CustomerId, targetCustomer.CustomerId, StringComparison.Ordinal) ||
+                 string.Equals(GetLegacyCustomerMergeKey(customer), targetMergeKey, StringComparison.Ordinal)));
+    }
+
+    private FrameworkElement? FindLegacyMatchingCanvasVehicle(string vehicleId) =>
+        LegacyGraphCanvas.Children
+            .OfType<FrameworkElement>()
+            .FirstOrDefault(element => element.Tag is AbacusLegacyExportCandidateGraphVehicle vehicle &&
+                                       string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal));
+
+    private FrameworkElement? FindLegacyMatchingCanvasDocument(
+        AbacusLegacyExportCandidateGraphDocument document) =>
+        LegacyGraphCanvas.Children
+            .OfType<FrameworkElement>()
+            .FirstOrDefault(element => element.Tag is AbacusLegacyExportCandidateGraphDocument graphDocument &&
+                                       string.Equals(
+                                           GetLegacyDocumentKey(graphDocument),
+                                           GetLegacyDocumentKey(document),
+                                           StringComparison.OrdinalIgnoreCase));
+
+    private Grid CreateLegacyMatchingPreviewCustomerBlock(
+        AbacusLegacyExportCandidateGraphCustomer customer,
+        double left,
+        double top,
+        double width,
+        double height) =>
+        AddLegacyMatchingPreviewBlock(
+            $"顧客: {GetLegacyGraphCustomerDisplayName(customer)}",
+            $"顧客ID: {customer.CustomerId}\n候補接続先 / 承認後",
+            left,
+            top,
+            width,
+            height);
+
+    private Grid CreateLegacyMatchingPreviewVehicleBlock(
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        double top,
+        double left,
+        double width,
+        double height,
+        string relationText) =>
+        AddLegacyMatchingPreviewBlock(
+            $"車両: {Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
+            $"登録: {Fallback(vehicle.RegistrationNumber)}\n車台: {Fallback(vehicle.ChassisNumber)}\n{relationText}",
+            left,
+            top,
+            width,
+            height);
+
+    private Grid CreateLegacyMatchingPreviewDocumentBlock(
+        AbacusLegacyExportCandidateGraphDocument document,
+        double top,
+        double left,
+        double width,
+        double height,
+        string currentLinkText) =>
+        AddLegacyMatchingPreviewBlock(
+            $"{document.Kind}: {Fallback(document.DocumentNumber)}",
+            $"{Fallback(document.CustomerName)} / {Fallback(document.VehicleName)}\n" +
+            $"日付: {Fallback(document.DocumentDate)} / 合計: {Fallback(document.TotalAmount)}\n" +
+            $"{currentLinkText}",
+            left,
+            top,
+            width,
+            height);
+
+    private Grid AddLegacyMatchingPreviewBlock(
+        string title,
+        string subtitle,
+        double left,
+        double top,
+        double width,
+        double height)
+    {
+        var block = new Grid
+        {
+            Width = width,
+            MinHeight = height,
+            Height = double.NaN,
+            VerticalAlignment = VerticalAlignment.Top,
+            Opacity = 0.9,
+            IsHitTestVisible = false,
+        };
+        var outline = new Rectangle
+        {
+            Stroke = ToBrush("#7C3AED"),
+            Fill = ToBrush("#F5F3FF"),
+            StrokeThickness = 2,
+            RadiusX = 7,
+            RadiusY = 7,
+            StrokeDashArray = new DoubleCollection { 6, 4 },
+        };
+        var content = new StackPanel { Margin = new Thickness(12, 8, 12, 8) };
+        content.Children.Add(new Border
+        {
+            Padding = new Thickness(6, 2, 6, 2),
+            Margin = new Thickness(0, 0, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = ToBrush("#7C3AED"),
+            CornerRadius = new CornerRadius(3),
+            Child = new TextBlock
+            {
+                Text = "おすすめ・承認後プレビュー",
+                FontSize = 10,
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.SemiBold,
+            },
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ToBrush("#10233F"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        content.Children.Add(new TextBlock
+        {
+            Margin = new Thickness(0, 3, 0, 0),
+            Text = subtitle,
+            FontSize = 12,
+            Foreground = ToBrush("#5B21B6"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        block.Children.Add(outline);
+        block.Children.Add(content);
+        LegacyMatchingRecommendationPreviewCanvas.Children.Add(block);
+        Canvas.SetLeft(block, left);
+        Canvas.SetTop(block, top);
+        return block;
+    }
+
+    private void AddLegacyMatchingPreviewEdge(
+        FrameworkElement source,
+        FrameworkElement target,
+        string label)
+    {
+        LegacyGraphCanvas.UpdateLayout();
+        LegacyMatchingRecommendationPreviewCanvas.UpdateLayout();
+        var sourceLeft = Canvas.GetLeft(source);
+        var sourceTop = Canvas.GetTop(source);
+        var targetLeft = Canvas.GetLeft(target);
+        var targetTop = Canvas.GetTop(target);
+        var sourceWidth = GetLegacyGraphElementWidth(source);
+        var sourceHeight = GetLegacyGraphElementHeight(source);
+        var targetWidth = GetLegacyGraphElementWidth(target);
+        var targetHeight = GetLegacyGraphElementHeight(target);
+        var sourceRight = sourceLeft + sourceWidth;
+        var targetRight = targetLeft + targetWidth;
+        var line = new Line
+        {
+            Stroke = ToBrush("#7C3AED"),
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 6, 4 },
+            IsHitTestVisible = false,
+        };
+        if (sourceLeft <= targetLeft)
+        {
+            line.X1 = sourceRight;
+            line.Y1 = sourceTop + sourceHeight / 2;
+            line.X2 = targetLeft;
+            line.Y2 = targetTop + targetHeight / 2;
+        }
+        else
+        {
+            line.X1 = sourceLeft;
+            line.Y1 = sourceTop + sourceHeight / 2;
+            line.X2 = targetRight;
+            line.Y2 = targetTop + targetHeight / 2;
+        }
+
+        LegacyMatchingRecommendationPreviewEdgesCanvas.Children.Add(line);
+        var edgeLabel = new Border
+        {
+            Padding = new Thickness(4, 1, 4, 1),
+            Background = ToBrush("#F5F3FF"),
+            BorderBrush = ToBrush("#A78BFA"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Child = new TextBlock
+            {
+                Text = label,
+                FontSize = 10,
+                Foreground = ToBrush("#5B21B6"),
+                FontWeight = FontWeights.SemiBold,
+            },
+        };
+        LegacyMatchingRecommendationPreviewCanvas.Children.Add(edgeLabel);
+        Canvas.SetLeft(edgeLabel, (line.X1 + line.X2) / 2 - 28);
+        Canvas.SetTop(edgeLabel, (line.Y1 + line.Y2) / 2 - 12);
+    }
+
+    private string GetLegacyMatchingCurrentLinkSummary(
+        AbacusLegacyExportCandidateGraphVehicle vehicle)
+    {
+        var customerId = legacyGraphManualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var manualCustomerId)
+            ? manualCustomerId
+            : vehicle.CustomerId;
+        return string.IsNullOrWhiteSpace(customerId)
+            ? "現在: 未接続"
+            : FindLegacyGraphCustomerById(customerId) is { } customer
+                ? $"現在: {GetLegacyGraphCustomerDisplayName(customer)}"
+                : "現在: 接続先不明";
+    }
+
+    private string GetLegacyMatchingCurrentLinkSummary(
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetLegacyDocumentKey(document);
+        if (legacyGraphManualDocumentLinks.TryGetValue(key, out var vehicleId) &&
+            FindLegacyGraphVehicleById(vehicleId) is { } manualVehicle)
+        {
+            return $"現在: 車両 {manualVehicle.DisplayName}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(document.LinkedVehicleId) &&
+            FindLegacyGraphVehicleById(document.LinkedVehicleId) is { } linkedVehicle)
+        {
+            return $"現在: 車両 {linkedVehicle.DisplayName}";
+        }
+
+        if (legacyGraphManualDocumentCustomerLinks.TryGetValue(key, out var targetGroupKey) &&
+            legacyExportCandidateGraphResult?.Customers.FirstOrDefault(customer =>
+                string.Equals(GetLegacyCustomerMergeKey(customer), targetGroupKey, StringComparison.Ordinal)) is { } manualCustomer)
+        {
+            return $"現在: {GetLegacyGraphCustomerDisplayName(manualCustomer)}へ直接接続";
+        }
+
+        return FindOriginalCustomerForDocument(document) is { } customer
+            ? $"現在: {GetLegacyGraphCustomerDisplayName(customer)}"
+            : "現在: 未接続";
     }
 
     private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetDocumentsForVehicle(
@@ -13707,6 +14425,10 @@ public partial class MainWindow : Window
         Brush StatusBrush,
         string InternalStatusText,
         string ValuesText);
+
+    private sealed record LegacyMatchingAlternativeRow(
+        string Title,
+        string Details);
 
     private sealed record LegacyMatchingInternalInfoRow(
         string Label,
