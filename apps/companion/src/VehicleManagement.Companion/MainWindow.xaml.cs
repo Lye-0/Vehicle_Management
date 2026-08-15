@@ -5756,11 +5756,19 @@ public partial class MainWindow : Window
             ReferenceEquals(matchingPanel, LegacyMatchingDetailsScrollViewer))
         {
             matchingPanel.UpdateLayout();
-            if (TryScrollVertical(matchingPanel, e.Delta))
-            {
-                e.Handled = true;
-                return;
-            }
+            // 内側のスクロールが先頭・末尾に達していても、ページ全体へ
+            // ホイール操作を伝播させないようにします。
+            TryScrollVertical(matchingPanel, e.Delta);
+            e.Handled = true;
+            return;
+        }
+
+        if (LegacyMatchingSidePanel.Visibility == Visibility.Visible &&
+            LegacyMatchingSidePanel.IsMouseOver)
+        {
+            // 右パネル内のヘッダーやタブ上でも、ページ全体を動かしません。
+            e.Handled = true;
+            return;
         }
 
         // グラフ上のホイールは、グラフ内のScrollViewerではなくページを動かします。
