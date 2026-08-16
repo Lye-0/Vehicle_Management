@@ -25,6 +25,7 @@ var tests = new (string Name, Action Test)[]
     ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
     ("インポート確定ゲートは顧客・統合候補・書類をすべて確認する", ImportFinalizationRequiresAllGates),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
+    ("旧チェックポイントの顧客二重所属を正規化して再開できる", LegacyCheckpointMergeMembershipRecovery),
 };
 
 foreach (var (name, test) in tests)
@@ -414,6 +415,109 @@ static void ImportFinalizationRequiresAllGates()
         "ノード未接続書類を残したままインポート確定可能になっています。");
     Assert(!LegacyMatchingWorkflow.CanFinalizeImport(0, 0, 1),
         "未確認顧客を残したままインポート確定可能になっています。");
+}
+
+static void LegacyCheckpointMergeMembershipRecovery()
+{
+    var logicalGroupId = "logical:merged-yamada";
+    var candidateGroupId = "same-name:山田";
+    var otherCandidateGroupId = "same-name:佐藤";
+    var singleCustomerGroupId = "manual:single";
+    var checkpoint = new LegacyGraphWorkCheckpoint(
+        LegacyGraphWorkCheckpointSchema.Kind,
+        LegacyGraphWorkCheckpointSchema.CurrentVersion,
+        "package",
+        "source",
+        new string('A', 64),
+        "candidate",
+        new string('B', 64),
+        "vehicles.csv",
+        false,
+        "graph",
+        null,
+        null,
+        false,
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+            new LegacyGraphCheckpointMergeGroup(candidateGroupId, "same-name", ["c1", "c2"]),
+            new LegacyGraphCheckpointMergeGroup(logicalGroupId, "logical", ["c1", "c2"]),
+            new LegacyGraphCheckpointMergeGroup(otherCandidateGroupId, "same-name", ["c3", "c4"]),
+            new LegacyGraphCheckpointMergeGroup(singleCustomerGroupId, "manual", ["c5"]),
+        ],
+        new Dictionary<string, string>
+        {
+            ["c1"] = candidateGroupId,
+            ["c2"] = candidateGroupId,
+            ["c3"] = otherCandidateGroupId,
+            ["c4"] = otherCandidateGroupId,
+            ["c5"] = singleCustomerGroupId,
+        },
+        new Dictionary<string, LegacyGraphCheckpointMergeDraft>
+        {
+            [logicalGroupId] = new LegacyGraphCheckpointMergeDraft(
+                logicalGroupId,
+                ["c1", "c2"],
+                new Dictionary<string, string>(),
+                new Dictionary<string, string>(),
+                DateTimeOffset.UtcNow),
+        },
+        [logicalGroupId],
+        new Dictionary<string, string>(),
+        new Dictionary<string, bool>
+        {
+            [candidateGroupId] = true,
+            [logicalGroupId] = false,
+        },
+        [],
+        null,
+        DateTimeOffset.UtcNow,
+        CustomerApprovalStates: new Dictionary<string, bool>
+        {
+            [candidateGroupId] = false,
+            [logicalGroupId] = true,
+            ["customer:c5"] = false,
+        },
+        CustomerReviewStates: new Dictionary<string, string>
+        {
+            [candidateGroupId] = LegacyGraphCustomerReviewStateValues.NeedsReview,
+            [logicalGroupId] = LegacyGraphCustomerReviewStateValues.Approved,
+            ["customer:c5"] = LegacyGraphCustomerReviewStateValues.Unreviewed,
+        });
+
+    var recovered = LegacyGraphWorkCheckpointRecovery.NormalizeMergeMembership(checkpoint);
+    var groups = recovered.Checkpoint.CustomerMergeGroups;
+    Assert(recovered.Changed, "二重所属チェックポイントが正規化済みと判定されています。");
+    Assert(groups.Length == 2 &&
+           groups.Any(group => group.GroupId == logicalGroupId && group.CustomerIds.SequenceEqual(["c1", "c2"])) &&
+           groups.Any(group => group.GroupId == otherCandidateGroupId && group.CustomerIds.SequenceEqual(["c3", "c4"])),
+        "論理グループを優先した顧客構成へ正規化できていません。");
+    Assert(!recovered.Checkpoint.CustomerMergeGroupByCustomerId.ContainsKey("c1") &&
+           recovered.Checkpoint.CustomerMergeGroupByCustomerId["c3"] == otherCandidateGroupId,
+        "仮グループの顧客所属マップが正規化されていません。");
+    var logicalMap = recovered.Checkpoint.LogicalCustomerMergeGroupByCustomerId ?? [];
+    var reviewStates = recovered.Checkpoint.CustomerReviewStates ?? [];
+    Assert(logicalMap["c1"] == logicalGroupId &&
+           logicalMap["c2"] == logicalGroupId,
+        "論理顧客グループの所属マップが保持されていません。");
+    Assert(reviewStates.ContainsKey("customer:c5") &&
+           !reviewStates.ContainsKey(candidateGroupId),
+        "通常顧客の確認状態を残したまま古い候補グループ状態だけを整理できていません。");
+
+    var alreadyNormalized = LegacyGraphWorkCheckpointRecovery.NormalizeMergeMembership(
+        recovered.Checkpoint);
+    Assert(!alreadyNormalized.Changed,
+        "重複所属を整理したチェックポイントを再度変更しています。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

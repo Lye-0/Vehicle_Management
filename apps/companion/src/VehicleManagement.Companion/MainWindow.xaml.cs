@@ -5679,7 +5679,11 @@ public partial class MainWindow : Window
             var resumed = await ReadLegacyExportPackageAsync(candidatePackagePath, automatic: false, checkpoint);
             if (!resumed)
             {
-                throw new InvalidDataException("候補パッケージの再検証またはグラフ復元に失敗しました。");
+                var detail = LegacyGraphStatusText.Text.Trim();
+                throw new InvalidDataException(
+                    string.IsNullOrWhiteSpace(detail)
+                        ? "候補パッケージの再検証またはグラフ復元に失敗しました。"
+                        : detail);
             }
 
             if (legacyExportCandidateGraphResult is not null)
@@ -5978,6 +5982,8 @@ public partial class MainWindow : Window
         AbacusLegacyExportPreviewPackageResult package,
         AbacusLegacyExportCandidateGraphResult graph)
     {
+        var recovery = LegacyGraphWorkCheckpointRecovery.NormalizeMergeMembership(checkpoint);
+        checkpoint = recovery.Checkpoint;
         if (!string.Equals(
                 Path.GetFullPath(package.PackagePath),
                 Path.GetFullPath(graph.PackagePath),
@@ -6293,7 +6299,8 @@ public partial class MainWindow : Window
         }
         UpdateLegacyGraphImportConfirmationButton();
         LegacyGraphWorkStatusText.Text =
-            $"作業チェックポイントを復元しました（保存日時: {checkpoint.SavedAtUtc.ToLocalTime():yyyy/MM/dd HH:mm:ss}）。";
+            $"作業チェックポイントを復元しました（保存日時: {checkpoint.SavedAtUtc.ToLocalTime():yyyy/MM/dd HH:mm:ss}）。" +
+            (recovery.Changed ? "旧形式の顧客統合グループの重複所属を整理しました。" : "");
         LegacyGraphWorkStatusText.Foreground = ToBrush("#17643A");
     }
 
@@ -9488,6 +9495,14 @@ public partial class MainWindow : Window
                 LegacyGraphCustomerReviewStateValues.NeedsReview);
         }
 
+        // 統合確定後は、採用した論理顧客グループだけを所属先として残します。
+        // 同姓同名などの仮候補グループに同じ顧客が残ると、作業保存後の
+        // 再開時に二重所属として検証に失敗し、左一覧の構成も不定になります。
+        foreach (var customerId in mergeGroup.CustomerIds.ToArray())
+        {
+            RemoveLegacyGraphCustomerFromOtherMergeGroups(customerId, mergeGroup.GroupId);
+        }
+
         InvalidateLegacyGraphImportConfirmation();
         RebuildLegacyGraphRecommendationCandidatesForCustomers(
             mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
@@ -9992,6 +10007,11 @@ public partial class MainWindow : Window
         }
 
         var appliedMergeKey = mergeKey;
+        var candidateDraftBeforeApply = legacyGraphCustomerMergeDrafts.TryGetValue(
+            mergeKey,
+            out var savedCandidateDraft)
+            ? savedCandidateDraft
+            : null;
         string? candidateGroupKeyToCleanup = null;
         if (TryGetLegacyGraphMergeGroup(mergeKey, out var candidateGroup) &&
             candidateGroup.CustomerIds.Count > 1)
@@ -10010,9 +10030,9 @@ public partial class MainWindow : Window
                     appliedMergeKey = AcceptLegacyGraphCustomerMerge(logicalCustomer, targetCustomer);
                 }
 
-                if (legacyGraphCustomerMergeDrafts.Remove(mergeKey, out var candidateDraft))
+                if (candidateDraftBeforeApply is not null)
                 {
-                    legacyGraphCustomerMergeDrafts[appliedMergeKey] = candidateDraft with
+                    legacyGraphCustomerMergeDrafts[appliedMergeKey] = candidateDraftBeforeApply with
                     {
                         GroupKey = appliedMergeKey,
                     };
@@ -10249,6 +10269,11 @@ public partial class MainWindow : Window
             {
                 legacyGraphCustomerMergeDrafts[entry.Group.GroupId] = defaultDraft;
             }
+            var candidateDraftBeforeApply = legacyGraphCustomerMergeDrafts.TryGetValue(
+                entry.Group.GroupId,
+                out var savedCandidateDraft)
+                ? savedCandidateDraft
+                : null;
 
             var groupCustomers = entry.Candidates.ToArray();
             if (!IsLegacyGraphLogicalCustomerGroup(entry.Group.GroupId) && groupCustomers.Length > 1)
@@ -10259,9 +10284,9 @@ public partial class MainWindow : Window
                     appliedMergeKey = AcceptLegacyGraphCustomerMerge(logicalCustomer, targetCustomer);
                 }
 
-                if (legacyGraphCustomerMergeDrafts.Remove(entry.Group.GroupId, out var candidateDraft))
+                if (candidateDraftBeforeApply is not null)
                 {
-                    legacyGraphCustomerMergeDrafts[appliedMergeKey] = candidateDraft with
+                    legacyGraphCustomerMergeDrafts[appliedMergeKey] = candidateDraftBeforeApply with
                     {
                         GroupKey = appliedMergeKey,
                     };
@@ -15286,21 +15311,28 @@ public partial class MainWindow : Window
             var sourceGroupKey = GetLegacyCustomerMergeKey(sourceCustomer);
             var targetGroupKey = GetLegacyCustomerMergeKey(targetCustomer);
             var previewKey = GetLegacyGraphCustomerMergePreviewKey(sourceCustomer, targetCustomer);
+            var draftBeforeApply = new[] { previewKey, sourceGroupKey, targetGroupKey }
+                .Distinct(StringComparer.Ordinal)
+                .Select(key => legacyGraphCustomerMergeDrafts.TryGetValue(key, out var draft)
+                    ? draft
+                    : null)
+                .FirstOrDefault(draft => draft is not null);
             var groupKey = AcceptLegacyGraphCustomerMerge(sourceCustomer, targetCustomer);
-            foreach (var draftKey in new[] { previewKey, sourceGroupKey, targetGroupKey }
-                         .Distinct(StringComparer.Ordinal))
+            if (draftBeforeApply is not null)
             {
-                if (string.Equals(draftKey, groupKey, StringComparison.Ordinal) ||
-                    !legacyGraphCustomerMergeDrafts.Remove(draftKey, out var draft))
+                foreach (var draftKey in new[] { previewKey, sourceGroupKey, targetGroupKey }
+                             .Distinct(StringComparer.Ordinal))
                 {
-                    continue;
+                    if (!string.Equals(draftKey, groupKey, StringComparison.Ordinal))
+                    {
+                        legacyGraphCustomerMergeDrafts.Remove(draftKey);
+                    }
                 }
 
-                legacyGraphCustomerMergeDrafts[groupKey] = draft with
+                legacyGraphCustomerMergeDrafts[groupKey] = draftBeforeApply with
                 {
                     GroupKey = groupKey,
                 };
-                break;
             }
             legacyGraphCustomerGroupExpanded[groupKey] = true;
             if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
