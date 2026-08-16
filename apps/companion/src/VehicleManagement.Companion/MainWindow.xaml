@@ -1383,7 +1383,15 @@
                                 </Grid>
                             </Border>
                         </Expander>
-                        <Border x:Name="LegacyMatchingTopHeader" Margin="0,8,0,0" Padding="10"
+                        <Grid x:Name="LegacyGraphMatchingPageGrid">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                        <Border x:Name="LegacyMatchingTopHeader" Grid.Row="0" Margin="0,8,0,0" Padding="10"
                                 Background="#F7F9FC" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8"
                                 Visibility="Collapsed">
                             <Grid>
@@ -1442,7 +1450,7 @@
                                 </Grid>
                             </Grid>
                         </Border>
-                        <Grid x:Name="LegacyGraphWorkspaceGrid" Margin="0,14,0,0" MinHeight="650">
+                        <Grid x:Name="LegacyGraphWorkspaceGrid" Grid.Row="1" Margin="0,14,0,0" MinHeight="650">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="500" />
                                 <ColumnDefinition Width="12" />
@@ -2539,7 +2547,7 @@
                                 </Grid>
                             </Border>
                         </Grid>
-                        <Border x:Name="LegacyMatchingChangesPanel" Margin="0,10,0,0" Padding="8"
+                        <Border x:Name="LegacyMatchingChangesPanel" Grid.Row="2" Margin="0,10,0,0" Padding="8"
                                 Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6"
                                 Visibility="Collapsed">
                             <Grid>
@@ -2585,7 +2593,7 @@
                                 </ListBox>
                             </Grid>
                         </Border>
-                        <Border x:Name="LegacyGraphMatchingWorkspace" Margin="0,14,0,0" Padding="12"
+                        <Border x:Name="LegacyGraphMatchingWorkspace" Grid.Row="3" Margin="0,14,0,0" Padding="12"
                                 Background="#F7F9FC" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8"
                                 Visibility="Collapsed">
                             <Grid>
@@ -2748,7 +2756,7 @@
                                            Text="おすすめ以外の項目は、右上の未確定タブから検索してキャンバスへ手動接続できます。" />
                             </Grid>
                         </Border>
-                        <StackPanel x:Name="LegacyGraphUnresolvedTraySection">
+                        <StackPanel x:Name="LegacyGraphUnresolvedTraySection" Grid.Row="4">
                         <TextBlock Margin="0,14,0,0" FontSize="15" FontWeight="SemiBold" Foreground="#10233F"
                                    Text="未確定トレイ" />
                         <TextBlock Margin="0,5,0,8" Foreground="#52647A" TextWrapping="Wrap"
@@ -2871,6 +2879,7 @@
                             </Border>
                         </Grid>
                         </StackPanel>
+                        </Grid>
                         <Border Margin="0,14,0,0" Padding="12" Background="#FFF7ED" BorderBrush="#F59E0B"
                                 BorderThickness="1" CornerRadius="6">
                             <Expander Header="ごみ箱一覧（復元）" IsExpanded="False"

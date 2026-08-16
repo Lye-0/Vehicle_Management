@@ -268,13 +268,15 @@ public partial class MainWindow : Window
 
     private void UpdateLegacyGraphWorkspaceHeight()
     {
-        if (LegacyGraphWorkspaceGrid is null)
+        if (LegacyGraphMatchingPageGrid is null ||
+            LegacyGraphWorkspaceGrid is null)
         {
             return;
         }
 
         if (!string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
         {
+            LegacyGraphMatchingPageGrid.ClearValue(FrameworkElement.HeightProperty);
             LegacyGraphWorkspaceGrid.Height = LegacyGraphDefaultWorkspaceHeight;
             return;
         }
@@ -283,37 +285,43 @@ public partial class MainWindow : Window
             LegacyGraphPageContent is null ||
             LegacyGraphPageScrollViewer.ViewportHeight <= 0 ||
             LegacyGraphPageContent.ActualHeight <= 0 ||
-            LegacyGraphWorkspaceGrid.ActualHeight <= 0)
+            LegacyGraphMatchingPageGrid.ActualHeight <= 0)
         {
             return;
         }
 
         try
         {
-            // StackPanel内の固定Heightが、ヘッダー短縮分を吸収できていなかったため、
-            // ワークスペースの前後にある既存コンテンツを除いた残りをここへ配分します。
-            var workspaceTop = LegacyGraphWorkspaceGrid
+            // グラフモードから切り替えた場合に残っている固定Heightを解除し、
+            // マッチング用Gridの自然な高さを基準に残り高さを計算します。
+            LegacyGraphWorkspaceGrid.ClearValue(FrameworkElement.HeightProperty);
+            LegacyGraphMatchingPageGrid.ClearValue(FrameworkElement.HeightProperty);
+            LegacyGraphPageScrollViewer.UpdateLayout();
+
+            var matchingPageTop = LegacyGraphMatchingPageGrid
                 .TransformToAncestor(LegacyGraphPageContent)
                 .Transform(new Point(0, 0))
                 .Y;
-            var contentAfterWorkspace = Math.Max(
+            var contentAfterMatchingPage = Math.Max(
                 0,
                 LegacyGraphPageContent.ActualHeight -
-                workspaceTop -
-                LegacyGraphWorkspaceGrid.ActualHeight);
-            var availableWorkspaceHeight = LegacyGraphPageScrollViewer.ViewportHeight -
-                                            workspaceTop -
-                                            contentAfterWorkspace;
-            if (double.IsNaN(availableWorkspaceHeight) || double.IsInfinity(availableWorkspaceHeight))
+                matchingPageTop -
+                LegacyGraphMatchingPageGrid.ActualHeight);
+            var availableMatchingPageHeight = LegacyGraphPageScrollViewer.ViewportHeight -
+                                               matchingPageTop -
+                                               contentAfterMatchingPage;
+            var naturalMatchingPageHeight = LegacyGraphMatchingPageGrid.DesiredSize.Height;
+            if (double.IsNaN(availableMatchingPageHeight) ||
+                double.IsInfinity(availableMatchingPageHeight) ||
+                double.IsNaN(naturalMatchingPageHeight) ||
+                double.IsInfinity(naturalMatchingPageHeight))
             {
                 return;
             }
 
-            var targetHeight = Math.Max(LegacyGraphDefaultWorkspaceHeight, availableWorkspaceHeight);
-            if (double.IsNaN(LegacyGraphWorkspaceGrid.Height) ||
-                Math.Abs(LegacyGraphWorkspaceGrid.Height - targetHeight) > 1)
+            if (availableMatchingPageHeight > naturalMatchingPageHeight + 1)
             {
-                LegacyGraphWorkspaceGrid.Height = targetHeight;
+                LegacyGraphMatchingPageGrid.Height = availableMatchingPageHeight;
             }
         }
         catch (InvalidOperationException)
