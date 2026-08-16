@@ -1924,9 +1924,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#15803D" FontSize="10" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#15803D" FontSize="10" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                             <TextBlock Grid.Column="1" Margin="5,0" Foreground="#15803D" FontSize="10" Text="←" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#15803D" FontSize="10" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#15803D" FontSize="10" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -1965,9 +1965,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#92400E" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#92400E" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                             <TextBlock Grid.Column="1" Margin="5,0" Foreground="#B45309" FontSize="10" Text="←" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#92400E" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#92400E" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -2006,9 +2006,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#6B7280" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#6B7280" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                             <TextBlock Grid.Column="1" Margin="5,0" Foreground="#6B7280" FontSize="10" Text="←" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#6B7280" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#6B7280" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -2101,9 +2101,9 @@
                                                                                             <ColumnDefinition Width="Auto" />
                                                                                             <ColumnDefinition Width="*" />
                                                                                         </Grid.ColumnDefinitions>
-                                                                                        <TextBlock Foreground="#10233F" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Foreground="#10233F" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                         <TextBlock Grid.Column="1" Margin="7,0" Foreground="#64748B" Text="←" />
-                                                                                        <TextBlock Grid.Column="2" Foreground="#1D4ED8" Text="{Binding SourceValue}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Grid.Column="2" Foreground="#1D4ED8" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
                                                                                     </Grid>
                                                                                 </Grid>
                                                                             </Border>
