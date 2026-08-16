@@ -2501,8 +2501,6 @@
                                                                 Click="LegacyMatchingCustomerApproveButton_Click" />
                                                     </StackPanel>
                                                 </Border>
-                                                <TextBlock Margin="0,6,0,0" Foreground="#52647A" FontSize="10" TextWrapping="Wrap"
-                                                           Text="承認は既存のリンク状態へ反映します。却下・保留は元データとリンクを変更しません。" />
                                             </StackPanel>
                                         </Border>
                                     </Grid>
