@@ -158,6 +158,7 @@ public partial class MainWindow : Window
     private int legacyGraphMatchingRecommendationIndex = -1;
     private bool legacyGraphRefreshingMatchingCustomerQueue;
     private bool legacyGraphWorkspaceHeightUpdatePending;
+    private bool legacyGraphWorkspaceHeightUpdateInProgress;
     private const int LegacyMatchingUnresolvedPageSize = 50;
     private int legacyMatchingUnresolvedPageIndex;
     private bool legacyMatchingDetailsVisible;
@@ -249,10 +250,11 @@ public partial class MainWindow : Window
 
     private void LegacyGraphPageScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        // マッチング領域が外側ページの下側にある場合、初回レイアウト時には
-        // 有効な高さを計算できないことがあります。ページのスクロール後にも再計算します。
-        if (Math.Abs(e.VerticalChange) > double.Epsilon ||
-            Math.Abs(e.ViewportHeightChange) > double.Epsilon)
+        // 高さ計算はビューポートの大きさに依存し、ページ内のスクロール位置には依存しません。
+        // VerticalChangeにも反応すると、長い候補詳細をスクロールするたびに
+        // 固定高さの解除・再設定が発生し、外側ScrollViewerの再レイアウトを連鎖させます。
+        if (Math.Abs(e.ViewportHeightChange) > double.Epsilon ||
+            Math.Abs(e.ViewportWidthChange) > double.Epsilon)
         {
             ScheduleLegacyGraphWorkspaceHeightUpdate();
         }
@@ -273,7 +275,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (legacyGraphWorkspaceHeightUpdatePending)
+        if (legacyGraphWorkspaceHeightUpdatePending ||
+            legacyGraphWorkspaceHeightUpdateInProgress)
         {
             return;
         }
@@ -282,7 +285,20 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             legacyGraphWorkspaceHeightUpdatePending = false;
-            UpdateLegacyGraphWorkspaceHeight();
+            if (legacyGraphWorkspaceHeightUpdateInProgress)
+            {
+                return;
+            }
+
+            legacyGraphWorkspaceHeightUpdateInProgress = true;
+            try
+            {
+                UpdateLegacyGraphWorkspaceHeight();
+            }
+            finally
+            {
+                legacyGraphWorkspaceHeightUpdateInProgress = false;
+            }
         }));
     }
 
@@ -312,11 +328,15 @@ public partial class MainWindow : Window
 
         try
         {
-            // グラフモードから切り替えた場合に残っている固定Heightを解除し、
-            // マッチング用Gridの自然な高さを基準に残り高さを計算します。
-            LegacyGraphWorkspaceGrid.ClearValue(FrameworkElement.HeightProperty);
-            LegacyGraphMatchingPageGrid.ClearValue(FrameworkElement.HeightProperty);
-            LegacyGraphPageScrollViewer.UpdateLayout();
+            // グラフモードから切り替えた直後だけ残っている固定Heightを解除します。
+            // 安定後の再計算で毎回解除すると、自然高さへの再測定と外側ScrollViewerの
+            // スクロール変更が連鎖して、フォルダー読込後の切替時にUIを占有します。
+            if (LegacyGraphWorkspaceGrid.ReadLocalValue(FrameworkElement.HeightProperty) !=
+                DependencyProperty.UnsetValue)
+            {
+                LegacyGraphWorkspaceGrid.ClearValue(FrameworkElement.HeightProperty);
+                LegacyGraphPageScrollViewer.UpdateLayout();
+            }
 
             var matchingPageTopInContent = LegacyGraphMatchingPageGrid
                 .TransformToAncestor(LegacyGraphPageContent)
@@ -1888,10 +1908,18 @@ public partial class MainWindow : Window
     private void SetLegacyGraphUiMode(string mode, bool scheduleCheckpoint = true)
     {
         var isMatching = string.Equals(mode, "matching", StringComparison.OrdinalIgnoreCase);
+        var wasMatching = string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase);
         legacyGraphUiMode = isMatching ? "matching" : "graph";
         if (LegacyGraphWorkspaceGrid is null || LegacyGraphMatchingWorkspace is null)
         {
             return;
+        }
+
+        if (isMatching && !wasMatching)
+        {
+            // 前回のマッチング表示で設定したページ全体の固定高さを、
+            // 新しい候補データを測定する前に一度だけ解除します。
+            LegacyGraphMatchingPageGrid?.ClearValue(FrameworkElement.HeightProperty);
         }
 
         // マッチングUIも同じキャンバスを使い、左の統合候補欄と右のおすすめ欄だけを切り替えます。
