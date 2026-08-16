@@ -188,6 +188,18 @@ public static class LegacyMatchingWorkflow
         new(0, 0, requiresCustomerPreview);
 
     /// <summary>
+    /// インポート全体の最終確定が可能かを、画面表示とクリック時検証で共通利用します。
+    /// 未確定トレイやごみ箱の件数は、確定時に除外できるためこの判定には含めません。
+    /// </summary>
+    public static bool CanFinalizeImport(
+        int pendingMergeGroupCount,
+        int pendingDocumentCount,
+        int unapprovedCustomerCount) =>
+        pendingMergeGroupCount == 0 &&
+        pendingDocumentCount == 0 &&
+        unapprovedCustomerCount == 0;
+
+    /// <summary>
     /// マッチング候補キューの未処理・保留件数を集計します。
     /// 顧客最終確定ゲートとは別に、候補巡回の表示・進捗で利用します。
     /// </summary>

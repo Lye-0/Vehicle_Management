@@ -23,6 +23,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客確定ゲートは未反映統合だけでは確定を止めない", CustomerReviewGateIgnoresUnappliedMerge),
     ("顧客確定ゲートはマッチング候補の未処理と分離される", CustomerApprovalGateIgnoresMatchingQueue),
     ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
+    ("インポート確定ゲートは顧客・統合候補・書類をすべて確認する", ImportFinalizationRequiresAllGates),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -401,6 +402,18 @@ static void CustomerApprovalGateIgnoresMatchingQueue()
         requiresCustomerPreview: true);
     Assert(!mergeBlocked.CanApprove && mergeBlocked.RequiresCustomerPreview,
         "統合顧客の採用内容未設定を顧客最終確定の条件として扱えていません。");
+}
+
+static void ImportFinalizationRequiresAllGates()
+{
+    Assert(LegacyMatchingWorkflow.CanFinalizeImport(0, 0, 0),
+        "未完了項目がない状態をインポート確定可能と判定できていません。");
+    Assert(!LegacyMatchingWorkflow.CanFinalizeImport(1, 0, 0),
+        "未承認の統合候補を残したままインポート確定可能になっています。");
+    Assert(!LegacyMatchingWorkflow.CanFinalizeImport(0, 1, 0),
+        "ノード未接続書類を残したままインポート確定可能になっています。");
+    Assert(!LegacyMatchingWorkflow.CanFinalizeImport(0, 0, 1),
+        "未確認顧客を残したままインポート確定可能になっています。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

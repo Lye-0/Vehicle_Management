@@ -1284,8 +1284,8 @@
                                 </Border>
                                 <Button x:Name="LegacyGraphApproveAllMergeButton"
                                         Style="{StaticResource LegacyGraphApproveButton}"
-                                        Content="統合候補を一括承認" IsEnabled="False"
-                                        ToolTip="顧客情報プレビュー済みの候補をまとめてキャンバス承認します。未保存の候補は確認後に既定値で自動作成できます。"
+                                        Content="統合候補・顧客を一括確定" IsEnabled="False"
+                                        ToolTip="統合候補を論理顧客として確定し、通常顧客を含む顧客確認対象をまとめて顧客確認済みにします。未保存の統合候補は確認後に既定値で顧客情報を作成できます。"
                                         Click="LegacyGraphApproveAllMergeButton_Click" />
                             </StackPanel>
                         </Grid>
