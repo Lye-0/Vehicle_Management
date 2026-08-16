@@ -1558,7 +1558,7 @@
                                             </ListBox.ItemContainerStyle>
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border Margin="{Binding BlockMargin}" Padding="6" HorizontalAlignment="Stretch"
+                                                    <Border Margin="{Binding BlockMargin}" Padding="{Binding MatchingContentPadding}" HorizontalAlignment="Stretch"
                                                             Background="{Binding BackgroundBrush}"
                                                             BorderBrush="{Binding BorderBrush}" BorderThickness="1" CornerRadius="5">
                                                         <Grid>
@@ -1571,7 +1571,17 @@
                                                                     Visibility="{Binding ExpandButtonVisibility}"
                                                                     Tag="{Binding GroupKey}" IsEnabled="{Binding IsGroupHeader}"
                                                                     Click="LegacyGraphCustomerGroupToggleButton_Click" />
-                                                            <StackPanel Grid.Column="1">
+                                                            <StackPanel Grid.Column="1" Visibility="{Binding MatchingGroupHeaderVisibility}">
+                                                                <DockPanel LastChildFill="True">
+                                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}"
+                                                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
+                                                                               Foreground="{Binding StatusBrush}" FontSize="11"
+                                                                               VerticalAlignment="Center" Text="{Binding Summary}"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </DockPanel>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1" Visibility="{Binding MatchingCustomerContentVisibility}">
                                                                 <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}"
                                                                            TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
                                                                 <TextBlock Margin="0,2,0,0" Foreground="#52647A" FontSize="12"
