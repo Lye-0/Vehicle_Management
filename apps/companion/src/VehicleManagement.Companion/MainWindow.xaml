@@ -66,7 +66,33 @@
             <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="5,5" />
             <Setter Property="MinWidth" Value="0" />
-            </Style>
+        </Style>
+        <Style x:Key="LegacyMatchingCustomerMergePreviewButton" TargetType="Button"
+               BasedOn="{StaticResource LegacyMatchingSecondaryButton}">
+            <Setter Property="Background" Value="#EFF6FF" />
+            <Setter Property="BorderBrush" Value="#2563EB" />
+            <Setter Property="Foreground" Value="#1D4ED8" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="7,4" />
+            <Setter Property="MinHeight" Value="30" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#DBEAFE" />
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="Foreground" Value="#1E3A8A" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="#1E3A8A" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#F1F5F9" />
+                    <Setter Property="BorderBrush" Value="#CBD5E1" />
+                    <Setter Property="Foreground" Value="#94A3B8" />
+                    <Setter Property="FontWeight" Value="Normal" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LegacyMatchingNavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Background" Value="#EFF6FF" />
             <Setter Property="BorderBrush" Value="#2563EB" />
@@ -2517,7 +2543,7 @@
                                                            Foreground="#52647A" FontSize="10" TextWrapping="Wrap" />
                                                 <Button x:Name="LegacyMatchingOpenCustomerMergePreviewButton" Margin="0,4,0,0"
                                                         HorizontalAlignment="Left" Padding="6,3"
-                                                        Style="{StaticResource LegacyMatchingSecondaryButton}"
+                                                        Style="{StaticResource LegacyMatchingCustomerMergePreviewButton}"
                                                         Content="顧客情報を確認・統一" Visibility="Collapsed"
                                                         Click="LegacyMatchingOpenCustomerMergePreviewButton_Click" />
                                                 <TextBlock x:Name="LegacyMatchingCustomerMergePreviewStatusText" Margin="0,2,0,0"

@@ -2195,9 +2195,10 @@ public partial class MainWindow : Window
         }
 
         var customers = GetLegacyGraphMatchingCustomers();
-        // マッチングUIの巡回単位は、統合後の論理顧客の代表ではなく、
-        // ユーザーが選択した基準顧客です。論理顧客の表示用モデルは中央キャンバスでのみ利用します。
+        // マッチングUIの巡回単位は、統合後もユーザーが選択した基準顧客です。
+        // 表示情報だけは、同じ論理顧客グループの採用済み表示モデルを参照します。
         var sourceCustomer = customer;
+        var displayCustomer = GetLegacyGraphDisplayCustomer(sourceCustomer);
         var confirmedVehicles = GetLegacyGraphVehiclesForDisplay(customer)
             .Select(vehicle => new LegacyMatchingVehicleCard(
                 $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
@@ -2220,11 +2221,11 @@ public partial class MainWindow : Window
             .ToArray();
 
         SetLegacyMatchingHeader(
-            GetLegacyGraphMatchingBaseDisplayName(sourceCustomer),
+            GetLegacyGraphCustomerDisplayName(displayCustomer),
             $"顧客 {legacyGraphMatchingCustomerIndex + 1:N0} / {customers.Count:N0}",
-            $"ふりがな: {Fallback(sourceCustomer.NameKana)} / " +
-            $"電話: {Fallback(sourceCustomer.PhoneNumber)} / " +
-            $"住所: {Fallback(sourceCustomer.Address)}",
+            $"ふりがな: {Fallback(displayCustomer.NameKana)} / " +
+            $"電話: {Fallback(displayCustomer.PhoneNumber)} / " +
+            $"住所: {Fallback(displayCustomer.Address)}",
             hasCustomer: true,
             canGoPrevious: legacyGraphMatchingCustomerIndex > 0,
             canGoNext: legacyGraphMatchingCustomerIndex >= 0 &&
@@ -2245,7 +2246,6 @@ public partial class MainWindow : Window
         LegacyMatchingRecommendationStatusText.Text = recommendationItems.Length == 0
             ? "この顧客に表示できるおすすめ候補はありません。"
             : "候補を選択し、一致項目・差異・競合を確認してください。";
-        var displayCustomer = GetLegacyGraphDisplayCustomer(customer);
         legacyGraphSelectedItem = displayCustomer;
         RenderLegacyGraphCustomer(displayCustomer);
         UpdateLegacyGraphInspector(displayCustomer);
@@ -2456,7 +2456,7 @@ public partial class MainWindow : Window
         RefreshLegacyMatchingCustomerMergePreviewAction(sourceCustomer);
 
         LegacyMatchingSideCustomerText.Text =
-            $"基準顧客: {GetLegacyGraphMatchingBaseDisplayName(sourceCustomer)} / 候補の接続先と承認後の変更を確認";
+            $"基準顧客: {GetLegacyGraphMatchingDisplayName(sourceCustomer)} / 候補の接続先と承認後の変更を確認";
         LegacyMatchingSideProgressText.Text =
             $"未処理 {categorySummary.Pending:N0} / 保留 {categorySummary.Held:N0}";
         LegacyMatchingCustomerCategoryButton.Content = BuildLegacyMatchingCategoryButtonText(
@@ -4238,7 +4238,7 @@ public partial class MainWindow : Window
             if (otherCustomerId is not null && FindLegacyGraphCustomerById(otherCustomerId) is { } otherCustomer)
             {
                 subjectText = GetLegacyGraphCustomerDisplayName(otherCustomer);
-                targetText = $"{GetLegacyGraphMatchingBaseDisplayName(focusSource)}（現在の顧客）";
+                targetText = $"{GetLegacyGraphMatchingDisplayName(focusSource)}（現在の顧客）";
             }
         }
         var reverseCustomerMergeDisplay = focusCustomer is not null &&
@@ -4333,7 +4333,7 @@ public partial class MainWindow : Window
         {
             if (string.Equals(targetCustomer.CustomerId, focusCustomer.CustomerId, StringComparison.Ordinal))
             {
-                targetText = GetLegacyGraphMatchingBaseDisplayName(focusCustomer);
+                targetText = GetLegacyGraphMatchingDisplayName(focusCustomer);
             }
 
             return focusCustomerIds.Contains(targetCustomer.CustomerId)
@@ -4923,7 +4923,7 @@ public partial class MainWindow : Window
             GetLegacyGraphMatchingCustomer() is { } matchingCustomer)
         {
             LegacyGraphCurrentCustomerSelectionText.Text =
-                $"確認中の顧客: {GetLegacyGraphMatchingBaseDisplayName(matchingCustomer)}";
+                $"確認中の顧客: {GetLegacyGraphMatchingDisplayName(matchingCustomer)}";
             return;
         }
 
@@ -7784,9 +7784,62 @@ public partial class MainWindow : Window
             focusSnapshot.Status,
             LegacyGraphCustomerReviewStateValues.NeedsReview,
             StringComparison.Ordinal);
-        var entries = new List<LegacyGraphCustomerListEntry>
+        var entries = new List<LegacyGraphCustomerListEntry>();
+        var logicalMembers = GetLegacyGraphLogicalCustomerMembers(focusSource).ToArray();
+        if (logicalMembers.Length > 1)
         {
-            CreateLegacyMatchingCustomerListEntry(
+            var logicalKey = GetLegacyGraphLogicalCustomerKey(focusSource);
+            var logicalSnapshot = GetLegacyGraphCustomerReviewSnapshot(focusSource);
+            var logicalApproved = string.Equals(
+                logicalSnapshot.Status,
+                LegacyGraphCustomerReviewStateValues.Approved,
+                StringComparison.Ordinal);
+            var logicalNeedsReview = string.Equals(
+                logicalSnapshot.Status,
+                LegacyGraphCustomerReviewStateValues.NeedsReview,
+                StringComparison.Ordinal);
+            var logicalState = logicalApproved
+                ? "確定済み"
+                : logicalNeedsReview
+                    ? "再確認待ち"
+                    : logicalSnapshot.PendingCount == 0 && logicalSnapshot.HeldCount == 0
+                        ? "確認待ち"
+                        : "未確認";
+            var expanded = legacyGraphCustomerGroupExpanded.GetValueOrDefault(logicalKey, true);
+            var logicalDisplayCustomer = GetLegacyGraphDisplayCustomer(focusSource);
+            entries.Add(CreateLegacyMatchingGroupHeader(
+                logicalKey,
+                focusSource,
+                GetLegacyGraphCustomerDisplayName(logicalDisplayCustomer),
+                $"{logicalMembers.Length:N0}件 / {logicalState}",
+                expanded,
+                ToBrush(logicalApproved ? "#EAF2FF" : "#FFF7ED"),
+                ToBrush(logicalApproved ? "#2563EB" : "#D97706"),
+                ToBrush(logicalApproved ? "#1D4ED8" : "#9A3412")));
+            if (expanded)
+            {
+                foreach (var member in logicalMembers)
+                {
+                    entries.Add(CreateLegacyMatchingCustomerListEntry(
+                        member,
+                        "統合元",
+                        "統合元",
+                        ToBrush("#F4F7FB"),
+                        ToBrush("#CBD5E1"),
+                        ToBrush("#52647A"),
+                        isFocus: string.Equals(
+                            member.CustomerId,
+                            focusSource.CustomerId,
+                            StringComparison.Ordinal),
+                        isGroupChild: true,
+                        groupKeyOverride: logicalKey,
+                        summaryOverride: BuildLegacyMatchingCustomerIdentitySummary(member)));
+                }
+            }
+        }
+        else
+        {
+            entries.Add(CreateLegacyMatchingCustomerListEntry(
                 focusCustomer,
                 focusApproved ? "承認済み" : focusNeedsReview ? "再確認待ち" : "現在確認中",
                 "基準顧客",
@@ -7795,44 +7848,7 @@ public partial class MainWindow : Window
                 ToBrush(focusApproved ? "#1D4ED8" : focusNeedsReview ? "#9A3412" : "#52647A"),
                 isFocus: true,
                 summaryOverride: $"車両 {GetLegacyGraphVehiclesForDisplay(focusSource).Count:N0}台 / " +
-                    $"書類 {GetLegacyGraphDisplayedDocumentCount(focusSource):N0}件"),
-        };
-
-        var logicalMembers = GetLegacyGraphLogicalCustomerMembers(focusSource)
-            .Where(customer => !string.Equals(customer.CustomerId, focusSource.CustomerId, StringComparison.Ordinal))
-            .ToArray();
-        if (logicalMembers.Length > 0)
-        {
-            var logicalKey = GetLegacyGraphLogicalCustomerKey(focusSource);
-            var logicalApproved = IsLegacyGraphCustomerApproved(focusSource);
-            var expanded = legacyGraphCustomerGroupExpanded.GetValueOrDefault(logicalKey, true);
-            entries.Add(CreateLegacyMatchingGroupHeader(
-                logicalKey,
-                focusSource,
-                $"統合済み {logicalMembers.Length:N0}件",
-                $"車両 {GetLegacyGraphVehiclesForDisplay(focusSource).Count:N0}台 / " +
-                    $"書類 {GetLegacyGraphDisplayedDocumentCount(focusSource):N0}件",
-                expanded,
-                ToBrush(logicalApproved ? "#EAF2FF" : "#FFF7ED"),
-                ToBrush(logicalApproved ? "#2563EB" : "#D97706"),
-                ToBrush(logicalApproved ? "#1D4ED8" : "#9A3412")));
-            if (expanded)
-            {
-                foreach (var candidate in logicalMembers)
-                {
-                    entries.Add(CreateLegacyMatchingCustomerListEntry(
-                        candidate,
-                        "統合済み",
-                        "統合元",
-                        ToBrush("#F4F7FB"),
-                        ToBrush("#CBD5E1"),
-                        ToBrush("#52647A"),
-                        isFocus: false,
-                        isGroupChild: true,
-                        groupKeyOverride: logicalKey,
-                        summaryOverride: BuildLegacyMatchingCustomerIdentitySummary(candidate)));
-                }
-            }
+                    $"書類 {GetLegacyGraphDisplayedDocumentCount(focusSource):N0}件"));
         }
 
         var allRecommendations = GetLegacyGraphMatchingRecommendations(focusSource);
@@ -7989,16 +8005,14 @@ public partial class MainWindow : Window
         string? groupKeyOverride = null,
         string? summaryOverride = null) =>
         new(
-            isFocus
-                ? $"matching-focus:{customer.CustomerId}"
-                : isGroupChild
-                    ? $"matching-child:{recommendation?.CandidateId ?? customer.CustomerId}"
+            isGroupChild
+                ? $"matching-child:{recommendation?.CandidateId ?? customer.CustomerId}"
+                : isFocus
+                    ? $"matching-focus:{customer.CustomerId}"
                     : $"matching-customer:{customer.CustomerId}",
             false,
             customer,
-            isFocus
-                ? GetLegacyGraphMatchingBaseDisplayName(customer)
-                : GetLegacyGraphCustomerDisplayName(customer),
+            GetLegacyGraphCustomerDisplayName(customer),
             summaryOverride ??
                 $"車両 {GetLegacyGraphVehiclesForDisplay(customer).Count:N0}台 / 書類 {GetLegacyGraphDisplayedDocumentCount(customer):N0}",
             addressSummary,
@@ -10890,11 +10904,13 @@ public partial class MainWindow : Window
             : customer.DisplayName;
     }
 
-    private string GetLegacyGraphMatchingBaseDisplayName(
-        AbacusLegacyExportCandidateGraphCustomer customer) =>
-        legacyGraphCustomerNameOverrides.TryGetValue($"customer:{customer.CustomerId}", out var customerName)
-            ? customerName
-            : customer.DisplayName;
+    private string GetLegacyGraphMatchingDisplayName(
+        AbacusLegacyExportCandidateGraphCustomer customer)
+    {
+        var sourceCustomer = GetLegacyGraphSourceCustomer(customer);
+        var displayCustomer = GetLegacyGraphDisplayCustomer(sourceCustomer);
+        return GetLegacyGraphCustomerDisplayName(displayCustomer);
+    }
 
     private AbacusLegacyExportCandidateGraphCustomer? FindLegacyGraphCustomerById(string customerId) =>
         legacyExportCandidateGraphResult?.Customers.FirstOrDefault(customer =>
