@@ -15,6 +15,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客単位カテゴリは顧客統合を先頭にする", MatchingCategoriesAreOrdered),
     ("同一論理書類の候補は1操作に集約される", SameLogicalDocumentRecommendationsAreGrouped),
     ("未処理の自動統合候補先は顧客巡回から除外され却下後に戻る", PendingAutomaticCustomerTargetsAreHidden),
+    ("別顧客を接続先とする書類候補は現在顧客の範囲外になる", CrossCustomerDocumentTargetIsOutsideCurrentScope),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -259,6 +260,18 @@ static void PendingAutomaticCustomerTargetsAreHidden()
     var hiddenAfterReject = LegacyMatchingWorkflow.GetPendingAutomaticCustomerIdsToHide(afterReject);
     Assert(hiddenAfterReject.SetEquals(["customer-c"]),
         "自動統合候補を却下した後、候補先顧客が巡回対象へ戻る状態を判定できていません。");
+}
+
+static void CrossCustomerDocumentTargetIsOutsideCurrentScope()
+{
+    var currentCustomerIds = new HashSet<string>(["customer-a"], StringComparer.Ordinal);
+    var crossCustomerCandidate = RecommendationCandidate("candidate-cross", "customer-b");
+    var currentCustomerCandidate = RecommendationCandidate("candidate-current", "customer-a");
+
+    Assert(!LegacyMatchingWorkflow.IsRelatedToCustomer(crossCustomerCandidate, currentCustomerIds),
+        "別顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲に含まれています。");
+    Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(currentCustomerCandidate, currentCustomerIds),
+        "現在顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲から除外されています。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

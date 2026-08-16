@@ -4179,18 +4179,22 @@ public partial class MainWindow : Window
         AbacusRecommendationCandidate candidate,
         IReadOnlySet<string> sourceCustomerIds)
     {
-        if (candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
-            candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
-        {
-            return sourceCustomerIds.Contains(candidate.SubjectId) ||
-                   sourceCustomerIds.Contains(candidate.TargetId);
-        }
-
-        if (sourceCustomerIds.Contains(candidate.TargetCustomerId))
+        if (LegacyMatchingWorkflow.IsRelatedToCustomer(candidate, sourceCustomerIds))
         {
             return true;
         }
 
+        // マッチングUIでは、書類の元所属顧客ではなく、候補が実際に示す
+        // TargetCustomerId を現在の論理顧客と照合します。元所属顧客を根拠に
+        // 別顧客への接続候補を表示すると、現在顧客の確認中に別顧客が接続先へ
+        // 混入します。別顧客への任意接続は検索・手動紐付けで行います。
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // グラフUIでは、従来どおり元所属顧客の未確定書類をキャンバス上の
+        // 候補判定対象として扱います。今回の修正はマッチングUIの一覧範囲だけです。
         if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Document ||
             legacyExportCandidateGraphResult is null)
         {
