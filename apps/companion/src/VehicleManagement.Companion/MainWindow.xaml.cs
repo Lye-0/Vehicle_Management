@@ -2570,8 +2570,8 @@ public partial class MainWindow : Window
             ? requiresManualReview
                 ? "競合があるため自動承認はできません。内容を確認してから手動承認できます。"
                 : currentCandidate.IsManual
-                    ? "検索から追加した顧客候補です。承認すると、現在の論理顧客へ統合します。"
-                    : "承認すると、この候補関係を既存のリンク状態へ反映します。"
+                    ? "検索から追加した顧客候補です。"
+                    : ""
             : "対象データまたは接続先を特定できないため、この候補は承認できません。";
         LegacyMatchingSideApproveButton.Content = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
             ? "統合する"
@@ -4192,7 +4192,7 @@ public partial class MainWindow : Window
         LegacyMatchingRecommendationStatusText.Text = canApprove
             ? requiresManualReview
                 ? $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。競合がありますが、内容を確認して手動承認できます。"
-                : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。承認すると既存のグラフ・最終パッケージのリンク状態へ反映します。"
+                : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。"
             : $"現在の判定: {GetLegacyMatchingDecisionText(decision)}。対象データまたは接続先を特定できないため承認できません。";
     }
 
