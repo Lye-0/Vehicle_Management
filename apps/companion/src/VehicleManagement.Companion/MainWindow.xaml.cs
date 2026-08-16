@@ -9374,6 +9374,12 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
         AbacusLegacyExportCandidateGraphCustomer targetCustomer)
     {
+        // 統合確定はデータ状態の変更であり、アコーディオンの開閉状態は変更しません。
+        // 仮グループから論理顧客グループへIDが変わる場合だけ、直前の開閉状態を引き継ぎます。
+        var sourceMergeKey = GetLegacyCustomerMergeKey(sourceCustomer);
+        var targetMergeKey = GetLegacyCustomerMergeKey(targetCustomer);
+        var wasExpanded = legacyGraphCustomerGroupExpanded.GetValueOrDefault(sourceMergeKey) ||
+                          legacyGraphCustomerGroupExpanded.GetValueOrDefault(targetMergeKey);
         var sourceKey = GetLegacyGraphLogicalCustomerKey(sourceCustomer);
         var targetKey = GetLegacyGraphLogicalCustomerKey(targetCustomer);
         var sourceGroup = legacyGraphCustomerMergeGroups.TryGetValue(sourceKey, out var existingSourceGroup) &&
@@ -9453,7 +9459,14 @@ public partial class MainWindow : Window
             legacyGraphLogicalCustomerMergeGroupByCustomerId[customerId] = mergeGroup.GroupId;
         }
 
-        legacyGraphCustomerGroupExpanded[mergeGroup.GroupId] = true;
+        if (wasExpanded)
+        {
+            legacyGraphCustomerGroupExpanded[mergeGroup.GroupId] = true;
+        }
+        else
+        {
+            legacyGraphCustomerGroupExpanded.Remove(mergeGroup.GroupId);
+        }
         legacyGraphCustomerApprovalStates.Remove(sourceKey);
         legacyGraphCustomerApprovalStates.Remove(targetKey);
         legacyGraphCustomerApprovalStates.Remove(mergeGroup.GroupId);
