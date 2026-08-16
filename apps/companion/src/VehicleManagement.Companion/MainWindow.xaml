@@ -1458,7 +1458,7 @@
                                 <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="430" />
+                                <ColumnDefinition x:Name="LegacyGraphInspectorColumn" Width="430" />
                             </Grid.ColumnDefinitions>
                             <Border Grid.Column="0" Padding="10" Background="#F4F7FB" BorderBrush="#D8E1EC"
                                     BorderThickness="1" CornerRadius="6">

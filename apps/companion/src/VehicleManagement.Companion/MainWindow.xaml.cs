@@ -209,6 +209,9 @@ public partial class MainWindow : Window
 
     private const double LegacyGraphMinimumCanvasHeight = 620;
     private const double LegacyGraphDefaultWorkspaceHeight = 650;
+    private const double LegacyGraphInspectorColumnWidth = 430;
+    private const double LegacyMatchingInspectorColumnWidth = 520;
+    private const double LegacyMatchingMinimumPageHeight = 900;
 
     public MainWindow()
     {
@@ -338,21 +341,12 @@ public partial class MainWindow : Window
                 LegacyGraphPageScrollViewer.UpdateLayout();
             }
 
-            var matchingPageTopInContent = LegacyGraphMatchingPageGrid
-                .TransformToAncestor(LegacyGraphPageContent)
-                .Transform(new Point(0, 0))
-                .Y;
-            var contentAfterMatchingPage = Math.Max(
-                0,
-                LegacyGraphPageContent.ActualHeight -
-                matchingPageTopInContent -
-                LegacyGraphMatchingPageGrid.ActualHeight);
-            // マッチング領域は外側ページのスクロール位置に関係なく、
-            // 「ビューポートの高さ - マッチング領域より後ろの固定コンテンツ」の
-            // 有限高さを持たせます。ページ内でマッチング領域がまだ見えていない場合に
-            // ページ内の位置を引くと、負の値になって高さ設定が中止されます。
-            var availableMatchingPageHeight = LegacyGraphPageScrollViewer.ViewportHeight -
-                                               contentAfterMatchingPage;
+            // マッチング領域は、ページ下部の「今回の変更」やごみ箱などの高さを
+            // 差し引かず、候補判断に必要な最低高さを確保します。下部の内容は外側の
+            // ScrollViewerでスクロールできるため、ここを縮める理由はありません。
+            var availableMatchingPageHeight = Math.Max(
+                LegacyGraphPageScrollViewer.ViewportHeight,
+                LegacyMatchingMinimumPageHeight);
             if (double.IsNaN(availableMatchingPageHeight) ||
                 double.IsInfinity(availableMatchingPageHeight) ||
                 availableMatchingPageHeight <= 0)
@@ -1924,6 +1918,10 @@ public partial class MainWindow : Window
 
         // マッチングUIも同じキャンバスを使い、左の統合候補欄と右のおすすめ欄だけを切り替えます。
         LegacyGraphWorkspaceGrid.Visibility = Visibility.Visible;
+        LegacyGraphInspectorColumn.Width = new GridLength(
+            isMatching
+                ? LegacyMatchingInspectorColumnWidth
+                : LegacyGraphInspectorColumnWidth);
         LegacyGraphCustomersList.Visibility = isMatching ? Visibility.Collapsed : Visibility.Visible;
         LegacyMatchingCustomerQueueList.Visibility = isMatching ? Visibility.Visible : Visibility.Collapsed;
         LegacyMatchingTopHeader.Visibility = isMatching ? Visibility.Visible : Visibility.Collapsed;
