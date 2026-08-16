@@ -155,6 +155,7 @@ public partial class MainWindow : Window
     private string legacyGraphMatchingCategory = LegacyMatchingCategoryKinds.Customer;
     private int legacyGraphMatchingRecommendationIndex = -1;
     private bool legacyGraphRefreshingMatchingCustomerQueue;
+    private bool legacyGraphWorkspaceHeightUpdatePending;
     private const int LegacyMatchingUnresolvedPageSize = 50;
     private int legacyMatchingUnresolvedPageIndex;
     private bool legacyMatchingDetailsVisible;
@@ -204,6 +205,7 @@ public partial class MainWindow : Window
     private readonly List<LegacyGraphEdge> legacyGraphEdges = [];
 
     private const double LegacyGraphMinimumCanvasHeight = 620;
+    private const double LegacyGraphDefaultWorkspaceHeight = 650;
 
     public MainWindow()
     {
@@ -231,6 +233,93 @@ public partial class MainWindow : Window
     private void LegacyGraphInspectorLayer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         UpdateLegacyGraphTrashOverlaySize();
+    }
+
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ScheduleLegacyGraphWorkspaceHeightUpdate();
+    }
+
+    private void LegacyGraphPageScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ScheduleLegacyGraphWorkspaceHeightUpdate();
+    }
+
+    private void ScheduleLegacyGraphWorkspaceHeightUpdate()
+    {
+        if (!IsLoaded ||
+            LegacyGraphWorkspaceGrid is null)
+        {
+            return;
+        }
+
+        if (legacyGraphWorkspaceHeightUpdatePending)
+        {
+            return;
+        }
+
+        legacyGraphWorkspaceHeightUpdatePending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            legacyGraphWorkspaceHeightUpdatePending = false;
+            UpdateLegacyGraphWorkspaceHeight();
+        }));
+    }
+
+    private void UpdateLegacyGraphWorkspaceHeight()
+    {
+        if (LegacyGraphWorkspaceGrid is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            LegacyGraphWorkspaceGrid.Height = LegacyGraphDefaultWorkspaceHeight;
+            return;
+        }
+
+        if (LegacyGraphPageScrollViewer is null ||
+            LegacyGraphPageContent is null ||
+            LegacyGraphPageScrollViewer.ViewportHeight <= 0 ||
+            LegacyGraphPageContent.ActualHeight <= 0 ||
+            LegacyGraphWorkspaceGrid.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // StackPanel内の固定Heightが、ヘッダー短縮分を吸収できていなかったため、
+            // ワークスペースの前後にある既存コンテンツを除いた残りをここへ配分します。
+            var workspaceTop = LegacyGraphWorkspaceGrid
+                .TransformToAncestor(LegacyGraphPageContent)
+                .Transform(new Point(0, 0))
+                .Y;
+            var contentAfterWorkspace = Math.Max(
+                0,
+                LegacyGraphPageContent.ActualHeight -
+                workspaceTop -
+                LegacyGraphWorkspaceGrid.ActualHeight);
+            var availableWorkspaceHeight = LegacyGraphPageScrollViewer.ViewportHeight -
+                                            workspaceTop -
+                                            contentAfterWorkspace;
+            if (double.IsNaN(availableWorkspaceHeight) || double.IsInfinity(availableWorkspaceHeight))
+            {
+                return;
+            }
+
+            var targetHeight = Math.Max(LegacyGraphDefaultWorkspaceHeight, availableWorkspaceHeight);
+            if (double.IsNaN(LegacyGraphWorkspaceGrid.Height) ||
+                Math.Abs(LegacyGraphWorkspaceGrid.Height - targetHeight) > 1)
+            {
+                LegacyGraphWorkspaceGrid.Height = targetHeight;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // レイアウト確定前は次のSizeChanged/更新時に再計算します。
+        }
     }
 
     private void UpdateLegacyGraphTrashOverlaySize()
@@ -1761,6 +1850,7 @@ public partial class MainWindow : Window
 
         RefreshLegacyMatchingChanges();
         RefreshLegacyMatchingMergeRemovalButton();
+        ScheduleLegacyGraphWorkspaceHeightUpdate();
 
         if (scheduleCheckpoint)
         {
@@ -2075,6 +2165,7 @@ public partial class MainWindow : Window
         LegacyMatchingChangesSummaryText.Text = visibleChanges.Length == 0
             ? "変更はありません"
             : $"{visibleChanges.Length:N0}件 / 元に戻せます";
+        ScheduleLegacyGraphWorkspaceHeightUpdate();
     }
 
     private string? GetLegacyMatchingChangeCustomerId()

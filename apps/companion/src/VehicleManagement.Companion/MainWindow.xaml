@@ -9,6 +9,7 @@
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
         Background="#F4F7FB"
+        SizeChanged="MainWindow_SizeChanged"
         PreviewMouseMove="MainWindow_PreviewMouseMove">
     <Window.Resources>
         <Style TargetType="Button">
@@ -946,6 +947,7 @@
                 <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Background="Transparent"
+                              SizeChanged="LegacyGraphPageScrollViewer_SizeChanged"
                               PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
                     <Grid>
                         <StackPanel x:Name="LegacyGraphPageContent" Margin="24">
@@ -1381,41 +1383,34 @@
                                 </Grid>
                             </Border>
                         </Expander>
-                        <Border x:Name="LegacyMatchingTopHeader" Margin="0,8,0,0" Padding="8"
+                        <Border x:Name="LegacyMatchingTopHeader" Margin="0,8,0,0" Padding="10"
                                 Background="#F7F9FC" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8"
                                 Visibility="Collapsed">
                             <Grid>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Grid Grid.Column="0" MinWidth="0" VerticalAlignment="Center">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" MaxWidth="180" VerticalAlignment="Center"
-                                                   FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
-                                                   Text="顧客単位のマッチング確認" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="LegacyMatchingTopCustomerTitleText" Grid.Column="1" Margin="12,0,0,0"
-                                                   MaxWidth="190" VerticalAlignment="Center"
-                                                   FontSize="19" FontWeight="SemiBold" Foreground="#1D4ED8"
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold"
+                                                   Foreground="#10233F" Text="顧客単位のマッチング確認" />
+                                        <TextBlock x:Name="LegacyMatchingTopCustomerTitleText" Margin="14,0,0,0"
+                                                   MaxWidth="260" VerticalAlignment="Center"
+                                                   FontSize="20" FontWeight="SemiBold" Foreground="#1D4ED8"
                                                    Text="顧客を選択してください" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock x:Name="LegacyMatchingTopCustomerSummaryText" Grid.Column="2" Margin="12,0,0,0"
-                                                   MinWidth="0" VerticalAlignment="Center" Foreground="#52647A" FontSize="11"
-                                                   TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
-                                        <Button x:Name="LegacyMatchingTopEditCustomerNameButton" Grid.Column="3" Margin="10,0,0,0"
-                                                Padding="8,4" Content="顧客名を変更" IsEnabled="False"
+                                    </StackPanel>
+                                    <TextBlock x:Name="LegacyMatchingTopCustomerSummaryText" Grid.Column="1" Margin="20,0,16,0"
+                                               MinWidth="0" VerticalAlignment="Center" Foreground="#52647A" FontSize="12"
+                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="LegacyMatchingTopEditCustomerNameButton" Margin="0,0,10,0"
+                                                Padding="10,6" Content="顧客名を変更" IsEnabled="False"
                                                 Click="LegacyMatchingEditCustomerNameButton_Click" />
-                                        <Border x:Name="LegacyMatchingPreviewLegend" Grid.Column="4" Margin="8,0,0,0"
+                                        <Border x:Name="LegacyMatchingPreviewLegend" Margin="0,0,14,0"
                                                 VerticalAlignment="Center" Visibility="Collapsed"
-                                                Padding="5,3" Background="#FFFFFF" BorderBrush="#C4B5FD"
+                                                Padding="7,5" Background="#FFFFFF" BorderBrush="#C4B5FD"
                                                 BorderThickness="1" CornerRadius="4">
                                             <Border.ToolTip>
                                                 <ToolTip>
@@ -1429,22 +1424,25 @@
                                                     </StackPanel>
                                                 </ToolTip>
                                             </Border.ToolTip>
-                                            <TextBlock FontSize="10" FontWeight="SemiBold" Foreground="#5B21B6"
+                                            <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="#5B21B6"
                                                        Text="接続状態の見方" />
                                         </Border>
-                                    </Grid>
-                                    <TextBlock x:Name="LegacyMatchingTopCustomerProgressText" Grid.Column="1" Margin="12,0,8,0"
-                                               VerticalAlignment="Center" Foreground="#52647A" FontWeight="SemiBold" />
-                                    <Button x:Name="LegacyMatchingTopPreviousButton" Grid.Column="2" Margin="0,0,8,0"
-                                            Content="← 前の顧客" Style="{StaticResource LegacyMatchingNavigationButton}"
-                                            IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
-                                    <Button x:Name="LegacyMatchingTopNextButton" Grid.Column="3" Margin="0"
-                                            Content="次の顧客 →" Style="{StaticResource LegacyMatchingNavigationButton}"
-                                            IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
+                                        <TextBlock x:Name="LegacyMatchingTopCustomerProgressText" Margin="0,0,10,0"
+                                                   VerticalAlignment="Center" Foreground="#52647A" FontSize="12"
+                                                   FontWeight="SemiBold" />
+                                        <Button x:Name="LegacyMatchingTopPreviousButton" Margin="0,0,8,0"
+                                                Padding="9,7" FontSize="13" Content="← 前の顧客"
+                                                Style="{StaticResource LegacyMatchingNavigationButton}"
+                                                IsEnabled="False" Click="LegacyMatchingPreviousButton_Click" />
+                                        <Button x:Name="LegacyMatchingTopNextButton" Margin="0"
+                                                Padding="9,7" FontSize="13" Content="次の顧客 →"
+                                                Style="{StaticResource LegacyMatchingNavigationButton}"
+                                                IsEnabled="False" Click="LegacyMatchingNextButton_Click" />
+                                    </StackPanel>
                                 </Grid>
                             </Grid>
                         </Border>
-                        <Grid x:Name="LegacyGraphWorkspaceGrid" Margin="0,14,0,0" Height="650">
+                        <Grid x:Name="LegacyGraphWorkspaceGrid" Margin="0,14,0,0" MinHeight="650">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="500" />
                                 <ColumnDefinition Width="12" />
