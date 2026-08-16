@@ -2155,10 +2155,11 @@ public partial class MainWindow : Window
             LegacyMatchingSideProgressText.Text = "候補 0件";
             LegacyMatchingCurrentCategoryText.Text = "顧客統合 / 0件";
             LegacyMatchingCurrentProgressText.Text = "0 / 0";
-            LegacyMatchingCurrentSubjectText.Text = "顧客を選択してください";
             LegacyMatchingCurrentTargetHeadingText.Text = "紐付け先";
             LegacyMatchingCurrentTargetText.Text = "候補パッケージを読み込むと、おすすめ欄を表示できます。";
-            LegacyMatchingCurrentRelationArrowText.Text = "→";
+            LegacyMatchingCurrentSubjectHeadingText.Text = "候補";
+            LegacyMatchingCurrentSubjectText.Text = "顧客を選択してください";
+            LegacyMatchingCurrentRelationArrowText.Text = "←";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
             LegacyMatchingCurrentDifferenceText.Text = "差異: なし";
             LegacyMatchingCurrentMissingText.Text = "不足情報: なし";
@@ -2502,10 +2503,11 @@ public partial class MainWindow : Window
 
         if (currentCandidate is null)
         {
-            LegacyMatchingCurrentSubjectText.Text = $"このカテゴリに{queueLabel}のおすすめはありません";
             LegacyMatchingCurrentTargetHeadingText.Text = "紐付け先";
             LegacyMatchingCurrentTargetText.Text = "未確定タブで検索するか、別のカテゴリを選択してください。";
-            LegacyMatchingCurrentRelationArrowText.Text = "→";
+            LegacyMatchingCurrentSubjectHeadingText.Text = "候補";
+            LegacyMatchingCurrentSubjectText.Text = $"このカテゴリに{queueLabel}のおすすめはありません";
+            LegacyMatchingCurrentRelationArrowText.Text = "←";
             LegacyMatchingCurrentMatchedText.Text = "一致: なし";
             LegacyMatchingCurrentDifferenceText.Text = "差異: なし";
             LegacyMatchingCurrentMissingText.Text = "不足情報: なし";
@@ -2559,9 +2561,6 @@ public partial class MainWindow : Window
         return;
     }
 
-        var reverseCustomerMergeDisplay = ShouldReverseLegacyMatchingCustomerMerge(
-            currentCandidate,
-            sourceCustomer);
         var item = CreateLegacyMatchingRecommendationItem(currentCandidate, sourceCustomer);
         var decision = GetLegacyGraphRecommendationDecision(currentCandidate);
         var matchedRows = currentCandidate.MatchedFields
@@ -2570,7 +2569,7 @@ public partial class MainWindow : Window
                 var values = GetLegacyMatchingDisplayedValues(
                     field.SourceValue,
                     field.CandidateValue,
-                    reverseCustomerMergeDisplay);
+                    reverse: true);
                 return new LegacyMatchingDetailRow(
                     field.Label,
                     DisplayLegacyMatchingValue(values.SourceValue),
@@ -2587,7 +2586,7 @@ public partial class MainWindow : Window
                 var values = GetLegacyMatchingDisplayedValues(
                     field.SourceValue,
                     field.CandidateValue,
-                    reverseCustomerMergeDisplay);
+                    reverse: true);
                 return new LegacyMatchingDetailRow(
                     field.Label,
                     DisplayLegacyMatchingValue(values.SourceValue),
@@ -2603,11 +2602,11 @@ public partial class MainWindow : Window
             {
                 var missingSide = GetLegacyMatchingDisplayedMissingSide(
                     field.MissingSide,
-                    reverseCustomerMergeDisplay);
+                    reverse: true);
                 var values = GetLegacyMatchingDisplayedValues(
                     field.SourceValue,
                     field.CandidateValue,
-                    reverseCustomerMergeDisplay);
+                    reverse: true);
                 var sourceValue = missingSide == "source"
                     ? "情報なし"
                     : DisplayLegacyMatchingValue(values.SourceValue);
@@ -2618,7 +2617,7 @@ public partial class MainWindow : Window
                     field.Label,
                     sourceValue,
                     candidateValue,
-                    missingSide == "source" ? "対象側：情報なし" : "候補側：情報なし",
+                    missingSide == "source" ? "紐付け先側：情報なし" : "候補側：情報なし",
                     ToBrush("#6B7280"),
                     $"missing:{missingSide}",
                     "");
@@ -2638,26 +2637,21 @@ public partial class MainWindow : Window
             .Concat(differenceRows)
             .Concat(missingRows)
             .ToArray();
-        var displaySubjectId = currentCandidate.SubjectId;
-        var displayTargetId = currentCandidate.TargetId;
-        if (reverseCustomerMergeDisplay)
-        {
-            (displaySubjectId, displayTargetId) = (displayTargetId, displaySubjectId);
-        }
+        var displayEndpoints = GetLegacyMatchingDisplayEndpoints(currentCandidate, sourceCustomer);
         var sourceEntitySections = BuildLegacyMatchingEntitySections(
-            currentCandidate.SubjectKind,
-            displaySubjectId);
+            displayEndpoints.ParentKind,
+            displayEndpoints.ParentId);
         var candidateEntitySections = BuildLegacyMatchingEntitySections(
-            currentCandidate.TargetKind,
-            displayTargetId);
+            displayEndpoints.CandidateKind,
+            displayEndpoints.CandidateId);
         var evidenceItems = currentCandidate.MatchedFields
             .Select(field =>
             {
                 var values = GetLegacyMatchingDisplayedValues(
                     field.SourceValue,
                     field.CandidateValue,
-                    reverseCustomerMergeDisplay);
-                return $"{field.Label}: {DisplayLegacyMatchingValue(values.SourceValue)} → " +
+                    reverse: true);
+                return $"{field.Label}: {DisplayLegacyMatchingValue(values.SourceValue)} ← " +
                     $"{DisplayLegacyMatchingValue(values.CandidateValue)}（{GetLegacyMatchingMatchKindText(field.MatchKind)}）";
             })
             .ToArray();
@@ -2667,8 +2661,8 @@ public partial class MainWindow : Window
                 var values = GetLegacyMatchingDisplayedValues(
                     field.SourceValue,
                     field.CandidateValue,
-                    reverseCustomerMergeDisplay);
-                return $"{field.Label}: {DisplayLegacyMatchingValue(values.SourceValue)} → " +
+                    reverse: true);
+                return $"{field.Label}: {DisplayLegacyMatchingValue(values.SourceValue)} ← " +
                     $"{DisplayLegacyMatchingValue(values.CandidateValue)}（値が異なります）";
             })
             .ToArray();
@@ -2677,8 +2671,8 @@ public partial class MainWindow : Window
             {
                 var missingSide = GetLegacyMatchingDisplayedMissingSide(
                     field.MissingSide,
-                    reverseCustomerMergeDisplay);
-                return $"{field.Label}: {(missingSide == "source" ? "対象側" : "候補側")}に情報がありません";
+                    reverse: true);
+                return $"{field.Label}: {(missingSide == "source" ? "紐付け先側" : "候補側")}に情報がありません";
             })
             .ToArray();
         var alternativeItems = BuildLegacyMatchingAlternativeRows(currentCandidate, sourceCustomer, allRecommendations);
@@ -2709,12 +2703,11 @@ public partial class MainWindow : Window
         LegacyMatchingNoRecommendationText.Visibility = Visibility.Collapsed;
         LegacyMatchingCurrentRecommendationScrollViewer.Visibility = Visibility.Visible;
         SetLegacyMatchingDetailsVisible(false);
-        LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
         LegacyMatchingCurrentTargetHeadingText.Text = GetLegacyMatchingTargetHeading(currentCandidate, sourceCustomer);
         LegacyMatchingCurrentTargetText.Text = item.TargetText;
-        LegacyMatchingCurrentRelationArrowText.Text = legacyGraphMatchingCategory == LegacyMatchingCategoryKinds.Customer
-            ? "⇄"
-            : "→";
+        LegacyMatchingCurrentSubjectHeadingText.Text = GetLegacyMatchingSubjectHeading(currentCandidate);
+        LegacyMatchingCurrentSubjectText.Text = item.SubjectText;
+        LegacyMatchingCurrentRelationArrowText.Text = "←";
         LegacyMatchingCurrentMatchedText.Text = $"一致 {matchedRows.Length:N0}件";
         LegacyMatchingCurrentDifferenceText.Text = $"差異 {differenceRows.Length:N0}件";
         LegacyMatchingCurrentMissingText.Text = $"情報なし {missingRows.Length:N0}件";
@@ -2723,15 +2716,9 @@ public partial class MainWindow : Window
         LegacyMatchingCurrentDifferenceItemsControl.ItemsSource = differenceRows;
         LegacyMatchingCurrentMissingItemsControl.ItemsSource = missingRows;
         LegacyMatchingCurrentConflictItemsControl.ItemsSource = conflictRows;
-        LegacyMatchingDetailsSubjectSummaryText.Text = $"{item.SubjectText} → {item.TargetText}";
-        LegacyMatchingDetailsSourceHeadingText.Text = GetLegacyMatchingEntityHeading(
-            currentCandidate.SubjectKind,
-            currentCandidate.TargetKind,
-            isSource: true);
-        LegacyMatchingDetailsCandidateHeadingText.Text = GetLegacyMatchingEntityHeading(
-            currentCandidate.SubjectKind,
-            currentCandidate.TargetKind,
-            isSource: false);
+        LegacyMatchingDetailsSubjectSummaryText.Text = $"{item.TargetText} ← {item.SubjectText}";
+        LegacyMatchingDetailsSourceHeadingText.Text = GetLegacyMatchingTargetHeading(currentCandidate, sourceCustomer);
+        LegacyMatchingDetailsCandidateHeadingText.Text = GetLegacyMatchingSubjectHeading(currentCandidate);
         LegacyMatchingDetailsSourceItemsControl.ItemsSource = sourceEntitySections;
         LegacyMatchingDetailsCandidateItemsControl.ItemsSource = candidateEntitySections;
         LegacyMatchingDetailsComparisonItemsControl.ItemsSource = comparisonRows;
@@ -3139,6 +3126,55 @@ public partial class MainWindow : Window
             (AbacusRecommendationEntityKinds.Vehicle, AbacusRecommendationEntityKinds.Customer, false) => "紐付け先候補の顧客",
             _ => isSource ? "対象の情報" : "候補・紐付け先の情報",
         };
+
+    private static string GetLegacyMatchingSubjectHeading(
+        AbacusRecommendationCandidate candidate) =>
+        (candidate.SubjectKind, candidate.TargetKind) switch
+        {
+            (AbacusRecommendationEntityKinds.Customer, AbacusRecommendationEntityKinds.Customer) => "統合候補",
+            (AbacusRecommendationEntityKinds.Document, _) => "対象書類",
+            (AbacusRecommendationEntityKinds.Vehicle, _) => "対象車両",
+            _ => "候補",
+        };
+
+    private (string ParentKind, string ParentId, string CandidateKind, string CandidateId)
+        GetLegacyMatchingDisplayEndpoints(
+            AbacusRecommendationCandidate candidate,
+            AbacusLegacyExportCandidateGraphCustomer focusCustomer)
+    {
+        if (IsLegacyMatchingCustomerMerge(candidate))
+        {
+            var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
+            var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
+                .Select(customer => customer.CustomerId)
+                .ToHashSet(StringComparer.Ordinal);
+            if (logicalCustomerIds.Contains(candidate.SubjectId) &&
+                !logicalCustomerIds.Contains(candidate.TargetId))
+            {
+                return (
+                    candidate.SubjectKind,
+                    candidate.SubjectId,
+                    candidate.TargetKind,
+                    candidate.TargetId);
+            }
+
+            if (logicalCustomerIds.Contains(candidate.TargetId) &&
+                !logicalCustomerIds.Contains(candidate.SubjectId))
+            {
+                return (
+                    candidate.TargetKind,
+                    candidate.TargetId,
+                    candidate.SubjectKind,
+                    candidate.SubjectId);
+            }
+        }
+
+        return (
+            candidate.TargetKind,
+            candidate.TargetId,
+            candidate.SubjectKind,
+            candidate.SubjectId);
+    }
 
     private AbacusLegacyExportCandidateGraphDocument? FindLegacyRecommendationDocumentById(string id) =>
         legacyExportCandidateGraphResult?.AllDocuments.FirstOrDefault(document =>

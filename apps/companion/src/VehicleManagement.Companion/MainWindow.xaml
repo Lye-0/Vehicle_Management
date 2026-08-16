@@ -1859,18 +1859,7 @@
                                                                     <ColumnDefinition Width="Auto" />
                                                                     <ColumnDefinition Width="*" />
                                                                 </Grid.ColumnDefinitions>
-                                                                <Border Grid.Column="0" Padding="8" Background="#F8FAFC"
-                                                                        BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="5">
-                                                                    <StackPanel>
-                                                                        <TextBlock Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Text="対象" />
-                                                                        <TextBlock x:Name="LegacyMatchingCurrentSubjectText" Margin="0,4,0,0"
-                                                                                   FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
-                                                                                   TextWrapping="Wrap" />
-                                                                    </StackPanel>
-                                                                </Border>
-                                                                <TextBlock x:Name="LegacyMatchingCurrentRelationArrowText" Grid.Column="1" Margin="7,0" VerticalAlignment="Center"
-                                                                           Foreground="#F59E0B" FontSize="20" FontWeight="SemiBold" Text="→" />
-                                                                <Border Grid.Column="2" Padding="8" Background="#EFF6FF"
+                                                                <Border Grid.Column="0" Padding="8" Background="#EFF6FF"
                                                                         BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="5">
                                                                     <StackPanel>
                                                                         <TextBlock x:Name="LegacyMatchingCurrentTargetHeadingText"
@@ -1878,6 +1867,19 @@
                                                                                    Text="紐付け先" />
                                                                         <TextBlock x:Name="LegacyMatchingCurrentTargetText" Margin="0,4,0,0"
                                                                                    FontSize="14" FontWeight="SemiBold" Foreground="#1D4ED8"
+                                                                                   TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                                <TextBlock x:Name="LegacyMatchingCurrentRelationArrowText" Grid.Column="1" Margin="7,0" VerticalAlignment="Center"
+                                                                           Foreground="#F59E0B" FontSize="20" FontWeight="SemiBold" Text="←" />
+                                                                <Border Grid.Column="2" Padding="8" Background="#F8FAFC"
+                                                                        BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="5">
+                                                                    <StackPanel>
+                                                                        <TextBlock x:Name="LegacyMatchingCurrentSubjectHeadingText"
+                                                                                   Foreground="#64748B" FontSize="10" FontWeight="SemiBold"
+                                                                                   Text="候補" />
+                                                                        <TextBlock x:Name="LegacyMatchingCurrentSubjectText" Margin="0,4,0,0"
+                                                                                   FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
                                                                                    TextWrapping="Wrap" />
                                                                     </StackPanel>
                                                                 </Border>
@@ -1912,9 +1914,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#15803D" FontSize="10" Text="{Binding SourceValue}" TextWrapping="Wrap" />
-                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#15803D" FontSize="10" Text="→" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#15803D" FontSize="10" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#15803D" FontSize="10" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#15803D" FontSize="10" Text="←" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#15803D" FontSize="10" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -1953,9 +1955,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#92400E" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
-                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#B45309" FontSize="10" Text="→" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#92400E" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#92400E" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#B45309" FontSize="10" Text="←" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#92400E" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -1994,9 +1996,9 @@
                                                                                                 <ColumnDefinition Width="Auto" />
                                                                                                 <ColumnDefinition Width="*" />
                                                                                             </Grid.ColumnDefinitions>
-                                                                                            <TextBlock Foreground="#6B7280" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
-                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#6B7280" FontSize="10" Text="→" />
-                                                                                            <TextBlock Grid.Column="2" Foreground="#6B7280" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Foreground="#6B7280" FontSize="11" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                            <TextBlock Grid.Column="1" Margin="5,0" Foreground="#6B7280" FontSize="10" Text="←" />
+                                                                                            <TextBlock Grid.Column="2" Foreground="#6B7280" FontSize="11" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                         </Grid>
                                                                                     </StackPanel>
                                                                                 </Grid>
@@ -2089,9 +2091,9 @@
                                                                                             <ColumnDefinition Width="Auto" />
                                                                                             <ColumnDefinition Width="*" />
                                                                                         </Grid.ColumnDefinitions>
-                                                                                        <TextBlock Foreground="#10233F" Text="{Binding SourceValue}" TextWrapping="Wrap" />
-                                                                                        <TextBlock Grid.Column="1" Margin="7,0" Foreground="#64748B" Text="→" />
-                                                                                        <TextBlock Grid.Column="2" Foreground="#1D4ED8" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Foreground="#10233F" Text="{Binding CandidateValue}" TextWrapping="Wrap" />
+                                                                                        <TextBlock Grid.Column="1" Margin="7,0" Foreground="#64748B" Text="←" />
+                                                                                        <TextBlock Grid.Column="2" Foreground="#1D4ED8" Text="{Binding SourceValue}" TextWrapping="Wrap" />
                                                                                     </Grid>
                                                                                 </Grid>
                                                                             </Border>
@@ -2169,7 +2171,7 @@
                                                                 </Border>
                                                                 <TextBlock x:Name="LegacyMatchingDetailsSourceHeadingText" Margin="0,12,0,0"
                                                                            FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
-                                                                           Text="対象の情報" />
+                                                                           Text="紐付け先の情報" />
                                                                 <Border Margin="0,5,0,0" Padding="7" Background="#F8FAFC" BorderBrush="#CBD5E1"
                                                                         BorderThickness="1" CornerRadius="4">
                                                                     <ItemsControl x:Name="LegacyMatchingDetailsSourceItemsControl">
@@ -2226,7 +2228,7 @@
                                                                  </Border>
                                                                  <TextBlock x:Name="LegacyMatchingDetailsCandidateHeadingText" Margin="0,12,0,0"
                                                                            FontSize="14" FontWeight="SemiBold" Foreground="#10233F"
-                                                                           Text="候補・紐付け先の情報" />
+                                                                           Text="候補の情報" />
                                                                 <Border Margin="0,5,0,0" Padding="7" Background="#EFF6FF"
                                                                         BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="4">
                                                                     <ItemsControl x:Name="LegacyMatchingDetailsCandidateItemsControl">
