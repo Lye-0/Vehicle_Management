@@ -947,6 +947,7 @@
                 <ScrollViewer x:Name="LegacyGraphPageScrollViewer"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Background="Transparent"
+                              Loaded="LegacyGraphPageScrollViewer_Loaded"
                               SizeChanged="LegacyGraphPageScrollViewer_SizeChanged"
                               PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
                     <Grid>

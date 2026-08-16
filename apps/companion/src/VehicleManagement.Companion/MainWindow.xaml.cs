@@ -245,6 +245,14 @@ public partial class MainWindow : Window
         ScheduleLegacyGraphWorkspaceHeightUpdate();
     }
 
+    private void LegacyGraphPageScrollViewer_Loaded(object sender, RoutedEventArgs e)
+    {
+        // 起動時にチェックポイントからマッチングUIを復元する場合、
+        // SetLegacyGraphUiMode は Loaded 前に呼ばれるため、その時点の高さ更新は予約されません。
+        // 読み込み後の有限なViewportを使って、右側詳細のスクロール領域を確定します。
+        ScheduleLegacyGraphWorkspaceHeightUpdate();
+    }
+
     private void ScheduleLegacyGraphWorkspaceHeightUpdate()
     {
         if (!IsLoaded ||
