@@ -310,16 +310,19 @@ public partial class MainWindow : Window
             var availableMatchingPageHeight = LegacyGraphPageScrollViewer.ViewportHeight -
                                                matchingPageTop -
                                                contentAfterMatchingPage;
-            var naturalMatchingPageHeight = LegacyGraphMatchingPageGrid.DesiredSize.Height;
             if (double.IsNaN(availableMatchingPageHeight) ||
                 double.IsInfinity(availableMatchingPageHeight) ||
-                double.IsNaN(naturalMatchingPageHeight) ||
-                double.IsInfinity(naturalMatchingPageHeight))
+                availableMatchingPageHeight <= 0)
             {
                 return;
             }
 
-            if (availableMatchingPageHeight > naturalMatchingPageHeight + 1)
+            // LegacyGraphPageContent は縦 StackPanel のため、明示的な高さがない間は
+            // 右側候補詳細の全文を含む自然高さでマッチング領域を測定します。
+            // 自然高さが残り高さを上回る場合も、ここへ残り高さを適用しないと
+            // 内側の候補 ScrollViewer が無限高さで測定され、スクロールバーが表示されません。
+            if (double.IsNaN(LegacyGraphMatchingPageGrid.Height) ||
+                Math.Abs(LegacyGraphMatchingPageGrid.Height - availableMatchingPageHeight) > 1)
             {
                 LegacyGraphMatchingPageGrid.Height = availableMatchingPageHeight;
             }
