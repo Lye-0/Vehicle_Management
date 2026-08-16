@@ -97,6 +97,8 @@ public partial class MainWindow : Window
     private AbacusImportOutputPackageSession? unifiedImportOutputSession;
     private AbacusBulkImagePreparationResult? bulkImagePreparationResult;
     private CancellationTokenSource? legacyExportDetectionCancellation;
+    private CancellationTokenSource? unifiedImportOutputParentValidationCancellation;
+    private string? unifiedImportValidatedOutputParentPath;
     private AbacusLegacyExportReadResult? legacyExportReadResult;
     private bool legacyExportSubsetActive;
     private AbacusWebImportMappingPackage? loadedWebImportMappingPackage;
@@ -458,11 +460,15 @@ public partial class MainWindow : Window
     {
         var previousBulkSourcePath = BulkImageSourcePathTextBox.Text.Trim();
         var bulkSourceChanged = !string.Equals(previousBulkSourcePath, folderPath, StringComparison.OrdinalIgnoreCase);
-        var preservedLegacyExportPath = preserveSelectedLegacyExport &&
-                                        !string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text) &&
-                                        Directory.Exists(LegacyExportPathTextBox.Text.Trim())
-            ? LegacyExportPathTextBox.Text.Trim()
-            : null;
+        string? preservedLegacyExportPath = null;
+        if (preserveSelectedLegacyExport && !string.IsNullOrWhiteSpace(LegacyExportPathTextBox.Text))
+        {
+            var candidateLegacyExportPath = LegacyExportPathTextBox.Text.Trim();
+            if (await DirectoryExistsOnBackgroundAsync(candidateLegacyExportPath))
+            {
+                preservedLegacyExportPath = candidateLegacyExportPath;
+            }
+        }
         var preservedLegacyExportSubset = preservedLegacyExportPath is not null && legacyExportSubsetActive;
         UnifiedImportFolderPathTextBox.Text = folderPath;
         BulkImageSourcePathTextBox.Text = folderPath;
@@ -564,19 +570,74 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(UnifiedImportOutputParentPathTextBox.Text))
+        unifiedImportOutputParentValidationCancellation?.Cancel();
+        unifiedImportOutputParentValidationCancellation = null;
+        unifiedImportValidatedOutputParentPath = null;
+
+        var path = UnifiedImportOutputParentPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path))
         {
             UnifiedImportStatusText.Text = "生成物の保存先を選択してください。";
             UnifiedImportStatusText.Foreground = ToBrush("#52647A");
+            UpdateUnifiedImportEntryState();
+            return;
         }
 
         UpdateUnifiedImportEntryState();
+
+        // 入力中にネットワークフォルダーなどへ同期アクセスすると、
+        // TextChangedがUIスレッドをブロックして画面全体が固まります。
+        // 入力が止まってからバックグラウンドで1回だけ存在確認します。
+        var cancellation = new CancellationTokenSource();
+        unifiedImportOutputParentValidationCancellation = cancellation;
+        _ = ValidateUnifiedImportOutputParentAsync(path, cancellation);
     }
+
+    private async Task ValidateUnifiedImportOutputParentAsync(
+        string path,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellation.Token);
+            var exists = await Task.Run(
+                () => Directory.Exists(path),
+                cancellation.Token);
+            if (cancellation.IsCancellationRequested ||
+                !ReferenceEquals(unifiedImportOutputParentValidationCancellation, cancellation) ||
+                UnifiedImportOutputParentPathTextBox is null ||
+                !string.Equals(UnifiedImportOutputParentPathTextBox.Text.Trim(), path, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            unifiedImportValidatedOutputParentPath = exists ? path : null;
+            UpdateUnifiedImportEntryState();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(unifiedImportOutputParentValidationCancellation, cancellation))
+            {
+                unifiedImportOutputParentValidationCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private static Task<bool> DirectoryExistsOnBackgroundAsync(
+        string path,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => Directory.Exists(path), cancellationToken);
 
     private async void UnifiedImportCreateCanvasButton_Click(object sender, RoutedEventArgs e)
     {
         var folderPath = UnifiedImportFolderPathTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+        if (string.IsNullOrWhiteSpace(folderPath) ||
+            !await DirectoryExistsOnBackgroundAsync(folderPath))
         {
             MessageBox.Show(this, "保存用ABACUSフォルダーを選択してください。", "フォルダー未選択");
             return;
@@ -640,7 +701,8 @@ public partial class MainWindow : Window
     private async Task<bool> EnsureUnifiedImportOutputSessionAsync(string sourceFolder)
     {
         var destinationParent = UnifiedImportOutputParentPathTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(destinationParent) || !Directory.Exists(destinationParent))
+        if (string.IsNullOrWhiteSpace(destinationParent) ||
+            !await DirectoryExistsOnBackgroundAsync(destinationParent))
         {
             MessageBox.Show(this, "先に生成物の保存先を選択してください。保存先の下に作業用と完成品用のフォルダーを作成します。", "保存先未選択", MessageBoxButton.OK, MessageBoxImage.Warning);
             UnifiedImportStatusText.Text = "生成物の保存先を選択してください。";
@@ -656,7 +718,7 @@ public partial class MainWindow : Window
                 Path.GetDirectoryName(unifiedImportOutputSession.RootPath),
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(destinationParent)),
                 StringComparison.OrdinalIgnoreCase) &&
-            Directory.Exists(unifiedImportOutputSession.RootPath))
+            await DirectoryExistsOnBackgroundAsync(unifiedImportOutputSession.RootPath))
         {
             return true;
         }
@@ -904,8 +966,12 @@ public partial class MainWindow : Window
 
     private void UpdateUnifiedImportEntryState()
     {
-        var hasOutputParent = !string.IsNullOrWhiteSpace(UnifiedImportOutputParentPathTextBox.Text) &&
-                              Directory.Exists(UnifiedImportOutputParentPathTextBox.Text.Trim());
+        var outputParentPath = UnifiedImportOutputParentPathTextBox.Text.Trim();
+        var hasOutputParent = !string.IsNullOrWhiteSpace(outputParentPath) &&
+                              string.Equals(
+                                  unifiedImportValidatedOutputParentPath,
+                                  outputParentPath,
+                                  StringComparison.OrdinalIgnoreCase);
         if (legacyExportCandidateGraphResult is not null && fp5VehicleImageMapping?.IsFullyMatched == true)
         {
             UnifiedImportCreateCanvasButton.IsEnabled = true;
