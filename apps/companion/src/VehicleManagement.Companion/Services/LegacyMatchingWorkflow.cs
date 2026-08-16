@@ -14,7 +14,9 @@ public sealed record LegacyGraphRecommendationState(
     string Decision,
     string Lifecycle = LegacyGraphRecommendationLifecycle.Active,
     string? ResolutionReason = null,
-    DateTimeOffset? UpdatedAtUtc = null);
+    DateTimeOffset? UpdatedAtUtc = null,
+    string? WorkTargetKey = null,
+    string? ExternalCustomerId = null);
 
 public static class LegacyMatchingCategoryKinds
 {

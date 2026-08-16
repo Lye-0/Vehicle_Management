@@ -24,6 +24,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客確定ゲートはマッチング候補の未処理と分離される", CustomerApprovalGateIgnoresMatchingQueue),
     ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
     ("インポート確定ゲートは顧客・統合候補・書類をすべて確認する", ImportFinalizationRequiresAllGates),
+    ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
     ("旧チェックポイントの顧客二重所属を正規化して再開できる", LegacyCheckpointMergeMembershipRecovery),
 };
@@ -417,6 +418,42 @@ static void ImportFinalizationRequiresAllGates()
         "未確認顧客を残したままインポート確定可能になっています。");
 }
 
+static void CustomerRecommendationScopeSurvivesMemberExpansion()
+{
+    var initial = CustomerRecommendationCandidate("candidate-a-b", "customer-a", "customer-b");
+    var regenerated = CustomerRecommendationCandidate("candidate-c-b", "customer-c", "customer-b");
+    var unrelated = CustomerRecommendationCandidate("candidate-y-b", "customer-y", "customer-b");
+
+    Assert(LegacyCustomerRecommendationScope.TryCreate(
+            initial,
+            "customer:a",
+            new HashSet<string>(["customer-a"], StringComparer.Ordinal),
+            out var initialScope),
+        "統合前の作業対象と外部候補顧客の判定スコープを作成できていません。");
+    Assert(LegacyCustomerRecommendationScope.TryCreate(
+            regenerated,
+            "logical:x",
+            new HashSet<string>(["customer-a", "customer-c"], StringComparer.Ordinal),
+            out var regeneratedScope),
+        "構成顧客追加後の作業対象と外部候補顧客の判定スコープを作成できていません。");
+    Assert(initialScope.ExternalCustomerId == "customer-b" &&
+           regeneratedScope.ExternalCustomerId == "customer-b",
+        "構成顧客が変わっても外部候補顧客を同じ顧客として識別できていません。");
+    Assert(!initialScope.Matches(regeneratedScope),
+        "統合前後のグループIDを暗黙に同一と扱っています。実装側で明示的な引き継ぎが必要です。");
+
+    var migratedScope = initialScope with { WorkTargetKey = "logical:x" };
+    Assert(migratedScope.Matches(regeneratedScope),
+        "作業対象グループの明示的な引き継ぎ後に、別CandidateIdの候補へ判定を適用できません。");
+    Assert(LegacyCustomerRecommendationScope.TryCreate(
+            unrelated,
+            "logical:y",
+            new HashSet<string>(["customer-y"], StringComparer.Ordinal),
+            out var unrelatedScope) &&
+           !migratedScope.Matches(unrelatedScope),
+        "別の作業対象グループへ判定が波及しています。");
+}
+
 static void LegacyCheckpointMergeMembershipRecovery()
 {
     var logicalGroupId = "logical:merged-yamada";
@@ -537,6 +574,24 @@ static AbacusRecommendationCandidate RecommendationCandidate(
         "テスト用のおすすめ",
         "test");
 
+static AbacusRecommendationCandidate CustomerRecommendationCandidate(
+    string candidateId,
+    string subjectCustomerId,
+    string targetCustomerId) =>
+    new(
+        candidateId,
+        AbacusRecommendationEntityKinds.Customer,
+        subjectCustomerId,
+        AbacusRecommendationEntityKinds.Customer,
+        targetCustomerId,
+        targetCustomerId,
+        [],
+        [],
+        [],
+        [],
+        "テスト用の顧客統合おすすめ",
+        "test");
+
 static void LegacyCheckpointUpgrade()
 {
     var directory = Path.Combine(Path.GetTempPath(), $"gate28-checkpoint-{Guid.NewGuid():N}");
@@ -610,6 +665,45 @@ static void LegacyCheckpointUpgrade()
                reviewed.CustomerReviewStates.TryGetValue("customer:c1", out var reviewState) &&
                reviewState == LegacyGraphCustomerReviewStateValues.NeedsReview,
             "顧客の再確認待ち状態がチェックポイントから復元されていません。");
+
+        var scopedCheckpoint = reviewCheckpoint with
+        {
+            RecommendationStates =
+            [
+                new LegacyGraphCheckpointRecommendationState(
+                    "candidate-regenerated",
+                    AbacusRecommendationDecisionValues.Rejected,
+                    LegacyGraphRecommendationLifecycle.Active,
+                    "ユーザーが別人と判断しました。",
+                    DateTimeOffset.UtcNow,
+                    "logical:work-target",
+                    "customer:external"),
+            ],
+            MatchingChanges =
+            [
+                new LegacyGraphCheckpointMatchingChange(
+                    "recommendation-scope\u001Flogical:work-target\u001Fcustomer:external",
+                    "recommendation",
+                    "candidate-regenerated",
+                    "別人と判断",
+                    "元に戻せます。",
+                    DateTimeOffset.UtcNow,
+                    "customer:c1",
+                    "logical:work-target",
+                    "customer:external"),
+            ],
+        };
+        File.WriteAllText(Path.Combine(directory, "graph-state.json"), JsonSerializer.Serialize(
+            scopedCheckpoint,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        var scoped = new LegacyGraphWorkCheckpointStore().ReadAsync(directory).GetAwaiter().GetResult();
+        Assert(scoped.RecommendationStates is { Length: 1 } &&
+               scoped.RecommendationStates[0].WorkTargetKey == "logical:work-target" &&
+               scoped.RecommendationStates[0].ExternalCustomerId == "customer:external" &&
+               scoped.MatchingChanges is { Length: 1 } &&
+               scoped.MatchingChanges[0].WorkTargetKey == "logical:work-target" &&
+               scoped.MatchingChanges[0].ExternalCustomerId == "customer:external",
+            "顧客統合判定の作業対象スコープがチェックポイント往復で失われています。");
     }
     finally
     {

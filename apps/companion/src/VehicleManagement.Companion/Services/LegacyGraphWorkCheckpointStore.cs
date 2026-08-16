@@ -77,7 +77,9 @@ public sealed record LegacyGraphCheckpointRecommendationState(
     string Decision,
     string Lifecycle = LegacyGraphRecommendationLifecycle.Active,
     string? ResolutionReason = null,
-    DateTimeOffset? UpdatedAtUtc = null);
+    DateTimeOffset? UpdatedAtUtc = null,
+    string? WorkTargetKey = null,
+    string? ExternalCustomerId = null);
 
 public sealed record LegacyGraphCheckpointMatchingChange(
     string ChangeId,
@@ -86,7 +88,9 @@ public sealed record LegacyGraphCheckpointMatchingChange(
     string Title,
     string Details,
     DateTimeOffset CreatedAtUtc,
-    string? CustomerId = null);
+    string? CustomerId = null,
+    string? WorkTargetKey = null,
+    string? ExternalCustomerId = null);
 
 public sealed record LegacyGraphWorkCheckpoint(
     string Kind,
@@ -347,6 +351,10 @@ public sealed class LegacyGraphWorkCheckpointStore
             checkpoint.RecommendationStates
                 .GroupBy(state => state.CandidateId, StringComparer.OrdinalIgnoreCase)
                 .Any(group => group.Count() > 1) ||
+            checkpoint.RecommendationStates.Any(state =>
+                (state.WorkTargetKey is null) != (state.ExternalCustomerId is null) ||
+                state.WorkTargetKey is not null && string.IsNullOrWhiteSpace(state.WorkTargetKey) ||
+                state.ExternalCustomerId is not null && string.IsNullOrWhiteSpace(state.ExternalCustomerId)) ||
             checkpoint.CustomerNameOverrides.Any(pair =>
                 string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
             checkpoint.MatchingCategory is not null &&
@@ -354,7 +362,10 @@ public sealed class LegacyGraphWorkCheckpointStore
                     LegacyMatchingCategoryKinds.Vehicle or LegacyMatchingCategoryKinds.Document) ||
             checkpoint.MatchingChanges.Any(change =>
                 change is null || string.IsNullOrWhiteSpace(change.ChangeId) ||
-                string.IsNullOrWhiteSpace(change.Kind) || string.IsNullOrWhiteSpace(change.SubjectId)) ||
+                string.IsNullOrWhiteSpace(change.Kind) || string.IsNullOrWhiteSpace(change.SubjectId) ||
+                (change.WorkTargetKey is null) != (change.ExternalCustomerId is null) ||
+                change.WorkTargetKey is not null && string.IsNullOrWhiteSpace(change.WorkTargetKey) ||
+                change.ExternalCustomerId is not null && string.IsNullOrWhiteSpace(change.ExternalCustomerId)) ||
             checkpoint.LogicalCustomerMergeGroupByCustomerId.Any(pair =>
                 string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) ||
             checkpoint.MatchingManualCustomerCandidateTargets.Any(pair =>

@@ -2356,6 +2356,22 @@ public partial class MainWindow : Window
 
         if (change.Kind == "recommendation")
         {
+            if (!string.IsNullOrWhiteSpace(change.WorkTargetKey) &&
+                !string.IsNullOrWhiteSpace(change.ExternalCustomerId))
+            {
+                var scope = new LegacyCustomerRecommendationScope(
+                    change.WorkTargetKey,
+                    change.ExternalCustomerId);
+                if (ResetLegacyGraphRecommendationScope(scope))
+                {
+                    InvalidateLegacyGraphImportConfirmation();
+                    RefreshLegacyMatchingView();
+                    ScheduleLegacyGraphCheckpointSave();
+                }
+
+                return;
+            }
+
             var candidate = legacyGraphRecommendationCandidates.FirstOrDefault(item =>
                 string.Equals(item.CandidateId, change.SubjectId, StringComparison.OrdinalIgnoreCase));
             if (candidate is not null && SetLegacyGraphRecommendationDecision(
@@ -3890,6 +3906,185 @@ public partial class MainWindow : Window
             : $"customer:{customerId}";
     }
 
+    private bool TryGetLegacyGraphWorkTargetCustomerIds(
+        string workTargetKey,
+        out HashSet<string> customerIds)
+    {
+        customerIds = new HashSet<string>(StringComparer.Ordinal);
+        if (legacyGraphCustomerMergeGroups.TryGetValue(workTargetKey, out var group))
+        {
+            customerIds.UnionWith(group.CustomerIds.Where(customerId =>
+                !legacyGraphTrashCustomerIds.Contains(customerId)));
+            return customerIds.Count > 0;
+        }
+
+        const string customerPrefix = "customer:";
+        if (workTargetKey.StartsWith(customerPrefix, StringComparison.Ordinal))
+        {
+            var customerId = workTargetKey[customerPrefix.Length..];
+            if (FindLegacyGraphCustomerById(customerId) is not null &&
+                !legacyGraphTrashCustomerIds.Contains(customerId))
+            {
+                customerIds.Add(customerId);
+            }
+        }
+
+        return customerIds.Count > 0;
+    }
+
+    private AbacusLegacyExportCandidateGraphCustomer? GetLegacyGraphScopeFocusCustomer()
+    {
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(legacyGraphMatchingCustomerId) &&
+            FindLegacyGraphCustomerById(legacyGraphMatchingCustomerId) is { } matchingCustomer)
+        {
+            return matchingCustomer;
+        }
+
+        return legacyGraphSelectedItem is AbacusLegacyExportCandidateGraphCustomer selectedCustomer
+            ? GetLegacyGraphSourceCustomer(selectedCustomer)
+            : null;
+    }
+
+    private string GetLegacyGraphRecommendationWorkTargetKey(
+        AbacusLegacyExportCandidateGraphCustomer customer) =>
+        string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase)
+            ? GetLegacyGraphLogicalCustomerKey(customer)
+            : GetLegacyCustomerMergeKey(customer);
+
+    private bool TryGetLegacyGraphCurrentRecommendationScope(
+        AbacusRecommendationCandidate candidate,
+        out LegacyCustomerRecommendationScope scope)
+    {
+        scope = null!;
+        var focusCustomer = GetLegacyGraphScopeFocusCustomer();
+        if (focusCustomer is null)
+        {
+            return false;
+        }
+
+        var workTargetKey = GetLegacyGraphRecommendationWorkTargetKey(focusCustomer);
+        return TryGetLegacyGraphWorkTargetCustomerIds(workTargetKey, out var workTargetCustomerIds) &&
+               LegacyCustomerRecommendationScope.TryCreate(
+                   candidate,
+                   workTargetKey,
+                   workTargetCustomerIds,
+                   out scope);
+    }
+
+    private bool TryGetLegacyGraphRecommendationScopeForKey(
+        AbacusRecommendationCandidate candidate,
+        string workTargetKey,
+        out LegacyCustomerRecommendationScope scope)
+    {
+        scope = null!;
+        return TryGetLegacyGraphWorkTargetCustomerIds(workTargetKey, out var workTargetCustomerIds) &&
+               LegacyCustomerRecommendationScope.TryCreate(
+                   candidate,
+                   workTargetKey,
+                   workTargetCustomerIds,
+                   out scope);
+    }
+
+    private bool TryInferLegacyGraphRecommendationScope(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlySet<string>? preferredWorkTargetKeys,
+        out LegacyCustomerRecommendationScope scope)
+    {
+        scope = null!;
+        if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Customer ||
+            candidate.TargetKind != AbacusRecommendationEntityKinds.Customer)
+        {
+            return false;
+        }
+
+        var customerIds = new[] { candidate.SubjectId, candidate.TargetId };
+        var candidateWorkTargetKeys = customerIds
+            .Select(FindLegacyGraphCustomerById)
+            .Where(customer => customer is not null)
+            .Cast<AbacusLegacyExportCandidateGraphCustomer>()
+            .Select(GetLegacyGraphRecommendationWorkTargetKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var preferredKeys = preferredWorkTargetKeys is null
+            ? Array.Empty<string>()
+            : candidateWorkTargetKeys
+                .Where(preferredWorkTargetKeys.Contains)
+                .ToArray();
+        foreach (var workTargetKey in preferredKeys
+                     .Concat(candidateWorkTargetKeys.Except(preferredKeys, StringComparer.Ordinal)))
+        {
+            if (TryGetLegacyGraphRecommendationScopeForKey(candidate, workTargetKey, out scope))
+            {
+                return true;
+            }
+        }
+
+        var fallbackWorkTargetKey = $"customer:{candidate.SubjectId}";
+        return TryGetLegacyGraphRecommendationScopeForKey(
+            candidate,
+            fallbackWorkTargetKey,
+            out scope);
+    }
+
+    private bool CandidateMatchesLegacyGraphRecommendationScope(
+        AbacusRecommendationCandidate candidate,
+        LegacyCustomerRecommendationScope scope) =>
+        TryGetLegacyGraphRecommendationScopeForKey(candidate, scope.WorkTargetKey, out var candidateScope) &&
+        candidateScope.Matches(scope);
+
+    private IEnumerable<KeyValuePair<string, LegacyGraphRecommendationState>>
+        GetActiveLegacyGraphRecommendationScopeStates() =>
+        legacyGraphRecommendationStates
+            .Where(pair => pair.Value.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+                           !string.IsNullOrWhiteSpace(pair.Value.WorkTargetKey) &&
+                           !string.IsNullOrWhiteSpace(pair.Value.ExternalCustomerId));
+
+    private void HydrateLegacyGraphRecommendationScopes(
+        IReadOnlySet<string>? preferredWorkTargetKeys = null)
+    {
+        foreach (var pair in legacyGraphRecommendationStates.ToArray())
+        {
+            var state = pair.Value;
+            if (state.Lifecycle != LegacyGraphRecommendationLifecycle.Active ||
+                !string.IsNullOrWhiteSpace(state.WorkTargetKey) ||
+                !string.IsNullOrWhiteSpace(state.ExternalCustomerId) ||
+                legacyGraphRecommendationCandidates.FirstOrDefault(candidate =>
+                    string.Equals(candidate.CandidateId, pair.Key, StringComparison.OrdinalIgnoreCase)) is not { } candidate ||
+                !TryInferLegacyGraphRecommendationScope(candidate, preferredWorkTargetKeys, out var scope))
+            {
+                continue;
+            }
+
+            legacyGraphRecommendationStates[pair.Key] = state with
+            {
+                WorkTargetKey = scope.WorkTargetKey,
+                ExternalCustomerId = scope.ExternalCustomerId,
+            };
+        }
+
+        foreach (var index in Enumerable.Range(0, legacyGraphMatchingChanges.Count).Reverse())
+        {
+            var change = legacyGraphMatchingChanges[index];
+            if (change.Kind != "recommendation" ||
+                !string.IsNullOrWhiteSpace(change.WorkTargetKey) ||
+                !string.IsNullOrWhiteSpace(change.ExternalCustomerId) ||
+                legacyGraphRecommendationCandidates.FirstOrDefault(candidate =>
+                    string.Equals(candidate.CandidateId, change.SubjectId, StringComparison.OrdinalIgnoreCase)) is not { } candidate ||
+                !TryInferLegacyGraphRecommendationScope(candidate, preferredWorkTargetKeys, out var scope))
+            {
+                continue;
+            }
+
+            legacyGraphMatchingChanges[index] = change with
+            {
+                WorkTargetKey = scope.WorkTargetKey,
+                ExternalCustomerId = scope.ExternalCustomerId,
+            };
+        }
+    }
+
     private IReadOnlyList<AbacusRecommendationCandidate> GetLegacyGraphRecommendationGroupMembers(
         AbacusRecommendationCandidate candidate) =>
         legacyGraphRecommendationCandidates
@@ -3927,6 +4122,13 @@ public partial class MainWindow : Window
                      .ToArray())
         {
             var state = legacyGraphRecommendationStates[candidateId];
+            if (state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+                !string.IsNullOrWhiteSpace(state.WorkTargetKey) &&
+                !string.IsNullOrWhiteSpace(state.ExternalCustomerId))
+            {
+                continue;
+            }
+
             legacyGraphRecommendationStates[candidateId] = state with
             {
                 Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
@@ -3934,13 +4136,14 @@ public partial class MainWindow : Window
             };
         }
 
+        HydrateLegacyGraphRecommendationScopes();
         legacyGraphRecommendationDecisions.Clear();
         foreach (var candidate in legacyGraphRecommendationCandidates)
         {
-            if (legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) &&
-                state.Lifecycle == LegacyGraphRecommendationLifecycle.Active)
+            var decision = GetLegacyGraphRecommendationDecision(candidate);
+            if (decision != AbacusRecommendationDecisionValues.Pending)
             {
-                legacyGraphRecommendationDecisions[candidate.CandidateId] = state.Decision;
+                legacyGraphRecommendationDecisions[candidate.CandidateId] = decision;
             }
         }
 
@@ -3986,6 +4189,13 @@ public partial class MainWindow : Window
                      .ToArray())
         {
             var state = legacyGraphRecommendationStates[candidateId];
+            if (state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+                !string.IsNullOrWhiteSpace(state.WorkTargetKey) &&
+                !string.IsNullOrWhiteSpace(state.ExternalCustomerId))
+            {
+                continue;
+            }
+
             legacyGraphRecommendationStates[candidateId] = state with
             {
                 Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
@@ -3994,13 +4204,19 @@ public partial class MainWindow : Window
             };
         }
 
+        HydrateLegacyGraphRecommendationScopes(affectedCustomerIds
+            .Select(customerId => FindLegacyGraphCustomerById(customerId))
+            .Where(customer => customer is not null)
+            .Cast<AbacusLegacyExportCandidateGraphCustomer>()
+            .Select(GetLegacyGraphRecommendationWorkTargetKey)
+            .ToHashSet(StringComparer.Ordinal));
         legacyGraphRecommendationDecisions.Clear();
         foreach (var candidate in legacyGraphRecommendationCandidates)
         {
-            if (legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) &&
-                state.Lifecycle == LegacyGraphRecommendationLifecycle.Active)
+            var decision = GetLegacyGraphRecommendationDecision(candidate);
+            if (decision != AbacusRecommendationDecisionValues.Pending)
             {
-                legacyGraphRecommendationDecisions[candidate.CandidateId] = state.Decision;
+                legacyGraphRecommendationDecisions[candidate.CandidateId] = decision;
             }
         }
 
@@ -5933,7 +6149,9 @@ public partial class MainWindow : Window
                      pair.Value.Decision,
                      pair.Value.Lifecycle,
                      pair.Value.ResolutionReason,
-                     pair.Value.UpdatedAtUtc))
+                     pair.Value.UpdatedAtUtc,
+                     pair.Value.WorkTargetKey,
+                     pair.Value.ExternalCustomerId))
                  .ToArray(),
              new Dictionary<string, string>(legacyGraphCustomerNameOverrides, StringComparer.Ordinal),
              legacyGraphMatchingCategory,
@@ -5946,7 +6164,9 @@ public partial class MainWindow : Window
                      change.Title,
                      change.Details,
                      change.CreatedAtUtc,
-                     change.CustomerId))
+                     change.CustomerId,
+                     change.WorkTargetKey,
+                     change.ExternalCustomerId))
                  .ToArray(),
              new Dictionary<string, string>(
                  legacyGraphLogicalCustomerMergeGroupByCustomerId,
@@ -6032,7 +6252,9 @@ public partial class MainWindow : Window
         }
         ValidateCheckpointKeys(
             recommendationStates
-                .Where(state => state.Lifecycle == LegacyGraphRecommendationLifecycle.Active)
+                .Where(state => state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+                                string.IsNullOrWhiteSpace(state.WorkTargetKey) &&
+                                string.IsNullOrWhiteSpace(state.ExternalCustomerId))
                 .Select(state => state.CandidateId),
             recommendationCandidateIds,
             "おすすめ判定状態");
@@ -6192,7 +6414,9 @@ public partial class MainWindow : Window
                 state.Decision,
                 state.Lifecycle,
                 state.ResolutionReason,
-                state.UpdatedAtUtc);
+                state.UpdatedAtUtc,
+                state.WorkTargetKey,
+                state.ExternalCustomerId);
             if (state.Lifecycle == LegacyGraphRecommendationLifecycle.Active)
             {
                 legacyGraphRecommendationDecisions[state.CandidateId] = state.Decision;
@@ -6213,7 +6437,9 @@ public partial class MainWindow : Window
                 change.Title,
                 change.Details,
                 change.CreatedAtUtc,
-                change.CustomerId));
+                change.CustomerId,
+                change.WorkTargetKey,
+                change.ExternalCustomerId));
         }
         RestoreSet(legacyGraphUnconnectedDocumentKeys, checkpoint.UnconnectedDocumentKeys);
         RestoreSet(legacyGraphTrayDocumentKeys, checkpoint.TrayDocumentKeys);
@@ -9377,6 +9603,74 @@ public partial class MainWindow : Window
             .ToArray();
     }
 
+    private void MigrateLegacyGraphRecommendationScopes(
+        IReadOnlySet<string> previousWorkTargetKeys,
+        string newWorkTargetKey,
+        IReadOnlySet<string> newWorkTargetCustomerIds)
+    {
+        if (previousWorkTargetKeys.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var pair in legacyGraphRecommendationStates.ToArray())
+        {
+            var state = pair.Value;
+            if (state.Lifecycle != LegacyGraphRecommendationLifecycle.Active ||
+                string.IsNullOrWhiteSpace(state.WorkTargetKey) ||
+                string.IsNullOrWhiteSpace(state.ExternalCustomerId) ||
+                !previousWorkTargetKeys.Contains(state.WorkTargetKey))
+            {
+                continue;
+            }
+
+            if (newWorkTargetCustomerIds.Contains(state.ExternalCustomerId))
+            {
+                legacyGraphRecommendationStates[pair.Key] = state with
+                {
+                    Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
+                    ResolutionReason = "候補顧客を同じ論理顧客グループへ統合したため、別人判定を解消しました。",
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                legacyGraphRecommendationDecisions.Remove(pair.Key);
+                continue;
+            }
+
+            legacyGraphRecommendationStates[pair.Key] = state with
+            {
+                WorkTargetKey = newWorkTargetKey,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+        }
+
+        foreach (var index in Enumerable.Range(0, legacyGraphMatchingChanges.Count).Reverse())
+        {
+            var change = legacyGraphMatchingChanges[index];
+            if (change.Kind != "recommendation" ||
+                string.IsNullOrWhiteSpace(change.WorkTargetKey) ||
+                string.IsNullOrWhiteSpace(change.ExternalCustomerId) ||
+                !previousWorkTargetKeys.Contains(change.WorkTargetKey))
+            {
+                continue;
+            }
+
+            if (newWorkTargetCustomerIds.Contains(change.ExternalCustomerId))
+            {
+                legacyGraphMatchingChanges.RemoveAt(index);
+                continue;
+            }
+
+            var migratedScope = new LegacyCustomerRecommendationScope(
+                newWorkTargetKey,
+                change.ExternalCustomerId);
+            legacyGraphMatchingChanges[index] = change with
+            {
+                ChangeId = BuildLegacyGraphRecommendationScopeChangeId(migratedScope),
+                WorkTargetKey = migratedScope.WorkTargetKey,
+            };
+        }
+    }
+
     private string AcceptLegacyGraphCustomerMerge(
         AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
         AbacusLegacyExportCandidateGraphCustomer targetCustomer)
@@ -9389,6 +9683,16 @@ public partial class MainWindow : Window
                           legacyGraphCustomerGroupExpanded.GetValueOrDefault(targetMergeKey);
         var sourceKey = GetLegacyGraphLogicalCustomerKey(sourceCustomer);
         var targetKey = GetLegacyGraphLogicalCustomerKey(targetCustomer);
+        var previousRecommendationScopeKeys = new[]
+                {
+                    sourceMergeKey,
+                    targetMergeKey,
+                    sourceKey,
+                    targetKey,
+                }
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .ToHashSet(StringComparer.Ordinal);
+        HydrateLegacyGraphRecommendationScopes(previousRecommendationScopeKeys);
         var sourceGroup = legacyGraphCustomerMergeGroups.TryGetValue(sourceKey, out var existingSourceGroup) &&
                           IsLegacyGraphLogicalCustomerGroup(sourceKey)
             ? existingSourceGroup
@@ -9502,6 +9806,11 @@ public partial class MainWindow : Window
         {
             RemoveLegacyGraphCustomerFromOtherMergeGroups(customerId, mergeGroup.GroupId);
         }
+
+        MigrateLegacyGraphRecommendationScopes(
+            previousRecommendationScopeKeys,
+            mergeGroup.GroupId,
+            mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
 
         InvalidateLegacyGraphImportConfirmation();
         RebuildLegacyGraphRecommendationCandidatesForCustomers(
@@ -15090,24 +15399,126 @@ public partial class MainWindow : Window
     }
 
     private string GetLegacyGraphRecommendationDecision(
-        AbacusRecommendationCandidate candidate) =>
-        legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) &&
-        state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
-        AbacusRecommendationDecisionValues.IsSupported(state.Decision)
-            ? state.Decision
-            : legacyGraphRecommendationDecisions.TryGetValue(candidate.CandidateId, out var decision) &&
-              AbacusRecommendationDecisionValues.IsSupported(decision)
-                ? decision
-                : AbacusRecommendationDecisionValues.Pending;
+        AbacusRecommendationCandidate candidate)
+    {
+        var scopedStates = GetActiveLegacyGraphRecommendationScopeStates();
+        if (TryGetLegacyGraphCurrentRecommendationScope(candidate, out var currentScope))
+        {
+            var currentScopedState = scopedStates
+                .Where(pair =>
+                    string.Equals(pair.Value.WorkTargetKey, currentScope.WorkTargetKey, StringComparison.Ordinal) &&
+                    string.Equals(pair.Value.ExternalCustomerId, currentScope.ExternalCustomerId, StringComparison.Ordinal))
+                .OrderByDescending(pair => pair.Value.UpdatedAtUtc)
+                .Select(pair => pair.Value)
+                .FirstOrDefault();
+            if (currentScopedState is not null &&
+                AbacusRecommendationDecisionValues.IsSupported(currentScopedState.Decision))
+            {
+                return currentScopedState.Decision;
+            }
+        }
+
+        var matchingScopedState = scopedStates
+            .Where(pair => CandidateMatchesLegacyGraphRecommendationScope(candidate, new LegacyCustomerRecommendationScope(
+                pair.Value.WorkTargetKey!,
+                pair.Value.ExternalCustomerId!)))
+            .OrderByDescending(pair => pair.Value.UpdatedAtUtc)
+            .Select(pair => pair.Value)
+            .FirstOrDefault();
+        if (matchingScopedState is not null &&
+            AbacusRecommendationDecisionValues.IsSupported(matchingScopedState.Decision))
+        {
+            return matchingScopedState.Decision;
+        }
+
+        if (legacyGraphRecommendationStates.TryGetValue(candidate.CandidateId, out var state) &&
+            state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+            AbacusRecommendationDecisionValues.IsSupported(state.Decision))
+        {
+            return state.Decision;
+        }
+
+        return legacyGraphRecommendationDecisions.TryGetValue(candidate.CandidateId, out var decision) &&
+               AbacusRecommendationDecisionValues.IsSupported(decision)
+            ? decision
+            : AbacusRecommendationDecisionValues.Pending;
+    }
+
+    private static string BuildLegacyGraphRecommendationScopeChangeId(
+        LegacyCustomerRecommendationScope scope) =>
+        string.Join("\u001F", "recommendation-scope", scope.WorkTargetKey, scope.ExternalCustomerId);
+
+    private void RemoveLegacyGraphRecommendationChange(
+        LegacyCustomerRecommendationScope? scope,
+        string? candidateId = null)
+    {
+        legacyGraphMatchingChanges.RemoveAll(change =>
+            change.Kind == "recommendation" &&
+            ((scope is not null &&
+              string.Equals(change.WorkTargetKey, scope.WorkTargetKey, StringComparison.Ordinal) &&
+              string.Equals(change.ExternalCustomerId, scope.ExternalCustomerId, StringComparison.Ordinal)) ||
+             candidateId is not null &&
+             (string.Equals(change.SubjectId, candidateId, StringComparison.OrdinalIgnoreCase) ||
+              string.Equals(change.ChangeId, $"recommendation:{candidateId}", StringComparison.OrdinalIgnoreCase))));
+    }
+
+    private bool ResetLegacyGraphRecommendationScope(
+        LegacyCustomerRecommendationScope scope)
+    {
+        var currentCandidates = legacyGraphRecommendationCandidates
+            .Where(candidate =>
+                LegacyMatchingCategoryKinds.GetKind(candidate) == LegacyMatchingCategoryKinds.Customer &&
+                IsLegacyGraphRecommendationActive(candidate) &&
+                CandidateMatchesLegacyGraphRecommendationScope(candidate, scope))
+            .ToArray();
+
+        foreach (var pair in legacyGraphRecommendationStates.ToArray())
+        {
+            var state = pair.Value;
+            if (state.Lifecycle != LegacyGraphRecommendationLifecycle.Active ||
+                !string.Equals(state.WorkTargetKey, scope.WorkTargetKey, StringComparison.Ordinal) ||
+                !string.Equals(state.ExternalCustomerId, scope.ExternalCustomerId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            legacyGraphRecommendationStates[pair.Key] = state with
+            {
+                Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
+                ResolutionReason = "ユーザーが別人判定を元に戻しました。",
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            legacyGraphRecommendationDecisions.Remove(pair.Key);
+        }
+
+        foreach (var candidate in currentCandidates)
+        {
+            SetLegacyGraphRecommendationState(
+                candidate,
+                AbacusRecommendationDecisionValues.Pending,
+                scope);
+        }
+
+        RemoveLegacyGraphRecommendationChange(scope);
+        return currentCandidates.Length > 0 ||
+               legacyGraphRecommendationStates.Values.Any(state =>
+                   state.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
+                   string.Equals(state.WorkTargetKey, scope.WorkTargetKey, StringComparison.Ordinal) &&
+                   string.Equals(state.ExternalCustomerId, scope.ExternalCustomerId, StringComparison.Ordinal));
+    }
 
     private void AddLegacyMatchingChange(
         AbacusRecommendationCandidate candidate,
         string decision,
         string previousDecision)
     {
-        var changeId = $"recommendation:{candidate.CandidateId}";
-        legacyGraphMatchingChanges.RemoveAll(change =>
-            string.Equals(change.ChangeId, changeId, StringComparison.OrdinalIgnoreCase));
+        var hasScope = TryGetLegacyGraphCurrentRecommendationScope(candidate, out var scope);
+        var changeId = hasScope
+            ? BuildLegacyGraphRecommendationScopeChangeId(scope)
+            : $"recommendation:{candidate.CandidateId}";
+        RemoveLegacyGraphRecommendationChange(
+            hasScope ? scope : null,
+            hasScope ? null : candidate.CandidateId);
 
         if (decision == AbacusRecommendationDecisionValues.Rejected)
         {
@@ -15124,7 +15535,9 @@ public partial class MainWindow : Window
                 $"紐付け先: {subject.TargetText}\n" +
                 $"元の判定: {GetLegacyMatchingDecisionText(previousDecision)} / 元に戻せます。",
                 DateTimeOffset.UtcNow,
-                GetLegacyMatchingChangeCustomerId()));
+                GetLegacyMatchingChangeCustomerId(),
+                hasScope ? scope.WorkTargetKey : null,
+                hasScope ? scope.ExternalCustomerId : null));
         }
     }
 
@@ -15273,13 +15686,44 @@ public partial class MainWindow : Window
 
     private void SetLegacyGraphRecommendationState(
         AbacusRecommendationCandidate candidate,
-        string decision)
+        string decision,
+        LegacyCustomerRecommendationScope? scope = null)
     {
+        if (scope is null &&
+            LegacyMatchingCategoryKinds.GetKind(candidate) == LegacyMatchingCategoryKinds.Customer)
+        {
+            TryGetLegacyGraphCurrentRecommendationScope(candidate, out scope);
+        }
+
+        if (scope is not null)
+        {
+            foreach (var pair in legacyGraphRecommendationStates.ToArray())
+            {
+                if (string.Equals(pair.Key, candidate.CandidateId, StringComparison.OrdinalIgnoreCase) ||
+                    pair.Value.Lifecycle != LegacyGraphRecommendationLifecycle.Active ||
+                    !string.Equals(pair.Value.WorkTargetKey, scope.WorkTargetKey, StringComparison.Ordinal) ||
+                    !string.Equals(pair.Value.ExternalCustomerId, scope.ExternalCustomerId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                legacyGraphRecommendationStates[pair.Key] = pair.Value with
+                {
+                    Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
+                    ResolutionReason = "同じ作業対象と候補顧客の最新判定へ統合しました。",
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                legacyGraphRecommendationDecisions.Remove(pair.Key);
+            }
+        }
+
         legacyGraphRecommendationStates[candidate.CandidateId] = new LegacyGraphRecommendationState(
             decision,
             LegacyGraphRecommendationLifecycle.Active,
             null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            scope?.WorkTargetKey,
+            scope?.ExternalCustomerId);
         if (decision == AbacusRecommendationDecisionValues.Pending)
         {
             legacyGraphRecommendationDecisions.Remove(candidate.CandidateId);
@@ -17728,7 +18172,9 @@ public partial class MainWindow : Window
         string Title,
         string Details,
         DateTimeOffset CreatedAtUtc,
-        string? CustomerId = null);
+        string? CustomerId = null,
+        string? WorkTargetKey = null,
+        string? ExternalCustomerId = null);
 
     private sealed record LegacyMatchingUnresolvedItem(
         object Item,
