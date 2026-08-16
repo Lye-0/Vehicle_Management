@@ -245,17 +245,27 @@ public partial class MainWindow : Window
         ScheduleLegacyGraphWorkspaceHeightUpdate();
     }
 
+    private void LegacyGraphPageScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        // マッチング領域が外側ページの下側にある場合、初回レイアウト時には
+        // 有効な高さを計算できないことがあります。ページのスクロール後にも再計算します。
+        if (Math.Abs(e.VerticalChange) > double.Epsilon ||
+            Math.Abs(e.ViewportHeightChange) > double.Epsilon)
+        {
+            ScheduleLegacyGraphWorkspaceHeightUpdate();
+        }
+    }
+
     private void LegacyGraphPageScrollViewer_Loaded(object sender, RoutedEventArgs e)
     {
-        // 起動時にチェックポイントからマッチングUIを復元する場合、
-        // SetLegacyGraphUiMode は Loaded 前に呼ばれるため、その時点の高さ更新は予約されません。
-        // 読み込み後の有限なViewportを使って、右側詳細のスクロール領域を確定します。
+        // 起動時にチェックポイントからマッチングUIを復元する場合も、
+        // 読み込み後の有限なViewportを使って右側詳細のスクロール領域を確定します。
         ScheduleLegacyGraphWorkspaceHeightUpdate();
     }
 
     private void ScheduleLegacyGraphWorkspaceHeightUpdate()
     {
-        if (!IsLoaded ||
+        if (LegacyGraphPageScrollViewer is null ||
             LegacyGraphWorkspaceGrid is null)
         {
             return;
@@ -310,17 +320,16 @@ public partial class MainWindow : Window
                 .TransformToAncestor(LegacyGraphPageContent)
                 .Transform(new Point(0, 0))
                 .Y;
-            var matchingPageTopInViewport = LegacyGraphMatchingPageGrid
-                .TransformToAncestor(LegacyGraphPageScrollViewer)
-                .Transform(new Point(0, 0))
-                .Y;
             var contentAfterMatchingPage = Math.Max(
                 0,
                 LegacyGraphPageContent.ActualHeight -
                 matchingPageTopInContent -
                 LegacyGraphMatchingPageGrid.ActualHeight);
+            // マッチング領域は外側ページのスクロール位置に関係なく、
+            // 「ビューポートの高さ - マッチング領域より後ろの固定コンテンツ」の
+            // 有限高さを持たせます。ページ内でマッチング領域がまだ見えていない場合に
+            // ページ内の位置を引くと、負の値になって高さ設定が中止されます。
             var availableMatchingPageHeight = LegacyGraphPageScrollViewer.ViewportHeight -
-                                               matchingPageTopInViewport -
                                                contentAfterMatchingPage;
             if (double.IsNaN(availableMatchingPageHeight) ||
                 double.IsInfinity(availableMatchingPageHeight) ||

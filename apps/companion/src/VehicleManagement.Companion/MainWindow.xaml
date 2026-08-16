@@ -949,6 +949,7 @@
                               Background="Transparent"
                               Loaded="LegacyGraphPageScrollViewer_Loaded"
                               SizeChanged="LegacyGraphPageScrollViewer_SizeChanged"
+                              ScrollChanged="LegacyGraphPageScrollViewer_ScrollChanged"
                               PreviewMouseWheel="LegacyGraphPageScrollViewer_PreviewMouseWheel">
                     <Grid>
                         <StackPanel x:Name="LegacyGraphPageContent" Margin="24">
