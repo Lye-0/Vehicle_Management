@@ -306,17 +306,21 @@ public partial class MainWindow : Window
             LegacyGraphMatchingPageGrid.ClearValue(FrameworkElement.HeightProperty);
             LegacyGraphPageScrollViewer.UpdateLayout();
 
-            var matchingPageTop = LegacyGraphMatchingPageGrid
+            var matchingPageTopInContent = LegacyGraphMatchingPageGrid
                 .TransformToAncestor(LegacyGraphPageContent)
+                .Transform(new Point(0, 0))
+                .Y;
+            var matchingPageTopInViewport = LegacyGraphMatchingPageGrid
+                .TransformToAncestor(LegacyGraphPageScrollViewer)
                 .Transform(new Point(0, 0))
                 .Y;
             var contentAfterMatchingPage = Math.Max(
                 0,
                 LegacyGraphPageContent.ActualHeight -
-                matchingPageTop -
+                matchingPageTopInContent -
                 LegacyGraphMatchingPageGrid.ActualHeight);
             var availableMatchingPageHeight = LegacyGraphPageScrollViewer.ViewportHeight -
-                                               matchingPageTop -
+                                               matchingPageTopInViewport -
                                                contentAfterMatchingPage;
             if (double.IsNaN(availableMatchingPageHeight) ||
                 double.IsInfinity(availableMatchingPageHeight) ||
