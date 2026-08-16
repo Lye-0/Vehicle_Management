@@ -40,9 +40,11 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Style.Triggers>
                 <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Background" Value="#DBEAFE" />
-                    <Setter Property="BorderBrush" Value="#93C5FD" />
-                    <Setter Property="Foreground" Value="#60A5FA" />
+                    <Setter Property="Background" Value="#F1F5F9" />
+                    <Setter Property="BorderBrush" Value="#CBD5E1" />
+                    <Setter Property="Foreground" Value="#94A3B8" />
+                    <Setter Property="FontWeight" Value="Normal" />
+                    <Setter Property="Cursor" Value="Arrow" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -1707,28 +1709,17 @@
                                                    Foreground="#805B10" FontSize="12" TextWrapping="Wrap" />
                                         <Button x:Name="LegacyGraphMergeButton" Margin="0,16,0,0"
                                                 Style="{StaticResource LegacyGraphPreviewButton}"
-                                                Content="顧客情報をプレビュー" IsEnabled="False"
+                                                Content="顧客情報をプレビュー" IsEnabled="False" Visibility="Collapsed"
                                                 Click="LegacyGraphMergeButton_Click" />
-                                        <Button x:Name="LegacyGraphApplyMergePreviewButton" Margin="0,8,0,0"
-                                                Style="{StaticResource LegacyGraphApproveButton}"
-                                                Content="統合を反映" IsEnabled="False"
-                                                Click="LegacyGraphApplyMergePreviewButton_Click" />
+                                        <TextBlock x:Name="LegacyGraphCustomerApprovalReasonText" Margin="0,6,0,0"
+                                                   Foreground="#805B10" FontSize="11" TextWrapping="Wrap"
+                                                   Visibility="Collapsed" />
                                         <Button x:Name="LegacyGraphCustomerApproveButton" Margin="0,8,0,0"
                                                 Style="{StaticResource LegacyGraphApproveButton}"
-                                                Content="キャンバスを承認" IsEnabled="False" Visibility="Collapsed"
+                                                Content="この顧客を確定" IsEnabled="False" Visibility="Collapsed"
                                                 Click="LegacyGraphCustomerApproveButton_Click" />
-                                        <Button x:Name="LegacyGraphRemoveCustomerFromMergeButton" Margin="0,8,0,0"
-                                                Content="選択顧客を統合候補から外す" IsEnabled="False"
-                                                Visibility="Collapsed" Click="LegacyGraphRemoveCustomerFromMergeButton_Click" />
-                                        <Button x:Name="LegacyGraphDissolveCustomerMergeButton" Margin="0,8,0,0"
-                                                Content="統合候補を解消" IsEnabled="False"
-                                                Visibility="Collapsed" Click="LegacyGraphDissolveCustomerMergeButton_Click" />
                                         <Button x:Name="LegacyGraphReassignButton" Content="仮紐付けを解除"
                                                 IsEnabled="False" Visibility="Collapsed" Click="LegacyGraphClearManualLinkButton_Click" />
-                                        <Button x:Name="LegacyGraphTrashButton" Margin="0,8,0,0"
-                                                Content="ごみ箱へ移動"
-                                                IsEnabled="False" Visibility="Collapsed"
-                                                Click="LegacyGraphTrashButton_Click" />
                                         <TabControl x:Name="LegacyGraphInspectorTabs" Margin="0,14,0,0">
                                             <TabItem Header="統合後">
                                                 <StackPanel Margin="0,8,0,0">

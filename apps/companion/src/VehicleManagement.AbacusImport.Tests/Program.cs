@@ -16,6 +16,13 @@ var tests = new (string Name, Action Test)[]
     ("同一論理書類の候補は1操作に集約される", SameLogicalDocumentRecommendationsAreGrouped),
     ("未処理の自動統合候補先は顧客巡回から除外され却下後に戻る", PendingAutomaticCustomerTargetsAreHidden),
     ("別顧客を接続先とする書類候補は現在顧客の範囲外になる", CrossCustomerDocumentTargetIsOutsideCurrentScope),
+    ("統合候補をすべて拒否すると統合意思が残らない", AllRejectedCandidatesHaveNoMergeIntent),
+    ("グラフ確定で残り候補を処理済みにすると未処理と保留が0になる", GraphApprovalCompletesRecommendationGate),
+    ("顧客確定ゲートは統合時だけ採用プレビューを要求する", CustomerReviewGateRequiresCustomerPreview),
+    ("顧客確定ゲートは保存済み採用内容で確定可能になる", CustomerReviewGateAllowsSavedMergeDraft),
+    ("顧客確定ゲートは未反映統合だけでは確定を止めない", CustomerReviewGateIgnoresUnappliedMerge),
+    ("顧客確定ゲートはマッチング候補の未処理と分離される", CustomerApprovalGateIgnoresMatchingQueue),
+    ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
 };
 
@@ -272,6 +279,128 @@ static void CrossCustomerDocumentTargetIsOutsideCurrentScope()
         "別顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲に含まれています。");
     Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(currentCustomerCandidate, currentCustomerIds),
         "現在顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲から除外されています。");
+}
+
+static void CustomerReviewGateRequiresCustomerPreview()
+{
+    Assert(!LegacyMatchingWorkflow.RequiresCustomerPreview(false, false),
+        "統合候補のない普通の顧客に採用プレビューを要求しています。");
+    Assert(LegacyMatchingWorkflow.RequiresCustomerPreview(true, false),
+        "採用プレビュー未設定の統合候補を確定可能として扱っています。");
+
+    var blocked = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        [],
+        new Dictionary<string, string>(),
+        requiresCustomerPreview: true);
+    Assert(blocked.RequiresCustomerPreview && !blocked.CanApprove,
+        "採用プレビュー未設定の顧客を確定可能として扱っています。");
+
+    var ordinary = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        [],
+        new Dictionary<string, string>(),
+        requiresCustomerPreview: false);
+    Assert(ordinary.CanApprove,
+        "候補も採用プレビューもない普通の顧客を確定可能として判定できていません。");
+}
+
+static void AllRejectedCandidatesHaveNoMergeIntent()
+{
+    var candidates = new[]
+    {
+        RecommendationCandidate("candidate-rejected-a", "customer-a"),
+        RecommendationCandidate("candidate-rejected-b", "customer-a"),
+    };
+    var decisions = new Dictionary<string, string>
+    {
+        ["candidate-rejected-a"] = AbacusRecommendationDecisionValues.Rejected,
+        ["candidate-rejected-b"] = AbacusRecommendationDecisionValues.Rejected,
+    };
+
+    Assert(LegacyMatchingWorkflow.AreAllCandidatesRejected(candidates, decisions),
+        "すべて拒否した顧客統合候補を未解決の統合意思として扱っています。");
+
+    decisions["candidate-rejected-b"] = AbacusRecommendationDecisionValues.Pending;
+    Assert(!LegacyMatchingWorkflow.AreAllCandidatesRejected(candidates, decisions),
+        "未処理の顧客統合候補まで拒否済みとして扱っています。");
+}
+
+static void GraphApprovalCompletesRecommendationGate()
+{
+    var candidates = new[]
+    {
+        RecommendationCandidate("candidate-graph-pending", "customer-a"),
+        RecommendationCandidate("candidate-graph-held", "customer-a"),
+    };
+    var decisions = new Dictionary<string, string>
+    {
+        ["candidate-graph-pending"] = AbacusRecommendationDecisionValues.Rejected,
+        ["candidate-graph-held"] = AbacusRecommendationDecisionValues.Rejected,
+    };
+
+    var gate = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        candidates,
+        decisions,
+        requiresCustomerPreview: false);
+    Assert(gate.PendingCount == 0 && gate.HeldCount == 0 && gate.CanApprove,
+        "グラフ確定後も候補ゲートに未処理または保留が残っています。");
+}
+
+static void CustomerReviewGateAllowsSavedMergeDraft()
+{
+    var requiresPreview = LegacyMatchingWorkflow.RequiresCustomerPreview(
+        hasMergeCandidates: true,
+        hasCompleteMergeDraft: true);
+    var gate = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        [],
+        new Dictionary<string, string>(),
+        requiresPreview);
+
+    Assert(!requiresPreview && gate.CanApprove,
+        "統合プレビューを保存した顧客を確定可能として判定できていません。");
+}
+
+static void CustomerReviewGateIgnoresUnappliedMerge()
+{
+    var gate = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        [],
+        new Dictionary<string, string>(),
+        requiresCustomerPreview: false);
+
+    Assert(gate.CanApprove,
+        "未反映の統合が残っていることだけで顧客確定を無効にしています。");
+}
+
+static void CustomerReviewGateCountsPendingAndHeld()
+{
+    var candidates = new[]
+    {
+        RecommendationCandidate("candidate-pending", "customer-a"),
+        RecommendationCandidate("candidate-held", "customer-a"),
+    };
+    var gate = LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+        candidates,
+        new Dictionary<string, string>
+        {
+            ["candidate-held"] = AbacusRecommendationDecisionValues.Hold,
+        },
+        requiresCustomerPreview: false);
+
+    Assert(gate.PendingCount == 1 && gate.HeldCount == 1 && !gate.CanApprove,
+        "マッチング候補キューが未処理・保留候補を正しく数えていません。");
+}
+
+static void CustomerApprovalGateIgnoresMatchingQueue()
+{
+    var gate = LegacyMatchingWorkflow.EvaluateCustomerApprovalGate(
+        requiresCustomerPreview: false);
+
+    Assert(gate.PendingCount == 0 && gate.HeldCount == 0 && gate.CanApprove,
+        "顧客最終確定がマッチング候補キューの状態に依存しています。");
+
+    var mergeBlocked = LegacyMatchingWorkflow.EvaluateCustomerApprovalGate(
+        requiresCustomerPreview: true);
+    Assert(!mergeBlocked.CanApprove && mergeBlocked.RequiresCustomerPreview,
+        "統合顧客の採用内容未設定を顧客最終確定の条件として扱えていません。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

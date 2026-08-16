@@ -60,6 +60,18 @@ public sealed record LegacyMatchingCategorySummary(
 }
 
 /// <summary>
+/// 顧客単位の確認で使う、保存対象ではない純粋な判定結果です。
+/// Pending/Hold はマッチング候補キューの集計値であり、顧客最終確定の可否とは分離して扱います。
+/// </summary>
+public sealed record LegacyCustomerReviewGate(
+    int PendingCount,
+    int HeldCount,
+    bool RequiresCustomerPreview)
+{
+    public bool CanApprove => PendingCount == 0 && HeldCount == 0 && !RequiresCustomerPreview;
+}
+
+/// <summary>
 /// 顧客巡回から除外する未処理の自動統合候補を表します。
 /// 顧客単位UIでは、候補として表示される側を独立顧客としてもう一度巡回しません。
 /// </summary>
@@ -139,6 +151,61 @@ public static class LegacyMatchingWorkflow
                 AbacusRecommendationDecisionValues.Rejected or
                 AbacusRecommendationDecisionValues.Hold;
         });
+
+    /// <summary>
+    /// 候補が存在することと、顧客統合の意思が残っていることを区別します。
+    /// 候補をすべて拒否した場合は、顧客情報の統合プレビューを要求しません。
+    /// </summary>
+    public static bool AreAllCandidatesRejected(
+        IEnumerable<AbacusRecommendationCandidate> candidates,
+        IReadOnlyDictionary<string, string> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(decisions);
+
+        var candidateList = candidates.ToArray();
+        return candidateList.Length > 0 &&
+               candidateList.All(candidate =>
+                   GetDecision(decisions, candidate) == AbacusRecommendationDecisionValues.Rejected);
+    }
+
+    /// <summary>
+    /// 顧客情報プレビューが必要なのは、複数顧客を統合する場合で、
+    /// かつ採用内容がまだ保存されていない場合だけです。
+    /// 統合の反映済み・未反映はこの判定に含めません。
+    /// </summary>
+    public static bool RequiresCustomerPreview(
+        bool hasMergeCandidates,
+        bool hasCompleteMergeDraft) =>
+        hasMergeCandidates && !hasCompleteMergeDraft;
+
+    /// <summary>
+    /// 顧客の最終確定ゲートを、マッチング候補キューから切り離して評価します。
+    /// 候補の承認・却下・保留は別の作業状態であり、顧客の現在内容を確定する操作をブロックしません。
+    /// </summary>
+    public static LegacyCustomerReviewGate EvaluateCustomerApprovalGate(
+        bool requiresCustomerPreview) =>
+        new(0, 0, requiresCustomerPreview);
+
+    /// <summary>
+    /// マッチング候補キューの未処理・保留件数を集計します。
+    /// 顧客最終確定ゲートとは別に、候補巡回の表示・進捗で利用します。
+    /// </summary>
+    public static LegacyCustomerReviewGate EvaluateCustomerReviewGate(
+        IEnumerable<AbacusRecommendationCandidate> candidates,
+        IReadOnlyDictionary<string, string> decisions,
+        bool requiresCustomerPreview)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(decisions);
+
+        var candidateList = candidates.ToArray();
+        var pendingCount = candidateList.Count(candidate =>
+            GetDecision(decisions, candidate) == AbacusRecommendationDecisionValues.Pending);
+        var heldCount = candidateList.Count(candidate =>
+            GetDecision(decisions, candidate) == AbacusRecommendationDecisionValues.Hold);
+        return new LegacyCustomerReviewGate(pendingCount, heldCount, requiresCustomerPreview);
+    }
 
     public static bool IsRelatedToCustomer(
         AbacusRecommendationCandidate candidate,
