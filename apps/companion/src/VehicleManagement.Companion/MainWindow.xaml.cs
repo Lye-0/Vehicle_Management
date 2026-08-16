@@ -2014,7 +2014,6 @@ public partial class MainWindow : Window
                 $"{item.OwnerLabel} / {Fallback(item.Document.DocumentDate)} / {Fallback(item.Document.TotalAmount)}"))
             .ToArray();
         var allRecommendations = GetLegacyGraphMatchingRecommendations(customer);
-        var reviewSnapshot = GetLegacyGraphCustomerReviewSnapshot(sourceCustomer, allRecommendations);
         var recommendationItems = allRecommendations
             .Select(candidate => CreateLegacyMatchingRecommendationItem(candidate, sourceCustomer))
             .ToArray();
@@ -2022,21 +2021,9 @@ public partial class MainWindow : Window
         SetLegacyMatchingHeader(
             GetLegacyGraphCustomerDisplayName(sourceCustomer),
             $"顧客 {legacyGraphMatchingCustomerIndex + 1:N0} / {customers.Count:N0}",
-            $"顧客番号: {Fallback(sourceCustomer.CustomerNumber)} / " +
             $"ふりがな: {Fallback(sourceCustomer.NameKana)} / " +
             $"電話: {Fallback(sourceCustomer.PhoneNumber)} / " +
-            $"住所: {Fallback(sourceCustomer.Address)}\n" +
-            $"確定済み: 車両 {confirmedVehicles.Length:N0}台・書類 {confirmedDocuments.Length:N0}件 / " +
-            $"おすすめ {allRecommendations.Count(candidate =>
-                GetLegacyGraphRecommendationDecision(candidate) is AbacusRecommendationDecisionValues.Pending or
-                    AbacusRecommendationDecisionValues.Hold):N0}件 / 保留 {allRecommendations.Count(candidate =>
-                    GetLegacyGraphRecommendationDecision(candidate) == AbacusRecommendationDecisionValues.Hold):N0}件 / " +
-            $"顧客確認: {reviewSnapshot.Status switch
-            {
-                LegacyGraphCustomerReviewStateValues.Approved => "完了",
-                LegacyGraphCustomerReviewStateValues.NeedsReview => "再確認待ち",
-                _ => "未完了",
-            }}",
+            $"住所: {Fallback(sourceCustomer.Address)}",
             hasCustomer: true,
             canGoPrevious: legacyGraphMatchingCustomerIndex > 0,
             canGoNext: legacyGraphMatchingCustomerIndex >= 0 &&
