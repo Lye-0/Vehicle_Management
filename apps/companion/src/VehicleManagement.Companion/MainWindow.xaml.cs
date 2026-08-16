@@ -2621,8 +2621,8 @@ public partial class MainWindow : Window
             ? "採用内容を再確認"
             : "顧客情報を確認・統一";
         LegacyMatchingCustomerMergePreviewStatusText.Text = hasDraft
-            ? "採用値を保存済みです。必要なら再確認できます。"
-            : "統合対象の顧客情報から、最終採用値を選択してください。";
+            ? "顧客情報 ✓ 決定済み"
+            : "顧客情報 [未決定]";
     }
 
     private void LegacyMatchingOpenCustomerMergePreviewButton_Click(
@@ -10196,6 +10196,8 @@ public partial class MainWindow : Window
         if (LegacyMatchingCustomerApprovalBorder is null ||
             LegacyMatchingCustomerReviewSummaryText is null ||
             LegacyMatchingCustomerApprovalStatusText is null ||
+            LegacyMatchingCustomerApprovalStateBorder is null ||
+            LegacyMatchingCustomerApprovalStateText is null ||
             LegacyMatchingCustomerApproveButton is null)
         {
             return;
@@ -10207,6 +10209,7 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         LegacyMatchingCustomerApproveButton.IsEnabled = false;
+        LegacyMatchingCustomerApprovalStateText.Text = "";
         if (customer is null)
         {
             LegacyMatchingCustomerReviewSummaryText.Text = "顧客単位の確認対象はありません。";
@@ -10228,8 +10231,13 @@ public partial class MainWindow : Window
             StringComparison.Ordinal);
         if (approved)
         {
+            LegacyMatchingCustomerReviewSummaryText.Text = "";
             LegacyMatchingCustomerApprovalStatusText.Text =
-                "✓ この顧客の確認は完了しています。変更した場合は再確認が必要です。";
+                "✓ この顧客の確認は完了しています";
+            LegacyMatchingCustomerApprovalStateText.Text = "承認済み";
+            LegacyMatchingCustomerApprovalStateBorder.Background = ToBrush("#EAF2FF");
+            LegacyMatchingCustomerApprovalStateBorder.BorderBrush = ToBrush("#93C5FD");
+            LegacyMatchingCustomerApprovalStateText.Foreground = ToBrush("#1D4ED8");
             LegacyMatchingCustomerApproveButton.Content = "顧客確認済み";
             LegacyMatchingCustomerApprovalBorder.Background = ToBrush("#EAF2FF");
             LegacyMatchingCustomerApprovalBorder.BorderBrush = ToBrush("#93C5FD");
@@ -10238,47 +10246,73 @@ public partial class MainWindow : Window
         }
 
         LegacyMatchingCustomerApproveButton.Content = "この顧客を確定";
-        LegacyMatchingCustomerApprovalStatusText.Text = snapshot.Status ==
+        LegacyMatchingCustomerApprovalStatusText.Text =
+            BuildLegacyMatchingCustomerApprovalStatusText(categorySummaries, snapshot);
+        LegacyMatchingCustomerApprovalStateText.Text = snapshot.Status ==
                 LegacyGraphCustomerReviewStateValues.NeedsReview
-            ? $"⚠ 再確認待ち: {snapshot.Reason}"
+            ? "再確認待ち"
             : snapshot.CanApprove
-            ? "候補処理が完了しました。顧客情報とキャンバスを確認して確定してください。"
-            : snapshot.Reason;
-        LegacyMatchingCustomerApprovalBorder.Background = snapshot.Status ==
-                LegacyGraphCustomerReviewStateValues.NeedsReview
-            ? ToBrush("#FFF7ED")
-            : snapshot.CanApprove
-            ? ToBrush("#F0FDF4")
-            : ToBrush("#FFF7ED");
-        LegacyMatchingCustomerApprovalBorder.BorderBrush = snapshot.Status ==
-                LegacyGraphCustomerReviewStateValues.NeedsReview
-            ? ToBrush("#FDBA74")
-            : snapshot.CanApprove
-            ? ToBrush("#86EFAC")
-            : ToBrush("#FCD34D");
-        LegacyMatchingCustomerApprovalStatusText.Foreground = snapshot.Status ==
-                LegacyGraphCustomerReviewStateValues.NeedsReview
-            ? ToBrush("#9A3412")
-            : snapshot.CanApprove
-            ? ToBrush("#166534")
-            : ToBrush("#92400E");
+            ? "確認待ち"
+            : "未確認";
+        LegacyMatchingCustomerApprovalStateBorder.Background = ToBrush("#FFF7ED");
+        LegacyMatchingCustomerApprovalStateBorder.BorderBrush = ToBrush("#FCD34D");
+        LegacyMatchingCustomerApprovalStateText.Foreground = ToBrush("#92400E");
+        LegacyMatchingCustomerApprovalBorder.Background = ToBrush("#FFF7ED");
+        LegacyMatchingCustomerApprovalBorder.BorderBrush = ToBrush("#FCD34D");
+        LegacyMatchingCustomerApprovalStatusText.Foreground = ToBrush("#92400E");
         LegacyMatchingCustomerApproveButton.IsEnabled = snapshot.CanApprove;
     }
 
     private static string BuildLegacyMatchingCustomerReviewSummaryText(
         IReadOnlyList<LegacyMatchingCustomerCategoryReviewSummary> summaries)
     {
-        var categoryLines = summaries
-            .Select(summary =>
-                $"{summary.Label} {summary.Completed:N0}/{summary.Total:N0}件完了" +
-                (summary.Pending > 0 ? $"・未処理 {summary.Pending:N0}" : "") +
-                (summary.Held > 0 ? $"・保留 {summary.Held:N0}" : ""));
-        var pending = summaries.Sum(summary => summary.Pending);
         var held = summaries.Sum(summary => summary.Held);
-        var stateLine = pending == 0 && held == 0
-            ? "候補処理: 完了"
-            : $"候補処理: 未処理 {pending:N0}件 / 保留 {held:N0}件";
-        return "顧客単位の最終確認\n" + string.Join("\n", categoryLines.Append(stateLine));
+        var categoryParts = summaries.Select(summary =>
+        {
+            var isComplete = summary.Total == 0 || summary.Completed >= summary.Total;
+            return $"{summary.Label} {(isComplete ? "✓ " : "")}{summary.Completed:N0}/{summary.Total:N0}";
+        });
+        return string.Join("   ", categoryParts.Append($"保留 {held:N0}"));
+    }
+
+    private static string BuildLegacyMatchingCustomerApprovalStatusText(
+        IReadOnlyList<LegacyMatchingCustomerCategoryReviewSummary> summaries,
+        LegacyGraphCustomerReviewSnapshot snapshot)
+    {
+        if (string.Equals(
+                snapshot.Status,
+                LegacyGraphCustomerReviewStateValues.NeedsReview,
+                StringComparison.Ordinal))
+        {
+            return $"⚠ 再確認待ち: {snapshot.Reason}";
+        }
+
+        if (snapshot.CanApprove)
+        {
+            return "✓ すべての候補を処理しました";
+        }
+
+        var pendingSummaries = summaries
+            .Where(summary => summary.Pending > 0)
+            .ToArray();
+        var held = summaries.Sum(summary => summary.Held);
+        if (pendingSummaries.Length == 1 && held == 0)
+        {
+            var pending = pendingSummaries[0];
+            return $"⚠ {pending.Label}の未処理が{pending.Pending:N0}件あります。";
+        }
+
+        var remainingParts = pendingSummaries
+            .Select(summary => $"{summary.Label}{summary.Pending:N0}件")
+            .ToList();
+        if (held > 0)
+        {
+            remainingParts.Add($"保留{held:N0}件");
+        }
+
+        return remainingParts.Count > 0
+            ? $"⚠ {string.Join("・", remainingParts)}が残っています。"
+            : snapshot.Reason;
     }
 
     private bool ApproveLegacyGraphCustomer(
