@@ -205,6 +205,8 @@ CREATE TABLE `organizations` (
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
+INSERT OR IGNORE INTO `organizations` (`id`, `name`, `owner_uid`, `setup_completed`) VALUES ('org-default', '東京都心支店', NULL, 0);
+--> statement-breakpoint
 CREATE TABLE `payment_entries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text DEFAULT 'org-default' NOT NULL,
