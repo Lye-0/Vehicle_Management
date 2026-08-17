@@ -169,9 +169,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             throw new InvalidDataException($"顧客件数が上限{MaximumCustomerCount:N0}件を超えています。");
         }
 
-        var sourceCustomers = graph.Customers.ToDictionary(customer => customer.CustomerId, StringComparer.Ordinal);
-        var allGroups = ValidateGroups(snapshot.CustomerGroups, sourceCustomers);
         var explicitExcludedCustomerIds = NormalizeKeys(snapshot.ExplicitExcludedCustomerIds);
+        var sourceCustomers = graph.Customers.ToDictionary(customer => customer.CustomerId, StringComparer.Ordinal);
+        var allGroups = ValidateGroups(
+            snapshot.CustomerGroups,
+            sourceCustomers,
+            explicitExcludedCustomerIds);
         if (explicitExcludedCustomerIds.Any(customerId => !sourceCustomers.ContainsKey(customerId)))
         {
             throw new InvalidDataException("ごみ箱の顧客除外指定に存在しない顧客が含まれています。グラフを再読込してください。");
@@ -638,7 +641,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static IReadOnlyList<AbacusLegacyGraphFinalCustomerGroup> ValidateGroups(
         IReadOnlyList<AbacusLegacyGraphFinalCustomerGroup> groups,
-        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> sourceCustomers)
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> sourceCustomers,
+        IReadOnlySet<string> explicitExcludedCustomerIds)
     {
         if (groups.Count == 0)
         {
@@ -664,19 +668,33 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 }
             }
 
-            if (!group.Approved)
+            var hasActiveSourceCustomer = group.SourceCustomerIds.Any(
+                customerId => !explicitExcludedCustomerIds.Contains(customerId));
+            if (hasActiveSourceCustomer && group.SourceCustomerIds.Any(explicitExcludedCustomerIds.Contains))
+            {
+                throw new InvalidDataException(
+                    $"ごみ箱の顧客と出力対象顧客が同じ論理顧客グループに残っています: {group.GroupKey}");
+            }
+            if (hasActiveSourceCustomer && !group.Approved)
             {
                 throw new InvalidDataException($"未確認の顧客が残っています: {group.GroupKey}");
             }
-            RequiredText(group.CustomerId, "出力顧客ID");
-            RequiredText(group.CustomerName, "出力顧客名");
-            if (!seenOutputCustomerIds.Add(group.CustomerId))
+            if (hasActiveSourceCustomer)
             {
-                throw new InvalidDataException($"統合後の出力顧客IDが重複しています: {group.CustomerId}");
+                RequiredText(group.CustomerId, "出力顧客ID");
+                RequiredText(group.CustomerName, "出力顧客名");
+                if (!seenOutputCustomerIds.Add(group.CustomerId))
+                {
+                    throw new InvalidDataException($"統合後の出力顧客IDが重複しています: {group.CustomerId}");
+                }
             }
         }
 
-        if (seenCustomerIds.Count != sourceCustomers.Count)
+        var expectedActiveCustomerCount = sourceCustomers.Keys.Count(
+            customerId => !explicitExcludedCustomerIds.Contains(customerId));
+        var seenActiveCustomerCount = seenCustomerIds.Count(
+            customerId => !explicitExcludedCustomerIds.Contains(customerId));
+        if (seenActiveCustomerCount != expectedActiveCustomerCount)
         {
             throw new InvalidDataException("顧客統合グループに含まれていない顧客があります。グラフを再読込してください。");
         }

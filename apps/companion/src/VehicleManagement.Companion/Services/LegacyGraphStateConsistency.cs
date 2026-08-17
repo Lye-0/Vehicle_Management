@@ -26,6 +26,83 @@ public sealed record LegacyGraphDetachedUndoState(
     bool IsTray,
     IReadOnlyList<LegacyGraphDetachedDocumentState> Documents);
 
+public static class LegacyGraphVehicleUndoState
+{
+    /// <summary>
+    /// UndoStateに保存された顧客IDを、手動車両リンクとして復元できるか判定します。
+    /// 元から顧客に所属する車両の実効顧客は手動リンクではないため、
+    /// 旧チェックポイントに混入した同じ顧客IDも復元対象から除外します。
+    /// </summary>
+    public static string? ResolveManualCustomerId(
+        string? storedManualCustomerId,
+        bool hasOriginalCustomer,
+        string? originalCustomerId)
+    {
+        if (string.IsNullOrWhiteSpace(storedManualCustomerId))
+        {
+            return null;
+        }
+
+        return hasOriginalCustomer &&
+               string.Equals(storedManualCustomerId, originalCustomerId, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : storedManualCustomerId;
+    }
+}
+
+public static class LegacyGraphVehicleDetachState
+{
+    /// <summary>
+    /// 車両解除時に、手動でその車両へ接続された書類のリンクを削除する対象か判定します。
+    /// 元CSVの車両所属はこの判定では扱わず、画面上の手動リンクだけを対象にします。
+    /// </summary>
+    public static bool IsManualDocumentLinkedToVehicle(
+        string? linkedVehicleId,
+        string vehicleId) =>
+        !string.IsNullOrWhiteSpace(linkedVehicleId) &&
+        string.Equals(linkedVehicleId, vehicleId, StringComparison.Ordinal);
+}
+
+public static class LegacyGraphTemporaryMergeGroupState
+{
+    /// <summary>
+    /// Graph UIの仮統合グループは、Recommendation Decisionではなく、
+    /// 現在の所属顧客とグループ状態だけで判定します。
+    /// </summary>
+    public static bool IsPending(
+        int activeMemberCount,
+        bool isLogicalGroup,
+        bool isApplied)
+    {
+        return activeMemberCount > 1 && !isLogicalGroup && !isApplied;
+    }
+}
+
+public static class LegacyGraphMutationState
+{
+    public static bool CanMutate(
+        bool bulkMergeBusy,
+        bool finalPackageBusy,
+        bool resumeInProgress) =>
+        !bulkMergeBusy && !finalPackageBusy && !resumeInProgress;
+}
+
+public static class LegacyGraphCheckpointSaveState
+{
+    public static bool ShouldRescheduleAfterResumeFailure(
+        bool resumeFailed,
+        bool hadPendingSave) =>
+        resumeFailed && hadPendingSave;
+}
+
+public static class LegacyGraphFinalPackageState
+{
+    public static bool CanComplete(
+        bool importConfirmedAtSnapshot,
+        bool importConfirmedNow) =>
+        importConfirmedAtSnapshot && importConfirmedNow;
+}
+
 public static class LegacyGraphCustomerReviewStateTransition
 {
     public static string MarkApproved() => LegacyGraphCustomerReviewStateValues.Approved;

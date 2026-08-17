@@ -22,6 +22,8 @@ var tests = new (string Name, Action Test)[]
     ("顧客統合時に変更履歴のUndoStateも新しいグループIDへ移行する", DetachedUndoStateGroupReferencesMigrate),
     ("確認済み顧客へ書類を新規接続すると再確認待ちになる", ApprovedCustomerDocumentConnectionNeedsReview),
     ("確認済み顧客へ車両を新規接続すると再確認待ちになる", ApprovedCustomerVehicleConnectionNeedsReview),
+    ("元顧客所属車両のUndoは手動リンクを作らない", OriginalCustomerVehicleUndoDoesNotBecomeManualLink),
+    ("車両解除時は手動書類リンクだけを解除対象にする", VehicleDetachOnlyClearsManualDocumentLink),
     ("AからBへ手動接続した書類のUndoはBを復元する", ManualDocumentUndoRestoresCurrentCustomer),
     ("ごみ箱内の顧客・車両・書類はおすすめ対象にならない", TrashRecommendationEndpointsAreInactive),
     ("Graph UIとMatching UIの顧客確定結果は同じドメイン状態になる", GraphAndMatchingApprovalShareDomainState),
@@ -35,6 +37,12 @@ var tests = new (string Name, Action Test)[]
     ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
     ("インポート確定ゲートは顧客・統合候補・書類をすべて確認する", ImportFinalizationRequiresAllGates),
     ("最終パッケージは単独顧客も確認済みを要求する", StandaloneCustomerApprovalIsRequiredAtPackageBoundary),
+    ("ごみ箱の単独未確認顧客は最終パッケージを阻害しない", TrashStandaloneCustomerDoesNotBlockFinalPackage),
+    ("有効顧客とごみ箱顧客の混在グループは最終出力で拒否する", TrashCustomerMixedGroupIsRejectedAtPackageBoundary),
+    ("一括処理中・最終出力中・再開中はユーザー変更を禁止する", LegacyGraphMutationGuard),
+    ("最終パッケージ完成には確定状態の再確認が必要", FinalPackageCompletionRequiresStableConfirmation),
+    ("グラフ仮統合は推薦判定ではなく所属構成で決まる", GraphTemporaryMergeGroupUsesMembershipOnly),
+    ("再開失敗時は予定済みチェックポイント保存を再登録する", ResumeFailureReschedulesPendingCheckpoint),
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
     ("旧チェックポイントの顧客二重所属を正規化して再開できる", LegacyCheckpointMergeMembershipRecovery),
@@ -489,6 +497,30 @@ static void ApprovedCustomerVehicleConnectionNeedsReview()
         "確認済み顧客へ車両を追加したとき、顧客確認状態を再確認待ちへ戻せません。");
 }
 
+static void OriginalCustomerVehicleUndoDoesNotBecomeManualLink()
+{
+    Assert(LegacyGraphVehicleUndoState.ResolveManualCustomerId(
+                "customer:a",
+                hasOriginalCustomer: true,
+                originalCustomerId: "customer:a") is null,
+        "元CSVで顧客Aに所属する車両をUndoしたとき、Aへの手動リンクを作成しています。");
+    Assert(LegacyGraphVehicleUndoState.ResolveManualCustomerId(
+                "customer:b",
+                hasOriginalCustomer: true,
+                originalCustomerId: "customer:a") == "customer:b",
+        "顧客Aから顧客Bへ手動接続した車両のUndoで、Bへの手動リンクを復元できません。");
+}
+
+static void VehicleDetachOnlyClearsManualDocumentLink()
+{
+    Assert(LegacyGraphVehicleDetachState.IsManualDocumentLinkedToVehicle("vehicle-1", "vehicle-1"),
+        "車両解除時に対象車両への手動書類リンクを解除対象として判定できていません。");
+    Assert(!LegacyGraphVehicleDetachState.IsManualDocumentLinkedToVehicle("vehicle-2", "vehicle-1"),
+        "別車両への手動書類リンクまで解除対象として判定しています。");
+    Assert(!LegacyGraphVehicleDetachState.IsManualDocumentLinkedToVehicle(null, "vehicle-1"),
+        "手動リンクのない書類を解除対象として判定しています。");
+}
+
 static void ManualDocumentUndoRestoresCurrentCustomer()
 {
     var undoState = new LegacyGraphDetachedUndoState(
@@ -783,6 +815,156 @@ static void StandaloneCustomerApprovalIsRequiredAtPackageBoundary()
             Directory.Delete(root, recursive: true);
         }
     }
+}
+
+static void TrashStandaloneCustomerDoesNotBlockFinalPackage()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-trash-customer-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "manifest.json"), "{}");
+    try
+    {
+        var activeCustomer = new AbacusLegacyExportCandidateGraphCustomer(
+            "c1", "number-1", "山田太郎", "やまだたろう", "", "", "", "", "", [], []);
+        var trashCustomer = new AbacusLegacyExportCandidateGraphCustomer(
+            "c2", "number-2", "佐藤花子", "さとうはなこ", "", "", "", "", "", [], []);
+        var graph = new AbacusLegacyExportCandidateGraphResult(
+            sourceRoot,
+            [activeCustomer, trashCustomer],
+            [],
+            [],
+            [],
+            0,
+            0,
+            0,
+            []);
+        var activeGroup = new AbacusLegacyGraphFinalCustomerGroup(
+            "customer:c1", "single", true, ["c1"], "c1", "number-1", "山田太郎", "やまだたろう", "", "", "", "", "");
+        var trashGroup = new AbacusLegacyGraphFinalCustomerGroup(
+            "customer:c2", "single", false, ["c2"], "c2", "number-2", "佐藤花子", "さとうはなこ", "", "", "", "", "");
+        var snapshot = new AbacusLegacyGraphFinalizationSnapshot(
+            [activeGroup, trashGroup],
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            [],
+            true,
+            ExplicitExcludedCustomerIds: ["c2"]);
+
+        var result = new AbacusLegacyGraphFinalPackageStore()
+            .CreateAsync(graph, snapshot, destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(result.CustomerRowCount == 1 && result.ExcludedCustomerCount == 1,
+            "ごみ箱へ移した単独顧客を除外し、有効顧客だけの最終パッケージを作成できていません。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static void TrashCustomerMixedGroupIsRejectedAtPackageBoundary()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-trash-mixed-group-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "manifest.json"), "{}");
+    try
+    {
+        var customers = new[]
+        {
+            new AbacusLegacyExportCandidateGraphCustomer(
+                "c1", "number-1", "山田太郎", "やまだたろう", "", "", "", "", "", [], []),
+            new AbacusLegacyExportCandidateGraphCustomer(
+                "c2", "number-2", "佐藤花子", "さとうはなこ", "", "", "", "", "", [], []),
+        };
+        var graph = new AbacusLegacyExportCandidateGraphResult(
+            sourceRoot, customers, [], [], [], 0, 0, 0, []);
+        var mixedGroup = new AbacusLegacyGraphFinalCustomerGroup(
+            "logical:mixed", "logical", true, ["c1", "c2"], "c1", "number-1", "山田太郎", "やまだたろう", "", "", "", "", "");
+        var snapshot = new AbacusLegacyGraphFinalizationSnapshot(
+            [mixedGroup],
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            [],
+            true,
+            ExplicitExcludedCustomerIds: ["c2"]);
+
+        var rejected = false;
+        try
+        {
+            new AbacusLegacyGraphFinalPackageStore()
+                .CreateAsync(graph, snapshot, destinationRoot)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+
+        Assert(rejected,
+            "有効顧客とごみ箱顧客が同じ論理顧客グループに残った状態を最終出力で許可しています。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static void LegacyGraphMutationGuard()
+{
+    Assert(LegacyGraphMutationState.CanMutate(false, false, false),
+        "通常時のグラフ操作をMutation Guardが禁止しています。");
+    Assert(!LegacyGraphMutationState.CanMutate(true, false, false),
+        "一括確定中にユーザー操作を受け付ける状態です。");
+    Assert(!LegacyGraphMutationState.CanMutate(false, true, false),
+        "最終パッケージ作成中にユーザー操作を受け付ける状態です。");
+    Assert(!LegacyGraphMutationState.CanMutate(false, false, true),
+        "作業再開中にユーザー操作を受け付ける状態です。");
+}
+
+static void FinalPackageCompletionRequiresStableConfirmation()
+{
+    Assert(LegacyGraphFinalPackageState.CanComplete(true, true),
+        "確定状態が維持された場合に最終パッケージを完成可能と判定できていません。");
+    Assert(!LegacyGraphFinalPackageState.CanComplete(true, false),
+        "パッケージ作成中に確定状態が解除された場合も完成可能になっています。");
+    Assert(!LegacyGraphFinalPackageState.CanComplete(false, true),
+        "未確定スナップショットを最終パッケージとして完成可能にしています。");
+}
+
+static void GraphTemporaryMergeGroupUsesMembershipOnly()
+{
+    Assert(LegacyGraphTemporaryMergeGroupState.IsPending(2, false, false),
+        "2件の有効な非論理顧客グループをグラフ仮統合として扱えていません。");
+    Assert(!LegacyGraphTemporaryMergeGroupState.IsPending(1, false, false),
+        "構成顧客が1件だけのグループをグラフ仮統合として扱っています。");
+    Assert(!LegacyGraphTemporaryMergeGroupState.IsPending(2, true, false),
+        "論理顧客グループをグラフ仮統合として扱っています。");
+    Assert(!LegacyGraphTemporaryMergeGroupState.IsPending(2, false, true),
+        "適用済みグループをグラフ仮統合として扱っています。");
+}
+
+static void ResumeFailureReschedulesPendingCheckpoint()
+{
+    Assert(LegacyGraphCheckpointSaveState.ShouldRescheduleAfterResumeFailure(true, true),
+        "再開前に予定されていたチェックポイント保存を、再開失敗後に再登録できる判定になっていません。");
+    Assert(!LegacyGraphCheckpointSaveState.ShouldRescheduleAfterResumeFailure(false, true),
+        "再開成功時に不要なチェックポイント保存を再登録する判定です。");
+    Assert(!LegacyGraphCheckpointSaveState.ShouldRescheduleAfterResumeFailure(true, false),
+        "再開前に予定されていないチェックポイント保存を再登録する判定です。");
 }
 
 static void CustomerRecommendationScopeSurvivesMemberExpansion()
