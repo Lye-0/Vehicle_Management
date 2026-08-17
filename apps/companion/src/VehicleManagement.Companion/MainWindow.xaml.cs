@@ -17651,6 +17651,55 @@ public partial class MainWindow : Window
                 return false;
             }
 
+            var isMatchingMode = string.Equals(
+                legacyGraphUiMode,
+                "matching",
+                StringComparison.OrdinalIgnoreCase);
+            var matchingFocusCustomer = isMatchingMode
+                ? GetLegacyGraphMatchingCustomer()
+                : null;
+            var matchingGroupAlreadyContainsCandidate = false;
+            if (isMatchingMode)
+            {
+                if (matchingFocusCustomer is null)
+                {
+                    return false;
+                }
+
+                var currentWorkTargetCustomerIds = GetLegacyGraphCustomerMergeCandidates(
+                        matchingFocusCustomer)
+                    .Select(customer => customer.CustomerId)
+                    .ToHashSet(StringComparer.Ordinal);
+                if (LegacyGraphMatchingCustomerMergeDirection.TryResolve(
+                        candidate,
+                        currentWorkTargetCustomerIds,
+                        out var normalizedSourceCustomerId,
+                        out var normalizedTargetCustomerId))
+                {
+                    // MatchingのRecommendationは「現在の作業対象グループへ候補を追加する」
+                    // 操作です。raw Subject/Targetをそのまま渡すと、既存グループ側がsourceに
+                    // なったとき、その顧客だけを既存グループから引き抜いてしまいます。
+                    sourceCustomer = FindLegacyGraphCustomerById(normalizedSourceCustomerId);
+                    targetCustomer = FindLegacyGraphCustomerById(normalizedTargetCustomerId);
+                    if (sourceCustomer is null || targetCustomer is null)
+                    {
+                        return false;
+                    }
+                }
+                else if (currentWorkTargetCustomerIds.Contains(sourceCustomer.CustomerId) &&
+                         currentWorkTargetCustomerIds.Contains(targetCustomer.CustomerId))
+                {
+                    // 既に同じ作業対象グループに所属している候補は、方向付き移動を
+                    // 再実行して新しいグループを作らず、その所属を維持します。
+                    matchingGroupAlreadyContainsCandidate = true;
+                }
+                else
+                {
+                    // 現在のMatching作業対象と無関係な顧客同士を、推測で移動させません。
+                    return false;
+                }
+            }
+
             var sourceGroupKey = GetLegacyCustomerMergeKey(sourceCustomer);
             var targetGroupKey = GetLegacyCustomerMergeKey(targetCustomer);
             var previewKey = GetLegacyGraphCustomerMergePreviewKey(sourceCustomer, targetCustomer);
@@ -17664,7 +17713,9 @@ public partial class MainWindow : Window
                               legacyGraphCustomerGroupExpanded.GetValueOrDefault(targetGroupKey);
             // Recommendationの承認は、候補を仮グループへ追加するだけです。
             // 正式な論理顧客への昇格は「この顧客を確定」で行います。
-            var groupKey = AddLegacyGraphCustomerToMergeGroup(sourceCustomer, targetCustomer);
+            var groupKey = matchingGroupAlreadyContainsCandidate
+                ? GetLegacyCustomerMergeKey(matchingFocusCustomer!)
+                : AddLegacyGraphCustomerToMergeGroup(sourceCustomer, targetCustomer);
             if (draftBeforeApply is not null)
             {
                 foreach (var draftKey in new[] { previewKey, sourceGroupKey, targetGroupKey }

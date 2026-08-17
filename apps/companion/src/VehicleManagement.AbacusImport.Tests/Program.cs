@@ -66,6 +66,8 @@ var tests = new (string Name, Action Test)[]
     ("同一グループ内の顧客Approvedは構成顧客追加で維持する", ApprovedCustomerRecommendationSurvivesMemberExpansion),
     ("同一グループ内の顧客Approvedは別顧客解除で維持する", ApprovedCustomerRecommendationSurvivesUnrelatedMemberRemoval),
     ("複数顧客解除でも残存顧客のApprovedを維持する", ApprovedCustomerRecommendationSurvivesMultipleMemberRemoval),
+    ("Matching顧客統合は既存グループを維持して候補を順次追加する", MatchingCustomerMergeKeepsExistingGroupMembers),
+    ("Matching顧客統合はRecommendationのSubjectとTargetの向きを正規化する", MatchingCustomerMergeNormalizesRecommendationDirection),
     ("再開失敗時は予定済みチェックポイント保存を再登録する", ResumeFailureReschedulesPendingCheckpoint),
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
@@ -1568,6 +1570,70 @@ static void ResumeFailureReschedulesPendingCheckpoint()
         "再開成功時に不要なチェックポイント保存を再登録する判定です。");
     Assert(!LegacyGraphCheckpointSaveState.ShouldRescheduleAfterResumeFailure(true, false),
         "再開前に予定されていないチェックポイント保存を再登録する判定です。");
+}
+
+static void MatchingCustomerMergeKeepsExistingGroupMembers()
+{
+    var currentGroup = new HashSet<string>(["F"], StringComparer.Ordinal);
+    var pendingCandidates = new HashSet<string>(["U", "S1", "S2", "S3", "S4"], StringComparer.Ordinal);
+    var approvals = new[]
+    {
+        CustomerRecommendationCandidate("candidate-f-u", "F", "U"),
+        CustomerRecommendationCandidate("candidate-f-s1", "F", "S1"),
+        CustomerRecommendationCandidate("candidate-s2-u", "S2", "U"),
+        CustomerRecommendationCandidate("candidate-u-s3", "U", "S3"),
+    };
+
+    foreach (var candidate in approvals)
+    {
+        Assert(LegacyGraphMatchingCustomerMergeDirection.TryResolve(
+                candidate,
+                currentGroup,
+                out var mergeSourceCustomerId,
+                out var mergeTargetCustomerId),
+            $"{candidate.CandidateId}の統合方向を解決できていません。");
+        Assert(currentGroup.Contains(mergeTargetCustomerId),
+            $"{candidate.CandidateId}の統合先が現在の作業対象グループではありません。");
+        Assert(!currentGroup.Contains(mergeSourceCustomerId),
+            $"{candidate.CandidateId}の追加候補が既存グループ側として扱われています。");
+
+        currentGroup.Add(mergeSourceCustomerId);
+        pendingCandidates.Remove(mergeSourceCustomerId);
+    }
+
+    Assert(currentGroup.SetEquals(["F", "U", "S1", "S2", "S3"]),
+        "顧客統合を順番に承認しても既存の構成顧客を維持できていません。");
+    Assert(pendingCandidates.SetEquals(["S4"]),
+        "順番に承認した後の未処理候補が追加候補1件だけになっていません。");
+}
+
+static void MatchingCustomerMergeNormalizesRecommendationDirection()
+{
+    foreach (var (subjectCustomerId, targetCustomerId) in new[]
+             {
+                 ("F", "S1"),
+                 ("S1", "F"),
+             })
+    {
+        var candidate = CustomerRecommendationCandidate(
+            $"candidate-direction-{subjectCustomerId}-{targetCustomerId}",
+            subjectCustomerId,
+            targetCustomerId);
+        var currentGroup = new HashSet<string>(["F", "U"], StringComparer.Ordinal);
+
+        Assert(LegacyGraphMatchingCustomerMergeDirection.TryResolve(
+                candidate,
+                currentGroup,
+                out var mergeSourceCustomerId,
+                out var mergeTargetCustomerId),
+            $"{subjectCustomerId}→{targetCustomerId}の統合方向を解決できていません。");
+        Assert(mergeSourceCustomerId == "S1" && mergeTargetCustomerId == "F",
+            $"{subjectCustomerId}→{targetCustomerId}が外部候補→現在グループへ正規化されていません。");
+
+        currentGroup.Add(mergeSourceCustomerId);
+        Assert(currentGroup.SetEquals(["F", "U", "S1"]),
+            $"{subjectCustomerId}→{targetCustomerId}で既存グループを維持できていません。");
+    }
 }
 
 static void CustomerRecommendationScopeSurvivesMemberExpansion()
