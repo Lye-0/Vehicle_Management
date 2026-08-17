@@ -248,6 +248,14 @@ public static class LegacyMatchingWorkflow
         return hiddenCustomerIds;
     }
 
+    public static string BuildCustomerRejectedChangeDetails(
+        string currentCustomerText,
+        string rejectedCandidateText,
+        string previousDecisionText) =>
+        $"確認中の顧客: {currentCustomerText}\n" +
+        $"別人と判断した候補: {rejectedCandidateText}\n" +
+        $"元の判定: {previousDecisionText} / 元に戻せます。";
+
     private static string GetDecision(
         IReadOnlyDictionary<string, string> decisions,
         AbacusRecommendationCandidate candidate) =>

@@ -15,6 +15,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客単位カテゴリは顧客統合を先頭にする", MatchingCategoriesAreOrdered),
     ("同一論理書類の候補は1操作に集約される", SameLogicalDocumentRecommendationsAreGrouped),
     ("未処理の自動統合候補先は顧客巡回から除外され却下後に戻る", PendingAutomaticCustomerTargetsAreHidden),
+    ("顧客の別人判定履歴は確認中顧客と候補を表示する", CustomerRejectedChangeDetailsUseCustomerRoles),
     ("別顧客を接続先とする書類候補は現在顧客の範囲外になる", CrossCustomerDocumentTargetIsOutsideCurrentScope),
     ("統合候補をすべて拒否すると統合意思が残らない", AllRejectedCandidatesHaveNoMergeIntent),
     ("グラフ確定で残り候補を処理済みにすると未処理と保留が0になる", GraphApprovalCompletesRecommendationGate),
@@ -50,6 +51,8 @@ var tests = new (string Name, Action Test)[]
     ("一括処理中・最終出力中・再開中はユーザー変更を禁止する", LegacyGraphMutationGuard),
     ("最終パッケージ完成には確定状態の再確認が必要", FinalPackageCompletionRequiresStableConfirmation),
     ("グラフ仮統合は推薦判定ではなく所属構成で決まる", GraphTemporaryMergeGroupUsesMembershipOnly),
+    ("マッチングの構成顧客解除は基準顧客以外だけを許可する", MatchingMergeMemberSelectionIsScoped),
+    ("代表候補承認で作られた重複Obsoleteは構成変更でPendingへ戻る", DuplicateRecommendationReconcilesAfterMembershipChange),
     ("再開失敗時は予定済みチェックポイント保存を再登録する", ResumeFailureReschedulesPendingCheckpoint),
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
@@ -298,6 +301,20 @@ static void PendingAutomaticCustomerTargetsAreHidden()
     var hiddenAfterReject = LegacyMatchingWorkflow.GetPendingAutomaticCustomerIdsToHide(afterReject);
     Assert(hiddenAfterReject.SetEquals(["customer-c"]),
         "自動統合候補を却下した後、候補先顧客が巡回対象へ戻る状態を判定できていません。");
+}
+
+static void CustomerRejectedChangeDetailsUseCustomerRoles()
+{
+    var details = LegacyMatchingWorkflow.BuildCustomerRejectedChangeDetails(
+        "上田 いずみ",
+        "上田 茂",
+        "未処理");
+
+    Assert(details ==
+           "確認中の顧客: 上田 いずみ\n" +
+           "別人と判断した候補: 上田 茂\n" +
+           "元の判定: 未処理 / 元に戻せます。",
+        "顧客同士の別人判定履歴が対象・紐付け先の曖昧な表示になっています。");
 }
 
 static void CrossCustomerDocumentTargetIsOutsideCurrentScope()
@@ -1250,6 +1267,54 @@ static void GraphTemporaryMergeGroupUsesMembershipOnly()
         "適用済みグループをグラフ仮統合として扱っています。");
 }
 
+static void MatchingMergeMemberSelectionIsScoped()
+{
+    var group = new[] { "customer-a", "customer-b" };
+    Assert(LegacyGraphMatchingSelectionState.CanRemoveMergeMember(
+            "customer-b",
+            "customer-a",
+            group,
+            canMutate: true),
+        "基準顧客以外の構成顧客を解除可能と判定できていません。");
+    Assert(!LegacyGraphMatchingSelectionState.CanRemoveMergeMember(
+            "customer-a",
+            "customer-a",
+            group,
+            canMutate: true),
+        "マッチングの基準顧客を統合から外せる状態です。");
+    Assert(!LegacyGraphMatchingSelectionState.CanRemoveMergeMember(
+            "customer-c",
+            "customer-a",
+            group,
+            canMutate: true),
+        "現在のグループにいない顧客を解除可能と判定しています。");
+}
+
+static void DuplicateRecommendationReconcilesAfterMembershipChange()
+{
+    var obsolete = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Rejected,
+        LegacyGraphRecommendationLifecycle.Obsolete,
+        LegacyGraphRecommendationLifecycleReconciler.DuplicateCustomerRecommendationObsoleteReason,
+        DateTimeOffset.UtcNow);
+    var restored = LegacyGraphRecommendationLifecycleReconciler.ReconcileAfterMergeMembershipChange(
+        obsolete,
+        DateTimeOffset.UtcNow.AddSeconds(1));
+
+    Assert(restored.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+           restored.Decision == AbacusRecommendationDecisionValues.Pending &&
+           restored.ResolutionReason is null,
+        "構成変更後に内部duplicate候補を再評価してPendingへ戻せていません。");
+
+    var held = obsolete with { Decision = AbacusRecommendationDecisionValues.Hold };
+    var heldAfterReconcile = LegacyGraphRecommendationLifecycleReconciler.ReconcileAfterMergeMembershipChange(
+        held,
+        DateTimeOffset.UtcNow.AddSeconds(1));
+    Assert(heldAfterReconcile.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
+           heldAfterReconcile.Decision == AbacusRecommendationDecisionValues.Hold,
+        "保留中の候補を構成変更の内部duplicate復帰でPendingへ戻しています。");
+}
+
 static void ResumeFailureReschedulesPendingCheckpoint()
 {
     Assert(LegacyGraphCheckpointSaveState.ShouldRescheduleAfterResumeFailure(true, true),
@@ -1638,6 +1703,7 @@ static void LegacyCheckpointUpgrade()
             {
                 ["customer:c1"] = LegacyGraphCustomerReviewStateValues.NeedsReview,
             },
+            MatchingCustomerId = "customer:c1",
         };
         File.WriteAllText(Path.Combine(directory, "graph-state.json"), JsonSerializer.Serialize(
             reviewCheckpoint,
@@ -1645,7 +1711,8 @@ static void LegacyCheckpointUpgrade()
         var reviewed = new LegacyGraphWorkCheckpointStore().ReadAsync(directory).GetAwaiter().GetResult();
         Assert(reviewed.CustomerReviewStates is not null &&
                reviewed.CustomerReviewStates.TryGetValue("customer:c1", out var reviewState) &&
-               reviewState == LegacyGraphCustomerReviewStateValues.NeedsReview,
+               reviewState == LegacyGraphCustomerReviewStateValues.NeedsReview &&
+               reviewed.MatchingCustomerId == "customer:c1",
             "顧客の再確認待ち状態がチェックポイントから復元されていません。");
 
         var scopedCheckpoint = reviewCheckpoint with

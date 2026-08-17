@@ -7,7 +7,7 @@ namespace VehicleManagement.Companion.Services;
 
 public static class LegacyGraphWorkCheckpointSchema
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
     public const string Kind = "abacus-legacy-graph-work-checkpoint";
 }
 
@@ -136,7 +136,8 @@ public sealed record LegacyGraphWorkCheckpoint(
     Dictionary<string, string>? LogicalCustomerMergeGroupByCustomerId = null,
     Dictionary<string, string[]>? MatchingManualCustomerCandidateTargets = null,
     Dictionary<string, bool>? CustomerApprovalStates = null,
-    Dictionary<string, string>? CustomerReviewStates = null);
+    Dictionary<string, string>? CustomerReviewStates = null,
+    string? MatchingCustomerId = null);
 
 /// <summary>
 /// グラフ操作のチェックポイントを、作業フォルダー内へ原子的に保存します。
@@ -240,7 +241,7 @@ public sealed class LegacyGraphWorkCheckpointStore
 
     private static LegacyGraphWorkCheckpoint UpgradeCheckpoint(LegacyGraphWorkCheckpoint checkpoint)
     {
-        if (checkpoint.Version is not 1 and not 2 and not 3 and not 4 and not LegacyGraphWorkCheckpointSchema.CurrentVersion)
+        if (checkpoint.Version is not 1 and not 2 and not 3 and not 4 and not 5 and not LegacyGraphWorkCheckpointSchema.CurrentVersion)
         {
             return checkpoint;
         }

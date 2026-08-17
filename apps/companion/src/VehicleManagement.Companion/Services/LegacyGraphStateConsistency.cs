@@ -80,6 +80,43 @@ public static class LegacyGraphTemporaryMergeGroupState
     public static bool HasActiveMembership(int activeMemberCount) => activeMemberCount > 1;
 }
 
+public static class LegacyGraphMatchingSelectionState
+{
+    /// <summary>
+    /// Matching UIで、現在の基準顧客以外の構成顧客を統合から外せるか判定します。
+    /// 基準顧客・構成顧客・おすすめ選択は別状態ですが、解除操作の可否だけは
+    /// 現在のグループ構成と専用の選択顧客IDから判定します。
+    /// </summary>
+    public static bool CanRemoveMergeMember(
+        string? selectedMemberCustomerId,
+        string? matchingCustomerId,
+        IReadOnlyCollection<string> groupCustomerIds,
+        bool canMutate)
+    {
+        ArgumentNullException.ThrowIfNull(groupCustomerIds);
+
+        return canMutate &&
+               groupCustomerIds.Count >= 2 &&
+               !string.IsNullOrWhiteSpace(selectedMemberCustomerId) &&
+               !string.IsNullOrWhiteSpace(matchingCustomerId) &&
+               !string.Equals(
+                   selectedMemberCustomerId,
+                   matchingCustomerId,
+                   StringComparison.Ordinal) &&
+               groupCustomerIds.Contains(selectedMemberCustomerId, StringComparer.Ordinal);
+    }
+
+    public static bool IsSelectedMemberStillInGroup(
+        string? selectedMemberCustomerId,
+        IReadOnlyCollection<string> groupCustomerIds)
+    {
+        ArgumentNullException.ThrowIfNull(groupCustomerIds);
+
+        return !string.IsNullOrWhiteSpace(selectedMemberCustomerId) &&
+               groupCustomerIds.Contains(selectedMemberCustomerId, StringComparer.Ordinal);
+    }
+}
+
 public static class LegacyGraphMutationState
 {
     public static bool CanMutate(
@@ -312,8 +349,40 @@ public static class LegacyGraphRecommendationLifecycleReconciler
     public const string CustomerApprovalResolutionReason =
         "顧客確定に伴う一括処理で判定済みです。";
 
+    public const string DuplicateCustomerRecommendationObsoleteReason =
+        "同じ論理対象の代表候補を承認したため、この重複候補を解決しました。";
+
     public static bool IsTemporaryManualLinkObsolete(string? reason) =>
         string.Equals(reason, TemporaryManualLinkObsoleteReason, StringComparison.Ordinal);
+
+    public static bool IsDuplicateCustomerRecommendationObsolete(string? reason) =>
+        string.Equals(reason, DuplicateCustomerRecommendationObsoleteReason, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 顧客構成の変更で、代表候補承認時だけ作られた内部duplicateを再評価します。
+    /// ユーザーのRejected/Holdはこの処理の対象にしません。
+    /// </summary>
+    public static LegacyGraphRecommendationState ReconcileAfterMergeMembershipChange(
+        LegacyGraphRecommendationState state,
+        DateTimeOffset updatedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        if (state.Lifecycle != LegacyGraphRecommendationLifecycle.Obsolete ||
+            state.Decision != AbacusRecommendationDecisionValues.Rejected ||
+            !IsDuplicateCustomerRecommendationObsolete(state.ResolutionReason))
+        {
+            return state;
+        }
+
+        return state with
+        {
+            Decision = AbacusRecommendationDecisionValues.Pending,
+            Lifecycle = LegacyGraphRecommendationLifecycle.Active,
+            ResolutionReason = null,
+            UpdatedAtUtc = updatedAtUtc,
+        };
+    }
 
     public static LegacyGraphRecommendationState MarkObsoleteAfterRebuild(
         LegacyGraphRecommendationState state,
