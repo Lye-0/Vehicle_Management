@@ -90,7 +90,8 @@ public sealed record LegacyGraphCheckpointMatchingChange(
     DateTimeOffset CreatedAtUtc,
     string? CustomerId = null,
     string? WorkTargetKey = null,
-    string? ExternalCustomerId = null);
+    string? ExternalCustomerId = null,
+    LegacyGraphDetachedUndoState? UndoState = null);
 
 public sealed record LegacyGraphWorkCheckpoint(
     string Kind,

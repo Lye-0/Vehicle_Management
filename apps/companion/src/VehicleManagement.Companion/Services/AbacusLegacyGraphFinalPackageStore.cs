@@ -664,9 +664,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 }
             }
 
-            if (group.SourceCustomerIds.Count > 1 && !group.Approved)
+            if (!group.Approved)
             {
-                throw new InvalidDataException($"未承認の顧客統合候補が残っています: {group.GroupKey}");
+                throw new InvalidDataException($"未確認の顧客が残っています: {group.GroupKey}");
             }
             RequiredText(group.CustomerId, "出力顧客ID");
             RequiredText(group.CustomerName, "出力顧客名");

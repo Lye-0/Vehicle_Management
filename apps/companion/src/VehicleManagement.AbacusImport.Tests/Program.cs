@@ -18,12 +18,14 @@ var tests = new (string Name, Action Test)[]
     ("別顧客を接続先とする書類候補は現在顧客の範囲外になる", CrossCustomerDocumentTargetIsOutsideCurrentScope),
     ("統合候補をすべて拒否すると統合意思が残らない", AllRejectedCandidatesHaveNoMergeIntent),
     ("グラフ確定で残り候補を処理済みにすると未処理と保留が0になる", GraphApprovalCompletesRecommendationGate),
+    ("手動リンク解除で一時Obsolete候補だけが再びActiveになる", RecommendationLifecycleReconciliation),
     ("顧客確定ゲートは統合時だけ採用プレビューを要求する", CustomerReviewGateRequiresCustomerPreview),
     ("顧客確定ゲートは保存済み採用内容で確定可能になる", CustomerReviewGateAllowsSavedMergeDraft),
     ("顧客確定ゲートは未反映統合だけでは確定を止めない", CustomerReviewGateIgnoresUnappliedMerge),
     ("顧客確定ゲートはマッチング候補の未処理と分離される", CustomerApprovalGateIgnoresMatchingQueue),
     ("マッチング候補ゲートは未処理と保留を数える", CustomerReviewGateCountsPendingAndHeld),
     ("インポート確定ゲートは顧客・統合候補・書類をすべて確認する", ImportFinalizationRequiresAllGates),
+    ("最終パッケージは単独顧客も確認済みを要求する", StandaloneCustomerApprovalIsRequiredAtPackageBoundary),
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
     ("旧チェックポイントの顧客二重所属を正規化して再開できる", LegacyCheckpointMergeMembershipRecovery),
@@ -348,6 +350,51 @@ static void GraphApprovalCompletesRecommendationGate()
         "グラフ確定後も候補ゲートに未処理または保留が残っています。");
 }
 
+static void RecommendationLifecycleReconciliation()
+{
+    var temporary = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Approved,
+        LegacyGraphRecommendationLifecycle.Obsolete,
+        LegacyGraphRecommendationLifecycleReconciler.TemporaryManualLinkObsoleteReason,
+        DateTimeOffset.UtcNow,
+        "customer:c1",
+        "customer:c2");
+    var reconciled = LegacyGraphRecommendationLifecycleReconciler.ReconcileCurrentCandidate(
+        temporary,
+        DateTimeOffset.UtcNow);
+    Assert(reconciled is not null &&
+           reconciled.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+           reconciled.Decision == AbacusRecommendationDecisionValues.Pending &&
+           reconciled.ResolutionReason is null &&
+           reconciled.WorkTargetKey == "customer:c1" &&
+           reconciled.ExternalCustomerId == "customer:c2",
+        "手動リンク解除後に再成立した候補をPending/Activeへ戻せていません。");
+
+    var explicitRejected = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Rejected,
+        LegacyGraphRecommendationLifecycle.Obsolete,
+        LegacyGraphRecommendationLifecycleReconciler.ExplicitRejectedObsoleteReason,
+        DateTimeOffset.UtcNow,
+        "customer:c1",
+        "customer:c2");
+    var keptRejected = LegacyGraphRecommendationLifecycleReconciler.ReconcileCurrentCandidate(
+        explicitRejected,
+        DateTimeOffset.UtcNow);
+    Assert(keptRejected is not null &&
+           keptRejected.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
+           keptRejected.Decision == AbacusRecommendationDecisionValues.Rejected,
+        "ユーザーが明示的に却下した候補を自動で再表示対象へ戻しています。");
+
+    var marked = LegacyGraphRecommendationLifecycleReconciler.MarkObsoleteAfterRebuild(
+        new LegacyGraphRecommendationState(
+            AbacusRecommendationDecisionValues.Rejected,
+            LegacyGraphRecommendationLifecycle.Active),
+        "候補の再評価で外れました。",
+        DateTimeOffset.UtcNow);
+    Assert(marked.ResolutionReason == LegacyGraphRecommendationLifecycleReconciler.ExplicitRejectedObsoleteReason,
+        "明示却下の候補を再評価時に一時Obsoleteとして扱っています。");
+}
+
 static void CustomerReviewGateAllowsSavedMergeDraft()
 {
     var requiresPreview = LegacyMatchingWorkflow.RequiresCustomerPreview(
@@ -416,6 +463,88 @@ static void ImportFinalizationRequiresAllGates()
         "ノード未接続書類を残したままインポート確定可能になっています。");
     Assert(!LegacyMatchingWorkflow.CanFinalizeImport(0, 0, 1),
         "未確認顧客を残したままインポート確定可能になっています。");
+}
+
+static void StandaloneCustomerApprovalIsRequiredAtPackageBoundary()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-final-package-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "manifest.json"), "{}");
+    try
+    {
+        var customer = new AbacusLegacyExportCandidateGraphCustomer(
+            "c1",
+            "number-1",
+            "山田太郎",
+            "やまだたろう",
+            "",
+            "",
+            "",
+            "",
+            "",
+            [],
+            []);
+        var graph = new AbacusLegacyExportCandidateGraphResult(
+            sourceRoot,
+            [customer],
+            [],
+            [],
+            [],
+            0,
+            0,
+            0,
+            []);
+        var group = new AbacusLegacyGraphFinalCustomerGroup(
+            "customer:c1",
+            "single",
+            false,
+            ["c1"],
+            "c1",
+            "number-1",
+            "山田太郎",
+            "やまだたろう",
+            "",
+            "",
+            "",
+            "",
+            "");
+        var snapshot = new AbacusLegacyGraphFinalizationSnapshot(
+            [group],
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            [],
+            true);
+        var store = new AbacusLegacyGraphFinalPackageStore();
+        var rejected = false;
+        try
+        {
+            store.CreateAsync(graph, snapshot, destinationRoot).GetAwaiter().GetResult();
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+
+        Assert(rejected, "未確認の単独顧客を含む最終パッケージを生成できてしまいます。");
+        var result = store.CreateAsync(
+                graph,
+                snapshot with { CustomerGroups = [group with { Approved = true }] },
+                destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(File.Exists(result.ManifestPath),
+            "確認済みの単独顧客から最終パッケージを生成できていません。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 static void CustomerRecommendationScopeSurvivesMemberExpansion()
@@ -690,7 +819,23 @@ static void LegacyCheckpointUpgrade()
                     DateTimeOffset.UtcNow,
                     "customer:c1",
                     "logical:work-target",
-                    "customer:external"),
+                    "customer:external",
+                    new LegacyGraphDetachedUndoState(
+                        "document",
+                        "document-1",
+                        "customer:b",
+                        true,
+                        [
+                            new LegacyGraphDetachedDocumentState(
+                                "document-1",
+                                "vehicle-b",
+                                "logical:work-target",
+                                "manual-vehicle",
+                                "ユーザーが選択",
+                                false,
+                                true,
+                                false),
+                        ])),
             ],
         };
         File.WriteAllText(Path.Combine(directory, "graph-state.json"), JsonSerializer.Serialize(
@@ -702,7 +847,10 @@ static void LegacyCheckpointUpgrade()
                scoped.RecommendationStates[0].ExternalCustomerId == "customer:external" &&
                scoped.MatchingChanges is { Length: 1 } &&
                scoped.MatchingChanges[0].WorkTargetKey == "logical:work-target" &&
-               scoped.MatchingChanges[0].ExternalCustomerId == "customer:external",
+               scoped.MatchingChanges[0].ExternalCustomerId == "customer:external" &&
+               scoped.MatchingChanges[0].UndoState is { } undoState &&
+               undoState.ManualVehicleCustomerId == "customer:b" &&
+               undoState.Documents is [{ ManualVehicleId: "vehicle-b", IsTray: true }],
             "顧客統合判定の作業対象スコープがチェックポイント往復で失われています。");
     }
     finally
