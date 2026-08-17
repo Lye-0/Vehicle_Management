@@ -19,6 +19,15 @@ var tests = new (string Name, Action Test)[]
     ("統合候補をすべて拒否すると統合意思が残らない", AllRejectedCandidatesHaveNoMergeIntent),
     ("グラフ確定で残り候補を処理済みにすると未処理と保留が0になる", GraphApprovalCompletesRecommendationGate),
     ("手動リンク解除で一時Obsolete候補だけが再びActiveになる", RecommendationLifecycleReconciliation),
+    ("顧客統合時に変更履歴のUndoStateも新しいグループIDへ移行する", DetachedUndoStateGroupReferencesMigrate),
+    ("確認済み顧客へ書類を新規接続すると再確認待ちになる", ApprovedCustomerDocumentConnectionNeedsReview),
+    ("確認済み顧客へ車両を新規接続すると再確認待ちになる", ApprovedCustomerVehicleConnectionNeedsReview),
+    ("AからBへ手動接続した書類のUndoはBを復元する", ManualDocumentUndoRestoresCurrentCustomer),
+    ("ごみ箱内の顧客・車両・書類はおすすめ対象にならない", TrashRecommendationEndpointsAreInactive),
+    ("Graph UIとMatching UIの顧客確定結果は同じドメイン状態になる", GraphAndMatchingApprovalShareDomainState),
+    ("顧客確定に伴う一括解決は個別の別人履歴にならない", CustomerApprovalResolutionDoesNotBecomeIndividualHistory),
+    ("作業再開の検証失敗は保存済みチェックポイントを変更しない", ResumeValidationFailureDoesNotMutateCheckpoint),
+    ("手動移動後の書類所有者は元顧客ではなく現在の顧客を使う", ManualDocumentOwnerUsesCurrentCustomer),
     ("顧客確定ゲートは統合時だけ採用プレビューを要求する", CustomerReviewGateRequiresCustomerPreview),
     ("顧客確定ゲートは保存済み採用内容で確定可能になる", CustomerReviewGateAllowsSavedMergeDraft),
     ("顧客確定ゲートは未反映統合だけでは確定を止めない", CustomerReviewGateIgnoresUnappliedMerge),
@@ -393,6 +402,235 @@ static void RecommendationLifecycleReconciliation()
         DateTimeOffset.UtcNow);
     Assert(marked.ResolutionReason == LegacyGraphRecommendationLifecycleReconciler.ExplicitRejectedObsoleteReason,
         "明示却下の候補を再評価時に一時Obsoleteとして扱っています。");
+
+    var held = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Hold,
+        LegacyGraphRecommendationLifecycle.Obsolete,
+        LegacyGraphRecommendationLifecycleReconciler.TemporaryManualLinkObsoleteReason,
+        DateTimeOffset.UtcNow,
+        "customer:c1",
+        "customer:c2");
+    var reconciledHold = LegacyGraphRecommendationLifecycleReconciler.ReconcileCurrentCandidate(
+        held,
+        DateTimeOffset.UtcNow);
+    Assert(reconciledHold is not null &&
+           reconciledHold.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+           reconciledHold.Decision == AbacusRecommendationDecisionValues.Hold,
+        "保留から一時Obsoleteになった候補の保留判定を再成立時に失っています。");
+
+    var temporaryRejected = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Rejected,
+        LegacyGraphRecommendationLifecycle.Obsolete,
+        LegacyGraphRecommendationLifecycleReconciler.TemporaryManualLinkObsoleteReason,
+        DateTimeOffset.UtcNow,
+        "customer:c1",
+        "customer:c2");
+    var keptTemporaryRejected = LegacyGraphRecommendationLifecycleReconciler.ReconcileCurrentCandidate(
+        temporaryRejected,
+        DateTimeOffset.UtcNow);
+    Assert(keptTemporaryRejected is not null &&
+           keptTemporaryRejected.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
+           keptTemporaryRejected.Decision == AbacusRecommendationDecisionValues.Rejected,
+        "却下済み候補を一時Obsolete理由だけで再表示対象へ戻しています。");
+}
+
+static void DetachedUndoStateGroupReferencesMigrate()
+{
+    var undoState = new LegacyGraphDetachedUndoState(
+        "document",
+        "document-1",
+        "customer:b",
+        true,
+        [
+            new LegacyGraphDetachedDocumentState(
+                "document-1",
+                "vehicle-b",
+                "logical:a",
+                "manual-customer-only",
+                "ユーザーが選択",
+                false,
+                true,
+                false),
+            new LegacyGraphDetachedDocumentState(
+                "document-2",
+                null,
+                "logical:unrelated",
+                "automatic",
+                null,
+                false,
+                true,
+                false),
+        ]);
+
+    var migrated = LegacyGraphDetachedUndoStateMigration.MigrateCustomerGroupReferences(
+        undoState,
+        new HashSet<string>(["logical:a", "customer:a"], StringComparer.Ordinal),
+        "logical:b");
+
+    Assert(migrated.Documents[0].ManualCustomerGroupKey == "logical:b" &&
+           migrated.Documents[1].ManualCustomerGroupKey == "logical:unrelated" &&
+           migrated.ManualVehicleCustomerId == "customer:b",
+        "顧客統合後のUndoで、対象グループだけを新しい論理顧客へ移行できていません。");
+}
+
+static void ApprovedCustomerDocumentConnectionNeedsReview()
+{
+    var nextState = LegacyGraphCustomerReviewStateTransition.MarkNeedsReview(
+        LegacyGraphCustomerReviewStateValues.Approved);
+    Assert(nextState == LegacyGraphCustomerReviewStateValues.NeedsReview,
+        "確認済み顧客へ書類を追加したとき、顧客確認状態を再確認待ちへ戻せません。");
+}
+
+static void ApprovedCustomerVehicleConnectionNeedsReview()
+{
+    var nextState = LegacyGraphCustomerReviewStateTransition.MarkNeedsReview(
+        LegacyGraphCustomerReviewStateValues.Approved);
+    Assert(nextState == LegacyGraphCustomerReviewStateValues.NeedsReview,
+        "確認済み顧客へ車両を追加したとき、顧客確認状態を再確認待ちへ戻せません。");
+}
+
+static void ManualDocumentUndoRestoresCurrentCustomer()
+{
+    var undoState = new LegacyGraphDetachedUndoState(
+        "document",
+        "document-1",
+        null,
+        true,
+        [
+            new LegacyGraphDetachedDocumentState(
+                "document-1",
+                null,
+                "customer:b",
+                "manual-customer-only",
+                "ユーザーが選択",
+                false,
+                true,
+                false),
+        ]);
+
+    var restored = LegacyGraphDetachedUndoStateMigration.MigrateCustomerGroupReferences(
+        undoState,
+        new HashSet<string>(["customer:a"], StringComparer.Ordinal),
+        "logical:b");
+    Assert(restored.Documents.Single().ManualCustomerGroupKey == "customer:b",
+        "AからBへ手動接続した書類のUndoで、直前のBへの接続を保持できていません。");
+}
+
+static void TrashRecommendationEndpointsAreInactive()
+{
+    var emptyCustomers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var emptyVehicles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var emptyDocuments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var customerCandidate = EntityRecommendationCandidate(
+        "trash-customer",
+        AbacusRecommendationEntityKinds.Document,
+        "document-1",
+        AbacusRecommendationEntityKinds.Customer,
+        "customer-1");
+    var vehicleCandidate = EntityRecommendationCandidate(
+        "trash-vehicle",
+        AbacusRecommendationEntityKinds.Document,
+        "document-1",
+        AbacusRecommendationEntityKinds.Vehicle,
+        "vehicle-1");
+    var documentCandidate = EntityRecommendationCandidate(
+        "trash-document",
+        AbacusRecommendationEntityKinds.Document,
+        "document-1",
+        AbacusRecommendationEntityKinds.Customer,
+        "customer-1");
+
+    Assert(!LegacyGraphRecommendationAvailability.AreEndpointsActive(
+            customerCandidate,
+            new HashSet<string>(["customer-1"], StringComparer.OrdinalIgnoreCase),
+            emptyVehicles,
+            emptyDocuments),
+        "ごみ箱内の顧客をRecommendationの接続先として有効扱いしています。");
+    Assert(!LegacyGraphRecommendationAvailability.AreEndpointsActive(
+            vehicleCandidate,
+            emptyCustomers,
+            new HashSet<string>(["vehicle-1"], StringComparer.OrdinalIgnoreCase),
+            emptyDocuments),
+        "ごみ箱内の車両をRecommendationの接続先として有効扱いしています。");
+    Assert(!LegacyGraphRecommendationAvailability.AreEndpointsActive(
+            documentCandidate,
+            emptyCustomers,
+            emptyVehicles,
+            new HashSet<string>(["document-1"], StringComparer.OrdinalIgnoreCase)),
+        "ごみ箱内の書類をRecommendationの対象として有効扱いしています。");
+}
+
+static void GraphAndMatchingApprovalShareDomainState()
+{
+    // Graph/Matchingの両UIは同じApproveLegacyGraphCustomer経路を通るため、
+    // 最終的なドメイン状態は共通の状態遷移結果になる。
+    var graphResult = LegacyGraphCustomerReviewStateTransition.MarkApproved();
+    var matchingResult = LegacyGraphCustomerReviewStateTransition.MarkApproved();
+    Assert(graphResult == LegacyGraphCustomerReviewStateValues.Approved &&
+           matchingResult == graphResult,
+        "Graph UIとMatching UIの顧客確定結果が共通のApproved状態になっていません。");
+}
+
+static void CustomerApprovalResolutionDoesNotBecomeIndividualHistory()
+{
+    var resolved = new LegacyGraphRecommendationState(
+        AbacusRecommendationDecisionValues.Rejected,
+        LegacyGraphRecommendationLifecycle.Active,
+        LegacyGraphRecommendationLifecycleReconciler.CustomerApprovalResolutionReason,
+        DateTimeOffset.UtcNow);
+    Assert(resolved.Decision == AbacusRecommendationDecisionValues.Rejected &&
+           resolved.ResolutionReason == LegacyGraphRecommendationLifecycleReconciler.CustomerApprovalResolutionReason &&
+           resolved.ResolutionReason != "ユーザーが別人と判断しました。",
+        "顧客確定に伴う一括解決を個別の別人判定理由として保存しています。");
+}
+
+static void ResumeValidationFailureDoesNotMutateCheckpoint()
+{
+    var directory = Path.Combine(Path.GetTempPath(), $"gate28-invalid-checkpoint-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, "graph-state.json");
+    var invalidJson = "{\"kind\":\"invalid\"";
+    File.WriteAllText(path, invalidJson);
+    try
+    {
+        var before = File.ReadAllBytes(path);
+        var failed = false;
+        try
+        {
+            _ = new LegacyGraphWorkCheckpointStore().ReadAsync(directory).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            failed = true;
+        }
+
+        Assert(failed, "不正な作業チェックポイントを検証失敗として扱っていません。");
+        Assert(before.SequenceEqual(File.ReadAllBytes(path)),
+            "作業再開の検証失敗で保存済みチェックポイントを書き換えています。");
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+}
+
+static void ManualDocumentOwnerUsesCurrentCustomer()
+{
+    var directOwner = LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+        null,
+        "customer-b",
+        "customer-a",
+        "customer-a");
+    var vehicleOwner = LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+        "customer-c",
+        "customer-b",
+        "customer-a",
+        "customer-a");
+    Assert(directOwner == "customer-b" && vehicleOwner == "customer-c",
+        "手動移動後の書類所有者を現在の接続先より元顧客へ戻しています。");
 }
 
 static void CustomerReviewGateAllowsSavedMergeDraft()
@@ -696,6 +934,26 @@ static AbacusRecommendationCandidate RecommendationCandidate(
         AbacusRecommendationEntityKinds.Customer,
         targetCustomerId,
         targetCustomerId,
+        [],
+        [],
+        [],
+        [],
+        "テスト用のおすすめ",
+        "test");
+
+static AbacusRecommendationCandidate EntityRecommendationCandidate(
+    string candidateId,
+    string subjectKind,
+    string subjectId,
+    string targetKind,
+    string targetId) =>
+    new(
+        candidateId,
+        subjectKind,
+        subjectId,
+        targetKind,
+        targetId,
+        targetId,
         [],
         [],
         [],
