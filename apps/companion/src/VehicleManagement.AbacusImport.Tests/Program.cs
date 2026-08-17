@@ -17,6 +17,12 @@ var tests = new (string Name, Action Test)[]
     ("未処理の自動統合候補先は顧客巡回から除外され却下後に戻る", PendingAutomaticCustomerTargetsAreHidden),
     ("顧客の別人判定履歴は確認中顧客と候補を表示する", CustomerRejectedChangeDetailsUseCustomerRoles),
     ("別顧客を接続先とする書類候補は現在顧客の範囲外になる", CrossCustomerDocumentTargetIsOutsideCurrentScope),
+    ("Matchingの単独顧客範囲は別顧客の書類候補を含めない", MatchingWorkTargetStandaloneScopeExcludesCrossCustomerDocument),
+    ("Matchingの仮統合範囲は構成顧客の書類候補を含める", MatchingWorkTargetTemporaryScopeIncludesMemberDocument),
+    ("Matchingの仮統合範囲は複数構成顧客の候補を含める", MatchingWorkTargetTemporaryScopeIncludesAllMembers),
+    ("Matchingの構成顧客解除は書類候補を元の顧客範囲へ戻す", MatchingWorkTargetMemberRemovalRestoresStandaloneScope),
+    ("Matchingの論理化前後で構成顧客の書類候補範囲を維持する", MatchingWorkTargetLogicalScopeMatchesTemporaryScope),
+    ("Matchingの範囲変更は書類RecommendationのDecisionを変更しない", MatchingWorkTargetScopePreservesDocumentDecision),
     ("統合候補をすべて拒否すると統合意思が残らない", AllRejectedCandidatesHaveNoMergeIntent),
     ("グラフ確定で残り候補を処理済みにすると未処理と保留が0になる", GraphApprovalCompletesRecommendationGate),
     ("手動リンク解除で一時Obsolete候補だけが再びActiveになる", RecommendationLifecycleReconciliation),
@@ -342,6 +348,135 @@ static void CrossCustomerDocumentTargetIsOutsideCurrentScope()
         "別顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲に含まれています。");
     Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(currentCustomerCandidate, currentCustomerIds),
         "現在顧客をTargetCustomerIdに持つ書類候補が現在顧客の範囲から除外されています。");
+}
+
+static void MatchingWorkTargetStandaloneScopeExcludesCrossCustomerDocument()
+{
+    var scope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: false,
+        isLogicalGroup: false);
+
+    Assert(!LegacyMatchingWorkflow.IsRelatedToCustomer(
+                RecommendationCandidate("document-for-b", "customer-b"),
+                scope),
+        "仮統合前の単独顧客範囲へ別顧客の書類候補が混入しています。");
+}
+
+static void MatchingWorkTargetTemporaryScopeIncludesMemberDocument()
+{
+    var scope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: true,
+        isLogicalGroup: false);
+
+    Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(
+                RecommendationCandidate("document-for-b", "customer-b"),
+                scope),
+        "仮統合グループへ追加した顧客の書類候補が現在のMatching範囲に入りません。");
+}
+
+static void MatchingWorkTargetTemporaryScopeIncludesAllMembers()
+{
+    var scope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b", "customer-c"],
+        ["customer-a"],
+        isTemporaryGroup: true,
+        isLogicalGroup: false);
+
+    Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(
+                RecommendationCandidate("document-for-b", "customer-b"),
+                scope) &&
+           LegacyMatchingWorkflow.IsRelatedToCustomer(
+               RecommendationCandidate("document-for-c", "customer-c"),
+               scope),
+        "仮統合グループの全構成顧客に対する書類候補を同じMatching範囲へ含められていません。");
+}
+
+static void MatchingWorkTargetMemberRemovalRestoresStandaloneScope()
+{
+    var temporaryScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: true,
+        isLogicalGroup: false);
+    var standaloneScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: false,
+        isLogicalGroup: false);
+    var customerBStandaloneScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-b",
+        ["customer-b"],
+        ["customer-b"],
+        isTemporaryGroup: false,
+        isLogicalGroup: false);
+    var documentForB = RecommendationCandidate("document-for-b", "customer-b");
+
+    Assert(LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, temporaryScope) &&
+           !LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, standaloneScope) &&
+           LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, customerBStandaloneScope),
+        "仮統合解除後の書類候補範囲が、A側から外れてB側へ戻っていません。");
+}
+
+static void MatchingWorkTargetLogicalScopeMatchesTemporaryScope()
+{
+    var temporaryScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: true,
+        isLogicalGroup: false);
+    var logicalScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a"],
+        ["customer-a", "customer-b"],
+        isTemporaryGroup: false,
+        isLogicalGroup: true);
+    var documentForB = RecommendationCandidate("document-for-b", "customer-b");
+
+    Assert(temporaryScope.Count == logicalScope.Count &&
+           temporaryScope.All(logicalScope.Contains) &&
+           LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, temporaryScope) &&
+           LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, logicalScope),
+        "仮統合から論理統合へ移行した後のMatching書類候補範囲が一致していません。");
+}
+
+static void MatchingWorkTargetScopePreservesDocumentDecision()
+{
+    var documentForB = RecommendationCandidate("document-for-b", "customer-b");
+    var decisions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        [documentForB.CandidateId] = AbacusRecommendationDecisionValues.Hold,
+    };
+    var beforeScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a"],
+        ["customer-a"],
+        isTemporaryGroup: false,
+        isLogicalGroup: false);
+    var afterScope = LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+        "customer-a",
+        ["customer-a", "customer-b"],
+        ["customer-a"],
+        isTemporaryGroup: true,
+        isLogicalGroup: false);
+
+    Assert(!LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, beforeScope) &&
+           LegacyMatchingWorkflow.IsRelatedToCustomer(documentForB, afterScope) &&
+           LegacyMatchingWorkflow.EvaluateCustomerReviewGate(
+               [documentForB],
+               decisions,
+               requiresCustomerPreview: false).HeldCount == 1 &&
+           decisions[documentForB.CandidateId] == AbacusRecommendationDecisionValues.Hold,
+        "Matching範囲の変更だけで書類Recommendationの保留Decisionが変わっています。");
 }
 
 static void CustomerReviewGateRequiresCustomerPreview()

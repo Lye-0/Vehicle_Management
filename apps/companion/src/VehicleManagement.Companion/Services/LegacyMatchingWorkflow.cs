@@ -84,6 +84,35 @@ public sealed record LegacyMatchingCustomerMergeRelation(
     string Decision);
 
 /// <summary>
+/// Matching UIで現在確認する作業対象の顧客範囲を解決します。
+/// 仮統合・論理統合の構成を表示用に投影するだけで、永続ドメイン状態は変更しません。
+/// </summary>
+public static class LegacyMatchingWorkTargetScope
+{
+    public static IReadOnlySet<string> ResolveCustomerIds(
+        string standaloneCustomerId,
+        IReadOnlyCollection<string> temporaryCustomerIds,
+        IReadOnlyCollection<string> logicalCustomerIds,
+        bool isTemporaryGroup,
+        bool isLogicalGroup)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(standaloneCustomerId);
+        ArgumentNullException.ThrowIfNull(temporaryCustomerIds);
+        ArgumentNullException.ThrowIfNull(logicalCustomerIds);
+
+        var customerIds = (isLogicalGroup
+                ? logicalCustomerIds
+                : isTemporaryGroup
+                    ? temporaryCustomerIds
+                    : [standaloneCustomerId])
+            .Where(customerId => !string.IsNullOrWhiteSpace(customerId))
+            .ToHashSet(StringComparer.Ordinal);
+        customerIds.Add(standaloneCustomerId);
+        return customerIds;
+    }
+}
+
+/// <summary>
 /// 顧客単位UIの表示順・カテゴリ集計を、WPFの状態から切り離して決めます。
 /// リンクや判定を変更しないため、保存再開とUI切り替えの両方から安全に利用できます。
 /// </summary>

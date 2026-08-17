@@ -2268,7 +2268,10 @@ public partial class MainWindow : Window
         // 表示情報だけは、同じ論理顧客グループの採用済み表示モデルを参照します。
         var sourceCustomer = customer;
         var displayCustomer = GetLegacyGraphDisplayCustomer(sourceCustomer);
-        var confirmedVehicles = GetLegacyGraphVehiclesForDisplay(customer)
+        var confirmedVehicles = GetLegacyGraphMatchingWorkTargetMembers(customer)
+            .SelectMany(GetLegacyGraphVehiclesForDisplay)
+            .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .Select(group => group.First())
             .Select(vehicle => new LegacyMatchingVehicleCard(
                 $"{Fallback(vehicle.Maker)} {vehicle.DisplayName}".Trim(),
                 string.Join(" / ", new[]
@@ -3441,11 +3444,9 @@ public partial class MainWindow : Window
         if (IsLegacyMatchingCustomerMerge(candidate))
         {
             var focusSource = focusCustomer;
-            var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
-                .Select(customer => customer.CustomerId)
-                .ToHashSet(StringComparer.Ordinal);
-            if (logicalCustomerIds.Contains(candidate.SubjectId) &&
-                !logicalCustomerIds.Contains(candidate.TargetId))
+            var matchingScopeCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusSource);
+            if (matchingScopeCustomerIds.Contains(candidate.SubjectId) &&
+                !matchingScopeCustomerIds.Contains(candidate.TargetId))
             {
                 return (
                     candidate.SubjectKind,
@@ -3454,8 +3455,8 @@ public partial class MainWindow : Window
                     candidate.TargetId);
             }
 
-            if (logicalCustomerIds.Contains(candidate.TargetId) &&
-                !logicalCustomerIds.Contains(candidate.SubjectId))
+            if (matchingScopeCustomerIds.Contains(candidate.TargetId) &&
+                !matchingScopeCustomerIds.Contains(candidate.SubjectId))
             {
                 return (
                     candidate.TargetKind,
@@ -3484,9 +3485,7 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
         IReadOnlyList<AbacusRecommendationCandidate> allRecommendations)
     {
-        var sourceCustomerIds = GetLegacyGraphCustomerMergeCandidates(sourceCustomer)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var sourceCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(sourceCustomer);
         var alternatives = allRecommendations
             .Where(candidate => !string.Equals(candidate.CandidateId, currentCandidate.CandidateId, StringComparison.OrdinalIgnoreCase))
             .Where(candidate => currentCandidate.SubjectKind == AbacusRecommendationEntityKinds.Customer
@@ -3627,20 +3626,17 @@ public partial class MainWindow : Window
         }
 
         var mergeKey = GetLegacyGraphCustomerMergePreviewKey(sourceCustomer, targetCustomer);
-        var logicalMembers = GetLegacyGraphLogicalCustomerMembers(sourceCustomer);
-        var logicalIds = logicalMembers
+        var workTargetMembers = GetLegacyGraphMatchingWorkTargetMembers(sourceCustomer);
+        var workTargetIds = workTargetMembers
             .Select(customer => customer.CustomerId)
             .ToHashSet(StringComparer.Ordinal);
-        var customers = logicalIds.Contains(targetCustomer.CustomerId)
-            ? logicalMembers
-            : TryGetLegacyGraphMergeGroup(GetLegacyCustomerMergeKey(sourceCustomer), out var mergeGroup) &&
-              mergeGroup.CustomerIds.Contains(targetCustomer.CustomerId, StringComparer.Ordinal)
-                ? GetLegacyGraphCandidateGroupMembers(sourceCustomer)
-                : logicalMembers
-                    .Append(targetCustomer)
-                    .GroupBy(customer => customer.CustomerId, StringComparer.Ordinal)
-                    .Select(group => group.First())
-                    .ToArray();
+        var customers = workTargetIds.Contains(targetCustomer.CustomerId)
+            ? workTargetMembers
+            : workTargetMembers
+                .Append(targetCustomer)
+                .GroupBy(customer => customer.CustomerId, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray();
         var vehicles = customers
             .SelectMany(GetLegacyGraphVehiclesForDisplay)
             .Where(vehicle => !IsLegacyGraphVehicleInTrash(vehicle))
@@ -3693,14 +3689,12 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusCustomer)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var matchingScopeCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusCustomer);
         // 推薦データは Subject -> Target の順ですが、顧客統合の画面では
         // 現在顧客を左、統合候補を右に固定して「現在顧客 ← 候補」と表示します。
         // 現在顧客が Target 側のときだけ、値の左右を入れ替えます。
-        return logicalCustomerIds.Contains(candidate.TargetId) &&
-               !logicalCustomerIds.Contains(candidate.SubjectId);
+        return matchingScopeCustomerIds.Contains(candidate.TargetId) &&
+               !matchingScopeCustomerIds.Contains(candidate.SubjectId);
     }
 
     private static (string SourceValue, string CandidateValue) GetLegacyMatchingDisplayedValues(
@@ -3733,9 +3727,11 @@ public partial class MainWindow : Window
     private IReadOnlyList<AbacusLegacyExportCandidateGraphDocument> GetLegacyMatchingDocumentsForCustomer(
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
-        var documents = GetLegacyGraphVehiclesForDisplay(customer)
+        var workTargetMembers = GetLegacyGraphMatchingWorkTargetMembers(customer);
+        var documents = workTargetMembers
+            .SelectMany(GetLegacyGraphVehiclesForDisplay)
             .SelectMany(GetDocumentsForVehicle)
-            .Concat(GetLegacyGraphCustomerDirectDocuments(customer))
+            .Concat(workTargetMembers.SelectMany(GetLegacyGraphCustomerDirectDocuments))
             .Where(document => !IsLegacyGraphDocumentInTrash(document) &&
                                !IsLegacyGraphDocumentInTray(document))
             .ToList();
@@ -4006,18 +4002,21 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
         var documents = new List<(AbacusLegacyExportCandidateGraphDocument Document, string OwnerLabel)>();
-        foreach (var vehicle in GetLegacyGraphVehiclesForDisplay(customer))
+        foreach (var member in GetLegacyGraphMatchingWorkTargetMembers(customer))
         {
-            foreach (var document in GetDocumentsForVehicle(vehicle).Where(IsLegacyGraphConfirmedDocumentForMatching))
+            foreach (var vehicle in GetLegacyGraphVehiclesForDisplay(member))
             {
-                documents.Add((document, $"車両 {Fallback(vehicle.DisplayName)}"));
+                foreach (var document in GetDocumentsForVehicle(vehicle).Where(IsLegacyGraphConfirmedDocumentForMatching))
+                {
+                    documents.Add((document, $"車両 {Fallback(vehicle.DisplayName)}"));
+                }
             }
-        }
 
-        foreach (var document in GetLegacyGraphCustomerDirectDocuments(customer)
-                     .Where(IsLegacyGraphConfirmedDocumentForMatching))
-        {
-            documents.Add((document, "顧客へ直接紐付け"));
+            foreach (var document in GetLegacyGraphCustomerDirectDocuments(member)
+                         .Where(IsLegacyGraphConfirmedDocumentForMatching))
+            {
+                documents.Add((document, "顧客へ直接紐付け"));
+            }
         }
 
         return documents
@@ -4038,38 +4037,51 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer customer,
         bool includeCompletedCustomerCandidates = false)
     {
+        var isMatchingMode = string.Equals(
+            legacyGraphUiMode,
+            "matching",
+            StringComparison.OrdinalIgnoreCase);
         var includeGraphOriginalCustomerDocuments =
-            !string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase);
+            !isMatchingMode;
         return GetLegacyGraphRecommendationsForCustomer(
             customer,
             includeCompletedCustomerCandidates,
-            includeGraphOriginalCustomerDocuments);
+            includeGraphOriginalCustomerDocuments,
+            useMatchingWorkTargetScope: isMatchingMode);
     }
 
     private IReadOnlyList<AbacusRecommendationCandidate> GetLegacyGraphCustomerReviewRecommendations(
         AbacusLegacyExportCandidateGraphCustomer customer)
     {
         // 顧客単位の最終確認は表示モードに依存させず、候補が実際に示す
-        // 顧客範囲だけを共通のゲートとして評価します。
+        // 顧客範囲だけを共通のゲートとして評価します。Matching UIでは
+        // 仮統合グループ全体を作業対象範囲として使います。
         return GetLegacyGraphRecommendationsForCustomer(
             customer,
             includeCompletedCustomerCandidates: false,
-            includeGraphOriginalCustomerDocuments: false);
+            includeGraphOriginalCustomerDocuments: false,
+            useMatchingWorkTargetScope: string.Equals(
+                legacyGraphUiMode,
+                "matching",
+                StringComparison.OrdinalIgnoreCase));
     }
 
     private IReadOnlyList<AbacusRecommendationCandidate> GetLegacyGraphRecommendationsForCustomer(
         AbacusLegacyExportCandidateGraphCustomer customer,
         bool includeCompletedCustomerCandidates,
-        bool includeGraphOriginalCustomerDocuments)
+        bool includeGraphOriginalCustomerDocuments,
+        bool useMatchingWorkTargetScope = false)
     {
         if (legacyExportCandidateGraphResult is null)
         {
             return [];
         }
 
-        var sourceCustomerIds = GetLegacyGraphLogicalCustomerMembers(customer)
-            .Select(candidate => candidate.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var sourceCustomerIds = useMatchingWorkTargetScope
+            ? GetLegacyGraphMatchingScopeCustomerIds(customer)
+            : GetLegacyGraphLogicalCustomerMembers(customer)
+                .Select(candidate => candidate.CustomerId)
+                .ToHashSet(StringComparer.Ordinal);
         var filtered = legacyGraphRecommendationCandidates
             .Where(candidate => IsLegacyGraphRecommendationForCustomer(
                 candidate,
@@ -4282,6 +4294,19 @@ public partial class MainWindow : Window
             ? GetLegacyGraphLogicalCustomerKey(customer)
             : GetLegacyCustomerMergeKey(customer);
 
+    private bool TryGetLegacyGraphMatchingRecommendationScope(
+        AbacusRecommendationCandidate candidate,
+        AbacusLegacyExportCandidateGraphCustomer focusCustomer,
+        out LegacyCustomerRecommendationScope scope)
+    {
+        var workTargetKey = GetLegacyGraphRecommendationWorkTargetKey(focusCustomer);
+        return LegacyCustomerRecommendationScope.TryCreate(
+            candidate,
+            workTargetKey,
+            GetLegacyGraphMatchingScopeCustomerIds(focusCustomer),
+            out scope);
+    }
+
     private bool TryGetLegacyGraphCurrentRecommendationScope(
         AbacusRecommendationCandidate candidate,
         out LegacyCustomerRecommendationScope scope)
@@ -4294,6 +4319,11 @@ public partial class MainWindow : Window
         }
 
         var workTargetKey = GetLegacyGraphRecommendationWorkTargetKey(focusCustomer);
+        if (string.Equals(legacyGraphUiMode, "matching", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryGetLegacyGraphMatchingRecommendationScope(candidate, focusCustomer, out scope);
+        }
+
         return TryGetLegacyGraphWorkTargetCustomerIds(workTargetKey, out var workTargetCustomerIds) &&
                LegacyCustomerRecommendationScope.TryCreate(
                    candidate,
@@ -4861,12 +4891,10 @@ public partial class MainWindow : Window
             candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
         {
             var focusSource = focusCustomer;
-            var logicalCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
-                .Select(item => item.CustomerId)
-                .ToHashSet(StringComparer.Ordinal);
-            var otherCustomerId = logicalCustomerIds.Contains(candidate.SubjectId)
+            var matchingScopeCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusSource);
+            var otherCustomerId = matchingScopeCustomerIds.Contains(candidate.SubjectId)
                 ? candidate.TargetId
-                : logicalCustomerIds.Contains(candidate.TargetId)
+                : matchingScopeCustomerIds.Contains(candidate.TargetId)
                     ? candidate.SubjectId
                     : null;
             if (otherCustomerId is not null && FindLegacyGraphCustomerById(otherCustomerId) is { } otherCustomer)
@@ -4959,9 +4987,7 @@ public partial class MainWindow : Window
 
         // 統合後も、ここで表示する「基準顧客」は巡回開始時の顧客を維持します。
         var focusSource = focusCustomer;
-        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var focusCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusSource);
         if (candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
             FindLegacyGraphCustomerById(candidate.TargetId) is { } targetCustomer)
         {
@@ -4998,9 +5024,7 @@ public partial class MainWindow : Window
             return "統合先（現在の顧客）";
         }
 
-        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusCustomer)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var focusCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusCustomer);
         if (candidate.TargetKind == AbacusRecommendationEntityKinds.Customer &&
             FindLegacyGraphCustomerById(candidate.TargetId) is { } targetCustomer)
         {
@@ -9389,9 +9413,7 @@ public partial class MainWindow : Window
         AbacusRecommendationCandidate candidate,
         AbacusLegacyExportCandidateGraphCustomer focusCustomer)
     {
-        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusCustomer)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var focusCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusCustomer);
         if (focusCustomerIds.Contains(candidate.SubjectId))
         {
             return FindLegacyGraphCustomerById(candidate.TargetId);
@@ -9955,8 +9977,7 @@ public partial class MainWindow : Window
             !isTemporaryMember &&
             legacyExportCandidateGraphResult is not null)
         {
-            var workTargetCustomerIds = GetLegacyGraphLogicalCustomerMembers(sourceCustomer)
-                .Select(customer => customer.CustomerId)
+            var workTargetCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(sourceCustomer)
                 .ToArray();
             if (LegacyGraphMutationState.HasUndirectedManualCustomerCandidate(
                     legacyGraphMatchingManualCustomerCandidateTargets,
@@ -9980,13 +10001,12 @@ public partial class MainWindow : Window
         AbacusLegacyExportCandidateGraphCustomer targetCustomer,
         bool includeInactive = false)
     {
-        var workTargetKey = GetLegacyGraphRecommendationWorkTargetKey(focusCustomer);
         return legacyGraphRecommendationCandidates
             .Where(candidate => candidate.SubjectKind == AbacusRecommendationEntityKinds.Customer &&
                                candidate.TargetKind == AbacusRecommendationEntityKinds.Customer)
             .Where(candidate => includeInactive || IsLegacyGraphRecommendationActive(candidate))
             .Where(candidate =>
-                TryGetLegacyGraphRecommendationScopeForKey(candidate, workTargetKey, out var scope) &&
+                TryGetLegacyGraphMatchingRecommendationScope(candidate, focusCustomer, out var scope) &&
                 string.Equals(scope.ExternalCustomerId, targetCustomer.CustomerId, StringComparison.Ordinal))
             .OrderByDescending(candidate => candidate.IsManual ||
                                             string.Equals(candidate.Origin, "manual", StringComparison.OrdinalIgnoreCase))
@@ -10805,6 +10825,50 @@ public partial class MainWindow : Window
             .Where(customer => !legacyGraphTrashCustomerIds.Contains(customer.CustomerId))
             .Where(customer => mergeGroup.CustomerIds.Contains(customer.CustomerId, StringComparer.Ordinal))
             .OrderBy(customer => string.Equals(customer.CustomerId, selectedCustomer.CustomerId, StringComparison.Ordinal) ? 0 : 1)
+            .ThenBy(customer => customer.CustomerId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private IReadOnlySet<string> GetLegacyGraphMatchingScopeCustomerIds(
+        AbacusLegacyExportCandidateGraphCustomer selectedCustomer)
+    {
+        var sourceCustomer = GetLegacyGraphSourceCustomer(selectedCustomer);
+        var logicalKey = GetLegacyGraphLogicalCustomerKey(sourceCustomer);
+        var logicalMembers = GetLegacyGraphLogicalCustomerMembers(sourceCustomer);
+        var isLogicalGroup = logicalMembers.Count > 1 &&
+                             IsLegacyGraphLogicalCustomerGroup(logicalKey);
+        var temporaryKey = GetLegacyCustomerMergeKey(sourceCustomer);
+        var temporaryMembers = GetLegacyGraphCustomerMergeCandidates(sourceCustomer);
+        var isTemporaryGroup = !isLogicalGroup &&
+                               temporaryMembers.Count > 1 &&
+                               TryGetLegacyGraphMergeGroup(temporaryKey, out var temporaryGroup) &&
+                               string.Equals(temporaryGroup.Origin, "manual", StringComparison.Ordinal) &&
+                               !legacyGraphAppliedCustomerMergeKeys.Contains(temporaryKey);
+
+        return LegacyMatchingWorkTargetScope.ResolveCustomerIds(
+            sourceCustomer.CustomerId,
+            temporaryMembers.Select(customer => customer.CustomerId).ToArray(),
+            logicalMembers.Select(customer => customer.CustomerId).ToArray(),
+            isTemporaryGroup,
+            isLogicalGroup);
+    }
+
+    private IReadOnlyList<AbacusLegacyExportCandidateGraphCustomer> GetLegacyGraphMatchingWorkTargetMembers(
+        AbacusLegacyExportCandidateGraphCustomer selectedCustomer)
+    {
+        var sourceCustomer = GetLegacyGraphSourceCustomer(selectedCustomer);
+        var customerIds = GetLegacyGraphMatchingScopeCustomerIds(sourceCustomer);
+        if (legacyExportCandidateGraphResult is null)
+        {
+            return [sourceCustomer];
+        }
+
+        return legacyExportCandidateGraphResult.Customers
+            .Where(customer => customerIds.Contains(customer.CustomerId))
+            .OrderBy(customer => string.Equals(
+                customer.CustomerId,
+                sourceCustomer.CustomerId,
+                StringComparison.Ordinal) ? 0 : 1)
             .ThenBy(customer => customer.CustomerId, StringComparer.Ordinal)
             .ToArray();
     }
@@ -15408,9 +15472,7 @@ public partial class MainWindow : Window
         }
 
         var focusSource = GetLegacyGraphSourceCustomer(focusCustomer);
-        var focusCustomerIds = GetLegacyGraphLogicalCustomerMembers(focusSource)
-            .Select(customer => customer.CustomerId)
-            .ToHashSet(StringComparer.Ordinal);
+        var focusCustomerIds = GetLegacyGraphMatchingScopeCustomerIds(focusSource);
         return focusCustomerIds.Contains(targetCustomer.CustomerId)
             ? "現在の顧客 / 承認後"
             : "候補顧客 / 承認後";
