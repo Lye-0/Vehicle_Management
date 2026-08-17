@@ -171,6 +171,7 @@ export async function completeInitialPasswordChange(database: Database, env: Env
 
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {
   if (!(env.APP_ENV === 'development' && env.FIREBASE_AUTH_EMULATOR === 'true')) return
+  await ensureDevelopmentOrganization(database)
   if (user.isAnonymous) return
   const organization = await database.select({ id: organizations.id }).from(organizations).where(eq(organizations.id, defaultOrganizationId)).get()
   if (!organization) return
@@ -181,6 +182,12 @@ export async function ensureDevelopmentMembership(database: Database, env: Env, 
   }
   await upsertProfile(database, user, existingMembership ? normalizeRole(existingMembership.role) : 'owner')
   await ensureAuthAccount(database, user.uid)
+}
+
+async function ensureDevelopmentOrganization(database: Database) {
+  await database.$client.prepare('INSERT OR IGNORE INTO organizations (id, name, owner_uid, setup_completed) VALUES (?, ?, NULL, 0)')
+    .bind(defaultOrganizationId, '東京都心支店')
+    .run()
 }
 
 async function upsertProfile(database: Database, user: FirebaseUser, role: OrganizationRole) {
