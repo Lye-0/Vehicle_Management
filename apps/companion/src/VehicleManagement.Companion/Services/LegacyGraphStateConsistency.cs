@@ -74,8 +74,10 @@ public static class LegacyGraphTemporaryMergeGroupState
         bool isLogicalGroup,
         bool isApplied)
     {
-        return activeMemberCount > 1 && !isLogicalGroup && !isApplied;
+        return HasActiveMembership(activeMemberCount) && !isLogicalGroup && !isApplied;
     }
+
+    public static bool HasActiveMembership(int activeMemberCount) => activeMemberCount > 1;
 }
 
 public static class LegacyGraphMutationState
@@ -85,6 +87,32 @@ public static class LegacyGraphMutationState
         bool finalPackageBusy,
         bool resumeInProgress) =>
         !bulkMergeBusy && !finalPackageBusy && !resumeInProgress;
+
+    public static bool TryAddManualCustomerCandidate(
+        IDictionary<string, HashSet<string>> candidateTargets,
+        string sourceCustomerId,
+        string targetCustomerId,
+        bool bulkMergeBusy,
+        bool finalPackageBusy,
+        bool resumeInProgress)
+    {
+        ArgumentNullException.ThrowIfNull(candidateTargets);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceCustomerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCustomerId);
+
+        if (!CanMutate(bulkMergeBusy, finalPackageBusy, resumeInProgress))
+        {
+            return false;
+        }
+
+        if (!candidateTargets.TryGetValue(sourceCustomerId, out var targetIds))
+        {
+            targetIds = new HashSet<string>(StringComparer.Ordinal);
+            candidateTargets[sourceCustomerId] = targetIds;
+        }
+
+        return targetIds.Add(targetCustomerId);
+    }
 }
 
 public static class LegacyGraphCheckpointSaveState
@@ -116,6 +144,29 @@ public static class LegacyGraphCustomerReviewStateTransition
         }
 
         return LegacyGraphCustomerReviewStateValues.NeedsReview;
+    }
+
+    /// <summary>
+    /// 確定済み論理グループが構成顧客1件の単独顧客へ戻ったとき、
+    /// 旧グループキーの確認状態を残存顧客の現在キーへ移します。
+    /// </summary>
+    public static string MoveConfirmedGroupToStandaloneCustomer(
+        IDictionary<string, string> reviewStates,
+        IDictionary<string, bool> approvalStates,
+        string groupKey,
+        string remainingCustomerId)
+    {
+        ArgumentNullException.ThrowIfNull(reviewStates);
+        ArgumentNullException.ThrowIfNull(approvalStates);
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remainingCustomerId);
+
+        var standaloneKey = $"customer:{remainingCustomerId}";
+        reviewStates.Remove(groupKey);
+        approvalStates.Remove(groupKey);
+        reviewStates[standaloneKey] = LegacyGraphCustomerReviewStateValues.NeedsReview;
+        approvalStates[standaloneKey] = false;
+        return standaloneKey;
     }
 }
 
@@ -163,6 +214,17 @@ public static class LegacyGraphRecommendationAvailability
 
 public static class LegacyGraphDocumentOwnership
 {
+    public static string? ResolveCurrentVehicleId(
+        string? manualVehicleId,
+        string? linkedVehicleId,
+        string? originalVehicleId) =>
+        new[]
+        {
+            manualVehicleId,
+            linkedVehicleId,
+            originalVehicleId,
+        }.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+
     /// <summary>
     /// 書類の現在顧客を、手動車両・手動顧客直結・自動リンク・元データの順で解決します。
     /// </summary>

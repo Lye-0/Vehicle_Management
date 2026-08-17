@@ -30,6 +30,10 @@ var tests = new (string Name, Action Test)[]
     ("顧客確定に伴う一括解決は個別の別人履歴にならない", CustomerApprovalResolutionDoesNotBecomeIndividualHistory),
     ("作業再開の検証失敗は保存済みチェックポイントを変更しない", ResumeValidationFailureDoesNotMutateCheckpoint),
     ("手動移動後の書類所有者は元顧客ではなく現在の顧客を使う", ManualDocumentOwnerUsesCurrentCustomer),
+    ("現在の書類車両解決は手動移動先を優先する", CurrentDocumentVehicleResolutionPrefersManualLink),
+    ("確定済み論理グループを単独顧客へ戻すとNeedsReviewを現在キーへ移す", ConfirmedGroupSplitMovesReviewState),
+    ("手動顧客候補追加はBusy中に対象状態を変更しない", ManualCustomerCandidateMutationGuard),
+    ("グラフ仮統合は候補Reject後も所属構成を維持する", GraphStructuralMergeMembershipIgnoresMatchingReject),
     ("顧客確定ゲートは統合時だけ採用プレビューを要求する", CustomerReviewGateRequiresCustomerPreview),
     ("顧客確定ゲートは保存済み採用内容で確定可能になる", CustomerReviewGateAllowsSavedMergeDraft),
     ("顧客確定ゲートは未反映統合だけでは確定を止めない", CustomerReviewGateIgnoresUnappliedMerge),
@@ -663,6 +667,109 @@ static void ManualDocumentOwnerUsesCurrentCustomer()
         "customer-a");
     Assert(directOwner == "customer-b" && vehicleOwner == "customer-c",
         "手動移動後の書類所有者を現在の接続先より元顧客へ戻しています。");
+}
+
+static void CurrentDocumentVehicleResolutionPrefersManualLink()
+{
+    Assert(LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+                "vehicle-2",
+                "vehicle-1",
+                "vehicle-1") == "vehicle-2",
+        "手動で車両V2へ移した書類を、元の車両V1の所属として扱っています。");
+    Assert(LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+                null,
+                "vehicle-2",
+                "vehicle-1") == "vehicle-2",
+        "現在の書類車両リンクを元の車両より優先できていません。");
+    Assert(LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+                null,
+                null,
+                "vehicle-1") == "vehicle-1",
+        "手動・現在リンクがない書類の元車両を解決できていません。");
+}
+
+static void ConfirmedGroupSplitMovesReviewState()
+{
+    var reviewStates = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["logical:x"] = LegacyGraphCustomerReviewStateValues.Approved,
+    };
+    var approvalStates = new Dictionary<string, bool>(StringComparer.Ordinal)
+    {
+        ["logical:x"] = true,
+    };
+
+    var standaloneKey = LegacyGraphCustomerReviewStateTransition.MoveConfirmedGroupToStandaloneCustomer(
+        reviewStates,
+        approvalStates,
+        "logical:x",
+        "a");
+
+    Assert(standaloneKey == "customer:a" &&
+           !reviewStates.ContainsKey("logical:x") &&
+           !approvalStates.ContainsKey("logical:x") &&
+           reviewStates["customer:a"] == LegacyGraphCustomerReviewStateValues.NeedsReview &&
+           approvalStates["customer:a"] == false,
+        "論理グループを構成顧客1件へ戻した後、現在の単独顧客キーへ再確認状態を移せていません。");
+    Assert(LegacyGraphTemporaryMergeGroupState.HasActiveMembership(2),
+        "構成顧客が2件残るグループまで単独顧客へ解消扱いしています。");
+}
+
+static void ManualCustomerCandidateMutationGuard()
+{
+    var targets = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+    {
+        ["source"] = new HashSet<string>(["existing"], StringComparer.Ordinal),
+    };
+    foreach (var flags in new[]
+             {
+                 (Bulk: true, FinalPackage: false, Resume: false),
+                 (Bulk: false, FinalPackage: true, Resume: false),
+                 (Bulk: false, FinalPackage: false, Resume: true),
+             })
+    {
+        var added = LegacyGraphMutationState.TryAddManualCustomerCandidate(
+            targets,
+            "source",
+            "blocked",
+            flags.Bulk,
+            flags.FinalPackage,
+            flags.Resume);
+        Assert(!added && !targets["source"].Contains("blocked") && targets.Count == 1,
+            "Busy中の手動顧客候補追加が対象Dictionaryを変更しています。");
+    }
+
+    Assert(LegacyGraphMutationState.TryAddManualCustomerCandidate(
+                targets,
+                "source",
+                "target",
+                false,
+                false,
+                false) &&
+           targets["source"].Contains("target"),
+        "通常時の手動顧客候補追加を実行できません。");
+    Assert(!LegacyGraphMutationState.TryAddManualCustomerCandidate(
+                targets,
+                "source",
+                "target",
+                false,
+                false,
+                false),
+        "同じ手動顧客候補を重複追加できてしまいます。");
+}
+
+static void GraphStructuralMergeMembershipIgnoresMatchingReject()
+{
+    var candidate = RecommendationCandidate("candidate-rejected", "customer-a");
+    var decisions = new Dictionary<string, string>
+    {
+        [candidate.CandidateId] = AbacusRecommendationDecisionValues.Rejected,
+    };
+
+    Assert(LegacyMatchingWorkflow.AreAllCandidatesRejected([candidate], decisions),
+        "マッチング側の個別Reject判定を確認できません。");
+    Assert(LegacyGraphTemporaryMergeGroupState.IsPending(2, false, false),
+        "同じ候補がReject済みでも、構成顧客2件のグラフ仮統合を維持できません。");
 }
 
 static void CustomerReviewGateAllowsSavedMergeDraft()
