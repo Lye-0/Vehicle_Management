@@ -132,6 +132,136 @@ public static class LegacyGraphCustomerRecommendationMembership
     public static bool ShouldHidePending(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
 }
 
+/// <summary>
+/// Matching UIの顧客統合Recommendationを、方向付きのグループ移動へ渡す前に正規化します。
+/// RecommendationのSubject/Targetは表示上の関係を表すだけで、統合先を表すものではありません。
+/// </summary>
+public static class LegacyGraphMatchingCustomerMergeDirection
+{
+    public static bool TryResolve(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlyCollection<string> currentWorkTargetCustomerIds,
+        out string mergeSourceCustomerId,
+        out string mergeTargetCustomerId)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(currentWorkTargetCustomerIds);
+
+        if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Customer ||
+            candidate.TargetKind != AbacusRecommendationEntityKinds.Customer)
+        {
+            mergeSourceCustomerId = "";
+            mergeTargetCustomerId = "";
+            return false;
+        }
+
+        return TryResolve(
+            candidate.SubjectId,
+            candidate.TargetId,
+            currentWorkTargetCustomerIds,
+            out mergeSourceCustomerId,
+            out mergeTargetCustomerId);
+    }
+
+    public static bool TryResolve(
+        string subjectCustomerId,
+        string targetCustomerId,
+        IReadOnlyCollection<string> currentWorkTargetCustomerIds,
+        out string mergeSourceCustomerId,
+        out string mergeTargetCustomerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectCustomerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCustomerId);
+        ArgumentNullException.ThrowIfNull(currentWorkTargetCustomerIds);
+
+        var subjectIsInCurrentWorkTarget = currentWorkTargetCustomerIds.Contains(
+            subjectCustomerId,
+            StringComparer.Ordinal);
+        var targetIsInCurrentWorkTarget = currentWorkTargetCustomerIds.Contains(
+            targetCustomerId,
+            StringComparer.Ordinal);
+
+        // 片方だけが現在の作業対象グループにいるときだけ、外部候補を追加できます。
+        // 両方が同じグループにいる場合や、どちらも対象外の場合に方向を推測すると、
+        // 既存グループの構成顧客を誤って移動させるため、呼び出し側で別扱いにします。
+        if (subjectIsInCurrentWorkTarget == targetIsInCurrentWorkTarget)
+        {
+            mergeSourceCustomerId = "";
+            mergeTargetCustomerId = "";
+            return false;
+        }
+
+        mergeSourceCustomerId = subjectIsInCurrentWorkTarget
+            ? targetCustomerId
+            : subjectCustomerId;
+        mergeTargetCustomerId = subjectIsInCurrentWorkTarget
+            ? subjectCustomerId
+            : targetCustomerId;
+        return true;
+    }
+}
+
+/// <summary>
+/// Matching UIの顧客検索結果に表示する、現在の作業対象との関係です。
+/// これは保存するドメイン状態ではなく、既存の推薦・統合所属・ごみ箱状態から
+/// 検索結果へ投影するための値です。
+/// </summary>
+public enum LegacyMatchingCustomerSearchRelation
+{
+    None,
+    CurrentCustomer,
+    Pending,
+    Hold,
+    Rejected,
+    Approved,
+    TemporaryMember,
+    LogicalMember,
+    Trash,
+}
+
+public static class LegacyMatchingCustomerSearchRelationState
+{
+    public static LegacyMatchingCustomerSearchRelation Resolve(
+        bool isTrash,
+        bool isCurrentCustomer,
+        bool isLogicalMember,
+        bool isTemporaryMember,
+        string? recommendationDecision)
+    {
+        if (isTrash)
+        {
+            return LegacyMatchingCustomerSearchRelation.Trash;
+        }
+
+        if (isCurrentCustomer)
+        {
+            return LegacyMatchingCustomerSearchRelation.CurrentCustomer;
+        }
+
+        if (isLogicalMember)
+        {
+            return LegacyMatchingCustomerSearchRelation.LogicalMember;
+        }
+
+        if (isTemporaryMember)
+        {
+            return LegacyMatchingCustomerSearchRelation.TemporaryMember;
+        }
+
+        return recommendationDecision switch
+        {
+            AbacusRecommendationDecisionValues.Pending => LegacyMatchingCustomerSearchRelation.Pending,
+            AbacusRecommendationDecisionValues.Hold => LegacyMatchingCustomerSearchRelation.Hold,
+            AbacusRecommendationDecisionValues.Rejected => LegacyMatchingCustomerSearchRelation.Rejected,
+            AbacusRecommendationDecisionValues.Approved => LegacyMatchingCustomerSearchRelation.Approved,
+            _ => LegacyMatchingCustomerSearchRelation.None,
+        };
+    }
+
+    public static bool CanAdd(LegacyMatchingCustomerSearchRelation relation) =>
+        relation == LegacyMatchingCustomerSearchRelation.None;
+}
+
 public static class LegacyGraphMutationState
 {
     public static bool CanMutate(
@@ -157,6 +287,19 @@ public static class LegacyGraphMutationState
             return false;
         }
 
+        if (string.Equals(sourceCustomerId, targetCustomerId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Matchingの手動候補は向きを持たない関係です。逆向きの登録が
+        // 既にある場合も、同じ顧客候補を二重登録しません。
+        if (candidateTargets.TryGetValue(targetCustomerId, out var reverseTargetIds) &&
+            reverseTargetIds.Contains(sourceCustomerId))
+        {
+            return false;
+        }
+
         if (!candidateTargets.TryGetValue(sourceCustomerId, out var targetIds))
         {
             targetIds = new HashSet<string>(StringComparer.Ordinal);
@@ -164,6 +307,33 @@ public static class LegacyGraphMutationState
         }
 
         return targetIds.Add(targetCustomerId);
+    }
+
+    public static bool HasUndirectedManualCustomerCandidate(
+        IReadOnlyDictionary<string, HashSet<string>> candidateTargets,
+        IReadOnlyCollection<string> workTargetCustomerIds,
+        string externalCustomerId)
+    {
+        ArgumentNullException.ThrowIfNull(candidateTargets);
+        ArgumentNullException.ThrowIfNull(workTargetCustomerIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(externalCustomerId);
+
+        foreach (var workTargetCustomerId in workTargetCustomerIds)
+        {
+            if (candidateTargets.TryGetValue(workTargetCustomerId, out var targetIds) &&
+                targetIds.Contains(externalCustomerId))
+            {
+                return true;
+            }
+
+            if (candidateTargets.TryGetValue(externalCustomerId, out var reverseTargetIds) &&
+                reverseTargetIds.Contains(workTargetCustomerId))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

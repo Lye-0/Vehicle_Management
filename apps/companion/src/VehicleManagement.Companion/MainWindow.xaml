@@ -1271,14 +1271,14 @@
                                                      Grid.Column="0"
                                                      GroupName="LegacyGraphUiMode"
                                                      Style="{StaticResource LegacyGraphModeSwitchRadioButton}"
-                                                     IsChecked="True"
-                                                     Content="グラフUI（表示中）"
+                                                     Content="グラフUI"
                                                      Click="LegacyGraphModeButton_Click" />
                                         <RadioButton x:Name="LegacyMatchingModeButton"
                                                      Grid.Column="1"
                                                      GroupName="LegacyGraphUiMode"
                                                      Style="{StaticResource LegacyGraphModeSwitchRadioButton}"
-                                                     Content="顧客マッチングUI"
+                                                     IsChecked="True"
+                                                     Content="顧客マッチングUI（表示中）"
                                                      Click="LegacyMatchingModeButton_Click" />
                                     </Grid>
                                 </Border>
@@ -1315,6 +1315,8 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Foreground="#52647A" FontSize="11" TextWrapping="Wrap"
                                                    Text="検索語は空白・ハイフン・Unicode表記揺れを吸収します。原本やグラフ状態は変更しません。" />
+                                        <TextBlock x:Name="LegacyGraphSearchContextText" Margin="0,5,0,0"
+                                                   Foreground="#1E40AF" FontSize="11" TextWrapping="Wrap" />
                                         <TextBox x:Name="LegacyGraphSearchTextBox" Margin="0,7,0,0" MinHeight="34" Padding="8,5"
                                                  VerticalContentAlignment="Center"
                                                  ToolTip="顧客名・電話番号・住所・登録番号・車台番号・書類番号・金額などを検索"

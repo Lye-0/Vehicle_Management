@@ -52,6 +52,16 @@ var tests = new (string Name, Action Test)[]
     ("最終パッケージ完成には確定状態の再確認が必要", FinalPackageCompletionRequiresStableConfirmation),
     ("グラフ仮統合は推薦判定ではなく所属構成で決まる", GraphTemporaryMergeGroupUsesMembershipOnly),
     ("マッチングの構成顧客解除は基準顧客以外だけを許可する", MatchingMergeMemberSelectionIsScoped),
+    ("Matching顧客検索は未追加顧客だけを追加可能にする", MatchingSearchAllowsOnlyUnrelatedCustomer),
+    ("Matching顧客検索は未処理候補を再追加しない", MatchingSearchPendingRelationIsReadOnly),
+    ("Matching顧客検索は保留候補を再追加しない", MatchingSearchHoldRelationIsReadOnly),
+    ("Matching顧客検索は別人判定済み候補を再追加しない", MatchingSearchRejectedRelationIsReadOnly),
+    ("Matching顧客検索は仮統合グループの構成顧客を再追加しない", MatchingSearchTemporaryMemberIsReadOnly),
+    ("Matching顧客検索は論理顧客グループの構成顧客を再追加しない", MatchingSearchLogicalMemberIsReadOnly),
+    ("Matching顧客検索はごみ箱顧客を追加しない", MatchingSearchTrashRelationIsReadOnly),
+    ("Matching顧客検索は現在の対象顧客を追加しない", MatchingSearchCurrentCustomerIsReadOnly),
+    ("Matching顧客検索の関係表示は検索だけでは状態を変更しない", MatchingSearchProjectionIsReadOnly),
+    ("Matching手動顧客候補は逆向き関係を重複追加しない", MatchingManualCandidateRelationIsUndirected),
     ("代表候補承認で作られた重複Obsoleteは構成変更でPendingへ戻る", DuplicateRecommendationReconcilesAfterMembershipChange),
     ("同一グループ内の顧客Approvedは構成顧客追加で維持する", ApprovedCustomerRecommendationSurvivesMemberExpansion),
     ("同一グループ内の顧客Approvedは別顧客解除で維持する", ApprovedCustomerRecommendationSurvivesUnrelatedMemberRemoval),
@@ -962,6 +972,167 @@ static void ManualCustomerCandidateMutationGuard()
                 false,
                 false),
         "同じ手動顧客候補を重複追加できてしまいます。");
+}
+
+static void MatchingSearchAllowsOnlyUnrelatedCustomer()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        isTrash: false,
+        isCurrentCustomer: false,
+        isLogicalMember: false,
+        isTemporaryMember: false,
+        recommendationDecision: null);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.None &&
+           LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "関係のない顧客をMatching検索から追加できません。");
+}
+
+static void MatchingSearchPendingRelationIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        false,
+        false,
+        AbacusRecommendationDecisionValues.Pending);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.Pending &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "未処理候補をMatching検索から再追加できます。");
+}
+
+static void MatchingSearchHoldRelationIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        false,
+        false,
+        AbacusRecommendationDecisionValues.Hold);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.Hold &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "保留候補をMatching検索から再追加できます。");
+}
+
+static void MatchingSearchRejectedRelationIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        false,
+        false,
+        AbacusRecommendationDecisionValues.Rejected);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.Rejected &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "別人判定済み候補をMatching検索から再追加できます。");
+}
+
+static void MatchingSearchTemporaryMemberIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        false,
+        true,
+        AbacusRecommendationDecisionValues.Pending);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.TemporaryMember &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "仮統合グループの構成顧客を未処理候補として再追加できます。");
+}
+
+static void MatchingSearchLogicalMemberIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        true,
+        false,
+        AbacusRecommendationDecisionValues.Approved);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.LogicalMember &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "論理顧客グループの構成顧客を未処理候補として再追加できます。");
+}
+
+static void MatchingSearchTrashRelationIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        true,
+        false,
+        false,
+        false,
+        null);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.Trash &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "ごみ箱顧客をMatching検索から追加できます。");
+}
+
+static void MatchingSearchCurrentCustomerIsReadOnly()
+{
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        true,
+        false,
+        false,
+        null);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.CurrentCustomer &&
+           !LegacyMatchingCustomerSearchRelationState.CanAdd(relation),
+        "現在のMatching対象顧客を候補へ追加できます。");
+}
+
+static void MatchingSearchProjectionIsReadOnly()
+{
+    var targets = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+    {
+        ["current"] = new HashSet<string>(["candidate"], StringComparer.Ordinal),
+    };
+    var before = targets["current"].ToArray();
+    var relation = LegacyMatchingCustomerSearchRelationState.Resolve(
+        false,
+        false,
+        false,
+        false,
+        AbacusRecommendationDecisionValues.Pending);
+
+    Assert(relation == LegacyMatchingCustomerSearchRelation.Pending &&
+           targets["current"].SequenceEqual(before, StringComparer.Ordinal),
+        "Matching検索の関係表示だけで候補状態が変更されています。");
+}
+
+static void MatchingManualCandidateRelationIsUndirected()
+{
+    var targets = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+    {
+        ["candidate"] = new HashSet<string>(["current"], StringComparer.Ordinal),
+    };
+
+    Assert(!LegacyGraphMutationState.TryAddManualCustomerCandidate(
+                targets,
+                "current",
+                "candidate",
+                false,
+                false,
+                false) &&
+           !LegacyGraphMutationState.TryAddManualCustomerCandidate(
+               targets,
+               "current",
+               "current",
+               false,
+               false,
+               false),
+        "手動顧客候補の逆向きまたは自己関係を重複登録できます。");
+
+    Assert(LegacyGraphMutationState.HasUndirectedManualCustomerCandidate(
+               targets,
+               ["current", "other-member"],
+               "candidate"),
+        "論理顧客の作業対象から既存の手動候補関係を検出できません。");
 }
 
 static void GraphStructuralMergeMembershipIgnoresMatchingReject()
