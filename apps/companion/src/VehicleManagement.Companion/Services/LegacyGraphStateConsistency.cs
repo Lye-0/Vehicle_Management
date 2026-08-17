@@ -117,6 +117,12 @@ public static class LegacyGraphMutationState
 
 public static class LegacyGraphCheckpointSaveState
 {
+    public static bool CanStart(
+        bool resumeInProgress,
+        bool bulkMergeBusy,
+        bool finalPackageBusy) =>
+        !resumeInProgress && !bulkMergeBusy && !finalPackageBusy;
+
     public static bool ShouldRescheduleAfterResumeFailure(
         bool resumeFailed,
         bool hadPendingSave) =>
@@ -150,11 +156,12 @@ public static class LegacyGraphCustomerReviewStateTransition
     /// 確定済み論理グループが構成顧客1件の単独顧客へ戻ったとき、
     /// 旧グループキーの確認状態を残存顧客の現在キーへ移します。
     /// </summary>
-    public static string MoveConfirmedGroupToStandaloneCustomer(
+    public static string MoveGroupToStandaloneCustomer(
         IDictionary<string, string> reviewStates,
         IDictionary<string, bool> approvalStates,
         string groupKey,
-        string remainingCustomerId)
+        string remainingCustomerId,
+        bool wasApproved)
     {
         ArgumentNullException.ThrowIfNull(reviewStates);
         ArgumentNullException.ThrowIfNull(approvalStates);
@@ -164,7 +171,9 @@ public static class LegacyGraphCustomerReviewStateTransition
         var standaloneKey = $"customer:{remainingCustomerId}";
         reviewStates.Remove(groupKey);
         approvalStates.Remove(groupKey);
-        reviewStates[standaloneKey] = LegacyGraphCustomerReviewStateValues.NeedsReview;
+        reviewStates[standaloneKey] = wasApproved
+            ? LegacyGraphCustomerReviewStateValues.NeedsReview
+            : LegacyGraphCustomerReviewStateValues.Unreviewed;
         approvalStates[standaloneKey] = false;
         return standaloneKey;
     }
@@ -217,13 +226,22 @@ public static class LegacyGraphDocumentOwnership
     public static string? ResolveCurrentVehicleId(
         string? manualVehicleId,
         string? linkedVehicleId,
-        string? originalVehicleId) =>
-        new[]
+        string? originalVehicleId,
+        bool hasManualCustomerOnlyLink = false)
+    {
+        if (!string.IsNullOrWhiteSpace(manualVehicleId))
         {
-            manualVehicleId,
-            linkedVehicleId,
-            originalVehicleId,
-        }.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+            return manualVehicleId;
+        }
+
+        return hasManualCustomerOnlyLink
+            ? null
+            : new[]
+            {
+                linkedVehicleId,
+                originalVehicleId,
+            }.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+    }
 
     /// <summary>
     /// 書類の現在顧客を、手動車両・手動顧客直結・自動リンク・元データの順で解決します。

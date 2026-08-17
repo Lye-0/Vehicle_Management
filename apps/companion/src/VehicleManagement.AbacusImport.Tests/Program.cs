@@ -31,7 +31,11 @@ var tests = new (string Name, Action Test)[]
     ("作業再開の検証失敗は保存済みチェックポイントを変更しない", ResumeValidationFailureDoesNotMutateCheckpoint),
     ("手動移動後の書類所有者は元顧客ではなく現在の顧客を使う", ManualDocumentOwnerUsesCurrentCustomer),
     ("現在の書類車両解決は手動移動先を優先する", CurrentDocumentVehicleResolutionPrefersManualLink),
+    ("最終パッケージの書類除外は現在の車両・顧客所属を使う", FinalPackageUsesCurrentDocumentOwnership),
+    ("顧客なし車両への手動接続は現在顧客として解決される", ManualVehicleCustomerOwnershipIsCurrent),
+    ("チェックポイント保存はBulk・最終出力・再開中に開始しない", CheckpointSaveDefersWhileBusy),
     ("確定済み論理グループを単独顧客へ戻すとNeedsReviewを現在キーへ移す", ConfirmedGroupSplitMovesReviewState),
+    ("未確定の論理グループを単独顧客へ戻すとUnreviewedになる", UnapprovedGroupSplitMovesToUnreviewed),
     ("手動顧客候補追加はBusy中に対象状態を変更しない", ManualCustomerCandidateMutationGuard),
     ("グラフ仮統合は候補Reject後も所属構成を維持する", GraphStructuralMergeMembershipIgnoresMatchingReject),
     ("顧客確定ゲートは統合時だけ採用プレビューを要求する", CustomerReviewGateRequiresCustomerPreview),
@@ -50,6 +54,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
     ("旧チェックポイントの顧客二重所属を正規化して再開できる", LegacyCheckpointMergeMembershipRecovery),
+    ("旧チェックポイントの消滅グループ参照を有効な顧客スコープへ移行する", LegacyCheckpointGroupReferencesMigrate),
 };
 
 foreach (var (name, test) in tests)
@@ -686,6 +691,163 @@ static void CurrentDocumentVehicleResolutionPrefersManualLink()
                 null,
                 "vehicle-1") == "vehicle-1",
         "手動・現在リンクがない書類の元車両を解決できていません。");
+    Assert(LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+                null,
+                "vehicle-1",
+                "vehicle-1",
+                hasManualCustomerOnlyLink: true) is null,
+        "顧客直結へ変更した書類を、元車両の現在所属として扱っています。");
+}
+
+static void FinalPackageUsesCurrentDocumentOwnership()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-current-ownership-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "manifest.json"), "{}");
+    try
+    {
+        const string documentKey = "販売書類|sales.csv|1|D1";
+        var document = new AbacusLegacyExportCandidateGraphDocument(
+            "販売書類",
+            "sales.csv",
+            1,
+            "D1",
+            "顧客A",
+            "V1",
+            "",
+            "2024-01-01",
+            "1000",
+            "一意一致",
+            "",
+            "v1",
+            [],
+            []);
+        var vehicle1 = new AbacusLegacyExportCandidateGraphVehicle(
+            "v1", "a", "顧客A", "", "V1", "", "", "", "", "", [document]);
+        var vehicle2 = new AbacusLegacyExportCandidateGraphVehicle(
+            "v2", "b", "顧客B", "", "V2", "", "", "", "", "", []);
+        var customerA = new AbacusLegacyExportCandidateGraphCustomer(
+            "a", "A", "顧客A", "えー", "", "", "", "", "", [vehicle1], []);
+        var customerB = new AbacusLegacyExportCandidateGraphCustomer(
+            "b", "B", "顧客B", "びー", "", "", "", "", "", [vehicle2], []);
+        var graph = new AbacusLegacyExportCandidateGraphResult(
+            sourceRoot,
+            [customerA, customerB],
+            [document],
+            [],
+            [],
+            1,
+            0,
+            0,
+            []);
+        var groups = new[]
+        {
+            new AbacusLegacyGraphFinalCustomerGroup(
+                "customer:a", "single", true, ["a"], "a", "A", "顧客A", "えー", "", "", "", "", ""),
+            new AbacusLegacyGraphFinalCustomerGroup(
+                "customer:b", "single", true, ["b"], "b", "B", "顧客B", "びー", "", "", "", "", ""),
+        };
+
+        AbacusLegacyGraphFinalizationSnapshot Snapshot(
+            IReadOnlyCollection<string>? trayVehicles = null,
+            IReadOnlyCollection<string>? excludedVehicles = null,
+            IReadOnlyCollection<string>? excludedCustomers = null) =>
+            new(
+                groups,
+                new Dictionary<string, string> { [documentKey] = "v2" },
+                new Dictionary<string, string>(),
+                [],
+                true,
+                TrayVehicleIds: trayVehicles,
+                ExplicitExcludedVehicleIds: excludedVehicles,
+                ExplicitExcludedCustomerIds: excludedCustomers);
+
+        var store = new AbacusLegacyGraphFinalPackageStore();
+        var originalVehicleTrashed = store.CreateAsync(
+                graph,
+                Snapshot(trayVehicles: ["v1"]),
+                destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(originalVehicleTrashed.Documents is [{ VehicleId: "v2" }] &&
+               originalVehicleTrashed.ExcludedDocumentCount == 0,
+            "元車両V1をトレイへ移しただけで、現在V2の書類を除外しています。");
+
+        var currentVehicleTrashed = store.CreateAsync(
+                graph,
+                Snapshot(excludedVehicles: ["v2"]),
+                destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(currentVehicleTrashed.Documents.Count == 0 &&
+               currentVehicleTrashed.ExcludedDocumentCount == 1,
+            "現在所属する車両V2のごみ箱移動で、書類を除外できていません。");
+
+        var originalCustomerTrashed = store.CreateAsync(
+                graph,
+                Snapshot(excludedCustomers: ["a"]),
+                destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(originalCustomerTrashed.Documents is [{ VehicleId: "v2" }] &&
+               originalCustomerTrashed.ExcludedDocumentCount == 0,
+            "元顧客Aを除外しただけで、現在顧客Bの書類を除外しています。");
+
+        var currentCustomerTrashed = store.CreateAsync(
+                graph,
+                Snapshot(excludedCustomers: ["b"]),
+                destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        Assert(currentCustomerTrashed.Documents.Count == 0 &&
+               currentCustomerTrashed.ExcludedDocumentCount == 1,
+            "現在顧客Bのごみ箱移動で、書類を除外できていません。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static void ManualVehicleCustomerOwnershipIsCurrent()
+{
+    var currentCustomer = LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+        "customer:b",
+        null,
+        null,
+        "customer:a");
+    Assert(currentCustomer == "customer:b",
+        "顧客なし車両をBへ手動接続した書類を、現在顧客Bとして解決できていません。");
+    Assert(LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+                "customer:b",
+                null,
+                null,
+                "customer:a") is not null,
+        "顧客なし車両への手動接続を、Recommendation適用可能な現在顧客として扱えていません。");
+}
+
+static void CheckpointSaveDefersWhileBusy()
+{
+    Assert(!LegacyGraphCheckpointSaveState.CanStart(
+                resumeInProgress: false,
+                bulkMergeBusy: true,
+                finalPackageBusy: false) &&
+           !LegacyGraphCheckpointSaveState.CanStart(
+                resumeInProgress: false,
+                bulkMergeBusy: false,
+                finalPackageBusy: true) &&
+           !LegacyGraphCheckpointSaveState.CanStart(
+                resumeInProgress: true,
+                bulkMergeBusy: false,
+                finalPackageBusy: false) &&
+           LegacyGraphCheckpointSaveState.CanStart(false, false, false),
+        "Bulk・最終出力・再開中のチェックポイント保存開始ゲートが機能していません。");
 }
 
 static void ConfirmedGroupSplitMovesReviewState()
@@ -699,11 +861,12 @@ static void ConfirmedGroupSplitMovesReviewState()
         ["logical:x"] = true,
     };
 
-    var standaloneKey = LegacyGraphCustomerReviewStateTransition.MoveConfirmedGroupToStandaloneCustomer(
+    var standaloneKey = LegacyGraphCustomerReviewStateTransition.MoveGroupToStandaloneCustomer(
         reviewStates,
         approvalStates,
         "logical:x",
-        "a");
+        "a",
+        wasApproved: true);
 
     Assert(standaloneKey == "customer:a" &&
            !reviewStates.ContainsKey("logical:x") &&
@@ -713,6 +876,29 @@ static void ConfirmedGroupSplitMovesReviewState()
         "論理グループを構成顧客1件へ戻した後、現在の単独顧客キーへ再確認状態を移せていません。");
     Assert(LegacyGraphTemporaryMergeGroupState.HasActiveMembership(2),
         "構成顧客が2件残るグループまで単独顧客へ解消扱いしています。");
+}
+
+static void UnapprovedGroupSplitMovesToUnreviewed()
+{
+    var reviewStates = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["logical:x"] = LegacyGraphCustomerReviewStateValues.Unreviewed,
+    };
+    var approvalStates = new Dictionary<string, bool>(StringComparer.Ordinal)
+    {
+        ["logical:x"] = false,
+    };
+
+    LegacyGraphCustomerReviewStateTransition.MoveGroupToStandaloneCustomer(
+        reviewStates,
+        approvalStates,
+        "logical:x",
+        "a",
+        wasApproved: false);
+
+    Assert(reviewStates["customer:a"] == LegacyGraphCustomerReviewStateValues.Unreviewed &&
+           approvalStates["customer:a"] == false,
+        "未承認の論理グループ分解を再確認待ちへ誤って変更しています。");
 }
 
 static void ManualCustomerCandidateMutationGuard()
@@ -1211,6 +1397,126 @@ static void LegacyCheckpointMergeMembershipRecovery()
         recovered.Checkpoint);
     Assert(!alreadyNormalized.Changed,
         "重複所属を整理したチェックポイントを再度変更しています。");
+}
+
+static void LegacyCheckpointGroupReferencesMigrate()
+{
+    var logicalGroupId = "logical:formal";
+    var candidateGroupId = "same-name:消滅候補";
+    var checkpoint = new LegacyGraphWorkCheckpoint(
+        LegacyGraphWorkCheckpointSchema.Kind,
+        LegacyGraphWorkCheckpointSchema.CurrentVersion,
+        "package",
+        "source",
+        new string('A', 64),
+        "candidate",
+        new string('B', 64),
+        "vehicles.csv",
+        false,
+        "graph",
+        null,
+        null,
+        false,
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>
+        {
+            ["document-dangling"] = candidateGroupId,
+        },
+        new Dictionary<string, string>(),
+        new Dictionary<string, string>(),
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+            new LegacyGraphCheckpointMergeGroup(logicalGroupId, "logical", ["a", "b"]),
+            new LegacyGraphCheckpointMergeGroup(candidateGroupId, "same-name", ["b", "c"]),
+        ],
+        new Dictionary<string, string>
+        {
+            ["b"] = candidateGroupId,
+            ["c"] = candidateGroupId,
+        },
+        new Dictionary<string, LegacyGraphCheckpointMergeDraft>(),
+        [logicalGroupId],
+        new Dictionary<string, string>(),
+        new Dictionary<string, bool>(),
+        [],
+        null,
+        DateTimeOffset.UtcNow,
+        RecommendationStates:
+        [
+            new LegacyGraphCheckpointRecommendationState(
+                "candidate-regenerated",
+                AbacusRecommendationDecisionValues.Hold,
+                LegacyGraphRecommendationLifecycle.Active,
+                null,
+                DateTimeOffset.UtcNow,
+                candidateGroupId,
+                "customer:c"),
+        ],
+        MatchingChanges:
+        [
+            new LegacyGraphCheckpointMatchingChange(
+                $"recommendation-scope\u001F{candidateGroupId}\u001Fcustomer:c",
+                "recommendation",
+                "candidate-regenerated",
+                "保留",
+                "テスト",
+                DateTimeOffset.UtcNow,
+                "customer:b",
+                candidateGroupId,
+                "customer:c",
+                new LegacyGraphDetachedUndoState(
+                    "document",
+                    "document-dangling",
+                    "customer:c",
+                    true,
+                    [
+                        new LegacyGraphDetachedDocumentState(
+                            "document-dangling",
+                            null,
+                            candidateGroupId,
+                            "manual-customer-only",
+                            "ユーザーが選択",
+                            false,
+                            false,
+                            true),
+                    ])),
+        ],
+        LogicalCustomerMergeGroupByCustomerId: new Dictionary<string, string>
+        {
+            ["a"] = logicalGroupId,
+            ["b"] = logicalGroupId,
+        },
+        CustomerApprovalStates: new Dictionary<string, bool>
+        {
+            [logicalGroupId] = true,
+        },
+        CustomerReviewStates: new Dictionary<string, string>
+        {
+            [logicalGroupId] = LegacyGraphCustomerReviewStateValues.Approved,
+        });
+
+    var recovered = LegacyGraphWorkCheckpointRecovery.NormalizeMergeMembership(checkpoint).Checkpoint;
+    Assert(recovered.MatchingChanges is { Length: 1 },
+        "復元後の変更履歴がありません。");
+    var matchingChange = recovered.MatchingChanges![0];
+    Assert(matchingChange.UndoState?.Documents is { Count: 1 },
+        "復元後のUndo書類がありません。");
+    var undoDocument = matchingChange.UndoState!.Documents[0];
+    Assert(recovered.CustomerMergeGroups.Length == 1 &&
+           recovered.CustomerMergeGroups[0].GroupId == logicalGroupId &&
+           recovered.ManualDocumentCustomerGroupLinks["document-dangling"] == "customer:c" &&
+           recovered.RecommendationStates is [{ WorkTargetKey: "customer:c" }] &&
+           matchingChange.WorkTargetKey == "customer:c" &&
+           undoDocument.ManualCustomerGroupKey == "customer:c" &&
+           !matchingChange.ChangeId.Contains(candidateGroupId, StringComparison.Ordinal),
+        "消滅した候補グループを参照する状態が、現在の顧客スコープへ移行されていません。");
 }
 
 static AbacusRecommendationCandidate RecommendationCandidate(

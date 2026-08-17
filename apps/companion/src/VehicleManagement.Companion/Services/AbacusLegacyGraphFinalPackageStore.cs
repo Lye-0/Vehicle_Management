@@ -220,21 +220,20 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         }
 
         ValidateManualVehicleCustomerLinks(manualVehicleCustomerLinks, allSourceVehicles, sourceCustomers, trayVehicleIds);
+        var allVehiclesById = allSourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         var sourceVehicles = allSourceVehicles
             .Where(vehicle => !trayVehicleIds.Contains(vehicle.VehicleId) &&
                               !explicitExcludedVehicleIds.Contains(vehicle.VehicleId) &&
-                              !(vehicle.HasCustomer && explicitExcludedCustomerIds.Contains(vehicle.CustomerId)) &&
-                              !(manualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var manualCustomerId) &&
-                                explicitExcludedCustomerIds.Contains(manualCustomerId)) &&
-                              (vehicle.HasCustomer || manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)))
+                              !explicitExcludedCustomerIds.Contains(
+                                  ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "") &&
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) is not null)
             .ToArray();
         var excludedVehicles = allSourceVehicles
             .Where(vehicle => trayVehicleIds.Contains(vehicle.VehicleId) ||
                               explicitExcludedVehicleIds.Contains(vehicle.VehicleId) ||
-                              (vehicle.HasCustomer && explicitExcludedCustomerIds.Contains(vehicle.CustomerId)) ||
-                              (manualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var manualCustomerId) &&
-                               explicitExcludedCustomerIds.Contains(manualCustomerId)) ||
-                              (!vehicle.HasCustomer && !manualVehicleCustomerLinks.ContainsKey(vehicle.VehicleId)))
+                              explicitExcludedCustomerIds.Contains(
+                                  ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "") ||
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) is null)
             .ToArray();
         var vehiclesById = sourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         var documents = graph.AllDocuments
@@ -260,31 +259,23 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         // 顧客直結書類として誤って出力されないよう、元の車両リンクを最終段階で再確認します。
         var vehicleTrayDocumentKeys = documents
             .Where(document =>
-                (document.LinkedVehicleId is not null && trayVehicleIds.Contains(document.LinkedVehicleId)) ||
-                (snapshot.ManualDocumentVehicleLinks.TryGetValue(GetDocumentKey(document), out var manualVehicleId) &&
-                 trayVehicleIds.Contains(manualVehicleId)))
+                ResolveCurrentVehicleId(document, GetDocumentKey(document), snapshot, allVehiclesById, graph) is { } currentVehicleId &&
+                trayVehicleIds.Contains(currentVehicleId))
             .Select(GetDocumentKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         excludedKeys.UnionWith(vehicleTrayDocumentKeys);
 
         var explicitParentDocumentKeys = documents
             .Where(document =>
-                (document.LinkedVehicleId is not null && explicitExcludedVehicleIds.Contains(document.LinkedVehicleId)) ||
-                (snapshot.ManualDocumentVehicleLinks.TryGetValue(GetDocumentKey(document), out var manualVehicleId) &&
-                 explicitExcludedVehicleIds.Contains(manualVehicleId)) ||
-                (document.LinkedVehicleId is not null &&
-                 allSourceVehicles.FirstOrDefault(vehicle => string.Equals(vehicle.VehicleId, document.LinkedVehicleId, StringComparison.Ordinal)) is { HasCustomer: true } linkedVehicle &&
-                 explicitExcludedCustomerIds.Contains(linkedVehicle.CustomerId)) ||
+                (ResolveCurrentVehicleId(document, GetDocumentKey(document), snapshot, allVehiclesById, graph) is { } currentVehicleId &&
+                 (explicitExcludedVehicleIds.Contains(currentVehicleId) ||
+                  allVehiclesById.TryGetValue(currentVehicleId, out var currentVehicle) &&
+                  explicitExcludedCustomerIds.Contains(
+                      ResolveCurrentVehicleCustomerId(currentVehicle, manualVehicleCustomerLinks) ?? ""))) ||
                 (snapshot.ManualDocumentCustomerGroupLinks.TryGetValue(GetDocumentKey(document), out var manualGroupKey) &&
-                 excludedCustomerGroupKeys.Contains(manualGroupKey)) ||
-                (FindSourceCustomerForDocument(graph, document) is { } sourceCustomer &&
-                 explicitExcludedCustomerIds.Contains(sourceCustomer.CustomerId)))
+                 excludedCustomerGroupKeys.Contains(manualGroupKey)))
             .Select(GetDocumentKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var vehicle in allSourceVehicles.Where(vehicle => explicitExcludedVehicleIds.Contains(vehicle.VehicleId)))
-        {
-            explicitParentDocumentKeys.UnionWith(vehicle.Documents.Select(GetDocumentKey));
-        }
         excludedKeys.UnionWith(explicitParentDocumentKeys);
         var unresolvedDocumentOutputKeys = unresolvedExcludedKeys
             .Union(vehicleTrayDocumentKeys, StringComparer.OrdinalIgnoreCase)
@@ -294,7 +285,6 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         unresolvedDocumentOutputKeys.ExceptWith(explicitDocumentOutputKeys);
 
-        var allVehiclesById = allSourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         ValidateManualLinks(snapshot, documentByKey, allVehiclesById, allGroupByKey);
         var finalDocumentCandidates = new List<FinalDocument>(Math.Max(0, documents.Length - excludedKeys.Count));
         foreach (var document in documents)
@@ -306,7 +296,13 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 continue;
             }
 
-            var linkedVehicleId = ResolveVehicleId(document, key, snapshot, vehiclesById);
+            var linkedVehicleId = ResolveVehicleId(
+                document,
+                key,
+                snapshot,
+                graph,
+                allVehiclesById,
+                vehiclesById);
             var targetGroup = linkedVehicleId is not null
                 ? ResolveVehicleGroup(vehiclesById[linkedVehicleId], manualVehicleCustomerLinks, groupBySourceCustomerId)
                 : ResolveCustomerOnlyGroup(document, key, snapshot, sourceCustomers, groupBySourceCustomerId, groupByKey);
@@ -467,9 +463,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 var trayExcludedVehicleCount = excludedVehicles.Count(vehicle => trayVehicleIds.Contains(vehicle.VehicleId));
                 var explicitExcludedVehicleCount = excludedVehicles.Count(vehicle =>
                     explicitExcludedVehicleIds.Contains(vehicle.VehicleId) ||
-                    (vehicle.HasCustomer && explicitExcludedCustomerIds.Contains(vehicle.CustomerId)) ||
-                    (manualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var excludedCustomerId) &&
-                     explicitExcludedCustomerIds.Contains(excludedCustomerId)));
+                    explicitExcludedCustomerIds.Contains(
+                        ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? ""));
                 var customerUnresolvedVehicleCount = excludedVehicles.Length - trayExcludedVehicleCount - explicitExcludedVehicleCount;
                 warnings.Add($"出力対象外の車両{excludedVehicles.Length:N0}件（未確定トレイ{trayExcludedVehicleCount:N0}件 / 明示除外{explicitExcludedVehicleCount:N0}件 / 顧客未確定{Math.Max(0, customerUnresolvedVehicleCount):N0}件）。");
             }
@@ -566,11 +561,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     vehicle.SourceLocation,
                     explicitExcludedVehicleIds.Contains(vehicle.VehicleId)
                         ? "ユーザーがごみ箱へ移動したため最終パッケージから除外"
-                        : vehicle.HasCustomer && explicitExcludedCustomerIds.Contains(vehicle.CustomerId)
+                        : explicitExcludedCustomerIds.Contains(
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "")
                             ? "親顧客がごみ箱へ移動したため最終パッケージから除外"
-                            : manualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var mappedCustomerId) &&
-                              explicitExcludedCustomerIds.Contains(mappedCustomerId)
-                                ? "手動接続先の顧客がごみ箱へ移動したため最終パッケージから除外"
                             : trayVehicleIds.Contains(vehicle.VehicleId)
                         ? "ユーザーが未確定車両トレイへ移動したため最終パッケージから除外"
                         : "顧客未接続のため最終パッケージから除外")).ToArray(),
@@ -773,11 +766,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         IReadOnlyDictionary<string, string> manualVehicleCustomerLinks,
         IReadOnlyDictionary<string, AbacusLegacyGraphFinalCustomerGroup> groupsBySourceCustomerId)
     {
-        var sourceCustomerId = vehicle.HasCustomer
-            ? vehicle.CustomerId
-            : manualVehicleCustomerLinks.TryGetValue(vehicle.VehicleId, out var linkedCustomerId)
-                ? linkedCustomerId
-                : throw new InvalidDataException($"未確定車両に顧客接続がありません: {vehicle.VehicleId}");
+        var sourceCustomerId = ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ??
+            throw new InvalidDataException($"未確定車両に顧客接続がありません: {vehicle.VehicleId}");
         if (!groupsBySourceCustomerId.TryGetValue(sourceCustomerId, out var group))
         {
             throw new InvalidDataException($"車両の接続先顧客グループがありません: {vehicle.VehicleId}");
@@ -832,19 +822,59 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         AbacusLegacyExportCandidateGraphDocument document,
         string documentKey,
         AbacusLegacyGraphFinalizationSnapshot snapshot,
+        AbacusLegacyExportCandidateGraphResult graph,
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> allVehicles,
         IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> vehicles)
     {
-        if (snapshot.ManualDocumentVehicleLinks.TryGetValue(documentKey, out var manualVehicleId))
-        {
-            return manualVehicleId;
-        }
+        var currentVehicleId = ResolveCurrentVehicleId(
+            document,
+            documentKey,
+            snapshot,
+            allVehicles,
+            graph);
+        return currentVehicleId is not null && vehicles.ContainsKey(currentVehicleId)
+            ? currentVehicleId
+            : null;
+    }
 
-        if (document.LinkedVehicleId is not null && vehicles.ContainsKey(document.LinkedVehicleId))
-        {
-            return document.LinkedVehicleId;
-        }
+    private static string? ResolveCurrentVehicleId(
+        AbacusLegacyExportCandidateGraphDocument document,
+        string documentKey,
+        AbacusLegacyGraphFinalizationSnapshot snapshot,
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> allVehicles,
+        AbacusLegacyExportCandidateGraphResult graph)
+    {
+        var manualVehicleId = snapshot.ManualDocumentVehicleLinks.TryGetValue(documentKey, out var manualId) &&
+                              allVehicles.ContainsKey(manualId)
+            ? manualId
+            : null;
+        var linkedVehicleId = document.LinkedVehicleId is not null &&
+                              allVehicles.ContainsKey(document.LinkedVehicleId)
+            ? document.LinkedVehicleId
+            : null;
+        var originalVehicleId = FindOriginalVehicleForDocument(graph, document)?.VehicleId;
+        return LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+            manualVehicleId,
+            linkedVehicleId,
+            originalVehicleId,
+            snapshot.ManualDocumentCustomerGroupLinks.ContainsKey(documentKey));
+    }
 
-        return null;
+    private static string? ResolveCurrentVehicleCustomerId(
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        IReadOnlyDictionary<string, string> manualVehicleCustomerLinks)
+    {
+        var manualCustomerId = manualVehicleCustomerLinks.TryGetValue(
+            vehicle.VehicleId,
+            out var linkedCustomerId)
+            ? linkedCustomerId
+            : null;
+        var originalCustomerId = vehicle.HasCustomer ? vehicle.CustomerId : null;
+        return LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+            manualCustomerId,
+            null,
+            null,
+            originalCustomerId);
     }
 
     private static AbacusLegacyGraphFinalCustomerGroup ResolveCustomerOnlyGroup(
@@ -1104,6 +1134,17 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             customer.Vehicles.Any(vehicle => vehicle.Documents.Any(candidate =>
                 string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase))) ||
             customer.UnresolvedDocuments.Any(candidate =>
+               string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static AbacusLegacyExportCandidateGraphVehicle? FindOriginalVehicleForDocument(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetDocumentKey(document);
+        return graph.Customers
+            .SelectMany(customer => customer.Vehicles)
+            .FirstOrDefault(vehicle => vehicle.Documents.Any(candidate =>
                 string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase)));
     }
 
