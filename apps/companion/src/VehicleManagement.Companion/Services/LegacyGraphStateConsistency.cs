@@ -117,6 +117,21 @@ public static class LegacyGraphMatchingSelectionState
     }
 }
 
+public static class LegacyGraphCustomerRecommendationMembership
+{
+    /// <summary>
+    /// 顧客RecommendationのApprovedは、同じtemporary / logical group内の
+    /// 構成顧客同士である限り、別の構成顧客の追加・解除では取り消しません。
+    /// </summary>
+    public static bool ShouldKeepApproved(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
+
+    /// <summary>
+    /// 状態の不整合でPendingが残っても、同じ構成顧客同士のRecommendationは
+    /// Matchingの未処理候補として表示しません。
+    /// </summary>
+    public static bool ShouldHidePending(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
+}
+
 public static class LegacyGraphMutationState
 {
     public static bool CanMutate(

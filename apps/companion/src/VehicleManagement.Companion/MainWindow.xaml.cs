@@ -4065,6 +4065,10 @@ public partial class MainWindow : Window
                 sourceCustomerIds,
                 includeGraphOriginalCustomerDocuments))
             .Where(IsLegacyGraphRecommendationActive)
+            .Where(candidate =>
+                !LegacyGraphCustomerRecommendationMembership.ShouldHidePending(
+                    AreLegacyGraphCustomerRecommendationEndpointsInSameMergeGroup(candidate)) ||
+                GetLegacyGraphRecommendationDecision(candidate) != AbacusRecommendationDecisionValues.Pending)
             .Where(candidate => includeCompletedCustomerCandidates ||
                                 LegacyMatchingCategoryKinds.GetKind(candidate) != LegacyMatchingCategoryKinds.Customer ||
                                 GetLegacyGraphRecommendationDecision(candidate) is
@@ -8024,6 +8028,15 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            // Approvedは「推薦関係そのもの」ではなく、現在の構成に対する
+            // 承認です。両端が同じtemporary / logical groupに残っている限り、
+            // 別の構成顧客を追加・解除しただけで承認を取り消しません。
+            if (LegacyGraphCustomerRecommendationMembership.ShouldKeepApproved(
+                    AreLegacyGraphCustomerRecommendationEndpointsInSameMergeGroup(candidate)))
+            {
+                continue;
+            }
+
             legacyGraphRecommendationStates.Remove(candidate.CandidateId);
             legacyGraphRecommendationDecisions.Remove(candidate.CandidateId);
         }
@@ -8045,6 +8058,10 @@ public partial class MainWindow : Window
         return string.Equals(subjectGroupKey, targetGroupKey, StringComparison.Ordinal) &&
                TryGetLegacyGraphMergeGroup(subjectGroupKey, out var group) &&
                group.CustomerIds.Count > 1 &&
+               (string.Equals(group.Origin, "manual", StringComparison.Ordinal) ||
+                string.Equals(group.Origin, "logical", StringComparison.Ordinal) ||
+                legacyGraphAppliedCustomerMergeKeys.Contains(subjectGroupKey) ||
+                IsLegacyGraphLogicalCustomerGroup(subjectGroupKey)) &&
                group.CustomerIds.Contains(subjectCustomer.CustomerId, StringComparer.Ordinal) &&
                group.CustomerIds.Contains(targetCustomer.CustomerId, StringComparer.Ordinal);
     }

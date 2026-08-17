@@ -53,6 +53,9 @@ var tests = new (string Name, Action Test)[]
     ("グラフ仮統合は推薦判定ではなく所属構成で決まる", GraphTemporaryMergeGroupUsesMembershipOnly),
     ("マッチングの構成顧客解除は基準顧客以外だけを許可する", MatchingMergeMemberSelectionIsScoped),
     ("代表候補承認で作られた重複Obsoleteは構成変更でPendingへ戻る", DuplicateRecommendationReconcilesAfterMembershipChange),
+    ("同一グループ内の顧客Approvedは構成顧客追加で維持する", ApprovedCustomerRecommendationSurvivesMemberExpansion),
+    ("同一グループ内の顧客Approvedは別顧客解除で維持する", ApprovedCustomerRecommendationSurvivesUnrelatedMemberRemoval),
+    ("複数顧客解除でも残存顧客のApprovedを維持する", ApprovedCustomerRecommendationSurvivesMultipleMemberRemoval),
     ("再開失敗時は予定済みチェックポイント保存を再登録する", ResumeFailureReschedulesPendingCheckpoint),
     ("顧客統合判定は作業対象グループと外部候補顧客で維持される", CustomerRecommendationScopeSurvivesMemberExpansion),
     ("旧チェックポイントv1はおすすめ状態を空で補完して再開できる", LegacyCheckpointUpgrade),
@@ -1313,6 +1316,77 @@ static void DuplicateRecommendationReconcilesAfterMembershipChange()
     Assert(heldAfterReconcile.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
            heldAfterReconcile.Decision == AbacusRecommendationDecisionValues.Hold,
         "保留中の候補を構成変更の内部duplicate復帰でPendingへ戻しています。");
+}
+
+static void ApprovedCustomerRecommendationSurvivesMemberExpansion()
+{
+    var group = new HashSet<string>(["F", "U"], StringComparer.Ordinal);
+    var decisions = new Dictionary<string, string>
+    {
+        ["F-U"] = AbacusRecommendationDecisionValues.Approved,
+    };
+
+    group.Add("S");
+    ReconcileCustomerRecommendationDecisions(decisions, group);
+
+    Assert(decisions["F-U"] == AbacusRecommendationDecisionValues.Approved,
+        "別の顧客を仮グループへ追加しただけで、既存の顧客統合Approvedが解除されています。");
+}
+
+static void ApprovedCustomerRecommendationSurvivesUnrelatedMemberRemoval()
+{
+    var group = new HashSet<string>(["F", "U", "S"], StringComparer.Ordinal);
+    var decisions = new Dictionary<string, string>
+    {
+        ["F-U"] = AbacusRecommendationDecisionValues.Approved,
+        ["F-S"] = AbacusRecommendationDecisionValues.Approved,
+    };
+
+    group.Remove("S");
+    ReconcileCustomerRecommendationDecisions(decisions, group);
+
+    Assert(decisions["F-U"] == AbacusRecommendationDecisionValues.Approved &&
+           decisions["F-S"] == AbacusRecommendationDecisionValues.Pending,
+        "別顧客を外したとき、残存顧客のApproved維持と外した顧客の再評価を分離できていません。");
+}
+
+static void ApprovedCustomerRecommendationSurvivesMultipleMemberRemoval()
+{
+    var group = new HashSet<string>(["F", "U", "S1", "S2"], StringComparer.Ordinal);
+    var decisions = new Dictionary<string, string>
+    {
+        ["F-U"] = AbacusRecommendationDecisionValues.Approved,
+        ["F-S1"] = AbacusRecommendationDecisionValues.Approved,
+        ["F-S2"] = AbacusRecommendationDecisionValues.Approved,
+    };
+
+    group.Remove("S1");
+    ReconcileCustomerRecommendationDecisions(decisions, group);
+    group.Remove("S2");
+    ReconcileCustomerRecommendationDecisions(decisions, group);
+
+    Assert(decisions["F-U"] == AbacusRecommendationDecisionValues.Approved &&
+           decisions["F-S1"] == AbacusRecommendationDecisionValues.Pending &&
+           decisions["F-S2"] == AbacusRecommendationDecisionValues.Pending,
+        "複数顧客を順に外したとき、残存する顧客統合Approvedを維持できていません。");
+}
+
+static void ReconcileCustomerRecommendationDecisions(
+    IDictionary<string, string> decisions,
+    IReadOnlySet<string> groupCustomerIds)
+{
+    foreach (var pair in decisions.ToArray())
+    {
+        var endpoints = pair.Key.Split('-', StringSplitOptions.RemoveEmptyEntries);
+        var endpointsInSameGroup = endpoints.Length == 2 &&
+                                   groupCustomerIds.Contains(endpoints[0]) &&
+                                   groupCustomerIds.Contains(endpoints[1]);
+        if (pair.Value == AbacusRecommendationDecisionValues.Approved &&
+            !LegacyGraphCustomerRecommendationMembership.ShouldKeepApproved(endpointsInSameGroup))
+        {
+            decisions[pair.Key] = AbacusRecommendationDecisionValues.Pending;
+        }
+    }
 }
 
 static void ResumeFailureReschedulesPendingCheckpoint()
