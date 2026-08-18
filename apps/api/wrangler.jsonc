@@ -78,7 +78,6 @@
 				"FIREBASE_PROJECT_ID": "vehicle-management-64",
 				"FIREBASE_AUTH_EMULATOR": "false",
 				"CORS_ORIGIN": "https://vehicle-management-api.lye-0.workers.dev",
-				"FIREBASE_WEB_API_KEY": "AIzaSyCfKaXFXQJtvnBuN46HbLKN0RfwoP10ArA",
 				"B2_ENDPOINT": "https://s3.us-west-004.backblazeb2.com",
 				"B2_REGION": "us-west-004",
 				"B2_BUCKET": "vehicle-management-64",
