@@ -9,7 +9,11 @@ export default defineWorkersConfig(async () => ({
 			workers: {
 				wrangler: { configPath: "./wrangler.jsonc", environment: "development" },
 				miniflare: {
-					bindings: { TEST_MIGRATIONS: await readD1Migrations(migrationsPath), FIREBASE_AUTH_EMULATOR_RESET_MODE: "skip" },
+					bindings: {
+						TEST_MIGRATIONS: await readD1Migrations(migrationsPath),
+						FIREBASE_AUTH_EMULATOR_RESET_MODE: "skip",
+						FIREBASE_PROJECT_ID: "demo-vehicle-management",
+					},
 				},
 			},
 		},

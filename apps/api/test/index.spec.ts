@@ -12,7 +12,7 @@ describe("Vehicle Management API", () => {
 		})).toEqual([]);
 	});
 
-	it("rejects production settings that point to development services", () => {
+	it("rejects production settings with the emulator or development services", () => {
 		const issues = getEnvironmentIssues({
 			APP_ENV: "production",
 			DATA_ENV: "production",
@@ -23,23 +23,37 @@ describe("Vehicle Management API", () => {
 		});
 		expect(issues).toEqual(expect.arrayContaining([
 			"本番環境ではFIREBASE_AUTH_EMULATOR=falseが必要です。",
-			"本番環境では開発用とは別のFirebaseプロジェクトを指定してください。",
 			"本番環境のINITIAL_SETUP_KEYが未設定です。",
 			"本番環境では開発用とは別のB2バケットを指定してください。",
 		]));
 	});
 
-	it("accepts a separately configured production environment", () => {
+	it("accepts the configured production Firebase project", () => {
 		expect(getEnvironmentIssues({
 			APP_ENV: "production",
 			DATA_ENV: "production",
-			FIREBASE_PROJECT_ID: "vehicle-management-production",
+			FIREBASE_PROJECT_ID: "vehicle-management-64",
 			FIREBASE_AUTH_EMULATOR: "false",
 			FIREBASE_WEB_API_KEY: "production-web-api-key",
 			INITIAL_SETUP_KEY: "production-setup-key",
 			CORS_ORIGIN: "https://app.example.com",
 			B2_BUCKET: "vehicle-management-64-production",
 		})).toEqual([]);
+	});
+
+	it("rejects missing or placeholder production Firebase project IDs", () => {
+		const baseEnvironment = {
+			APP_ENV: "production",
+			DATA_ENV: "production",
+			FIREBASE_AUTH_EMULATOR: "false",
+			FIREBASE_WEB_API_KEY: "production-web-api-key",
+			INITIAL_SETUP_KEY: "production-setup-key",
+			CORS_ORIGIN: "https://app.example.com",
+			B2_BUCKET: "vehicle-management-64-production",
+		};
+
+		expect(getEnvironmentIssues(baseEnvironment)).toContain("本番環境のFIREBASE_PROJECT_IDが未設定です。");
+		expect(getEnvironmentIssues({ ...baseEnvironment, FIREBASE_PROJECT_ID: "REPLACE_WITH_PRODUCTION_FIREBASE_PROJECT_ID" })).toContain("本番環境のFIREBASE_PROJECT_IDにプレースホルダーは使用できません。");
 	});
 
 	it("returns service status from the health endpoint", async () => {

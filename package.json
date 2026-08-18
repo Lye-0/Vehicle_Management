@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names auth,api,web \"pnpm dev:auth\" \"pnpm dev:api\" \"pnpm dev:web\"",
-    "dev:auth": "firebase emulators:start --only auth",
+    "dev:auth": "firebase emulators:start --only auth --project demo-vehicle-management",
     "dev:api": "pnpm --filter api dev",
     "dev:web": "pnpm --filter web dev -- --mode development --host 127.0.0.1",
 

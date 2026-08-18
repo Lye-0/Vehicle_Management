@@ -507,7 +507,7 @@ function authHeaders() {
 }
 
 function emulatorToken(uid: string) {
-  const projectId = env.FIREBASE_PROJECT_ID ?? 'vehicle-management-64'
+  const projectId = env.FIREBASE_PROJECT_ID ?? 'demo-vehicle-management'
   const payload = { sub: uid, aud: projectId, iss: `https://securetoken.google.com/${projectId}`, exp: Math.floor(Date.now() / 1000) + 3600, email: `${uid}@example.com`, email_verified: true, name: uid }
   return `${base64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }))}.${base64Url(JSON.stringify(payload))}.cli-test`
 }
