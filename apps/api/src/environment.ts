@@ -10,7 +10,6 @@ export type EnvironmentConfig = {
   B2_BUCKET?: string
 }
 
-const developmentFirebaseProjectId = 'vehicle-management-64'
 const developmentB2Bucket = 'vehicle-management-64-dev'
 
 export function getEnvironmentIssues(env: EnvironmentConfig): string[] {
@@ -41,8 +40,8 @@ export function getEnvironmentIssues(env: EnvironmentConfig): string[] {
   if (env.FIREBASE_AUTH_EMULATOR !== 'false') issues.push('本番環境ではFIREBASE_AUTH_EMULATOR=falseが必要です。')
   if (!firebaseProjectId) {
     issues.push('本番環境のFIREBASE_PROJECT_IDが未設定です。')
-  } else if (firebaseProjectId === developmentFirebaseProjectId || firebaseProjectId.includes('REPLACE_WITH')) {
-    issues.push('本番環境では開発用とは別のFirebaseプロジェクトを指定してください。')
+  } else if (firebaseProjectId.includes('REPLACE_WITH')) {
+    issues.push('本番環境のFIREBASE_PROJECT_IDにプレースホルダーは使用できません。')
   }
   if (!env.FIREBASE_WEB_API_KEY?.trim()) issues.push('本番環境のFIREBASE_WEB_API_KEYが未設定です。')
   if (!env.INITIAL_SETUP_KEY?.trim()) issues.push('本番環境のINITIAL_SETUP_KEYが未設定です。')

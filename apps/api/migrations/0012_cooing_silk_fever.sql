@@ -1,1 +1,0 @@
-ALTER TABLE `backup_records` ADD `note` text DEFAULT '' NOT NULL;

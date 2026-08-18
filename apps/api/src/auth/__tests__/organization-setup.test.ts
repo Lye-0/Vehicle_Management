@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createDatabase } from '../../db/client'
-import { completeInitialOrganizationSetup } from '../organization'
+import { completeInitialOrganizationSetup, loadAuthSession } from '../organization'
 
 const organizationId = 'org-initial-setup-batch-test'
 const uid = 'uid-initial-setup-batch-test'
@@ -31,5 +31,28 @@ describe('initial organization setup', () => {
     expect(membership).toEqual({ role: 'owner', status: 'active' })
     expect(profile).toEqual({ display_name: 'セットアップユーザー', email: 'setup@example.invalid', role: 'owner' })
     expect(account).toEqual({ uid })
+  })
+
+  it('recreates the development organization when it is missing from an existing local database', async () => {
+    const defaultOrganization = await env.DB.prepare('SELECT id, name, owner_uid, setup_completed FROM organizations WHERE id = ?').bind('org-default').first<{ id: string; name: string; owner_uid: string | null; setup_completed: number }>()
+    await env.DB.prepare('DELETE FROM organizations WHERE id = ?').bind('org-default').run()
+
+    try {
+      const user = { uid: 'uid-development-anonymous-test', email: null, displayName: null, emailVerified: false, isAnonymous: true }
+      const database = createDatabase(env.DB)
+      const developmentEnv = { ...env, APP_ENV: 'development', FIREBASE_AUTH_EMULATOR: 'true' } as Env
+
+      const session = await loadAuthSession(database, developmentEnv, user)
+
+      expect(session.organizations).toEqual([{ id: 'development-anonymous-org-default', organizationId: 'org-default', name: '東京都心支店', role: 'owner', status: 'active' }])
+      await expect(env.DB.prepare('SELECT id, name, owner_uid, setup_completed FROM organizations WHERE id = ?').bind('org-default').first()).resolves.toEqual({ id: 'org-default', name: '東京都心支店', owner_uid: null, setup_completed: 0 })
+    } finally {
+      await env.DB.prepare('DELETE FROM organizations WHERE id = ?').bind('org-default').run()
+      if (defaultOrganization) {
+        await env.DB.prepare('INSERT INTO organizations (id, name, owner_uid, setup_completed) VALUES (?, ?, ?, ?)')
+          .bind(defaultOrganization.id, defaultOrganization.name, defaultOrganization.owner_uid, defaultOrganization.setup_completed)
+          .run()
+      }
+    }
   })
 })

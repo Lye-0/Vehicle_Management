@@ -25,7 +25,7 @@ afterAll(async () => {
 });
 
 function emulatorToken(uid: string) {
-  const projectId = env.FIREBASE_PROJECT_ID ?? "vehicle-management-64";
+  const projectId = env.FIREBASE_PROJECT_ID ?? "demo-vehicle-management";
   const payload = {
     sub: uid,
     aud: projectId,

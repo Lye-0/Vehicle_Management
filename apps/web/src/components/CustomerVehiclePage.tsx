@@ -27,7 +27,8 @@ import {
   createVehicle,
   deleteVehicleFile,
   fetchVehicleFile,
-  fetchCustomers,
+  fetchCustomerDetail,
+  fetchCustomerSummaries,
   fetchVehicleHistory,
   fetchVehiclelessDocuments,
   type Customer,
@@ -67,22 +68,11 @@ type OcrTextRegion = { text: string; x0: number; y0: number; x1: number; y1: num
 type OcrImageSize = { width: number; height: number; renderedWidth: number; renderedHeight: number }
 type OcrPointerSelection = { pointerId: number; anchorIndex: number; focusIndex: number }
 
-function getCustomerSearchText(customer: Customer, field: CustomerSearchField) {
-  const values = {
-    顧客名: customer.name,
-    ふりがな: customer.kana,
-    メールアドレス: customer.email,
-    電話番号: customer.phone,
-    住所: `${customer.postalCode} ${customer.address}`,
-    車名: customer.vehicles.map((vehicle) => `${vehicle.maker} ${vehicle.model}`).join(' '),
-    登録番号: customer.vehicles.map((vehicle) => vehicle.plate).join(' '),
-    車台番号: customer.vehicles.map((vehicle) => vehicle.vin).join(' '),
-  }
-  return field === 'すべて' ? Object.values(values).join(' ') : values[field]
-}
-
 export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehicleId, onNavigationConsumed }: { onNavigate?: (target: VehicleHistoryNavigation) => void; initialCustomerId?: string; initialVehicleId?: string; onNavigationConsumed?: () => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [customerNextCursor, setCustomerNextCursor] = useState<string | null>(null)
+  const [customerHasMore, setCustomerHasMore] = useState(false)
+  const [loadingMoreCustomers, setLoadingMoreCustomers] = useState(false)
   const [query, setQuery] = useState('')
   const [searchField, setSearchField] = useState<CustomerSearchField>('すべて')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
@@ -108,13 +98,19 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   useEffect(() => {
     let active = true
     setLoading(true)
-    void fetchCustomers().then((nextCustomers) => {
+    void fetchCustomerSummaries({ limit: 50 }).then((result) => {
       if (!active) return
-      setCustomers(nextCustomers)
+      const nextCustomers = result.customers.map(mapCustomerSummaryToRecord)
+      setCustomers((current) => {
+        const detailedTarget = current.find((customer) => customer.id === initialNavigationRef.current.customerId && !customer.isSummary)
+        return detailedTarget ? [detailedTarget, ...nextCustomers.filter((customer) => customer.id !== detailedTarget.id)] : nextCustomers
+      })
+      setCustomerNextCursor(result.nextCursor)
+      setCustomerHasMore(result.hasMore)
       const targetCustomer = initialNavigationRef.current.customerId ? nextCustomers.find((customer) => customer.id === initialNavigationRef.current.customerId) : undefined
       if (targetCustomer) {
         setSelectedCustomerId(targetCustomer.id)
-        setSelectedVehicleId(targetCustomer.vehicles.some((vehicle) => vehicle.id === initialNavigationRef.current.vehicleId) ? initialNavigationRef.current.vehicleId ?? '' : targetCustomer.vehicles[0]?.id ?? '')
+        setSelectedVehicleId('')
         setMobileWorkspaceView('detail')
         onNavigationConsumedRef.current?.()
       }
@@ -139,16 +135,91 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     }
   }, [attachmentPreview])
 
-  const filteredCustomers = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    if (!normalizedQuery) return customers
-    return customers.filter((customer) => getCustomerSearchText(customer, searchField).toLocaleLowerCase().includes(normalizedQuery))
-  }, [customers, query, searchField])
+  useEffect(() => {
+    let active = true
+    const timer = window.setTimeout(() => {
+      void fetchCustomerSummaries({ q: query, field: searchField, limit: 50 }).then((result) => {
+        if (!active) return
+        setCustomers(result.customers.map(mapCustomerSummaryToRecord))
+        setCustomerNextCursor(result.nextCursor)
+        setCustomerHasMore(result.hasMore)
+      }).catch((reason: unknown) => {
+        if (active) setError(getErrorMessage(reason))
+      })
+    }, query.trim() || searchField !== 'すべて' ? 280 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [query, searchField])
+
+  const filteredCustomers = customers
+
+  useEffect(() => {
+    if (filteredCustomers.some((customer) => customer.id === selectedCustomerId)) return
+    const nextCustomerId = filteredCustomers[0]?.id ?? ''
+    if (nextCustomerId === selectedCustomerId) return
+    setSelectedCustomerId(nextCustomerId)
+    setSelectedVehicleId('')
+    setSelectedVehiclelessCustomerId('')
+  }, [filteredCustomers, selectedCustomerId])
+
+  async function loadMoreCustomers() {
+    if (!customerHasMore || !customerNextCursor || loadingMoreCustomers) return
+    setLoadingMoreCustomers(true)
+    try {
+      const result = await fetchCustomerSummaries({ q: query, field: searchField, cursor: customerNextCursor, limit: 50 })
+      setCustomers((current) => [...current, ...result.customers.map(mapCustomerSummaryToRecord).filter((customer) => !current.some((item) => item.id === customer.id))])
+      setCustomerNextCursor(result.nextCursor)
+      setCustomerHasMore(result.hasMore)
+    } catch (reason: unknown) {
+      setError(getErrorMessage(reason))
+    } finally {
+      setLoadingMoreCustomers(false)
+    }
+  }
 
   const selectedCustomer = filteredCustomers.find((customer) => customer.id === selectedCustomerId) ?? filteredCustomers[0] ?? null
   const selectedVehicle = selectedCustomer?.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? selectedCustomer?.vehicles[0] ?? null
   const selectedVehiclelessDocuments = selectedCustomer ? vehiclelessDocumentsByCustomer[selectedCustomer.id] ?? null : null
   const vehiclelessLoading = Boolean(selectedCustomer && vehiclelessLoadingCustomerId === selectedCustomer.id)
+  const selectedCustomerVehicleCount = selectedCustomer?.vehicles.length ?? 0
+  const selectedVehiclelessDocumentCount = selectedVehiclelessDocuments?.documents.length ?? 0
+
+  useEffect(() => {
+    if (!selectedCustomerId || selectedCustomerVehicleCount > 0 || selectedVehiclelessDocumentCount === 0 || selectedVehiclelessCustomerId === selectedCustomerId) return
+    setSelectedVehiclelessCustomerId(selectedCustomerId)
+  }, [selectedCustomerId, selectedCustomerVehicleCount, selectedVehiclelessCustomerId, selectedVehiclelessDocumentCount])
+
+  useEffect(() => {
+    if (!selectedCustomerId) return
+    const current = customers.find((customer) => customer.id === selectedCustomerId)
+    if (!current?.isSummary) return
+    let active = true
+    void fetchCustomerDetail(selectedCustomerId).then((detail) => {
+      if (!active) return
+      setCustomers((items) => items.map((item) => item.id === detail.id ? detail : item))
+      const targetVehicleId = initialNavigationRef.current.customerId === detail.id ? initialNavigationRef.current.vehicleId : undefined
+      setSelectedVehicleId(targetVehicleId && detail.vehicles.some((vehicle) => vehicle.id === targetVehicleId) ? targetVehicleId : detail.vehicles[0]?.id ?? '')
+    }).catch((reason: unknown) => {
+      if (active) setError(getErrorMessage(reason))
+    })
+    return () => { active = false }
+  }, [customers, selectedCustomerId])
+
+  useEffect(() => {
+    const targetCustomerId = initialNavigationRef.current.customerId
+    if (!targetCustomerId || customers.some((customer) => customer.id === targetCustomerId)) return
+    let active = true
+    void fetchCustomerDetail(targetCustomerId).then((detail) => {
+      if (!active) return
+      setCustomers((current) => [detail, ...current])
+      setSelectedCustomerId(detail.id)
+      setSelectedVehicleId(initialNavigationRef.current.vehicleId && detail.vehicles.some((vehicle) => vehicle.id === initialNavigationRef.current.vehicleId) ? initialNavigationRef.current.vehicleId : detail.vehicles[0]?.id ?? '')
+      setMobileWorkspaceView('detail')
+      onNavigationConsumedRef.current?.()
+    }).catch((reason: unknown) => {
+      if (active) setError(getErrorMessage(reason))
+    })
+    return () => { active = false }
+  }, [customers])
 
   useEffect(() => {
     const customerId = selectedCustomer?.id
@@ -362,7 +433,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       </div>
 
       <div className={`customer-directory mobile-workspace mobile-workspace-${mobileWorkspaceView}`}>
-        <div className="mobile-workspace-list"><CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} /></div>
+        <div className="mobile-workspace-list"><CustomerList customers={filteredCustomers} selectedCustomerId={selectedCustomer?.id ?? ''} onSelect={selectCustomer} hasMore={customerHasMore} loadingMore={loadingMoreCustomers} onLoadMore={() => void loadMoreCustomers()} /></div>
         <div className="mobile-workspace-detail">
           <button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />顧客一覧へ戻る</button>
           <CustomerProfile customer={selectedCustomer} vehicle={selectedVehicle} vehiclelessDocuments={selectedVehiclelessDocuments} vehiclelessLoading={vehiclelessLoading} vehiclelessSelected={selectedVehiclelessCustomerId === selectedCustomer?.id} onSelectVehicle={(vehicle) => selectedCustomer && selectVehicle(selectedCustomer, vehicle)} onSelectVehiclelessDocuments={() => selectedCustomer && selectVehiclelessDocuments(selectedCustomer)} onAddVehicle={openNewVehicleDialog} onEditCustomer={openEditCustomerDialog} onEditVehicle={openEditVehicleDialog} onAttachments={handleAttachments} onAttachmentDrop={handleAttachmentDrop} onPreviewAttachment={openAttachment} onRemoveAttachment={removeAttachment} onNavigate={onNavigate} />
@@ -376,8 +447,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   )
 }
 
-function CustomerList({ customers, selectedCustomerId, onSelect }: { customers: Customer[]; selectedCustomerId: string; onSelect: (customer: Customer) => void }) {
-  return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone || '電話番号未登録'}</small></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>顧客を登録するか、検索条件を変更してください。</span></div>}</div></section>
+function CustomerList({ customers, selectedCustomerId, onSelect, hasMore, loadingMore, onLoadMore }: { customers: Customer[]; selectedCustomerId: string; onSelect: (customer: Customer) => void; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void }) {
+  return <section className="panel customer-list-panel"><div className="customer-list-header"><div><h2>顧客一覧</h2><span>顧客を選択すると詳細を表示します</span></div></div><div className="customer-list">{customers.map((customer) => <button className={`customer-list-item${customer.id === selectedCustomerId ? ' is-selected' : ''}`} key={customer.id} type="button" onClick={() => onSelect(customer)}><span className="customer-list-avatar"><UserRound size={19} /></span><span className="customer-list-copy"><strong>{customer.name}</strong><small>{customer.phone || '電話番号未登録'}</small></span><ChevronRight size={17} className="customer-list-chevron" /></button>)}{hasMore && <button className="button button-secondary customer-list-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? '読み込み中…' : '次の顧客を読み込む'}</button>}{!customers.length && <div className="empty-state"><Search size={24} /><strong>顧客が見つかりません</strong><span>顧客を登録するか、検索条件を変更してください。</span></div>}</div></section>
 }
 
 function CustomerProfile({ customer, vehicle, vehiclelessDocuments, vehiclelessLoading, vehiclelessSelected, onSelectVehicle, onSelectVehiclelessDocuments, onAddVehicle, onEditCustomer, onEditVehicle, onAttachments, onAttachmentDrop, onPreviewAttachment, onRemoveAttachment, onNavigate }: { customer: Customer | null; vehicle: Vehicle | null; vehiclelessDocuments: VehiclelessDocuments | null; vehiclelessLoading: boolean; vehiclelessSelected: boolean; onSelectVehicle: (vehicle: Vehicle) => void; onSelectVehiclelessDocuments: () => void; onAddVehicle: () => void; onEditCustomer: (customer: Customer) => void; onEditVehicle: (vehicle: Vehicle) => void; onAttachments: (event: ChangeEvent<HTMLInputElement>, vehicleId: string) => void; onAttachmentDrop: (event: DragEvent<HTMLLabelElement>, vehicleId: string) => void; onPreviewAttachment: (vehicleId: string, attachment: Attachment, mode: 'preview' | 'download') => void; onRemoveAttachment: (vehicleId: string, attachmentId: string) => void; onNavigate?: (target: VehicleHistoryNavigation) => void }) {
@@ -713,6 +784,10 @@ function ModalFooter({ onClose, submitLabel, disabled }: { onClose: () => void; 
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function mapCustomerSummaryToRecord(summary: { id: string; name: string; kana: string; phone: string; updatedAt: string }): Customer {
+  return { id: summary.id, name: summary.name, kana: summary.kana, phone: summary.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '', updatedAt: summary.updatedAt, vehicles: [], isSummary: true }
 }
 
 function getErrorMessage(reason: unknown) {

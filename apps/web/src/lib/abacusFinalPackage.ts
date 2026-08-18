@@ -36,6 +36,8 @@ export type GraphFinalManifest = {
     candidatePackagePath?: string
     candidateManifestSha256?: string
   }
+  /** Gate24: 書類状態を計算した固定基準日（YYYY-MM-DD）。旧パッケージでは省略可。 */
+  importBaseDate?: string | null
   summary: {
     customerRowCount: number
     vehicleRowCount: number
@@ -126,6 +128,7 @@ type AbacusImportReadyManifest = {
   status: 'ready'
   packageId: string
   imageAcquisitionMethod: 'fp5-vehicle-record'
+  importBaseDate?: string | null
   summary: {
     customerCount: number
     vehicleCount: number
@@ -332,6 +335,7 @@ export async function validateAbacusImportPackage(selectedFiles: File[]): Promis
     version: 1,
     kind: 'abacus-export-import-final-package',
     status: 'registration-preview',
+    importBaseDate: readyManifest.importBaseDate ?? undefined,
     source: { candidatePackagePath: `ABACUS-Import/${rootManifest.packageId}`, candidateManifestSha256: await sha256(rootManifestFile) },
     summary: {
       customerRowCount: readyManifest.summary.customerCount,
@@ -372,17 +376,25 @@ export async function validateAbacusImportPackage(selectedFiles: File[]): Promis
 
 function validateAbacusImportReadyManifest(manifest: AbacusImportReadyManifest, root: AbacusImportRootManifest) {
   if (manifest.version !== 1 || manifest.kind !== 'abacus-import-ready' || manifest.status !== 'ready' || manifest.packageId !== root.packageId || manifest.imageAcquisitionMethod !== 'fp5-vehicle-record' || !Array.isArray(manifest.files) || !manifest.summary) throw validationError('ready/manifest.jsonの形式または状態が不正です。')
+  if (manifest.importBaseDate !== undefined && manifest.importBaseDate !== null && !isCalendarDate(manifest.importBaseDate)) throw validationError('ready/manifest.jsonのインポート基準日が不正です。')
   const summaryValues = Object.values(manifest.summary)
   if (summaryValues.some((value) => !Number.isSafeInteger(value) || value < 0)) throw validationError('ready/manifest.jsonの集計値が不正です。')
 }
 
 function validateManifestShape(manifest: GraphFinalManifest) {
   if (manifest.version !== 1 || manifest.kind !== 'abacus-export-import-final-package' || manifest.status !== 'registration-preview') throw validationError('Gate 8Aのregistration-previewパッケージではありません。')
+  if (manifest.importBaseDate !== undefined && manifest.importBaseDate !== null && !isCalendarDate(manifest.importBaseDate)) throw validationError('manifest.jsonのインポート基準日が不正です。')
   if (!manifest.summary || !Number.isSafeInteger(manifest.summary.customerRowCount) || !Number.isSafeInteger(manifest.summary.vehicleRowCount) || !Number.isSafeInteger(manifest.summary.salesRowCount) || !Number.isSafeInteger(manifest.summary.maintenanceRowCount) || !Number.isSafeInteger(manifest.summary.vehiclelessDocumentCount) || !Number.isSafeInteger(manifest.summary.excludedDocumentCount)) throw validationError('マニフェストの集計情報が不正です。')
   if (manifest.summary.imageCount !== undefined && (!Number.isSafeInteger(manifest.summary.imageCount) || manifest.summary.imageCount < 0)) throw validationError('マニフェストの画像件数が不正です。')
   if (!Array.isArray(manifest.dataFiles) || (manifest.imageFiles !== undefined && !Array.isArray(manifest.imageFiles)) || !Array.isArray(manifest.groups) || !Array.isArray(manifest.documents) || !Array.isArray(manifest.excludedDocumentKeys) || !Array.isArray(manifest.warnings)) throw validationError('マニフェストの配列項目が不正です。')
   if (manifest.groups.length === 0 || manifest.groups.length > maximumCustomers || manifest.documents.length > maximumDocuments || manifest.excludedDocumentKeys.length > maximumDocuments) throw validationError('マニフェストの件数が上限を超えています。')
   if ((manifest.imageFiles?.length ?? 0) > maximumDocuments) throw validationError('マニフェストの画像件数が上限を超えています。')
+}
+
+function isCalendarDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
 async function verifyDescriptor(descriptor: GraphFinalFileDescriptor, files: PackageFileMap, checkedPaths: Set<string>) {

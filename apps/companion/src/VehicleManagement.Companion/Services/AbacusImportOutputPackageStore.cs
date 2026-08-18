@@ -37,6 +37,7 @@ public sealed class AbacusImportOutputPackageStore
     private const int RootManifestVersion = 1;
     private const int ReadyManifestVersion = 1;
     private const long MaximumManifestBytes = 4 * 1024 * 1024;
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -227,6 +228,9 @@ public sealed class AbacusImportOutputPackageStore
                 createdAtUtc = DateTime.UtcNow,
                 source = new { path = session.SourcePath, fingerprint = session.SourceFingerprint },
                 imageAcquisitionMethod = session.ImageAcquisitionMethod,
+                importBaseDate = finalManifest.TryGetProperty("importBaseDate", out var importBaseDate)
+                    ? importBaseDate.GetString()
+                    : null,
                 summary = new
                 {
                     customerCount = finalPackage.CustomerRowCount,
@@ -429,9 +433,23 @@ public sealed class AbacusImportOutputPackageStore
             throw new InvalidDataException($"マニフェストを読み取れません: {path}");
         }
 
-        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(path, cancellationToken));
-        return document.RootElement.Clone();
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            // 旧バージョンがUTF-8 BOM付きで保存したJSONも再開できるようにする。
+            using var document = JsonDocument.Parse(RemoveUtf8Bom(bytes));
+            return document.RootElement.Clone();
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException($"マニフェストのJSONが不正です: {path}", exception);
+        }
     }
+
+    private static byte[] RemoveUtf8Bom(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
+            ? bytes[3..]
+            : bytes;
 
     private static async Task CopyFileAsync(string source, string destination, CancellationToken cancellationToken)
     {
@@ -496,7 +514,7 @@ public sealed class AbacusImportOutputPackageStore
         }
 
         Directory.CreateDirectory(directory);
-        await File.WriteAllTextAsync(path, contents, Encoding.UTF8, cancellationToken);
+        await File.WriteAllTextAsync(path, contents, Utf8NoBom, cancellationToken);
     }
 
     private static void CopyDirectory(string source, string destination, bool overwrite = false)

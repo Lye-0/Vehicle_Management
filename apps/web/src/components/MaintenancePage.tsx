@@ -15,13 +15,14 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomers, type Customer } from '../lib/customerApi'
+import { fetchCustomerDetail, fetchCustomerSummaries, type Customer } from '../lib/customerApi'
 import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadMaintenanceDocumentPdf, previewMaintenanceDocumentPdf } from '../lib/pdf'
 import {
   archiveMaintenanceDocument,
   createMaintenanceDocument,
-  fetchMaintenanceDocuments,
+  fetchMaintenanceDocument,
+  fetchMaintenanceDocumentSummaries,
   updateMaintenanceDocument,
   defaultMaintenanceDocumentDetails,
   type IntakeCategory,
@@ -118,6 +119,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [draftDocument, setDraftDocument] = useState<MaintenanceDocumentLike | null>(null)
   const [draftDirty, setDraftDirty] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
+  const [documentHasMore, setDocumentHasMore] = useState(false)
+  const [loadingMoreDocuments, setLoadingMoreDocuments] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedDocumentId, setSavedDocumentId] = useState('')
   const [error, setError] = useState('')
@@ -132,16 +136,22 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const documentOpenedMileageRef = useRef<number | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
   const openedMasterSnapshotRef = useRef<MasterSnapshot | null>(null)
+  const summaryFilterInitializedRef = useRef(false)
+  const initialSortRef = useRef({ sortKey, sortDirection })
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([fetchMaintenanceDocuments(), fetchCustomers(), fetchSettings()])
-      .then(([nextDocuments, nextCustomers, nextSettings]) => {
+    Promise.all([fetchMaintenanceDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchCustomerSummaries({ limit: 100 }), fetchSettings()])
+      .then(([documentPage, customerPage, nextSettings]) => {
         if (cancelled) return
+        const nextDocuments = documentPage.documents
+        const nextCustomers = customerPage.customers.map(mapCustomerSummaryToRecord)
         setDocuments(nextDocuments)
+        setDocumentNextCursor(documentPage.nextCursor)
+        setDocumentHasMore(documentPage.hasMore)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        const nextSelectedDocumentId = initialDocumentId && nextDocuments.some((document) => document.id === initialDocumentId) ? initialDocumentId : ''
+        const nextSelectedDocumentId = initialDocumentId ?? nextDocuments[0]?.id ?? ''
         setSelectedDocumentId(nextSelectedDocumentId)
         if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setError('')
@@ -150,6 +160,41 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [initialDocumentId])
+
+  useEffect(() => {
+    if (!summaryFilterInitializedRef.current) {
+      summaryFilterInitializedRef.current = true
+      return
+    }
+    let active = true
+    const timer = window.setTimeout(() => {
+      void fetchMaintenanceDocumentSummaries({ q: query, type: typeFilter, category: categoryFilter, status: statusFilter, sortKey, sortDirection, limit: 100 }).then((page) => {
+        if (!active) return
+        setDocuments(page.documents)
+        setDocumentNextCursor(page.nextCursor)
+        setDocumentHasMore(page.hasMore)
+        setSelectedDocumentId((current) => current && page.documents.some((document) => document.id === current) ? current : page.documents[0]?.id ?? '')
+      }).catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : '整備書類を検索できませんでした。')
+      })
+    }, query.trim() ? 280 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [categoryFilter, query, sortDirection, sortKey, statusFilter, typeFilter])
+
+  async function loadMoreDocuments() {
+    if (!documentHasMore || !documentNextCursor || loadingMoreDocuments) return
+    setLoadingMoreDocuments(true)
+    try {
+      const page = await fetchMaintenanceDocumentSummaries({ q: query, type: typeFilter, category: categoryFilter, status: statusFilter, sortKey, sortDirection, cursor: documentNextCursor, limit: 100 })
+      setDocuments((current) => [...current, ...page.documents.filter((document) => !current.some((item) => item.id === document.id))])
+      setDocumentNextCursor(page.nextCursor)
+      setDocumentHasMore(page.hasMore)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '整備書類を追加で読み込めませんでした。')
+    } finally {
+      setLoadingMoreDocuments(false)
+    }
+  }
 
   const filteredDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -165,9 +210,61 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? incompleteDocuments[0] ?? filteredDocuments[0] ?? null
+  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
   const selectedDocument: MaintenanceDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument) : null
+
+  useEffect(() => {
+    if (!initialDocumentId || documents.some((document) => document.id === initialDocumentId)) return
+    let active = true
+    void fetchMaintenanceDocument(initialDocumentId).then((detail) => {
+      if (!active) return
+      setDocuments((current) => [detail, ...current])
+      setSelectedDocumentId(detail.id)
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '指定された整備書類を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [documents, initialDocumentId])
+
+  useEffect(() => {
+    const target = selectedPersistedDocument
+    if (!target?.isSummary) return
+    let active = true
+    void fetchMaintenanceDocument(target.id).then((detail) => {
+      if (!active) return
+      setDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '整備書類の詳細を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [selectedPersistedDocument])
+
+  useEffect(() => {
+    const customerId = selectedPersistedDocument?.customerId
+    if (!customerId) return
+    const current = customers.find((customer) => customer.id === customerId)
+    if (!current?.isSummary) return
+    let active = true
+    void fetchCustomerDetail(customerId).then((detail) => {
+      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '顧客情報を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [selectedPersistedDocument?.customerId, customers])
+
+  useEffect(() => {
+    const customerId = createForm.customerMode === 'existing' ? createForm.customerId : ''
+    if (!customerId) return
+    const current = customers.find((customer) => customer.id === customerId)
+    if (!current?.isSummary) return
+    let active = true
+    void fetchCustomerDetail(customerId).then((detail) => {
+      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [createForm.customerId, createForm.customerMode, customers])
 
   function setActiveDraft(nextDraft: MaintenanceDocumentLike | null) {
     draftDocumentRef.current = nextDraft
@@ -353,10 +450,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
       // Re-fetch customers to get latest updatedAt and mileage
       try {
-        const nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
+        const foundCustomer = await fetchCustomerDetail(selectedPersistedDocument.customerId)
+        setCustomers((current) => upsertCustomer(current, foundCustomer))
         // Update openedMasterSnapshot with latest values
-        const foundCustomer = nextCustomers.find((c) => c.id === selectedPersistedDocument.customerId)
         const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
         if (foundCustomer && foundVehicle) {
           openedMasterSnapshotRef.current = {
@@ -524,10 +620,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       setDocumentView('edit')
 
       try {
-        const nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
+        const foundCustomer = await fetchCustomerDetail(saved.customerId)
+        setCustomers((current) => upsertCustomer(current, foundCustomer))
         lastOpenedDocumentIdRef.current = saved.id
-        const foundCustomer = nextCustomers.find((customer) => customer.id === saved.customerId)
         const foundVehicle = saved.vehicleId ? foundCustomer?.vehicles.find((vehicle) => vehicle.id === saved.vehicleId) : undefined
         if (foundCustomer && foundVehicle) {
           const mileage = parseMileageString(foundVehicle.mileage)
@@ -567,9 +662,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       let nextCustomers = customers
       let customer = nextCustomers.find((item) => item.id === customerId)
       if (!customer) {
-        nextCustomers = await fetchCustomers()
-        setCustomers(nextCustomers)
-        customer = nextCustomers.find((item) => item.id === customerId)
+        customer = await fetchCustomerDetail(customerId)
+        setCustomers((current) => upsertCustomer(current, customer!))
       }
       if (!customer) throw new Error('選択した既存顧客を確認できません。顧客一覧を再読み込みしてください。')
 
@@ -807,14 +901,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
+    <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
     {maintenanceDuplicateDialog && <MaintenanceDuplicateConfirmationDialog state={maintenanceDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleMaintenanceDuplicateCancel} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMaintenanceMasterSyncCancel} />}
   </>
 }
 
-function MaintenanceDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect }: { incompleteDocuments: MaintenanceDocument[]; completedGroups: CompletedMaintenanceGroup[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
+function MaintenanceDocumentList({ incompleteDocuments, completedGroups, selectedDocumentId, onSelect, hasMore, loadingMore, onLoadMore }: { incompleteDocuments: MaintenanceDocument[]; completedGroups: CompletedMaintenanceGroup[]; selectedDocumentId: string; onSelect: (id: string) => void; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void }) {
   return <div className="maintenance-list-stack">
     <section className="panel maintenance-list-panel">
       <div className="maintenance-list-header"><div><h2>整備書類（未完了）</h2><span>書類を選択すると詳細を表示します</span></div><span className="results-count">{incompleteDocuments.length}件</span></div>
@@ -824,11 +918,20 @@ function MaintenanceDocumentList({ incompleteDocuments, completedGroups, selecte
       <div className="maintenance-list-header"><div><h2>完了書類</h2><span>書類の作成月ごとに表示します</span></div><span className="results-count">{completedGroups.reduce((total, group) => total + group.documents.length, 0)}件</span></div>
       <div className="maintenance-completed-groups">{completedGroups.map((group) => <details className="maintenance-completed-group" key={group.key}><summary><span>{group.label}</span><span className="results-count">{group.documents.length}件</span></summary><MaintenanceDocumentCards documents={group.documents} selectedDocumentId={selectedDocumentId} onSelect={onSelect} /></details>)}</div>
     </section>}
+    {hasMore && <button className="button button-secondary document-list-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? '読み込み中…' : '次の書類を読み込む'}</button>}
   </div>
 }
 
 function MaintenanceDocumentCards({ documents, selectedDocumentId, onSelect }: { documents: MaintenanceDocument[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
   return <div className="maintenance-document-list">{documents.map((document) => <button className={`maintenance-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="maintenance-card-top"><MaintenanceDocumentTypeTag type={document.type} /><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><MaintenanceStatusTag status={document.status} />{document.abacusImport?.vehicleless && <span className="document-abacus-badge">ABACUS・車両なし</span>}<ChevronRight size={16} /></div><strong className="maintenance-card-number">{document.number}</strong><span className="maintenance-card-customer"><UserRound size={14} />{document.customerName}</span><span className="maintenance-card-vehicle"><CarFront size={14} />{document.vehicle} ・ {document.plate}</span><div className="maintenance-card-bottom"><span>入庫 {document.intakeDate || '未定'}</span></div></button>)}</div>
+}
+
+function mapCustomerSummaryToRecord(summary: { id: string; name: string; kana: string; phone: string; updatedAt: string }): Customer {
+  return { id: summary.id, name: summary.name, kana: summary.kana, phone: summary.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '', updatedAt: summary.updatedAt, vehicles: [], isSummary: true }
+}
+
+function upsertCustomer(current: Customer[], next: Customer) {
+  return current.some((customer) => customer.id === next.id) ? current.map((customer) => customer.id === next.id ? next : customer) : [next, ...current]
 }
 
 function groupCompletedDocuments(documents: MaintenanceDocument[]): CompletedMaintenanceGroup[] {

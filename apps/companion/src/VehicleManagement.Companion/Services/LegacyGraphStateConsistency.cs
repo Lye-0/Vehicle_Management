@@ -1,0 +1,624 @@
+using VehicleManagement.AbacusImport;
+
+namespace VehicleManagement.Companion.Services;
+
+/// <summary>
+/// 未確定トレイへ移動する直前の、書類の一時リンク状態です。
+/// 元データではなく、ユーザー操作直前の画面上の状態をUndoするために保存します。
+/// </summary>
+public sealed record LegacyGraphDetachedDocumentState(
+    string DocumentKey,
+    string? ManualVehicleId,
+    string? ManualCustomerGroupKey,
+    string? LinkMethod,
+    string? LinkReason,
+    bool IsUnconnected,
+    bool IsTray,
+    bool IsExcluded);
+
+/// <summary>
+/// 未確定トレイへの移動をUndoするための構造化された直前状態です。
+/// </summary>
+public sealed record LegacyGraphDetachedUndoState(
+    string Kind,
+    string SubjectId,
+    string? ManualVehicleCustomerId,
+    bool IsTray,
+    IReadOnlyList<LegacyGraphDetachedDocumentState> Documents);
+
+public static class LegacyGraphVehicleUndoState
+{
+    /// <summary>
+    /// UndoStateに保存された顧客IDを、手動車両リンクとして復元できるか判定します。
+    /// 元から顧客に所属する車両の実効顧客は手動リンクではないため、
+    /// 旧チェックポイントに混入した同じ顧客IDも復元対象から除外します。
+    /// </summary>
+    public static string? ResolveManualCustomerId(
+        string? storedManualCustomerId,
+        bool hasOriginalCustomer,
+        string? originalCustomerId)
+    {
+        if (string.IsNullOrWhiteSpace(storedManualCustomerId))
+        {
+            return null;
+        }
+
+        return hasOriginalCustomer &&
+               string.Equals(storedManualCustomerId, originalCustomerId, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : storedManualCustomerId;
+    }
+}
+
+public static class LegacyGraphVehicleDetachState
+{
+    /// <summary>
+    /// 車両解除時に、手動でその車両へ接続された書類のリンクを削除する対象か判定します。
+    /// 元CSVの車両所属はこの判定では扱わず、画面上の手動リンクだけを対象にします。
+    /// </summary>
+    public static bool IsManualDocumentLinkedToVehicle(
+        string? linkedVehicleId,
+        string vehicleId) =>
+        !string.IsNullOrWhiteSpace(linkedVehicleId) &&
+        string.Equals(linkedVehicleId, vehicleId, StringComparison.Ordinal);
+}
+
+public static class LegacyGraphTemporaryMergeGroupState
+{
+    /// <summary>
+    /// Graph UIの仮統合グループは、Recommendation Decisionではなく、
+    /// 現在の所属顧客とグループ状態だけで判定します。
+    /// </summary>
+    public static bool IsPending(
+        int activeMemberCount,
+        bool isLogicalGroup,
+        bool isApplied)
+    {
+        return HasActiveMembership(activeMemberCount) && !isLogicalGroup && !isApplied;
+    }
+
+    public static bool HasActiveMembership(int activeMemberCount) => activeMemberCount > 1;
+}
+
+public static class LegacyGraphMatchingSelectionState
+{
+    /// <summary>
+    /// Matching UIで、現在の基準顧客以外の構成顧客を統合から外せるか判定します。
+    /// 基準顧客・構成顧客・おすすめ選択は別状態ですが、解除操作の可否だけは
+    /// 現在のグループ構成と専用の選択顧客IDから判定します。
+    /// </summary>
+    public static bool CanRemoveMergeMember(
+        string? selectedMemberCustomerId,
+        string? matchingCustomerId,
+        IReadOnlyCollection<string> groupCustomerIds,
+        bool canMutate)
+    {
+        ArgumentNullException.ThrowIfNull(groupCustomerIds);
+
+        return canMutate &&
+               groupCustomerIds.Count >= 2 &&
+               !string.IsNullOrWhiteSpace(selectedMemberCustomerId) &&
+               !string.IsNullOrWhiteSpace(matchingCustomerId) &&
+               !string.Equals(
+                   selectedMemberCustomerId,
+                   matchingCustomerId,
+                   StringComparison.Ordinal) &&
+               groupCustomerIds.Contains(selectedMemberCustomerId, StringComparer.Ordinal);
+    }
+
+    public static bool IsSelectedMemberStillInGroup(
+        string? selectedMemberCustomerId,
+        IReadOnlyCollection<string> groupCustomerIds)
+    {
+        ArgumentNullException.ThrowIfNull(groupCustomerIds);
+
+        return !string.IsNullOrWhiteSpace(selectedMemberCustomerId) &&
+               groupCustomerIds.Contains(selectedMemberCustomerId, StringComparer.Ordinal);
+    }
+}
+
+public static class LegacyGraphCustomerRecommendationMembership
+{
+    /// <summary>
+    /// 顧客RecommendationのApprovedは、同じtemporary / logical group内の
+    /// 構成顧客同士である限り、別の構成顧客の追加・解除では取り消しません。
+    /// </summary>
+    public static bool ShouldKeepApproved(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
+
+    /// <summary>
+    /// 状態の不整合でPendingが残っても、同じ構成顧客同士のRecommendationは
+    /// Matchingの未処理候補として表示しません。
+    /// </summary>
+    public static bool ShouldHidePending(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
+}
+
+/// <summary>
+/// Matching UIの顧客統合Recommendationを、方向付きのグループ移動へ渡す前に正規化します。
+/// RecommendationのSubject/Targetは表示上の関係を表すだけで、統合先を表すものではありません。
+/// </summary>
+public static class LegacyGraphMatchingCustomerMergeDirection
+{
+    public static bool TryResolve(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlyCollection<string> currentWorkTargetCustomerIds,
+        out string mergeSourceCustomerId,
+        out string mergeTargetCustomerId)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(currentWorkTargetCustomerIds);
+
+        if (candidate.SubjectKind != AbacusRecommendationEntityKinds.Customer ||
+            candidate.TargetKind != AbacusRecommendationEntityKinds.Customer)
+        {
+            mergeSourceCustomerId = "";
+            mergeTargetCustomerId = "";
+            return false;
+        }
+
+        return TryResolve(
+            candidate.SubjectId,
+            candidate.TargetId,
+            currentWorkTargetCustomerIds,
+            out mergeSourceCustomerId,
+            out mergeTargetCustomerId);
+    }
+
+    public static bool TryResolve(
+        string subjectCustomerId,
+        string targetCustomerId,
+        IReadOnlyCollection<string> currentWorkTargetCustomerIds,
+        out string mergeSourceCustomerId,
+        out string mergeTargetCustomerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectCustomerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCustomerId);
+        ArgumentNullException.ThrowIfNull(currentWorkTargetCustomerIds);
+
+        var subjectIsInCurrentWorkTarget = currentWorkTargetCustomerIds.Contains(
+            subjectCustomerId,
+            StringComparer.Ordinal);
+        var targetIsInCurrentWorkTarget = currentWorkTargetCustomerIds.Contains(
+            targetCustomerId,
+            StringComparer.Ordinal);
+
+        // 片方だけが現在の作業対象グループにいるときだけ、外部候補を追加できます。
+        // 両方が同じグループにいる場合や、どちらも対象外の場合に方向を推測すると、
+        // 既存グループの構成顧客を誤って移動させるため、呼び出し側で別扱いにします。
+        if (subjectIsInCurrentWorkTarget == targetIsInCurrentWorkTarget)
+        {
+            mergeSourceCustomerId = "";
+            mergeTargetCustomerId = "";
+            return false;
+        }
+
+        mergeSourceCustomerId = subjectIsInCurrentWorkTarget
+            ? targetCustomerId
+            : subjectCustomerId;
+        mergeTargetCustomerId = subjectIsInCurrentWorkTarget
+            ? subjectCustomerId
+            : targetCustomerId;
+        return true;
+    }
+}
+
+/// <summary>
+/// Matching UIの顧客検索結果に表示する、現在の作業対象との関係です。
+/// これは保存するドメイン状態ではなく、既存の推薦・統合所属・ごみ箱状態から
+/// 検索結果へ投影するための値です。
+/// </summary>
+public enum LegacyMatchingCustomerSearchRelation
+{
+    None,
+    CurrentCustomer,
+    Pending,
+    Hold,
+    Rejected,
+    Approved,
+    TemporaryMember,
+    LogicalMember,
+    Trash,
+}
+
+public static class LegacyMatchingCustomerSearchRelationState
+{
+    public static LegacyMatchingCustomerSearchRelation Resolve(
+        bool isTrash,
+        bool isCurrentCustomer,
+        bool isLogicalMember,
+        bool isTemporaryMember,
+        string? recommendationDecision)
+    {
+        if (isTrash)
+        {
+            return LegacyMatchingCustomerSearchRelation.Trash;
+        }
+
+        if (isCurrentCustomer)
+        {
+            return LegacyMatchingCustomerSearchRelation.CurrentCustomer;
+        }
+
+        if (isLogicalMember)
+        {
+            return LegacyMatchingCustomerSearchRelation.LogicalMember;
+        }
+
+        if (isTemporaryMember)
+        {
+            return LegacyMatchingCustomerSearchRelation.TemporaryMember;
+        }
+
+        return recommendationDecision switch
+        {
+            AbacusRecommendationDecisionValues.Pending => LegacyMatchingCustomerSearchRelation.Pending,
+            AbacusRecommendationDecisionValues.Hold => LegacyMatchingCustomerSearchRelation.Hold,
+            AbacusRecommendationDecisionValues.Rejected => LegacyMatchingCustomerSearchRelation.Rejected,
+            AbacusRecommendationDecisionValues.Approved => LegacyMatchingCustomerSearchRelation.Approved,
+            _ => LegacyMatchingCustomerSearchRelation.None,
+        };
+    }
+
+    public static bool CanAdd(LegacyMatchingCustomerSearchRelation relation) =>
+        relation == LegacyMatchingCustomerSearchRelation.None;
+}
+
+public static class LegacyGraphMutationState
+{
+    public static bool CanMutate(
+        bool bulkMergeBusy,
+        bool finalPackageBusy,
+        bool resumeInProgress) =>
+        !bulkMergeBusy && !finalPackageBusy && !resumeInProgress;
+
+    public static bool TryAddManualCustomerCandidate(
+        IDictionary<string, HashSet<string>> candidateTargets,
+        string sourceCustomerId,
+        string targetCustomerId,
+        bool bulkMergeBusy,
+        bool finalPackageBusy,
+        bool resumeInProgress)
+    {
+        ArgumentNullException.ThrowIfNull(candidateTargets);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceCustomerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCustomerId);
+
+        if (!CanMutate(bulkMergeBusy, finalPackageBusy, resumeInProgress))
+        {
+            return false;
+        }
+
+        if (string.Equals(sourceCustomerId, targetCustomerId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Matchingの手動候補は向きを持たない関係です。逆向きの登録が
+        // 既にある場合も、同じ顧客候補を二重登録しません。
+        if (candidateTargets.TryGetValue(targetCustomerId, out var reverseTargetIds) &&
+            reverseTargetIds.Contains(sourceCustomerId))
+        {
+            return false;
+        }
+
+        if (!candidateTargets.TryGetValue(sourceCustomerId, out var targetIds))
+        {
+            targetIds = new HashSet<string>(StringComparer.Ordinal);
+            candidateTargets[sourceCustomerId] = targetIds;
+        }
+
+        return targetIds.Add(targetCustomerId);
+    }
+
+    public static bool HasUndirectedManualCustomerCandidate(
+        IReadOnlyDictionary<string, HashSet<string>> candidateTargets,
+        IReadOnlyCollection<string> workTargetCustomerIds,
+        string externalCustomerId)
+    {
+        ArgumentNullException.ThrowIfNull(candidateTargets);
+        ArgumentNullException.ThrowIfNull(workTargetCustomerIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(externalCustomerId);
+
+        foreach (var workTargetCustomerId in workTargetCustomerIds)
+        {
+            if (candidateTargets.TryGetValue(workTargetCustomerId, out var targetIds) &&
+                targetIds.Contains(externalCustomerId))
+            {
+                return true;
+            }
+
+            if (candidateTargets.TryGetValue(externalCustomerId, out var reverseTargetIds) &&
+                reverseTargetIds.Contains(workTargetCustomerId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+public static class LegacyGraphCheckpointSaveState
+{
+    public static bool CanStart(
+        bool resumeInProgress,
+        bool bulkMergeBusy,
+        bool finalPackageBusy) =>
+        !resumeInProgress && !bulkMergeBusy && !finalPackageBusy;
+
+    public static bool ShouldRescheduleAfterResumeFailure(
+        bool resumeFailed,
+        bool hadPendingSave) =>
+        resumeFailed && hadPendingSave;
+}
+
+public static class LegacyGraphFinalPackageState
+{
+    public static bool CanComplete(
+        bool importConfirmedAtSnapshot,
+        bool importConfirmedNow) =>
+        importConfirmedAtSnapshot && importConfirmedNow;
+}
+
+public static class LegacyGraphCustomerReviewStateTransition
+{
+    public static string MarkApproved() => LegacyGraphCustomerReviewStateValues.Approved;
+
+    public static string MarkNeedsReview(string? currentState)
+    {
+        if (!string.IsNullOrWhiteSpace(currentState) &&
+            !LegacyGraphCustomerReviewStateValues.IsSupported(currentState))
+        {
+            throw new ArgumentException("顧客確認状態が不正です。", nameof(currentState));
+        }
+
+        return LegacyGraphCustomerReviewStateValues.NeedsReview;
+    }
+
+    /// <summary>
+    /// 確定済み論理グループが構成顧客1件の単独顧客へ戻ったとき、
+    /// 旧グループキーの確認状態を残存顧客の現在キーへ移します。
+    /// </summary>
+    public static string MoveGroupToStandaloneCustomer(
+        IDictionary<string, string> reviewStates,
+        IDictionary<string, bool> approvalStates,
+        string groupKey,
+        string remainingCustomerId,
+        bool wasApproved)
+    {
+        ArgumentNullException.ThrowIfNull(reviewStates);
+        ArgumentNullException.ThrowIfNull(approvalStates);
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remainingCustomerId);
+
+        var standaloneKey = $"customer:{remainingCustomerId}";
+        reviewStates.Remove(groupKey);
+        approvalStates.Remove(groupKey);
+        reviewStates[standaloneKey] = wasApproved
+            ? LegacyGraphCustomerReviewStateValues.NeedsReview
+            : LegacyGraphCustomerReviewStateValues.Unreviewed;
+        approvalStates[standaloneKey] = false;
+        return standaloneKey;
+    }
+}
+
+public static class LegacyGraphRecommendationAvailability
+{
+    public static bool AreEndpointsActive(
+        AbacusRecommendationCandidate candidate,
+        IReadOnlySet<string> trashCustomerIds,
+        IReadOnlySet<string> trashVehicleIds,
+        IReadOnlySet<string> trashDocumentKeys)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(trashCustomerIds);
+        ArgumentNullException.ThrowIfNull(trashVehicleIds);
+        ArgumentNullException.ThrowIfNull(trashDocumentKeys);
+
+        return IsActive(
+                   candidate.SubjectKind,
+                   candidate.SubjectId,
+                   trashCustomerIds,
+                   trashVehicleIds,
+                   trashDocumentKeys) &&
+               IsActive(
+                   candidate.TargetKind,
+                   candidate.TargetId,
+                   trashCustomerIds,
+                   trashVehicleIds,
+                   trashDocumentKeys);
+    }
+
+    private static bool IsActive(
+        string entityKind,
+        string entityId,
+        IReadOnlySet<string> trashCustomerIds,
+        IReadOnlySet<string> trashVehicleIds,
+        IReadOnlySet<string> trashDocumentKeys) =>
+        entityKind switch
+        {
+            AbacusRecommendationEntityKinds.Customer => !trashCustomerIds.Contains(entityId),
+            AbacusRecommendationEntityKinds.Vehicle => !trashVehicleIds.Contains(entityId),
+            AbacusRecommendationEntityKinds.Document => !trashDocumentKeys.Contains(entityId),
+            _ => true,
+        };
+}
+
+public static class LegacyGraphDocumentOwnership
+{
+    public static string? ResolveCurrentVehicleId(
+        string? manualVehicleId,
+        string? linkedVehicleId,
+        string? originalVehicleId,
+        bool hasManualCustomerOnlyLink = false)
+    {
+        if (!string.IsNullOrWhiteSpace(manualVehicleId))
+        {
+            return manualVehicleId;
+        }
+
+        return hasManualCustomerOnlyLink
+            ? null
+            : new[]
+            {
+                linkedVehicleId,
+                originalVehicleId,
+            }.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+    }
+
+    /// <summary>
+    /// 書類の現在顧客を、手動車両・手動顧客直結・自動リンク・元データの順で解決します。
+    /// </summary>
+    public static string? ResolveCurrentCustomerId(
+        string? manualVehicleCustomerId,
+        string? manualCustomerGroupCustomerId,
+        string? linkedVehicleCustomerId,
+        string? originalCustomerId) =>
+        new[]
+        {
+            manualVehicleCustomerId,
+            manualCustomerGroupCustomerId,
+            linkedVehicleCustomerId,
+            originalCustomerId,
+        }.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+}
+
+public static class LegacyGraphDetachedUndoStateMigration
+{
+    /// <summary>
+    /// 顧客統合でグループIDが変わったとき、変更履歴に保存された
+    /// 「操作直前の顧客直結先」も同じ新しいグループへ移します。
+    /// </summary>
+    public static LegacyGraphDetachedUndoState MigrateCustomerGroupReferences(
+        LegacyGraphDetachedUndoState state,
+        IReadOnlySet<string> oldGroupKeys,
+        string newGroupKey)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(oldGroupKeys);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newGroupKey);
+
+        var changed = false;
+        var documents = state.Documents
+            .Select(document =>
+            {
+                if (document.ManualCustomerGroupKey is not { } oldGroupKey ||
+                    !oldGroupKeys.Contains(oldGroupKey) ||
+                    string.Equals(oldGroupKey, newGroupKey, StringComparison.Ordinal))
+                {
+                    return document;
+                }
+
+                changed = true;
+                return document with { ManualCustomerGroupKey = newGroupKey };
+            })
+            .ToArray();
+
+        return changed
+            ? state with { Documents = documents }
+            : state;
+    }
+}
+
+/// <summary>
+/// 手動リンクによって一時的に無効になったおすすめだけを再評価時に復帰させます。
+/// ユーザーが明示的に却下したおすすめは復帰対象にしません。
+/// </summary>
+public static class LegacyGraphRecommendationLifecycleReconciler
+{
+    public const string TemporaryManualLinkObsoleteReason =
+        "既存の手動紐付けにより、この候補は現在の判定対象から外れました。";
+
+    public const string ExplicitRejectedObsoleteReason =
+        "ユーザーが明示的に却下したため、この候補は判定対象外です。";
+
+    public const string CustomerApprovalResolutionReason =
+        "顧客確定に伴う一括処理で判定済みです。";
+
+    public const string DuplicateCustomerRecommendationObsoleteReason =
+        "同じ論理対象の代表候補を承認したため、この重複候補を解決しました。";
+
+    public static bool IsTemporaryManualLinkObsolete(string? reason) =>
+        string.Equals(reason, TemporaryManualLinkObsoleteReason, StringComparison.Ordinal);
+
+    public static bool IsDuplicateCustomerRecommendationObsolete(string? reason) =>
+        string.Equals(reason, DuplicateCustomerRecommendationObsoleteReason, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 顧客構成の変更で、代表候補承認時だけ作られた内部duplicateを再評価します。
+    /// ユーザーのRejected/Holdはこの処理の対象にしません。
+    /// </summary>
+    public static LegacyGraphRecommendationState ReconcileAfterMergeMembershipChange(
+        LegacyGraphRecommendationState state,
+        DateTimeOffset updatedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        if (state.Lifecycle != LegacyGraphRecommendationLifecycle.Obsolete ||
+            state.Decision != AbacusRecommendationDecisionValues.Rejected ||
+            !IsDuplicateCustomerRecommendationObsolete(state.ResolutionReason))
+        {
+            return state;
+        }
+
+        return state with
+        {
+            Decision = AbacusRecommendationDecisionValues.Pending,
+            Lifecycle = LegacyGraphRecommendationLifecycle.Active,
+            ResolutionReason = null,
+            UpdatedAtUtc = updatedAtUtc,
+        };
+    }
+
+    public static LegacyGraphRecommendationState MarkObsoleteAfterRebuild(
+        LegacyGraphRecommendationState state,
+        string fallbackReason,
+        DateTimeOffset updatedAtUtc)
+    {
+        if (state.Lifecycle == LegacyGraphRecommendationLifecycle.Obsolete &&
+            IsTemporaryManualLinkObsolete(state.ResolutionReason))
+        {
+            return state;
+        }
+
+        var reason = state.Lifecycle == LegacyGraphRecommendationLifecycle.Active &&
+                     state.Decision == AbacusRecommendationDecisionValues.Rejected &&
+                     string.IsNullOrWhiteSpace(state.ResolutionReason)
+            ? ExplicitRejectedObsoleteReason
+            : fallbackReason;
+        return state with
+        {
+            Lifecycle = LegacyGraphRecommendationLifecycle.Obsolete,
+            ResolutionReason = reason,
+            UpdatedAtUtc = updatedAtUtc,
+        };
+    }
+
+    public static LegacyGraphRecommendationState? ReconcileCurrentCandidate(
+        LegacyGraphRecommendationState? state,
+        DateTimeOffset updatedAtUtc)
+    {
+        if (state is null ||
+            state.Lifecycle != LegacyGraphRecommendationLifecycle.Obsolete ||
+            !IsTemporaryManualLinkObsolete(state.ResolutionReason))
+        {
+            return state;
+        }
+
+        // 一時Obsolete化の前にユーザーが保留した候補は、再成立後も保留を維持します。
+        // 明示却下は一時理由が混在しても自動復帰させません。
+        if (state.Decision == AbacusRecommendationDecisionValues.Rejected)
+        {
+            return state;
+        }
+
+        return state with
+        {
+            Decision = state.Decision == AbacusRecommendationDecisionValues.Hold
+                ? AbacusRecommendationDecisionValues.Hold
+                : AbacusRecommendationDecisionValues.Pending,
+            Lifecycle = LegacyGraphRecommendationLifecycle.Active,
+            ResolutionReason = null,
+            UpdatedAtUtc = updatedAtUtc,
+        };
+    }
+}

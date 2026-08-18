@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarClock, Search } from 'lucide-react'
 import { DashboardCalendar } from './DashboardCalendar'
 import type { CustomerVehicleNavigation } from './CustomerVehiclePage'
-import { fetchCustomers, type Customer } from '../lib/customerApi'
+import { fetchInspectionVehicleSummaries, type InspectionVehicleSummary } from '../lib/inspectionApi'
 import type { DashboardCalendarEvent } from '../lib/dashboardApi'
 
 const vehicleSearchFields = ['すべて', '顧客名', '車名', '登録番号', '車台番号'] as const
@@ -29,7 +29,7 @@ type InspectionVehicle = {
 }
 
 export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?: (target: CustomerVehicleNavigation) => void } = {}) {
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const [inspectionVehicles, setInspectionVehicles] = useState<InspectionVehicleSummary[]>([])
   const [query, setQuery] = useState('')
   const [searchField, setSearchField] = useState<VehicleSearchField>('すべて')
   const [selectedInspectionYear, setSelectedInspectionYear] = useState('')
@@ -41,9 +41,9 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
   useEffect(() => {
     let active = true
     setLoading(true)
-    fetchCustomers().then((nextCustomers) => {
+    fetchInspectionVehicleSummaries({ limit: 500 }).then((response) => {
       if (!active) return
-      setCustomers(nextCustomers)
+      setInspectionVehicles(response.vehicles)
       setError('')
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '車検予定を読み込めませんでした。')
@@ -53,34 +53,35 @@ export function InspectionSchedulesPage({ onSelectVehicle }: { onSelectVehicle?:
     return () => { active = false }
   }, [])
 
-  const inspectionVehicles = useMemo(() => customers.flatMap((customer) => customer.vehicles.flatMap((vehicle) => {
-    if (!isValidDate(vehicle.inspectionDate)) return []
-    return [{
-      id: vehicle.id,
-      customerId: customer.id,
-      customerName: customer.name || '顧客未登録',
-      vehicleName: [vehicle.maker, vehicle.model].filter(Boolean).join(' ') || '車両未登録',
-      plate: vehicle.plate,
-      vin: vehicle.vin,
-      inspectionDate: vehicle.inspectionDate,
-    }]
-  })).sort((left, right) => normalizeDate(left.inspectionDate).localeCompare(normalizeDate(right.inspectionDate)) || left.customerName.localeCompare(right.customerName, 'ja')), [customers])
+  useEffect(() => {
+    let active = true
+    const timer = window.setTimeout(() => {
+      void fetchInspectionVehicleSummaries({ q: query, field: searchField, limit: 500 }).then((response) => {
+        if (active) setInspectionVehicles(response.vehicles)
+      }).catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : '車検予定を検索できませんでした。')
+      })
+    }, query.trim() || searchField !== 'すべて' ? 280 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [query, searchField])
 
-  const inspectionYears = useMemo(() => Array.from(new Set(inspectionVehicles.map((vehicle) => getInspectionYear(vehicle.inspectionDate)))).sort((left, right) => Number(right) - Number(left)), [inspectionVehicles])
+  const sortedInspectionVehicles = useMemo(() => inspectionVehicles.filter((vehicle) => isValidDate(vehicle.inspectionDate)).sort((left, right) => normalizeDate(left.inspectionDate).localeCompare(normalizeDate(right.inspectionDate)) || left.customerName.localeCompare(right.customerName, 'ja')), [inspectionVehicles])
+
+  const inspectionYears = useMemo(() => Array.from(new Set(sortedInspectionVehicles.map((vehicle) => getInspectionYear(vehicle.inspectionDate)))).sort((left, right) => Number(right) - Number(left)), [sortedInspectionVehicles])
   const inspectionMonths = useMemo(() => {
-    const source = selectedInspectionYear ? inspectionVehicles.filter((vehicle) => getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear) : inspectionVehicles
+    const source = selectedInspectionYear ? sortedInspectionVehicles.filter((vehicle) => getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear) : sortedInspectionVehicles
     return Array.from(new Set(source.map((vehicle) => getInspectionMonth(vehicle.inspectionDate)))).sort((left, right) => left - right)
-  }, [inspectionVehicles, selectedInspectionYear])
+  }, [selectedInspectionYear, sortedInspectionVehicles])
 
   const filteredVehicles = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    return inspectionVehicles.filter((vehicle) => {
+    return sortedInspectionVehicles.filter((vehicle) => {
       const matchesYear = !selectedInspectionYear || getInspectionYear(vehicle.inspectionDate) === selectedInspectionYear
       const matchesMonth = !selectedInspectionMonth || getInspectionMonth(vehicle.inspectionDate) === Number(selectedInspectionMonth)
       const matchesText = !normalizedQuery || getVehicleSearchText(vehicle, searchField).toLocaleLowerCase().includes(normalizedQuery)
       return matchesYear && matchesMonth && matchesText
     })
-  }, [inspectionVehicles, query, searchField, selectedInspectionMonth, selectedInspectionYear])
+  }, [query, searchField, selectedInspectionMonth, selectedInspectionYear, sortedInspectionVehicles])
 
   const vehicleInspectionEvents = useMemo<DashboardCalendarEvent[]>(() => filteredVehicles.map((vehicle) => ({
     id: `vehicle-${vehicle.id}-inspection`,

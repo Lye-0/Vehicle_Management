@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Banknote,
@@ -19,7 +19,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react'
-import { addPaymentEntry, deletePaymentEntry, fetchPayments, updatePaymentEntry, type PaymentDocumentStatus, type PaymentEntry, type PaymentEntryInput, type PaymentMethod, type PaymentRecord } from '../lib/paymentsApi'
+import { addPaymentEntry, deletePaymentEntry, fetchPaymentRecord, fetchPaymentSummaries, updatePaymentEntry, type PaymentDocumentStatus, type PaymentEntry, type PaymentEntryInput, type PaymentMethod, type PaymentRecord } from '../lib/paymentsApi'
 import { printDocument } from '../lib/print'
 import type { VehicleHistoryNavigation } from './CustomerVehiclePage'
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
@@ -42,17 +42,43 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'list' | 'detail'>(initialRecordId ? 'detail' : 'list')
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [recordNextCursor, setRecordNextCursor] = useState<string | null>(null)
+  const [recordHasMore, setRecordHasMore] = useState(false)
+  const [loadingMoreRecords, setLoadingMoreRecords] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const summaryFilterInitializedRef = useRef(false)
+  const initialSortRef = useRef({ sortKey, sortDirection })
 
   useEffect(() => {
     let cancelled = false
-    fetchPayments()
-      .then((nextRecords) => { if (!cancelled) { const pendingRecords = nextRecords.filter((record) => record.documentStatus === '入金待ち'); const nextSelectedRecordId = initialRecordId && pendingRecords.some((record) => record.id === initialRecordId) ? initialRecordId : ''; setRecords(pendingRecords); setSelectedRecordId(nextSelectedRecordId); if (nextSelectedRecordId) setMobileWorkspaceView('detail'); setError('') } })
+    fetchPaymentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection })
+      .then((page) => { if (!cancelled) { const pendingRecords = page.records.filter((record) => record.documentStatus === '入金待ち'); const nextSelectedRecordId = initialRecordId ?? pendingRecords[0]?.id ?? ''; setRecords(pendingRecords); setRecordNextCursor(page.nextCursor); setRecordHasMore(page.hasMore); setSelectedRecordId(nextSelectedRecordId); if (nextSelectedRecordId) setMobileWorkspaceView('detail'); setError('') } })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '入金データを読み込めませんでした。') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [initialRecordId])
+
+  useEffect(() => {
+    if (!summaryFilterInitializedRef.current) {
+      summaryFilterInitializedRef.current = true
+      return
+    }
+    let active = true
+    const timer = window.setTimeout(() => {
+      void fetchPaymentSummaries({ q: query, type: invoiceTypeFilter, sortKey, sortDirection, limit: 100 }).then((page) => {
+        if (!active) return
+        const pendingRecords = page.records.filter((record) => record.documentStatus === '入金待ち')
+        setRecords(pendingRecords)
+        setRecordNextCursor(page.nextCursor)
+        setRecordHasMore(page.hasMore)
+        setSelectedRecordId((current) => current && pendingRecords.some((record) => record.id === current) ? current : pendingRecords[0]?.id ?? '')
+      }).catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : '入金情報を検索できませんでした。')
+      })
+    }, query.trim() ? 280 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [invoiceTypeFilter, query, sortDirection, sortKey])
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -65,6 +91,49 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
   }, [invoiceTypeFilter, query, records, sortDirection, sortKey, statusFilter])
 
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0] ?? null
+
+  async function loadMoreRecords() {
+    if (!recordHasMore || !recordNextCursor || loadingMoreRecords) return
+    setLoadingMoreRecords(true)
+    try {
+      const page = await fetchPaymentSummaries({ q: query, type: invoiceTypeFilter, sortKey, sortDirection, cursor: recordNextCursor, limit: 100 })
+      const pendingRecords = page.records.filter((record) => record.documentStatus === '入金待ち')
+      setRecords((current) => [...current, ...pendingRecords.filter((record) => !current.some((item) => item.id === record.id))])
+      setRecordNextCursor(page.nextCursor)
+      setRecordHasMore(page.hasMore)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : '入金情報を追加で読み込めませんでした。')
+    } finally {
+      setLoadingMoreRecords(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!initialRecordId || records.some((record) => record.id === initialRecordId)) return
+    let active = true
+    const [documentType, documentId] = initialRecordId.split(':')
+    if (!documentType || !documentId || (documentType !== '販売請求書' && documentType !== '整備請求書')) return
+    void fetchPaymentRecord(documentType, documentId).then((detail) => {
+      if (!active || detail.documentStatus !== '入金待ち') return
+      setRecords((current) => [detail, ...current])
+      setSelectedRecordId(detail.id)
+      setMobileWorkspaceView('detail')
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '指定された入金情報を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [initialRecordId, records])
+
+  useEffect(() => {
+    if (!selectedRecord?.isSummary) return
+    let active = true
+    void fetchPaymentRecord(selectedRecord.documentType, selectedRecord.documentId).then((detail) => {
+      if (active) setRecords((current) => current.map((record) => record.id === detail.id ? detail : record))
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '入金詳細を読み込めませんでした。')
+    })
+    return () => { active = false }
+  }, [selectedRecord])
 
   function openMobileDetail() {
     setMobileWorkspaceView('detail')
@@ -134,12 +203,12 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
     <div className="payment-scope-note"><Info size={17} /><div><strong>表示対象</strong><span>販売タブの請求書と、車検・点検・一般タブの整備請求書のうち、書類状態が「入金待ち」のものだけを表示しています。</span></div></div>
     <div className="payment-toolbar"><label className="payment-search"><Search size={18} /><span className="sr-only">入金情報を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="請求書番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="payment-filter-panel mobile-filter-panel"><PaymentFilterGroup label="請求書の種類" kind="invoice-type" value={invoiceTypeFilter} options={['すべて', '販売請求書', '整備請求書'] as InvoiceTypeFilter[]} onChange={setInvoiceTypeFilter} /><PaymentFilterGroup label="入金状況" kind="payment-status" value={statusFilter} options={['すべて', '未入金', '一部入金', '入金済み'] as PaymentFilter[]} onChange={setStatusFilter} /><button className="text-button payment-filter-reset" type="button" onClick={resetFilters} disabled={statusFilter === 'すべて' && invoiceTypeFilter === 'すべて'}>条件をリセット</button></div>
-    <div className={`payment-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false); openMobileDetail() }} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />請求一覧へ戻る</button>{selectedRecord ? <PaymentRecordDetail key={selectedRecord.id} record={selectedRecord} saved={saved} saving={saving} onSaveEntry={saveEntry} onDeleteEntry={removeEntry} onOpenDocument={onNavigate ? () => onNavigate({ section: selectedRecord.sourceType === '販売請求書' ? 'sales' : 'maintenance', recordId: selectedRecord.documentId }) : undefined} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
+    <div className={`payment-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><PaymentRecordList records={filteredRecords} selectedRecordId={selectedRecord?.id ?? ''} onSelect={(id) => { setSelectedRecordId(id); setSaved(false); openMobileDetail() }} hasMore={recordHasMore} loadingMore={loadingMoreRecords} onLoadMore={() => void loadMoreRecords()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />請求一覧へ戻る</button>{selectedRecord ? <PaymentRecordDetail key={selectedRecord.id} record={selectedRecord} saved={saved} saving={saving} onSaveEntry={saveEntry} onDeleteEntry={removeEntry} onOpenDocument={onNavigate ? () => onNavigate({ section: selectedRecord.sourceType === '販売請求書' ? 'sales' : 'maintenance', recordId: selectedRecord.documentId }) : undefined} onPdf={() => printDocument(`${selectedRecord.number}-${selectedRecord.sourceType}`)} /> : <div className="panel payment-empty"><WalletCards size={30} /><strong>請求が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
   </>
 }
 
-function PaymentRecordList({ records, selectedRecordId, onSelect }: { records: PaymentRecord[]; selectedRecordId: string; onSelect: (id: string) => void }) {
-  return <section className="panel payment-list-panel"><div className="payment-list-header"><div><h2>請求一覧</h2><span>請求を選択すると入金履歴と現在の残額を表示します</span></div><span className="results-count">{records.length}件</span></div><div className="payment-record-list">{records.map((record) => { const status = getPaymentStatus(record); return <button className={`payment-record-card${record.id === selectedRecordId ? ' is-selected' : ''}`} key={record.id} type="button" onClick={() => onSelect(record.id)}><div className="payment-card-top"><span className={`payment-type-badge payment-type-${record.sourceType === '販売請求書' ? 'sales' : 'maintenance'}`}>{record.sourceType}</span><DocumentStatusTag status={record.documentStatus} /><PaymentStatusTag status={status} /><ChevronRight size={16} /></div><strong className="payment-card-number">{record.number}</strong><span className="payment-card-customer"><UserRound size={14} />{record.customerName}</span><span className="payment-card-vehicle"><CarFront size={14} />{record.vehicle} ・ {record.plate}</span><div className="payment-card-bottom"><span>未入金 {formatYen(getOutstandingAmount(record))}</span><strong className={isOverdue(record) && status !== '入金済み' ? 'is-overdue' : ''}>{status === '入金済み' ? '入金済み' : `期限 ${record.dueDate || '未設定'}`}</strong></div></button> })}</div></section>
+function PaymentRecordList({ records, selectedRecordId, onSelect, hasMore, loadingMore, onLoadMore }: { records: PaymentRecord[]; selectedRecordId: string; onSelect: (id: string) => void; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void }) {
+  return <section className="panel payment-list-panel"><div className="payment-list-header"><div><h2>請求一覧</h2><span>請求を選択すると入金履歴と現在の残額を表示します</span></div><span className="results-count">{records.length}件</span></div><div className="payment-record-list">{records.map((record) => { const status = getPaymentStatus(record); return <button className={`payment-record-card${record.id === selectedRecordId ? ' is-selected' : ''}`} key={record.id} type="button" onClick={() => onSelect(record.id)}><div className="payment-card-top"><span className={`payment-type-badge payment-type-${record.sourceType === '販売請求書' ? 'sales' : 'maintenance'}`}>{record.sourceType}</span><DocumentStatusTag status={record.documentStatus} /><PaymentStatusTag status={status} /><ChevronRight size={16} /></div><strong className="payment-card-number">{record.number}</strong><span className="payment-card-customer"><UserRound size={14} />{record.customerName}</span><span className="payment-card-vehicle"><CarFront size={14} />{record.vehicle} ・ {record.plate}</span><div className="payment-card-bottom"><span>未入金 {formatYen(getOutstandingAmount(record))}</span><strong className={isOverdue(record) && status !== '入金済み' ? 'is-overdue' : ''}>{status === '入金済み' ? '入金済み' : `期限 ${record.dueDate || '未設定'}`}</strong></div></button> })}</div>{hasMore && <button className="button button-secondary document-list-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? '読み込み中…' : '次の請求を読み込む'}</button>}</section>
 }
 
 function PaymentRecordDetail({ record, saved, saving, onSaveEntry, onDeleteEntry, onOpenDocument, onPdf }: { record: PaymentRecord; saved: boolean; saving: boolean; onSaveEntry: (entryId: string | undefined, input: PaymentEntryInput) => Promise<boolean>; onDeleteEntry: (entryId: string) => Promise<boolean>; onOpenDocument?: () => void; onPdf: () => void }) {

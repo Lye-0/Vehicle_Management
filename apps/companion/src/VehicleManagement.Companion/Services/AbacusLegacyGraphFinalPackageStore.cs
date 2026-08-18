@@ -29,7 +29,12 @@ public sealed record AbacusLegacyGraphFinalizationSnapshot(
     IReadOnlyCollection<string> ExcludedDocumentKeys,
     bool ImportConfirmed,
     IReadOnlyDictionary<string, string>? DocumentLinkMethods = null,
-    IReadOnlyDictionary<string, string>? DocumentLinkReasons = null);
+    IReadOnlyDictionary<string, string>? DocumentLinkReasons = null,
+    IReadOnlyDictionary<string, string>? ManualVehicleCustomerLinks = null,
+    IReadOnlyCollection<string>? TrayVehicleIds = null,
+    IReadOnlyCollection<string>? ExplicitExcludedDocumentKeys = null,
+    IReadOnlyCollection<string>? ExplicitExcludedVehicleIds = null,
+    IReadOnlyCollection<string>? ExplicitExcludedCustomerIds = null);
 
 public static class AbacusLinkMethods
 {
@@ -82,7 +87,12 @@ public sealed record AbacusLegacyGraphFinalPackageResult(
     IReadOnlyList<AbacusLegacyGraphFinalCustomerPreview> Customers,
     IReadOnlyList<AbacusLegacyGraphFinalDocumentPreview> Documents,
     string? ImageAttachmentsPath = null,
-    int ImageCount = 0);
+    int ImageCount = 0,
+    int ExcludedVehicleCount = 0,
+    int ExcludedVehicleImageCount = 0,
+    int UnresolvedDocumentCount = 0,
+    int ExplicitExcludedDocumentCount = 0,
+    int ExcludedCustomerCount = 0);
 
 /// <summary>
 /// グラフ画面での最終確定状態を、Web登録前に人が検証できるパッケージへ保存します。
@@ -146,6 +156,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var sourceRoot = ValidateFolder(graph.PackagePath, "候補パッケージ");
         var destinationRoot = ValidateFolder(destinationParent, "登録前パッケージ保存先");
         ValidateDestination(sourceRoot, destinationRoot);
+        // 状態判定はパッケージ作成時点で一度だけ固定し、後日同じパッケージを
+        // 登録・再検証しても「完了／下書き」が変化しないようにします。
+        // 利用者が確認する書類の基準日なので、実行環境のローカル日付（日本時間）で固定します。
+        var importBaseDate = DateTime.Now.Date;
         if (graph.AllDocuments.Count > MaximumDocumentCount)
         {
             throw new InvalidDataException($"書類件数が上限{MaximumDocumentCount:N0}件を超えています。");
@@ -155,14 +169,71 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             throw new InvalidDataException($"顧客件数が上限{MaximumCustomerCount:N0}件を超えています。");
         }
 
+        var explicitExcludedCustomerIds = NormalizeKeys(snapshot.ExplicitExcludedCustomerIds);
         var sourceCustomers = graph.Customers.ToDictionary(customer => customer.CustomerId, StringComparer.Ordinal);
-        var groups = ValidateGroups(snapshot.CustomerGroups, sourceCustomers);
+        var allGroups = ValidateGroups(
+            snapshot.CustomerGroups,
+            sourceCustomers,
+            explicitExcludedCustomerIds);
+        if (explicitExcludedCustomerIds.Any(customerId => !sourceCustomers.ContainsKey(customerId)))
+        {
+            throw new InvalidDataException("ごみ箱の顧客除外指定に存在しない顧客が含まれています。グラフを再読込してください。");
+        }
+        var excludedCustomerGroupKeys = allGroups
+            .Where(group => group.SourceCustomerIds.Any(explicitExcludedCustomerIds.Contains))
+            .Select(group => group.GroupKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var groups = allGroups
+            .Where(group => !excludedCustomerGroupKeys.Contains(group.GroupKey))
+            .ToArray();
+        if (groups.Length == 0)
+        {
+            throw new InvalidDataException("ごみ箱の顧客除外により、出力対象の顧客がなくなりました。");
+        }
+        var allGroupByKey = allGroups.ToDictionary(group => group.GroupKey, StringComparer.Ordinal);
         var groupByKey = groups.ToDictionary(group => group.GroupKey, StringComparer.Ordinal);
         var groupBySourceCustomerId = groups
             .SelectMany(group => group.SourceCustomerIds.Select(customerId => (customerId, group)))
             .ToDictionary(item => item.customerId, item => item.group, StringComparer.Ordinal);
-        var sourceVehicles = graph.Customers
+        var allSourceVehicles = graph.Customers
             .SelectMany(customer => customer.Vehicles)
+            .Concat(graph.UnresolvedVehicleRows)
+            .GroupBy(vehicle => vehicle.VehicleId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var manualVehicleCustomerLinks = snapshot.ManualVehicleCustomerLinks ??
+            new Dictionary<string, string>(StringComparer.Ordinal);
+        var trayVehicleIds = (snapshot.TrayVehicleIds ?? Array.Empty<string>())
+            .Select(value => value.Trim())
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        var explicitExcludedVehicleIds = NormalizeKeys(snapshot.ExplicitExcludedVehicleIds);
+        if (explicitExcludedVehicleIds.Any(vehicleId => allSourceVehicles.All(vehicle =>
+                !string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal))))
+        {
+            throw new InvalidDataException("ごみ箱の車両除外指定に存在しない車両が含まれています。グラフを再読込してください。");
+        }
+        if (trayVehicleIds.Any(vehicleId => allSourceVehicles.All(vehicle =>
+                !string.Equals(vehicle.VehicleId, vehicleId, StringComparison.Ordinal))))
+        {
+            throw new InvalidDataException("未確定車両トレイに存在しない車両が含まれています。グラフを再読込してください。");
+        }
+
+        ValidateManualVehicleCustomerLinks(manualVehicleCustomerLinks, allSourceVehicles, sourceCustomers, trayVehicleIds);
+        var allVehiclesById = allSourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
+        var sourceVehicles = allSourceVehicles
+            .Where(vehicle => !trayVehicleIds.Contains(vehicle.VehicleId) &&
+                              !explicitExcludedVehicleIds.Contains(vehicle.VehicleId) &&
+                              !explicitExcludedCustomerIds.Contains(
+                                  ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "") &&
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) is not null)
+            .ToArray();
+        var excludedVehicles = allSourceVehicles
+            .Where(vehicle => trayVehicleIds.Contains(vehicle.VehicleId) ||
+                              explicitExcludedVehicleIds.Contains(vehicle.VehicleId) ||
+                              explicitExcludedCustomerIds.Contains(
+                                  ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "") ||
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) is null)
             .ToArray();
         var vehiclesById = sourceVehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
         var documents = graph.AllDocuments
@@ -170,17 +241,52 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             .Select(group => group.First())
             .ToArray();
         var documentByKey = documents.ToDictionary(GetDocumentKey, StringComparer.OrdinalIgnoreCase);
-        var excludedKeys = snapshot.ExcludedDocumentKeys
-            .Select(value => value.Trim())
-            .Where(value => value.Length > 0)
+        var unresolvedExcludedKeys = NormalizeKeys(snapshot.ExcludedDocumentKeys, StringComparer.OrdinalIgnoreCase);
+        var explicitExcludedDocumentKeys = NormalizeKeys(snapshot.ExplicitExcludedDocumentKeys, StringComparer.OrdinalIgnoreCase);
+        if (explicitExcludedDocumentKeys.Any(key => !documentByKey.ContainsKey(key)))
+        {
+            throw new InvalidDataException("ごみ箱の書類除外指定に存在しない書類が含まれています。グラフを再読込してください。");
+        }
+        var excludedKeys = unresolvedExcludedKeys
+            .Union(explicitExcludedDocumentKeys, StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (excludedKeys.Any(key => !documentByKey.ContainsKey(key)))
+        if (unresolvedExcludedKeys.Any(key => !documentByKey.ContainsKey(key)))
         {
             throw new InvalidDataException("除外指定に存在しない書類が含まれています。グラフを再読込してください。");
         }
 
-        ValidateManualLinks(snapshot, documentByKey, vehiclesById, groupByKey);
-        var finalDocumentCandidates = new List<FinalDocument>(documents.Length - excludedKeys.Count);
+        // UI側で関連書類をトレイへ移動し忘れた場合でも、未確定車両の書類が
+        // 顧客直結書類として誤って出力されないよう、元の車両リンクを最終段階で再確認します。
+        var vehicleTrayDocumentKeys = documents
+            .Where(document =>
+                ResolveCurrentVehicleId(document, GetDocumentKey(document), snapshot, allVehiclesById, graph) is { } currentVehicleId &&
+                trayVehicleIds.Contains(currentVehicleId))
+            .Select(GetDocumentKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        excludedKeys.UnionWith(vehicleTrayDocumentKeys);
+
+        var explicitParentDocumentKeys = documents
+            .Where(document =>
+                (ResolveCurrentVehicleId(document, GetDocumentKey(document), snapshot, allVehiclesById, graph) is { } currentVehicleId &&
+                 (explicitExcludedVehicleIds.Contains(currentVehicleId) ||
+                  allVehiclesById.TryGetValue(currentVehicleId, out var currentVehicle) &&
+                  explicitExcludedCustomerIds.Contains(
+                      ResolveCurrentVehicleCustomerId(currentVehicle, manualVehicleCustomerLinks) ?? ""))) ||
+                (snapshot.ManualDocumentCustomerGroupLinks.TryGetValue(GetDocumentKey(document), out var manualGroupKey) &&
+                 excludedCustomerGroupKeys.Contains(manualGroupKey)))
+            .Select(GetDocumentKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        excludedKeys.UnionWith(explicitParentDocumentKeys);
+        var unresolvedDocumentOutputKeys = unresolvedExcludedKeys
+            .Union(vehicleTrayDocumentKeys, StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var explicitDocumentOutputKeys = explicitExcludedDocumentKeys
+            .Union(explicitParentDocumentKeys, StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        unresolvedDocumentOutputKeys.ExceptWith(explicitDocumentOutputKeys);
+
+        ValidateManualLinks(snapshot, documentByKey, allVehiclesById, allGroupByKey);
+        var finalDocumentCandidates = new List<FinalDocument>(Math.Max(0, documents.Length - excludedKeys.Count));
         foreach (var document in documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -190,9 +296,15 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 continue;
             }
 
-            var linkedVehicleId = ResolveVehicleId(document, key, snapshot, vehiclesById);
+            var linkedVehicleId = ResolveVehicleId(
+                document,
+                key,
+                snapshot,
+                graph,
+                allVehiclesById,
+                vehiclesById);
             var targetGroup = linkedVehicleId is not null
-                ? groupBySourceCustomerId[vehiclesById[linkedVehicleId].CustomerId]
+                ? ResolveVehicleGroup(vehiclesById[linkedVehicleId], manualVehicleCustomerLinks, groupBySourceCustomerId)
                 : ResolveCustomerOnlyGroup(document, key, snapshot, sourceCustomers, groupBySourceCustomerId, groupByKey);
             var vehicle = linkedVehicleId is null ? null : vehiclesById[linkedVehicleId];
             var linkDecision = ResolveLinkDecision(document, key, snapshot, linkedVehicleId);
@@ -213,12 +325,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var finalDocuments = AssignImportDocumentNumbers(finalDocumentCandidates);
 
         var customerRows = groups
-            .Select(group => new FinalCustomer(group, sourceVehicles.Count(vehicle => groupBySourceCustomerId[vehicle.CustomerId].GroupKey == group.GroupKey), finalDocuments.Count(document => document.Group.GroupKey == group.GroupKey)))
+            .Select(group => new FinalCustomer(group, sourceVehicles.Count(vehicle => ResolveVehicleGroup(vehicle, manualVehicleCustomerLinks, groupBySourceCustomerId).GroupKey == group.GroupKey), finalDocuments.Count(document => document.Group.GroupKey == group.GroupKey)))
             .OrderBy(customer => customer.Group.CustomerName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(customer => customer.Group.CustomerId, StringComparer.Ordinal)
             .ToArray();
         var vehicleRows = sourceVehicles
-            .Select(vehicle => new FinalVehicle(vehicle, groupBySourceCustomerId[vehicle.CustomerId]))
+            .Select(vehicle => new FinalVehicle(vehicle, ResolveVehicleGroup(vehicle, manualVehicleCustomerLinks, groupBySourceCustomerId)))
             .OrderBy(vehicle => vehicle.Group.CustomerId, StringComparer.Ordinal)
             .ThenBy(vehicle => vehicle.Vehicle.VehicleId, StringComparer.Ordinal)
             .ToArray();
@@ -227,6 +339,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             : string.IsNullOrWhiteSpace(imageRegistrationPreviewFolder)
                 ? Array.Empty<PreparedImageAttachment>()
                 : await ReadImageAttachmentsAsync(imageRegistrationPreviewFolder, vehicleRows, cancellationToken);
+        var excludedVehicleImageCount = fp5VehicleImageMapping is null
+            ? 0
+            : Math.Max(0, fp5VehicleImageMapping.MatchedImageCount - imageAttachments.Count);
 
         var packagePath = CreateUniquePackageDirectory(destinationRoot);
         try
@@ -239,8 +354,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             string? imageAttachmentsPath = null;
             await WriteAndVerifyAsync(customersCsvPath, BuildCustomersCsv(customerRows), cancellationToken);
             await WriteAndVerifyAsync(vehiclesCsvPath, BuildVehiclesCsv(vehicleRows), cancellationToken);
-            await WriteAndVerifyAsync(salesCsvPath, BuildSalesCsv(finalDocuments.Where(document => document.Document.Kind == "販売書類")), cancellationToken);
-            await WriteAndVerifyAsync(maintenanceCsvPath, BuildMaintenanceCsv(finalDocuments.Where(document => document.Document.Kind == "整備書類")), cancellationToken);
+            await WriteAndVerifyAsync(salesCsvPath, BuildSalesCsv(finalDocuments.Where(document => document.Document.Kind == "販売書類"), importBaseDate), cancellationToken);
+            await WriteAndVerifyAsync(maintenanceCsvPath, BuildMaintenanceCsv(finalDocuments.Where(document => document.Document.Kind == "整備書類"), importBaseDate), cancellationToken);
             var linksDocument = new DocumentLinksDocument(
                 1,
                 "abacus-export-import-document-links",
@@ -260,7 +375,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     document.LinkMethod,
                     document.SourceCandidateId,
                     document.LinkReason)).ToArray(),
-                excludedKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
+                excludedKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
+                unresolvedDocumentOutputKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
+                explicitDocumentOutputKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
             await WriteAndVerifyAsync(documentLinksPath, JsonSerializer.SerializeToUtf8Bytes(linksDocument, JsonOptions), cancellationToken);
 
             IReadOnlyList<OutputFile> imageFiles = Array.Empty<OutputFile>();
@@ -341,9 +458,27 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 warnings.Add($"車両情報のない書類を{vehiclelessCount:N0}件出力しました。Web画面では車両を「なし」と表示する特例対象です。");
             }
+            if (excludedVehicles.Length > 0)
+            {
+                var trayExcludedVehicleCount = excludedVehicles.Count(vehicle => trayVehicleIds.Contains(vehicle.VehicleId));
+                var explicitExcludedVehicleCount = excludedVehicles.Count(vehicle =>
+                    explicitExcludedVehicleIds.Contains(vehicle.VehicleId) ||
+                    explicitExcludedCustomerIds.Contains(
+                        ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? ""));
+                var customerUnresolvedVehicleCount = excludedVehicles.Length - trayExcludedVehicleCount - explicitExcludedVehicleCount;
+                warnings.Add($"出力対象外の車両{excludedVehicles.Length:N0}件（未確定トレイ{trayExcludedVehicleCount:N0}件 / 明示除外{explicitExcludedVehicleCount:N0}件 / 顧客未確定{Math.Max(0, customerUnresolvedVehicleCount):N0}件）。");
+            }
+            if (excludedVehicleImageCount > 0)
+            {
+                warnings.Add($"未確定車両に対応する画像{excludedVehicleImageCount:N0}件は、車両未接続のため画像登録前パッケージへ出力していません。");
+            }
             if (excludedKeys.Count > 0)
             {
-                warnings.Add($"未確定トレイ等の除外指定{excludedKeys.Count:N0}件は出力していません。");
+                warnings.Add($"除外指定{excludedKeys.Count:N0}件は出力していません（未確定トレイ等{unresolvedDocumentOutputKeys.Count:N0}件 / 明示除外{explicitDocumentOutputKeys.Count:N0}件）。");
+            }
+            if (vehicleTrayDocumentKeys.Count > 0)
+            {
+                warnings.Add($"未確定車両に元々紐付いていた書類{vehicleTrayDocumentKeys.Count:N0}件は、車両トレイ移動に連動して出力していません。");
             }
             var renumberedDocumentCount = finalDocuments.Count(document => !string.Equals(document.ImportDocumentNumber, document.Document.DocumentNumber, StringComparison.Ordinal));
             if (renumberedDocumentCount > 0)
@@ -355,7 +490,24 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             {
                 warnings.Add($"ABACUSで金額が未設定の{amountDefaultedDocumentCount:N0}件は、小計・合計を0として登録用CSVへ出力しています。元データに金額がないことは備考へ記録しています。");
             }
+            var statusDateWarningCount = finalDocuments.Count(document =>
+                !DateTime.TryParseExact(GetStatusDate(document), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
+            if (statusDateWarningCount > 0)
+            {
+                warnings.Add($"書類日付が空欄または不正な{statusDateWarningCount:N0}件は、状態を下書きとして出力しました。");
+            }
+            var classificationWarningCount = finalDocuments.Count(document =>
+                !string.IsNullOrWhiteSpace(document.Document.ClassificationWarning) ||
+                (document.Document.Kind == "整備書類" && AbacusDocumentClassification.NormalizeMaintenanceCategory(document.Document.MaintenanceCategory).Warning is not null));
+            if (classificationWarningCount > 0)
+            {
+                warnings.Add($"書類種別・入庫区分を正規化した際の警告対象は{classificationWarningCount:N0}件です。原文と警告を明細詳細JSONへ保存しています。");
+            }
             warnings.Add($"Gate 19明細: 対応付け済み{detailMappedCount:N0}件 / 要確認{detailReviewCount:N0}件 / 未対応{detailUnsupportedCount:N0}件 / 除外行{detailExcludedRowCount:N0}件 / 金額のみ行{amountOnlyDetailRowCount:N0}件。");
+            if (explicitExcludedCustomerIds.Count > 0)
+            {
+                warnings.Add($"ごみ箱へ移動した顧客{explicitExcludedCustomerIds.Count:N0}件は、関連する車両・書類・画像を出力していません。");
+            }
 
             var manifest = new OutputManifest(
                 1,
@@ -363,6 +515,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 "registration-preview",
                 DateTime.UtcNow,
                 new OutputSource(sourceRoot, sourceManifestSha256),
+                importBaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 new OutputSummary(
                     customerRows.Length,
                     vehicleRows.Length,
@@ -375,7 +528,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     detailReviewCount,
                     detailUnsupportedCount,
                     detailExcludedRowCount,
-                    amountOnlyDetailRowCount),
+                    amountOnlyDetailRowCount,
+                    excludedVehicles.Length,
+                    excludedVehicleImageCount,
+                    unresolvedDocumentOutputKeys.Count,
+                    explicitDocumentOutputKeys.Count,
+                    explicitExcludedCustomerIds.Count),
                 dataFiles,
                 imageFiles,
                 warnings,
@@ -397,7 +555,25 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     document.LinkMethod,
                     document.SourceCandidateId,
                     document.LinkReason)).ToArray(),
-                excludedKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
+                excludedKeys.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
+                excludedVehicles.Select(vehicle => new ManifestExcludedVehicle(
+                    vehicle.VehicleId,
+                    vehicle.SourceLocation,
+                    explicitExcludedVehicleIds.Contains(vehicle.VehicleId)
+                        ? "ユーザーがごみ箱へ移動したため最終パッケージから除外"
+                        : explicitExcludedCustomerIds.Contains(
+                              ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ?? "")
+                            ? "親顧客がごみ箱へ移動したため最終パッケージから除外"
+                            : trayVehicleIds.Contains(vehicle.VehicleId)
+                        ? "ユーザーが未確定車両トレイへ移動したため最終パッケージから除外"
+                        : "顧客未接続のため最終パッケージから除外")).ToArray(),
+                manualVehicleCustomerLinks,
+                explicitExcludedCustomerIds
+                    .Select(customerId => new ManifestExcludedCustomer(
+                        customerId,
+                        $"顧客CSV:{sourceCustomers[customerId].CustomerNumber}",
+                        "ユーザーがごみ箱へ移動したため最終パッケージから除外"))
+                    .ToArray());
             var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
             var manifestPath = Path.Combine(packagePath, ManifestFileName);
             await WriteAndVerifyManifestAsync(manifestPath, manifestBytes, manifest, cancellationToken);
@@ -438,7 +614,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                     document.SourceCandidateId,
                     document.LinkReason)).ToArray(),
                 imageAttachmentsPath,
-                imageAttachments.Count);
+                imageAttachments.Count,
+                excludedVehicles.Length,
+                excludedVehicleImageCount,
+                unresolvedDocumentOutputKeys.Count,
+                explicitDocumentOutputKeys.Count,
+                explicitExcludedCustomerIds.Count);
         }
         catch
         {
@@ -453,7 +634,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static IReadOnlyList<AbacusLegacyGraphFinalCustomerGroup> ValidateGroups(
         IReadOnlyList<AbacusLegacyGraphFinalCustomerGroup> groups,
-        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> sourceCustomers)
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> sourceCustomers,
+        IReadOnlySet<string> explicitExcludedCustomerIds)
     {
         if (groups.Count == 0)
         {
@@ -479,19 +661,33 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 }
             }
 
-            if (group.SourceCustomerIds.Count > 1 && !group.Approved)
+            var hasActiveSourceCustomer = group.SourceCustomerIds.Any(
+                customerId => !explicitExcludedCustomerIds.Contains(customerId));
+            if (hasActiveSourceCustomer && group.SourceCustomerIds.Any(explicitExcludedCustomerIds.Contains))
             {
-                throw new InvalidDataException($"未承認の顧客統合候補が残っています: {group.GroupKey}");
+                throw new InvalidDataException(
+                    $"ごみ箱の顧客と出力対象顧客が同じ論理顧客グループに残っています: {group.GroupKey}");
             }
-            RequiredText(group.CustomerId, "出力顧客ID");
-            RequiredText(group.CustomerName, "出力顧客名");
-            if (!seenOutputCustomerIds.Add(group.CustomerId))
+            if (hasActiveSourceCustomer && !group.Approved)
             {
-                throw new InvalidDataException($"統合後の出力顧客IDが重複しています: {group.CustomerId}");
+                throw new InvalidDataException($"未確認の顧客が残っています: {group.GroupKey}");
+            }
+            if (hasActiveSourceCustomer)
+            {
+                RequiredText(group.CustomerId, "出力顧客ID");
+                RequiredText(group.CustomerName, "出力顧客名");
+                if (!seenOutputCustomerIds.Add(group.CustomerId))
+                {
+                    throw new InvalidDataException($"統合後の出力顧客IDが重複しています: {group.CustomerId}");
+                }
             }
         }
 
-        if (seenCustomerIds.Count != sourceCustomers.Count)
+        var expectedActiveCustomerCount = sourceCustomers.Keys.Count(
+            customerId => !explicitExcludedCustomerIds.Contains(customerId));
+        var seenActiveCustomerCount = seenCustomerIds.Count(
+            customerId => !explicitExcludedCustomerIds.Contains(customerId));
+        if (seenActiveCustomerCount != expectedActiveCustomerCount)
         {
             throw new InvalidDataException("顧客統合グループに含まれていない顧客があります。グラフを再読込してください。");
         }
@@ -544,6 +740,42 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         }
     }
 
+    private static void ValidateManualVehicleCustomerLinks(
+        IReadOnlyDictionary<string, string> links,
+        IReadOnlyList<AbacusLegacyExportCandidateGraphVehicle> vehicles,
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphCustomer> customers,
+        IReadOnlySet<string> trayVehicleIds)
+    {
+        var vehiclesById = vehicles.ToDictionary(vehicle => vehicle.VehicleId, StringComparer.Ordinal);
+        foreach (var pair in links)
+        {
+            if (!vehiclesById.TryGetValue(pair.Key, out var vehicle) || vehicle.HasCustomer || trayVehicleIds.Contains(pair.Key))
+            {
+                throw new InvalidDataException("未確定車両の手動接続が現在のグラフを参照していません。");
+            }
+
+            if (!customers.ContainsKey(pair.Value))
+            {
+                throw new InvalidDataException("未確定車両の接続先顧客が現在のグラフを参照していません。");
+            }
+        }
+    }
+
+    private static AbacusLegacyGraphFinalCustomerGroup ResolveVehicleGroup(
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        IReadOnlyDictionary<string, string> manualVehicleCustomerLinks,
+        IReadOnlyDictionary<string, AbacusLegacyGraphFinalCustomerGroup> groupsBySourceCustomerId)
+    {
+        var sourceCustomerId = ResolveCurrentVehicleCustomerId(vehicle, manualVehicleCustomerLinks) ??
+            throw new InvalidDataException($"未確定車両に顧客接続がありません: {vehicle.VehicleId}");
+        if (!groupsBySourceCustomerId.TryGetValue(sourceCustomerId, out var group))
+        {
+            throw new InvalidDataException($"車両の接続先顧客グループがありません: {vehicle.VehicleId}");
+        }
+
+        return group;
+    }
+
     private static LinkDecision ResolveLinkDecision(
         AbacusLegacyExportCandidateGraphDocument document,
         string documentKey,
@@ -590,19 +822,59 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         AbacusLegacyExportCandidateGraphDocument document,
         string documentKey,
         AbacusLegacyGraphFinalizationSnapshot snapshot,
+        AbacusLegacyExportCandidateGraphResult graph,
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> allVehicles,
         IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> vehicles)
     {
-        if (snapshot.ManualDocumentVehicleLinks.TryGetValue(documentKey, out var manualVehicleId))
-        {
-            return manualVehicleId;
-        }
+        var currentVehicleId = ResolveCurrentVehicleId(
+            document,
+            documentKey,
+            snapshot,
+            allVehicles,
+            graph);
+        return currentVehicleId is not null && vehicles.ContainsKey(currentVehicleId)
+            ? currentVehicleId
+            : null;
+    }
 
-        if (document.LinkedVehicleId is not null && vehicles.ContainsKey(document.LinkedVehicleId))
-        {
-            return document.LinkedVehicleId;
-        }
+    private static string? ResolveCurrentVehicleId(
+        AbacusLegacyExportCandidateGraphDocument document,
+        string documentKey,
+        AbacusLegacyGraphFinalizationSnapshot snapshot,
+        IReadOnlyDictionary<string, AbacusLegacyExportCandidateGraphVehicle> allVehicles,
+        AbacusLegacyExportCandidateGraphResult graph)
+    {
+        var manualVehicleId = snapshot.ManualDocumentVehicleLinks.TryGetValue(documentKey, out var manualId) &&
+                              allVehicles.ContainsKey(manualId)
+            ? manualId
+            : null;
+        var linkedVehicleId = document.LinkedVehicleId is not null &&
+                              allVehicles.ContainsKey(document.LinkedVehicleId)
+            ? document.LinkedVehicleId
+            : null;
+        var originalVehicleId = FindOriginalVehicleForDocument(graph, document)?.VehicleId;
+        return LegacyGraphDocumentOwnership.ResolveCurrentVehicleId(
+            manualVehicleId,
+            linkedVehicleId,
+            originalVehicleId,
+            snapshot.ManualDocumentCustomerGroupLinks.ContainsKey(documentKey));
+    }
 
-        return null;
+    private static string? ResolveCurrentVehicleCustomerId(
+        AbacusLegacyExportCandidateGraphVehicle vehicle,
+        IReadOnlyDictionary<string, string> manualVehicleCustomerLinks)
+    {
+        var manualCustomerId = manualVehicleCustomerLinks.TryGetValue(
+            vehicle.VehicleId,
+            out var linkedCustomerId)
+            ? linkedCustomerId
+            : null;
+        var originalCustomerId = vehicle.HasCustomer ? vehicle.CustomerId : null;
+        return LegacyGraphDocumentOwnership.ResolveCurrentCustomerId(
+            manualCustomerId,
+            null,
+            null,
+            originalCustomerId);
     }
 
     private static AbacusLegacyGraphFinalCustomerGroup ResolveCustomerOnlyGroup(
@@ -675,41 +947,59 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 "",
                 "",
                 "",
-                Truncate($"ABACUSグラフ確定; 元顧客ID={vehicle.Vehicle.CustomerId}; 車両ID={vehicle.Vehicle.VehicleId}"),
+                Truncate(
+                    string.IsNullOrWhiteSpace(vehicle.Vehicle.CustomerId)
+                        ? $"ABACUSグラフ確定; 顧客情報なし車両をユーザーが顧客へ手動接続; 接続先顧客ID={vehicle.Group.CustomerId}; 車両ID={vehicle.Vehicle.VehicleId}"
+                        : $"ABACUSグラフ確定; 元顧客ID={vehicle.Vehicle.CustomerId}; 車両ID={vehicle.Vehicle.VehicleId}"),
             ]);
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static byte[] BuildSalesCsv(IEnumerable<FinalDocument> documents)
+    private static byte[] BuildSalesCsv(IEnumerable<FinalDocument> documents, DateTime importBaseDate)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, ["書類ID", "書類番号", "書類種別", "ステータス", "顧客名", "車名", "登録番号", "発行日", "支払期限", "税率", "小計", "消費税", "合計", "明細", "備考", "明細詳細"]);
         foreach (var document in documents)
         {
-            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: false));
+            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: false, importBaseDate));
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static byte[] BuildMaintenanceCsv(IEnumerable<FinalDocument> documents)
+    private static byte[] BuildMaintenanceCsv(IEnumerable<FinalDocument> documents, DateTime importBaseDate)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, ["書類ID", "書類番号", "書類種別", "入庫区分", "ステータス", "顧客名", "車名", "登録番号", "入庫日", "出庫予定日", "支払期限", "税率", "小計", "消費税", "合計", "明細", "備考", "明細詳細"]);
         foreach (var document in documents)
         {
-            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: true));
+            AppendCsvRow(builder, BuildDocumentFields(document, isMaintenance: true, importBaseDate));
         }
 
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static IReadOnlyList<string> BuildDocumentFields(FinalDocument finalDocument, bool isMaintenance)
+    private static IReadOnlyList<string> BuildDocumentFields(FinalDocument finalDocument, bool isMaintenance, DateTime importBaseDate)
     {
         var document = finalDocument.Document;
         var detail = ParseDetailJson(document.DetailsJson);
+        var rawDocumentType = string.IsNullOrWhiteSpace(detail?.RawDocumentType)
+            ? document.DocumentType
+            : detail.RawDocumentType!;
+        var documentTypeClassification = AbacusDocumentClassification.NormalizeDocumentType(
+            rawDocumentType,
+            isMaintenance ? "整備請求書" : "請求書");
+        var documentType = isMaintenance
+            ? documentTypeClassification.Value == "見積書" ? "整備見積書" : "整備請求書"
+            : documentTypeClassification.Value;
+        var rawMaintenanceCategory = isMaintenance
+            ? (string.IsNullOrWhiteSpace(detail?.RawMaintenanceCategory) ? document.MaintenanceCategory : detail.RawMaintenanceCategory!)
+            : "";
+        var categoryClassification = isMaintenance
+            ? AbacusDocumentClassification.NormalizeMaintenanceCategory(rawMaintenanceCategory)
+            : null;
         var vehicleName = finalDocument.Vehicle?.VehicleName ?? "";
         var registrationNumber = finalDocument.Vehicle?.RegistrationNumber ?? "";
         var amountWasMissing = string.IsNullOrWhiteSpace(document.TotalAmount);
@@ -738,20 +1028,31 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             ? document.DocumentDate
             : document.MaintenanceIntakeDate;
         var maintenanceCompletionDate = document.MaintenanceCompletionDate;
+        var statusClassification = AbacusDocumentClassification.CalculateStatus(
+            GetStatusDate(finalDocument, maintenanceIntakeDate, maintenanceCompletionDate),
+            importBaseDate);
         var originalNumberMemo = string.Equals(finalDocument.ImportDocumentNumber, document.DocumentNumber, StringComparison.Ordinal)
             ? ""
             : $" 原書類番号={document.DocumentNumber};";
         var missingAmountMemo = amountWasMissing ? " 金額未設定（小計・合計を0として登録）;" : "";
+        var classificationWarnings = new[]
+        {
+            detail?.ClassificationWarning,
+            document.ClassificationWarning,
+            documentTypeClassification.Warning,
+            categoryClassification?.Warning,
+            statusClassification.Warning,
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
         var memo = Truncate(
-            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 候補ID={finalDocument.SourceCandidateId}; 紐づけ方法={finalDocument.LinkMethod}; 根拠={finalDocument.LinkReason}; 元顧客名={document.CustomerName};{originalNumberMemo}{missingAmountMemo} " +
+            $"ABACUSグラフ確定; 出典={document.SourceLocation}; 候補ID={finalDocument.SourceCandidateId}; 紐づけ方法={finalDocument.LinkMethod}; 根拠={finalDocument.LinkReason}; 元顧客名={document.CustomerName}; 書類種別原文={rawDocumentType}; 入庫区分原文={rawMaintenanceCategory}; 状態基準日={importBaseDate:yyyy-MM-dd}; 状態判定={statusClassification.Value};{(classificationWarnings.Length > 0 ? $" 警告={string.Join(" / ", classificationWarnings)};" : "")}{originalNumberMemo}{missingAmountMemo} " +
             (finalDocument.Vehicle is null ? "車両情報なし（顧客直結の特例）" : $"車両ID={finalDocument.Vehicle.VehicleId}"));
         return isMaintenance
             ? [
                 finalDocument.DocumentId,
                 finalDocument.ImportDocumentNumber,
-                "整備請求書",
-                "一般整備",
-                "下書き",
+                documentType,
+                categoryClassification!.Value,
+                statusClassification.Value,
                 finalDocument.Group.CustomerName,
                 vehicleName,
                 registrationNumber,
@@ -769,8 +1070,8 @@ public sealed class AbacusLegacyGraphFinalPackageStore
             : [
                 finalDocument.DocumentId,
                 finalDocument.ImportDocumentNumber,
-                "請求書",
-                "下書き",
+                documentType,
+                statusClassification.Value,
                 finalDocument.Group.CustomerName,
                 vehicleName,
                 registrationNumber,
@@ -785,6 +1086,19 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 document.DetailsJson,
             ];
     }
+
+    private static string GetStatusDate(FinalDocument finalDocument) =>
+        GetStatusDate(
+            finalDocument,
+            finalDocument.Document.Kind == "整備書類" && string.IsNullOrWhiteSpace(finalDocument.Document.MaintenanceIntakeDate)
+                ? finalDocument.Document.DocumentDate
+                : finalDocument.Document.MaintenanceIntakeDate,
+            finalDocument.Document.MaintenanceCompletionDate);
+
+    private static string GetStatusDate(FinalDocument finalDocument, string? maintenanceIntakeDate, string? maintenanceCompletionDate) =>
+        finalDocument.Document.Kind == "整備書類"
+            ? (!string.IsNullOrWhiteSpace(maintenanceIntakeDate) ? maintenanceIntakeDate : maintenanceCompletionDate) ?? ""
+            : finalDocument.Document.DocumentDate;
 
     private static long ParseAmount(string value) =>
         long.TryParse(value.Trim().Replace(",", "", StringComparison.Ordinal), NumberStyles.Integer, CultureInfo.InvariantCulture, out var amount)
@@ -802,6 +1116,37 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
     private static string GetDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
         string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);
+
+    private static HashSet<string> NormalizeKeys(
+        IEnumerable<string>? values,
+        IEqualityComparer<string>? comparer = null) =>
+        (values ?? Array.Empty<string>())
+            .Select(value => value?.Trim() ?? "")
+            .Where(value => value.Length > 0)
+            .ToHashSet(comparer ?? StringComparer.Ordinal);
+
+    private static AbacusLegacyExportCandidateGraphCustomer? FindSourceCustomerForDocument(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetDocumentKey(document);
+        return graph.Customers.FirstOrDefault(customer =>
+            customer.Vehicles.Any(vehicle => vehicle.Documents.Any(candidate =>
+                string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase))) ||
+            customer.UnresolvedDocuments.Any(candidate =>
+               string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static AbacusLegacyExportCandidateGraphVehicle? FindOriginalVehicleForDocument(
+        AbacusLegacyExportCandidateGraphResult graph,
+        AbacusLegacyExportCandidateGraphDocument document)
+    {
+        var key = GetDocumentKey(document);
+        return graph.Customers
+            .SelectMany(customer => customer.Vehicles)
+            .FirstOrDefault(vehicle => vehicle.Documents.Any(candidate =>
+                string.Equals(GetDocumentKey(candidate), key, StringComparison.OrdinalIgnoreCase)));
+    }
 
     private static AbacusDetailJsonDocument? ParseDetailJson(string value)
     {
@@ -915,6 +1260,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 .ToArray();
             if (matches.Length != 1)
             {
+                if (matches.Length == 0)
+                {
+                    // 顧客へ接続されなかった未確定車両の画像は、車両CSVと同じく出力対象外です。
+                    continue;
+                }
+
                 throw new InvalidDataException(
                     $"Gate 14画像をグラフの車両へ一意に再照合できません: {imagePath}（候補 {matches.Length:N0}件）");
             }
@@ -926,11 +1277,6 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 GetImageContentType(imagePath),
                 matches[0].Group.CustomerId,
                 matches[0].Vehicle.VehicleId));
-        }
-
-        if (result.Count != mapping.MatchedImageCount)
-        {
-            throw new InvalidDataException("Gate 14画像対応付けの件数と同梱対象画像の件数が一致しません。");
         }
 
         return result;
@@ -1275,7 +1621,7 @@ public sealed class AbacusLegacyGraphFinalPackageStore
 
         await WriteAndVerifyAsync(path, bytes, cancellationToken);
         var actual = JsonSerializer.Deserialize<OutputManifest>(await File.ReadAllBytesAsync(path, cancellationToken), JsonOptions);
-        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.DataFiles.Count != expected.DataFiles.Count || actual.ImageFiles.Count != expected.ImageFiles.Count || actual.Summary.ImageCount != expected.Summary.ImageCount)
+        if (actual is null || actual.Version != expected.Version || actual.Kind != expected.Kind || actual.Status != expected.Status || actual.ImportBaseDate != expected.ImportBaseDate || actual.DataFiles.Count != expected.DataFiles.Count || actual.ImageFiles.Count != expected.ImageFiles.Count || actual.Summary.ImageCount != expected.Summary.ImageCount)
         {
             throw new InvalidDataException("作成したグラフ確定マニフェストの再読込検証に失敗しました。");
         }
@@ -1307,7 +1653,9 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string Kind,
         string Status,
         IReadOnlyList<DocumentLink> Documents,
-        IReadOnlyList<string> ExcludedDocumentKeys);
+        IReadOnlyList<string> ExcludedDocumentKeys,
+        IReadOnlyList<string>? UnresolvedExcludedDocumentKeys = null,
+        IReadOnlyList<string>? ExplicitExcludedDocumentKeys = null);
 
     private sealed record DocumentLink(
         string DocumentKey,
@@ -1344,13 +1692,17 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string Status,
         DateTime CreatedAtUtc,
         OutputSource Source,
+        string ImportBaseDate,
         OutputSummary Summary,
         IReadOnlyList<OutputFile> DataFiles,
         IReadOnlyList<OutputFile> ImageFiles,
         IReadOnlyList<string> Warnings,
         IReadOnlyList<ManifestGroup> Groups,
         IReadOnlyList<ManifestDocument> Documents,
-        IReadOnlyList<string> ExcludedDocumentKeys);
+        IReadOnlyList<string> ExcludedDocumentKeys,
+        IReadOnlyList<ManifestExcludedVehicle>? ExcludedVehicles = null,
+        IReadOnlyDictionary<string, string>? ManualVehicleCustomerLinks = null,
+        IReadOnlyList<ManifestExcludedCustomer>? ExcludedCustomers = null);
 
     private sealed record OutputSource(string CandidatePackagePath, string CandidateManifestSha256);
 
@@ -1366,7 +1718,12 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         int DetailReviewDocumentCount = 0,
         int DetailUnsupportedDocumentCount = 0,
         int DetailExcludedRowCount = 0,
-        int AmountOnlyDetailRowCount = 0);
+        int AmountOnlyDetailRowCount = 0,
+        int ExcludedVehicleCount = 0,
+        int ExcludedVehicleImageCount = 0,
+        int UnresolvedDocumentCount = 0,
+        int ExplicitExcludedDocumentCount = 0,
+        int ExcludedCustomerCount = 0);
 
     private sealed record OutputFile(string FileName, long SizeBytes, string Sha256);
 
@@ -1412,4 +1769,14 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         string LinkMethod,
         string SourceCandidateId,
         string LinkReason);
+
+    private sealed record ManifestExcludedVehicle(
+        string VehicleId,
+        string SourceLocation,
+        string Reason);
+
+    private sealed record ManifestExcludedCustomer(
+        string CustomerId,
+        string SourceLocation,
+        string Reason);
 }

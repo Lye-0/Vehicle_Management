@@ -139,6 +139,13 @@ export type SalesDocument = {
   purgeAt: string | null
   keepForever: boolean
   items: SalesLineItem[]
+  isSummary?: boolean
+}
+
+export type SalesDocumentSummary = Pick<SalesDocument, 'id' | 'number' | 'type' | 'status' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'issuedAt' | 'dueDate' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
+  total: number
+  abacusImport?: AbacusDocumentImportMetadata | null
+  isAbacusMigration?: boolean
 }
 
 /** Persisted fields plus the optional identifiers used by an unsaved document draft. */
@@ -197,16 +204,36 @@ export type SalesCreateInput = {
   }
 }
 
-type ApiSalesDocument = Omit<SalesDocument, 'taxRate' | 'issuedAt' | 'dueDate' | 'items'> & {
+type ApiSalesDocument = Omit<SalesDocument, 'taxRate' | 'issuedAt' | 'dueDate' | 'items' | 'details'> & {
   taxRate: number
   issuedAt: string
   dueDate: string | null
-  items: Array<SalesLineItem & { amount: number }>
+  details?: SalesDocumentDetails | null
+  items?: Array<SalesLineItem & { amount: number }>
+  summary?: boolean
 }
 
 export async function fetchSalesDocuments() {
   const response = await apiFetch<{ documents: ApiSalesDocument[] }>('/api/sales-documents')
   return response.documents.map(mapSalesDocument)
+}
+
+export async function fetchSalesDocumentSummaries(options: { q?: string; type?: string; status?: string; cursor?: string | null; limit?: number; includeArchived?: boolean; sortKey?: string; sortDirection?: string } = {}) {
+  const params = new URLSearchParams({ view: 'summary', limit: String(options.limit ?? 50) })
+  if (options.q?.trim()) params.set('q', options.q.trim())
+  if (options.type && options.type !== 'すべて') params.set('type', options.type)
+  if (options.status && options.status !== 'すべて') params.set('status', options.status)
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.includeArchived) params.set('includeArchived', 'true')
+  if (options.sortKey) params.set('sortKey', options.sortKey)
+  if (options.sortDirection) params.set('sortDirection', options.sortDirection)
+  const response = await apiFetch<{ documents: ApiSalesDocument[]; nextCursor: string | null; hasMore: boolean }>(`/api/sales-documents?${params.toString()}`)
+  return { documents: response.documents.map(mapSalesDocument), nextCursor: response.nextCursor, hasMore: response.hasMore }
+}
+
+export async function fetchSalesDocument(id: string) {
+  const response = await apiFetch<{ document: ApiSalesDocument }>(`/api/sales-documents/${encodeURIComponent(id)}`)
+  return mapSalesDocument(response.document)
 }
 
 export async function createSalesDocument(input: SalesCreateInput) {
@@ -324,6 +351,7 @@ export async function restoreSalesDocument(id: string) {
 function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
   return {
     ...document,
+    isSummary: document.summary === true,
     customerDetails: document.customerDetails ?? { name: document.customerName, kana: '', phone: document.phone, email: '', postalCode: '', address: '', birthDate: '', employer: '', contactPhone: '' },
     vehicleDetails: document.vehicleDetails ?? null,
     details: normalizeDetails(document.details),
@@ -332,7 +360,7 @@ function mapSalesDocument(document: ApiSalesDocument): SalesDocument {
     taxRate: document.taxRate / 100,
     taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
-    items: document.items.map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary, sourceRowIndex, abacusDetail, isAbacusMigration }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '', sourceRowIndex, abacusDetail: abacusDetail ?? null, isAbacusMigration })),
+    items: (document.items ?? []).map(({ id, itemType, description, quantity, unit, unitPrice, taxCategory, otherAmount, summary, sourceRowIndex, abacusDetail, isAbacusMigration }) => ({ id, itemType: itemType || 'その他', description, quantity, unit, unitPrice, taxCategory: taxCategory || '課税', otherAmount: otherAmount ?? 0, summary: summary ?? '', sourceRowIndex, abacusDetail: abacusDetail ?? null, isAbacusMigration })),
   }
 }
 

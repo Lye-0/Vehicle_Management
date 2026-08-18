@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
 import { customers, maintenanceDocuments, paymentEntries, paymentRecords, salesDocuments, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -23,7 +23,7 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
     const context = await requireOrganizationContext(request, env, database)
     const organizationId = context.organization.organizationId
     if (isCollection) {
-      if (request.method === 'GET') return await listPayments(env, database, organizationId)
+      if (request.method === 'GET') return await listPayments(request, env, database, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
     if (entryCollectionMatch) {
@@ -38,6 +38,7 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
       if (request.method === 'DELETE') return await deletePaymentEntry(request, env, database, documentType, documentId, entryId, organizationId)
       throw new HttpError(405, 'この操作には対応していません。')
     }
+    if (itemMatch && request.method === 'GET') return await paymentResponse(env, database, decodeURIComponent(itemMatch[1]), decodeURIComponent(itemMatch[2]), organizationId, 200)
     if (itemMatch && request.method === 'PATCH') return await replacePayment(request, env, database, decodeURIComponent(itemMatch[1]), decodeURIComponent(itemMatch[2]), organizationId)
     throw new HttpError(405, 'この操作には対応していません。')
   } catch (error) {
@@ -48,7 +49,8 @@ export async function handlePaymentRoutes(request: Request, env: Env): Promise<R
   }
 }
 
-async function listPayments(env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+async function listPayments(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  if (new URL(request.url).searchParams.get('view') === 'summary') return await listPaymentSummaries(new URL(request.url), env, database, organizationId)
   const [salesRows, maintenanceRows, paymentRows, paymentEntryRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), inArray(salesDocuments.status, paymentDocumentStatuses), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), inArray(maintenanceDocuments.status, paymentDocumentStatuses), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
@@ -66,6 +68,98 @@ async function listPayments(env: Env, database: ReturnType<typeof createDatabase
     ...maintenanceRows.map((document) => serializePayment('整備請求書', document, paymentsByKey.get(`整備請求書:${document.id}`), entriesByKey.get(`整備請求書:${document.id}`) ?? [], customersById, vehiclesById)),
   ].sort((left, right) => right.issuedAt.localeCompare(left.issuedAt))
   return jsonResponse({ records }, 200, env)
+}
+
+async function listPaymentSummaries(url: URL, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 100)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+  const type = url.searchParams.get('type')?.trim() ?? ''
+  const sortKey = normalizePaymentSortKey(url.searchParams.get('sortKey'))
+  const sortDirection = normalizePaymentSortDirection(url.searchParams.get('sortDirection'))
+  const cursor = decodePaymentCursor(url.searchParams.get('cursor'))
+  const conditions = [eq(salesDocuments.organizationId, organizationId), eq(salesDocuments.type, '請求書'), inArray(salesDocuments.status, paymentDocumentStatuses), isNull(salesDocuments.archivedAt)]
+  const maintenanceConditions = [eq(maintenanceDocuments.organizationId, organizationId), eq(maintenanceDocuments.type, '整備請求書'), inArray(maintenanceDocuments.status, paymentDocumentStatuses), isNull(maintenanceDocuments.archivedAt)]
+  const salesSortExpression = paymentSortExpression('sales', sortKey, sortDirection)
+  const maintenanceSortExpression = paymentSortExpression('maintenance', sortKey, sortDirection)
+  if (cursor && cursor.sortKey === sortKey && cursor.sortDirection === sortDirection) {
+    const salesAfter = sortDirection === 'asc' ? gt(salesSortExpression, cursor.value) : lt(salesSortExpression, cursor.value)
+    const salesSame = and(eq(salesSortExpression, cursor.value), sortDirection === 'asc' ? gt(salesDocuments.id, cursor.documentId) : lt(salesDocuments.id, cursor.documentId))
+    const maintenanceAfter = sortDirection === 'asc' ? gt(maintenanceSortExpression, cursor.value) : lt(maintenanceSortExpression, cursor.value)
+    const maintenanceSame = and(eq(maintenanceSortExpression, cursor.value), sortDirection === 'asc' ? gt(maintenanceDocuments.id, cursor.documentId) : lt(maintenanceDocuments.id, cursor.documentId))
+    conditions.push(or(salesAfter, salesSame)!)
+    maintenanceConditions.push(or(maintenanceAfter, maintenanceSame)!)
+  }
+  const pattern = `%${q}%`
+  if (q) {
+    const salesSearch = or(like(salesDocuments.number, pattern), like(customers.name, pattern), like(vehicles.name, pattern), like(vehicles.registrationNumber, pattern))!
+    const maintenanceSearch = or(like(maintenanceDocuments.number, pattern), like(customers.name, pattern), like(vehicles.name, pattern), like(vehicles.registrationNumber, pattern))!
+    conditions.push(salesSearch)
+    maintenanceConditions.push(maintenanceSearch)
+  }
+  const [salesRows, maintenanceRows] = await Promise.all([
+    type && type !== 'すべて' && type !== '販売請求書' ? Promise.resolve([]) : database.select({ document: salesDocuments, customerName: customers.name, customerPhone: customers.phone, vehicleMaker: vehicles.maker, vehicleName: vehicles.name, plate: vehicles.registrationNumber, paidAmount: paymentRecords.paidAmount, paymentDate: paymentRecords.paymentDate, method: paymentRecords.method, note: paymentRecords.note, paymentId: paymentRecords.id }).from(salesDocuments).leftJoin(customers, and(eq(customers.id, salesDocuments.customerId), eq(customers.organizationId, organizationId))).leftJoin(vehicles, and(eq(vehicles.id, salesDocuments.vehicleId), eq(vehicles.organizationId, organizationId))).leftJoin(paymentRecords, and(eq(paymentRecords.documentId, salesDocuments.id), eq(paymentRecords.documentType, '販売請求書'), eq(paymentRecords.organizationId, organizationId))).where(and(...conditions)).orderBy(sortDirection === 'asc' ? asc(salesSortExpression) : desc(salesSortExpression), sortDirection === 'asc' ? asc(salesDocuments.id) : desc(salesDocuments.id)).limit(limit + 1).all(),
+    type && type !== 'すべて' && type !== '整備請求書' ? Promise.resolve([]) : database.select({ document: maintenanceDocuments, customerName: customers.name, customerPhone: customers.phone, vehicleMaker: vehicles.maker, vehicleName: vehicles.name, plate: vehicles.registrationNumber, paidAmount: paymentRecords.paidAmount, paymentDate: paymentRecords.paymentDate, method: paymentRecords.method, note: paymentRecords.note, paymentId: paymentRecords.id }).from(maintenanceDocuments).leftJoin(customers, and(eq(customers.id, maintenanceDocuments.customerId), eq(customers.organizationId, organizationId))).leftJoin(vehicles, and(eq(vehicles.id, maintenanceDocuments.vehicleId), eq(vehicles.organizationId, organizationId))).leftJoin(paymentRecords, and(eq(paymentRecords.documentId, maintenanceDocuments.id), eq(paymentRecords.documentType, '整備請求書'), eq(paymentRecords.organizationId, organizationId))).where(and(...maintenanceConditions)).orderBy(sortDirection === 'asc' ? asc(maintenanceSortExpression) : desc(maintenanceSortExpression), sortDirection === 'asc' ? asc(maintenanceDocuments.id) : desc(maintenanceDocuments.id)).limit(limit + 1).all(),
+  ])
+  const rawRows = [...salesRows.map((row) => ({ type: '販売請求書' as const, row })), ...maintenanceRows.map((row) => ({ type: '整備請求書' as const, row }))].sort((left, right) => comparePaymentSummaryRows(left.row, right.row, sortKey, sortDirection))
+  const hasMore = rawRows.length > limit
+  const pageRows = rawRows.slice(0, limit)
+  const last = pageRows.at(-1)
+  const records = pageRows.map(({ type: documentType, row }) => serializePaymentSummary(documentType, row.document, row.customerName ?? '', row.customerPhone ?? '', row.vehicleMaker, row.vehicleName, row.plate, row.paidAmount ?? 0, row.paymentDate, row.method, row.note, row.paymentId))
+  return jsonResponse({ records, nextCursor: hasMore && last ? encodePaymentCursor({ sortKey, sortDirection, value: paymentSortValue(last.row.document, last.row.customerName, last.row.vehicleMaker, last.row.vehicleName, sortKey, sortDirection), documentId: last.row.document.id }) : null, hasMore }, 200, env)
+}
+
+type PaymentSummarySortKey = 'issuedAt' | 'dueDate' | 'customerName' | 'vehicle'
+type PaymentSummarySortDirection = 'asc' | 'desc'
+type PaymentCursor = { sortKey: PaymentSummarySortKey; sortDirection: PaymentSummarySortDirection; value: string; documentId: string }
+
+function normalizePaymentSortKey(value: string | null): PaymentSummarySortKey {
+  return value === 'dueDate' || value === 'customerName' || value === 'vehicle' ? value : 'issuedAt'
+}
+
+function normalizePaymentSortDirection(value: string | null): PaymentSummarySortDirection {
+  return value === 'asc' ? 'asc' : 'desc'
+}
+
+function paymentSortExpression(source: 'sales' | 'maintenance', sortKey: PaymentSummarySortKey, sortDirection: PaymentSummarySortDirection) {
+  const emptyValue = sortDirection === 'asc' ? '\uffff' : ''
+  const documentTable = source === 'sales' ? salesDocuments : maintenanceDocuments
+  if (sortKey === 'dueDate') return sql`COALESCE(${documentTable.dueDate}, ${emptyValue})`
+  if (sortKey === 'customerName') return sql`COALESCE(${customers.name}, ${emptyValue})`
+  if (sortKey === 'vehicle') return sql`COALESCE(NULLIF(TRIM(COALESCE(${vehicles.maker}, '') || ' ' || COALESCE(${vehicles.name}, '')), ''), ${emptyValue})`
+  return sql`COALESCE(${documentTable.issuedAt}, ${emptyValue})`
+}
+
+function paymentSortValue(document: InvoiceRow, customerName: string | null | undefined, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, sortKey: PaymentSummarySortKey, sortDirection: PaymentSummarySortDirection) {
+  const raw = sortKey === 'dueDate' ? document.dueDate : sortKey === 'customerName' ? customerName : sortKey === 'vehicle' ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : document.issuedAt
+  return raw || (sortDirection === 'asc' ? '\uffff' : '')
+}
+
+function comparePaymentSummaryRows(left: PaymentSummaryRow, right: PaymentSummaryRow, sortKey: PaymentSummarySortKey, sortDirection: PaymentSummarySortDirection) {
+  const leftValue = paymentSortValue(left.document, left.customerName, left.vehicleMaker, left.vehicleName, sortKey, sortDirection)
+  const rightValue = paymentSortValue(right.document, right.customerName, right.vehicleMaker, right.vehicleName, sortKey, sortDirection)
+  const comparison = leftValue.localeCompare(rightValue, 'ja-JP', { numeric: true, sensitivity: 'base' })
+  return sortDirection === 'asc' ? comparison || left.document.id.localeCompare(right.document.id) : -comparison || -left.document.id.localeCompare(right.document.id)
+}
+
+type PaymentSummaryRow = { document: InvoiceRow; customerName: string | null; customerPhone: string | null; vehicleMaker: string | null; vehicleName: string | null; plate: string | null; paidAmount: number | null; paymentDate: string | null; method: string | null; note: string | null; paymentId: string | null }
+
+function encodePaymentCursor(value: PaymentCursor) {
+  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+function decodePaymentCursor(value: string | null): PaymentCursor | null {
+  if (!value) return null
+  try {
+    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
+    const parsed = JSON.parse(atob(padded)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; documentId?: unknown; issuedAt?: unknown }
+    if (typeof parsed.sortKey === 'string' && typeof parsed.sortDirection === 'string' && typeof parsed.value === 'string' && typeof parsed.documentId === 'string') return { sortKey: normalizePaymentSortKey(parsed.sortKey), sortDirection: normalizePaymentSortDirection(parsed.sortDirection), value: parsed.value, documentId: parsed.documentId }
+    if (typeof parsed.issuedAt === 'string' && typeof parsed.documentId === 'string') return { sortKey: 'issuedAt', sortDirection: 'desc', value: parsed.issuedAt, documentId: parsed.documentId }
+    return null
+  } catch { return null }
+}
+
+function serializePaymentSummary(documentType: '販売請求書' | '整備請求書', document: InvoiceRow, customerName: string, phone: string, vehicleMaker: string | null | undefined, vehicleName: string | null | undefined, plate: string | null | undefined, paidAmount: number, paymentDate: string | null, method: string | null, note: string | null, paymentId: string | null) {
+  return { id: paymentId ?? `${documentType}:${document.id}`, documentType, documentId: document.id, number: document.number, sourceType: documentType, documentStatus: document.status, customerName, phone, vehicle: vehicleMaker || vehicleName ? [vehicleMaker, vehicleName].filter(Boolean).join(' ') : 'なし', plate: plate ?? '', issuedAt: document.issuedAt, dueDate: document.dueDate, invoiceAmount: document.total, paidAmount, paymentDate, method, note: note ?? '', paymentHistory: [], summary: true }
 }
 
 async function addPaymentEntry(request: Request, env: Env, database: ReturnType<typeof createDatabase>, documentType: string, documentId: string, organizationId: string) {
@@ -167,8 +261,8 @@ async function loadPaymentRecord(database: ReturnType<typeof createDatabase>, do
   const [payment, entryRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), eq(paymentRecords.documentType, documentType), eq(paymentRecords.documentId, documentId))).get(),
     database.select().from(paymentEntries).where(and(eq(paymentEntries.organizationId, organizationId), eq(paymentEntries.documentType, documentType), eq(paymentEntries.documentId, documentId))).orderBy(desc(paymentEntries.paymentDate), desc(paymentEntries.createdAt)).all(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), eq(customers.id, invoice.customerId))).all(),
+    invoice.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), eq(vehicles.id, invoice.vehicleId))).all() : Promise.resolve([]),
   ])
   return serializePayment(documentType as '販売請求書' | '整備請求書', invoice, payment, entryRows, new Map(customerRows.map((customer) => [customer.id, customer])), new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle])))
 }

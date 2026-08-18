@@ -68,22 +68,31 @@
 			]
 		},
 		"production": {
-			"name": "vehicle-management-api-production",
+			"name": "vehicle-management-api",
 			"triggers": {
 				"crons": ["0 2 * * *"]
 			},
 			"vars": {
 				"APP_ENV": "production",
 				"DATA_ENV": "production",
-				"FIREBASE_PROJECT_ID": "REPLACE_WITH_PRODUCTION_FIREBASE_PROJECT_ID",
+				"FIREBASE_PROJECT_ID": "vehicle-management-64",
 				"FIREBASE_AUTH_EMULATOR": "false",
-				"CORS_ORIGIN": "https://REPLACE_WITH_PRODUCTION_WEB_DOMAIN"
+				"CORS_ORIGIN": "https://vehicle-management-api.lye-0.workers.dev",
+				"B2_ENDPOINT": "https://s3.us-west-004.backblazeb2.com",
+				"B2_REGION": "us-west-004",
+				"B2_BUCKET": "vehicle-management-64",
+				"B2_KEY_ID": "004b15b57c3401c0000000003"
+			},
+			"assets": {
+				"directory": "../web/dist",
+				"not_found_handling": "single-page-application",
+				"run_worker_first": ["/api/*", "/health"]
 			},
 			"d1_databases": [
 				{
 					"binding": "DB",
-					"database_name": "vehicle-management-db-production",
-					"database_id": "00000000-0000-0000-0000-000000000000",
+					"database_name": "vehicle-management",
+					"database_id": "bdd8072c-768f-4cba-9ee9-9c69ea7b10e3",
 					"migrations_dir": "migrations"
 				}
 			]

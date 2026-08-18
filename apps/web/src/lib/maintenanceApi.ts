@@ -88,6 +88,13 @@ export type MaintenanceDocument = {
   purgeAt: string | null
   keepForever: boolean
   items: MaintenanceLineItem[]
+  isSummary?: boolean
+}
+
+export type MaintenanceDocumentSummary = Pick<MaintenanceDocument, 'id' | 'number' | 'type' | 'status' | 'category' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'intakeDate' | 'issuedAt' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
+  total: number
+  abacusImport?: AbacusDocumentImportMetadata | null
+  isAbacusMigration?: boolean
 }
 
 /** Persisted fields plus the optional identifiers used by an unsaved document draft. */
@@ -157,11 +164,30 @@ export type MaintenanceDocumentInput = {
   }
 }
 
-type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null }
+type ApiMaintenanceDocument = Omit<MaintenanceDocument, 'type' | 'status' | 'category' | 'taxRate' | 'intakeDate' | 'plannedReleaseDate' | 'completionDate' | 'issuedAt' | 'dueDate' | 'details' | 'items'> & { type: MaintenanceDocumentType | '納品書'; status: MaintenanceStatus | '受付中' | '作業中'; category: IntakeCategory | '法定点検'; taxRate: number; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; details?: MaintenanceDocumentDetails | null; items?: MaintenanceLineItem[]; summary?: boolean }
 
 export async function fetchMaintenanceDocuments() {
   const response = await apiFetch<{ documents: ApiMaintenanceDocument[] }>('/api/maintenance-documents')
   return response.documents.map(mapMaintenanceDocument)
+}
+
+export async function fetchMaintenanceDocumentSummaries(options: { q?: string; type?: string; category?: string; status?: string; cursor?: string | null; limit?: number; includeArchived?: boolean; sortKey?: string; sortDirection?: string } = {}) {
+  const params = new URLSearchParams({ view: 'summary', limit: String(options.limit ?? 50) })
+  if (options.q?.trim()) params.set('q', options.q.trim())
+  if (options.type && options.type !== 'すべて') params.set('type', options.type)
+  if (options.category && options.category !== 'すべて') params.set('category', options.category)
+  if (options.status && options.status !== 'すべて') params.set('status', options.status)
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.includeArchived) params.set('includeArchived', 'true')
+  if (options.sortKey) params.set('sortKey', options.sortKey)
+  if (options.sortDirection) params.set('sortDirection', options.sortDirection)
+  const response = await apiFetch<{ documents: ApiMaintenanceDocument[]; nextCursor: string | null; hasMore: boolean }>(`/api/maintenance-documents?${params.toString()}`)
+  return { documents: response.documents.map(mapMaintenanceDocument), nextCursor: response.nextCursor, hasMore: response.hasMore }
+}
+
+export async function fetchMaintenanceDocument(id: string) {
+  const response = await apiFetch<{ document: ApiMaintenanceDocument }>(`/api/maintenance-documents/${encodeURIComponent(id)}`)
+  return mapMaintenanceDocument(response.document)
 }
 
 export async function createMaintenanceDocument(input: MaintenanceDocumentInput) {
@@ -185,6 +211,7 @@ export async function restoreMaintenanceDocument(id: string) {
 function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDocument {
   return {
     ...document,
+    isSummary: document.summary === true,
     type: document.type === '納品書' ? '整備請求書' : document.type,
     status: normalizeMaintenanceStatus(document.status),
     category: document.category === '法定点検' ? '板金' : document.category,
@@ -199,7 +226,7 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     taxRate: document.taxRate / 100,
     taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
-    items: document.items.map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
+    items: (document.items ?? []).map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
   }
 }
 

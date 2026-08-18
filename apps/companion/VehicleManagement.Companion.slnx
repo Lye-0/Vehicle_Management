@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/VehicleManagement.AbacusImport/VehicleManagement.AbacusImport.csproj" />
+    <Project Path="src/VehicleManagement.AbacusImport.Tests/VehicleManagement.AbacusImport.Tests.csproj" />
     <Project Path="src/VehicleManagement.AbacusImport.Cli/VehicleManagement.AbacusImport.Cli.csproj" />
     <Project Path="src/VehicleManagement.Companion/VehicleManagement.Companion.csproj" />
     <Project Path="src/VehicleManagement.LegacyHost/VehicleManagement.LegacyHost.csproj" />

@@ -8,14 +8,17 @@
   },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names auth,api,web \"pnpm dev:auth\" \"pnpm dev:api\" \"pnpm dev:web\"",
-    "dev:auth": "firebase emulators:start --only auth",
+    "dev:auth": "firebase emulators:start --only auth --project demo-vehicle-management",
     "dev:api": "pnpm --filter api dev",
     "dev:web": "pnpm --filter web dev -- --mode development --host 127.0.0.1",
+
+    "prod": "pnpm build:production && pnpm deploy:production",
+    "build:production": "pnpm --filter web build:production",
+    "deploy:production": "pnpm --filter api deploy:production",
+
     "test": "pnpm --filter api test --run",
     "lint": "pnpm --filter web lint",
-    "build:production": "pnpm --filter web build:production",
     "migrate:local": "pnpm --filter api db:migrate:local",
-    "deploy:production": "pnpm --filter api deploy:production",
     "migrate:production": "pnpm --filter api db:migrate:production"
   },
   "devDependencies": {

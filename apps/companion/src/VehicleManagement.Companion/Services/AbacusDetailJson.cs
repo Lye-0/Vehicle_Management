@@ -26,7 +26,11 @@ public sealed record AbacusDetailJsonDocument(
     string Warning,
     IReadOnlyList<AbacusDetailFinancialLine>? FinancialLines = null,
     long? AbacusTax = null,
-    long? AbacusTaxRate = null);
+    long? AbacusTaxRate = null,
+    string? RawDocumentType = null,
+    string? RawMaintenanceCategory = null,
+    string? ClassificationWarning = null,
+    AbacusRecommendationProfile? MatchProfile = null);
 
 public sealed record AbacusDetailMatch(
     AbacusUcsDetailDocument? Document,
@@ -55,7 +59,12 @@ public sealed class AbacusDetailMapper
         return new AbacusDetailMatch(null, "unmatched", "書類番号・顧客・車両識別子に一致するUCS明細レコードがありません。");
     }
 
-    public static string Serialize(AbacusDetailMatch match)
+    public static string Serialize(
+        AbacusDetailMatch match,
+        string? rawDocumentType = null,
+        string? rawMaintenanceCategory = null,
+        string? classificationWarning = null,
+        AbacusRecommendationProfile? matchProfile = null)
     {
         var document = match.Document;
         var payload = new AbacusDetailJsonDocument(
@@ -80,7 +89,11 @@ public sealed class AbacusDetailMapper
             match.Warning,
             document?.FinancialLines ?? [],
             document?.AbacusTax,
-            document?.AbacusTaxRate);
+            document?.AbacusTaxRate,
+            string.IsNullOrWhiteSpace(rawDocumentType) ? null : rawDocumentType.Trim(),
+            string.IsNullOrWhiteSpace(rawMaintenanceCategory) ? null : rawMaintenanceCategory.Trim(),
+            string.IsNullOrWhiteSpace(classificationWarning) ? null : classificationWarning.Trim(),
+            matchProfile);
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false });
     }
 
