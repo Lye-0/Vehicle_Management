@@ -1306,6 +1306,7 @@
 .settings-logo-field .settings-logo-input { width: 1px; min-width: 1px; max-width: 1px; height: 1px; min-height: 1px; max-height: 1px; }
 .settings-logo-dropzone { display: grid; place-items: center; align-content: center; gap: 5px; min-height: 108px; color: var(--primary); border: 1px dashed #afc6ed; border-radius: 9px; background: #f8fbff; cursor: pointer; }
 .settings-logo-dropzone:hover { border-color: var(--primary); background: #f2f7ff; }
+.settings-logo-dropzone.is-dragging { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
 .settings-logo-dropzone strong { color: var(--text-secondary); font-size: 12px; }
 .settings-logo-dropzone small { color: var(--text-muted); font-size: 10px; }
 .settings-logo-preview { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 108px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }

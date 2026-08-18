@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
@@ -790,10 +790,7 @@ function ShopSettingsPanel({ settings, editable, onUpdate: saveUpdate }: { setti
 function ShopLogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [error, setError] = useState('')
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-    if (!file) return
+  function readFile(file: File) {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
       setError('PNG・JPEG・WebPの画像を選択してください。')
       return
@@ -817,7 +814,20 @@ function ShopLogoField({ value, onChange }: { value: string; onChange: (value: s
     reader.readAsDataURL(file)
   }
 
-  return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone"><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) readFile(file)
+  }
+
+  function handleDrop(event: ReactDragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    event.currentTarget.classList.remove('is-dragging')
+    const file = event.dataTransfer.files[0]
+    if (file) readFile(file)
+  }
+
+  return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone" onDragEnter={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragLeave={(event) => event.currentTarget.classList.remove('is-dragging')} onDrop={handleDrop}><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
 }
 
 function TaxSettingsPanel({ settings, editable, onUpdateTax: saveTaxUpdate, onUpdateDocument }: { settings: AppSettings; editable: boolean; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
