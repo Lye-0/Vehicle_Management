@@ -407,13 +407,14 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         const nextAmount = patch.amount ?? line.amount
         if (line.id === 'recycle-fee') {
           if (patch.label !== undefined && !patch.label.trim()) return { ...document, details: { ...document.details, recycleFee: 0 } }
-          if (patch.label !== undefined && patch.label.trim() !== line.label) {
-            const item: SalesLineItem = { id: `item-${Date.now()}-${bucket}-${index}`, itemType: defaults.itemType, description: patch.label.trim(), quantity: 1, unit: '式', unitPrice: nextAmount, taxCategory: defaults.taxCategory, otherAmount: 0, summary: '' }
+          if (patch.label !== undefined && patch.label !== line.label) {
+            const item: SalesLineItem = { id: `item-${Date.now()}-${bucket}-${index}`, itemType: defaults.itemType, description: patch.label, quantity: 1, unit: '式', unitPrice: nextAmount, taxCategory: defaults.taxCategory, otherAmount: 0, summary: '' }
             return { ...document, details: { ...document.details, recycleFee: 0 }, items: [...document.items, item] }
           }
           return { ...document, details: { ...document.details, recycleFee: nextAmount } }
         }
-        if ((patch.label !== undefined && !patch.label.trim()) || (!nextLabel.trim() && nextAmount === 0)) return { ...document, items: document.items.filter((item) => item.id !== line.id) }
+        const isLabelEmpty = patch.label !== undefined && !patch.label.trim()
+        if ((isLabelEmpty && patch.amount === undefined) || (!nextLabel.trim() && nextAmount === 0)) return { ...document, items: document.items.filter((item) => item.id !== line.id) }
         return {
           ...document,
           items: document.items.map((item) => item.id === line.id ? {
@@ -430,7 +431,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
           } : item),
         }
       }
-      const nextLabel = patch.label?.trim() || defaults.label
+      const nextLabel = patch.label || defaults.label
       const nextAmount = patch.amount ?? 0
       if (!patch.label?.trim() && patch.amount === undefined) return document
       const newItem: SalesLineItem = {
@@ -1458,7 +1459,7 @@ function SheetNameCombobox({ value, candidates, menuUp = false, onCommit }: { va
 
   function commit() {
     setOpen(false)
-    if (draft !== value) onCommit(draft.trim())
+    if (draft !== value) onCommit(draft)
   }
 
   return <div ref={rootRef} className="sales-sheet-name-combobox">
