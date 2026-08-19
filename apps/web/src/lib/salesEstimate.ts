@@ -163,7 +163,7 @@ export function buildSalesEstimateSections(document: SalesDocumentLike): SalesEs
 }
 
 export function salesLineLabel(item: Pick<SalesLineItem, 'itemType' | 'description' | 'abacusDetail'>) {
-  return item.abacusDetail?.description?.trim() || item.description.trim() || item.itemType.trim() || 'その他'
+  return item.abacusDetail?.description || item.description || item.itemType || 'その他'
 }
 
 export function emptySalesDocumentDetails(): SalesDocumentDetails {

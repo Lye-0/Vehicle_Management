@@ -183,7 +183,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
         setDocumentHasMore(documentPage.hasMore)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        const nextSelectedDocumentId = initialDocumentId ?? documentsWithInitialDetail[0]?.id ?? ''
+        const nextSelectedDocumentId = initialDocumentId ?? documentsWithInitialDetail.find((d) => d.status !== '完了')?.id ?? documentsWithInitialDetail[0]?.id ?? ''
         setSelectedDocumentId(nextSelectedDocumentId)
         if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setSyncError('')

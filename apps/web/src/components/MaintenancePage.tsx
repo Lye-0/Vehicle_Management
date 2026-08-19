@@ -151,7 +151,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
         setDocumentHasMore(documentPage.hasMore)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        const nextSelectedDocumentId = initialDocumentId ?? nextDocuments[0]?.id ?? ''
+        const nextSelectedDocumentId = initialDocumentId ?? nextDocuments.find((d) => d.status !== '完了')?.id ?? nextDocuments[0]?.id ?? ''
         setSelectedDocumentId(nextSelectedDocumentId)
         if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setError('')
