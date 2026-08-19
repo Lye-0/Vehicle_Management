@@ -960,7 +960,7 @@
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
-.maintenance-statement-combobox > input { width: calc(100% - 21px); height: calc(100% - 2px); margin: 1px 0; box-sizing: border-box; padding: 3px 4px 2px 12px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(5px, 0.9vw, 11px); line-height: 1; }
+.maintenance-statement-combobox > input { width: calc(100% - 21px); height: auto; top: 6px; bottom: 2px; box-sizing: border-box; padding: 3px 4px 2px 12px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(5px, 0.9vw, 11px); line-height: 1; }
 .maintenance-statement-combobox:hover > input { background: #f8fbff; }
 .maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: #fff; box-shadow: inset 0 0 0 2px #2563eb; }
 .maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; transform: translateY(4px); }
@@ -3647,6 +3647,15 @@
   .payment-detail-actions .button {
     flex: 0 1 auto;
   }
+
+  .maintenance-statement-combobox > input {
+    margin: 0;
+    height: auto;
+    top: 6px;
+    bottom: 2px;
+    width: calc(100% - 22px);
+    padding: 2px 4px 2px 12px;
+  }
 }
 
 @media (min-width: 761px) and (max-width: 860px) {
@@ -4079,6 +4088,8 @@
   .sales-estimate-sheet-frame,
   .maintenance-statement-frame {
     container-type: inline-size;
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .sales-estimate-sheet-field-control,
@@ -4146,6 +4157,15 @@
 
   .maintenance-statement-candidates span {
     font-size: 1.068cqw;
+  }
+
+  .sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"] {
+    padding-top: 2px;
+    line-height: 1;
+  }
+
+  .sales-estimate-sheet-calendar-control > input[type="date"] {
+    top: -2px !important;
   }
 }
 
