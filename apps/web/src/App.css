@@ -30,8 +30,8 @@
 .auth-card.auth-loading > span:last-child { color: var(--text-secondary); font-size: 12px; }
 .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .auth-brand > div { display: grid; gap: 2px; }
-.auth-brand strong { color: var(--text); font-size: 20px; letter-spacing: 0.02em; }
-.auth-brand small { color: var(--text-muted); font-size: 11px; }
+.auth-brand strong { color: #fff; font-size: 20px; letter-spacing: 0.02em; }
+.auth-brand small { color: #8ea3be; font-size: 11px; }
 .auth-card h1 { margin: 0; color: var(--text); font-size: 26px; letter-spacing: -0.03em; }
 .auth-card > p { margin: -3px 0 8px; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
 .auth-form { display: grid; gap: 13px; }
@@ -3044,7 +3044,7 @@
 
 /* Tablet layout: keep the desktop shell while giving inner panels their own
    responsive rules between the mobile and desktop breakpoints. */
-@media (min-width: 761px) and (max-width: 1399px) {
+@media (min-width: 761px) and (width < 1400px) {
   .sidebar {
     width: 230px;
     flex-basis: 230px;
@@ -3666,7 +3666,7 @@
 
 /* Medium-width consolidation: switch each workspace from its available
    content width instead of making every tablet viewport a one-column page. */
-@media (min-width: 761px) and (max-width: 1399px) {
+@media (min-width: 761px) and (width < 1400px) {
   .page-content {
     container: tablet-page / inline-size;
     min-width: 0;
@@ -3763,7 +3763,7 @@
 
 /* Between mobile and desktop, the sidebar grows continuously instead of
    taking 230px in a single step at the 901px boundary. */
-@media (min-width: 901px) and (max-width: 1399px) {
+@media (min-width: 901px) and (width < 1400px) {
   .sidebar {
     width: clamp(72px, calc(31.7vw - 214px), 230px);
     flex-basis: clamp(72px, calc(31.7vw - 214px), 230px);
@@ -3818,7 +3818,7 @@
   }
 }
 
-@media (min-width: 1180px) and (max-width: 1399px) {
+@media (min-width: 1180px) and (width < 1400px) {
   .sidebar-brand {
     justify-content: flex-start;
     gap: 10px;
@@ -4173,8 +4173,8 @@
 /*
    第一サイズ: 760px以下
    第二サイズ: 761px〜900px
-   第三サイズ: 901px〜1399pxの切り替え表示
-   第四サイズ: 901px〜1399pxの一覧＋詳細併設表示
+   第三サイズ: 901px〜1400px未満の切り替え表示
+   第四サイズ: 901px〜1400px未満の一覧＋詳細併設表示
    第五サイズ: 1400px以上
 */
 @container tablet-page (max-width: 939px) {
@@ -4247,7 +4247,7 @@
 
 /* The four vehicle-history values fit on one line at both intermediate
    sizes; the document name remains a full-width second row. */
-@media (min-width: 761px) and (max-width: 1399px) {
+@media (min-width: 761px) and (width < 1400px) {
   .vehicle-timeline-row {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -4412,7 +4412,7 @@
 
 /* Third size: keep the organization-user card compact even when a narrower
    tablet rule would otherwise make each control occupy its own row. */
-@media (min-width: 901px) and (max-width: 1399px) {
+@media (min-width: 901px) and (width < 1400px) {
   .settings-panel .settings-section-heading {
     align-items: center;
     margin-bottom: 14px;
