@@ -624,7 +624,7 @@
 .sales-estimate-sheet-calendar-control > input[type="date"]::-webkit-calendar-picker-indicator,
 .maintenance-statement-calendar-control > input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0; pointer-events: none; }
 .sales-estimate-sheet-calendar-control > .date-calendar-picker { right: 4px; z-index: 30; width: clamp(12px, 1.8cqw, 20px); }
-.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"] { padding-left: 1px; text-align: left; }
+.sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"] { position: absolute !important; inset: 0 !important; display: block; width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; box-sizing: border-box; padding-left: 1px; text-align: left; line-height: 1; -webkit-appearance: none; appearance: none; }
 .sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
 .sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-datetime-edit,
 .sales-estimate-sheet-calendar-control.is-trade-in-inspection-date > input[type="date"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
@@ -641,7 +641,7 @@
 .sales-sheet-name-combobox > input,
 .sales-sheet-amount-input { width: 100%; height: calc(100% - 2px); margin: 1px 0; border: 0; border-radius: 0; background: #fff; color: #101820; font: inherit; line-height: 1; }
 .sales-sheet-name-combobox { box-sizing: border-box; }
-.sales-sheet-name-combobox > input { box-sizing: border-box; width: calc(100% - 21px); padding: 9px 4px 2px 12px; }
+.sales-sheet-name-combobox > input { box-sizing: border-box; width: calc(100% - 21px); padding: 1px 4px 2px 12px; }
 .sales-sheet-name-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; border: 0; border-left: 1px solid transparent; background: rgba(234, 243, 255, 0.72); color: #1f4f91; opacity: 0.55; cursor: pointer; }
 .sales-sheet-name-combobox:hover > button,
 .sales-sheet-name-combobox:focus-within > button { border-left-color: #86a5d0; opacity: 1; }
@@ -960,10 +960,10 @@
 .maintenance-statement-control.is-select { appearance: auto; padding-right: 2px; cursor: pointer; }
 .maintenance-statement-control.is-document-number { font-size: 10px;}
 .maintenance-statement-combobox { position: absolute; box-sizing: border-box; min-width: 0; pointer-events: auto; }
-.maintenance-statement-combobox > input { width: calc(100% - 21px); height: auto; top: 6px; bottom: 2px; box-sizing: border-box; padding: 3px 4px 2px 12px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(5px, 0.9vw, 11px); line-height: 1; }
+.maintenance-statement-combobox > input { position: absolute; inset: 1px 21px 1px 1px; width: auto; height: auto; min-width: 0; min-height: 0; margin: 0; box-sizing: border-box; padding: 3px 4px 2px 12px; overflow: hidden; color: #101820; caret-color: auto; border: 0; border-radius: 0; outline: 0; background: #fff; font: inherit; font-size: clamp(5px, 0.9vw, 11px); line-height: 1; }
 .maintenance-statement-combobox:hover > input { background: #f8fbff; }
-.maintenance-statement-combobox > input:focus { position: relative; z-index: 1; border: 0; background: #fff; box-shadow: inset 0 0 0 2px #2563eb; }
-.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; transform: translateY(4px); }
+.maintenance-statement-combobox > input:focus { position: absolute; z-index: 1; border: 0; background: #fff; box-shadow: inset 0 0 0 2px #2563eb; }
+.maintenance-statement-combobox > button { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 20px; place-items: center; padding: 0; color: #1f4f91; border: 0; border-left: 1px solid transparent; background: transparent; opacity: 0.55; cursor: pointer; transform: none; }
 .maintenance-statement-combobox:hover > button, .maintenance-statement-combobox:focus-within > button { border-left-color: #86a5d0; opacity: 1; }
 .maintenance-statement-candidates { position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; display: grid; width: max(190px, 100%); max-height: 190px; overflow: auto; padding: 4px; border: 1px solid #86a5d0; border-radius: 5px; background: #fff; box-shadow: 0 8px 18px rgba(22, 44, 76, 0.2); }
 .maintenance-statement-candidates.is-up { top: auto; bottom: calc(100% + 2px); }
@@ -2575,9 +2575,10 @@
   }
 
   .sales-estimate-sheet-field-control[aria-label="車両displacement"] {
-    font-size: clamp(2.5px, 0.85cqw, 13px);
-    letter-spacing: -0.15px;
-    padding-inline: 0;
+    font-size: clamp(4px, 1.15cqw, 13px);
+    letter-spacing: -0.05px;
+    padding-inline: clamp(1px, 0.85cqw, 5px);
+    text-align: left;
   }
 
   .sales-estimate-sheet-field-control.is-multiline {
@@ -2593,14 +2594,15 @@
   }
 
   .sales-sheet-name-combobox > input {
-    position: absolute;
-    inset: 1px 22px 1px 1px;
+    position: absolute !important;
+    inset: 1px calc(clamp(5px, 1.9cqw, 20px) + 1px) 1px 1px;
     width: auto;
     height: auto;
     min-width: 0;
+    min-height: 0;
     margin: 0;
     box-sizing: border-box;
-    padding: 9px 4px 2px 12px;
+    padding: 0 4px 0 12px;
   }
 
   .sales-sheet-name-combobox > button,
@@ -2661,17 +2663,6 @@
     background-position: center;
     background-repeat: no-repeat;
     background-size: 75% 75%;
-  }
-
-  .maintenance-statement-combobox > input {
-    position: absolute;
-    inset: 1px 22px 1px 1px;
-    width: auto;
-    height: auto;
-    min-width: 0;
-    margin: 0;
-    box-sizing: border-box;
-    padding: 3px 4px 2px 12px;
   }
 
   .maintenance-statement-control.is-title {
@@ -3497,9 +3488,10 @@
   }
 
   .sales-estimate-sheet-field-control[aria-label="車両displacement"] {
-    font-size: clamp(3px, 0.85cqw, 13px);
-    letter-spacing: -0.15px;
-    padding-inline: 0;
+    font-size: clamp(5px, 1.15cqw, 13px);
+    letter-spacing: -0.05px;
+    padding-inline: clamp(1px, 0.85cqw, 5px);
+    text-align: left;
   }
 
   .sales-sheet-fixed-label {
@@ -3510,10 +3502,23 @@
     padding: 0 clamp(2px, 0.85cqw, 9px) 0 clamp(1px, 0.4cqw, 4px);
   }
 
-  .sales-sheet-name-combobox > input,
+  .sales-sheet-name-combobox > input {
+    position: absolute !important;
+    inset: 1px calc(clamp(5px, 1.9cqw, 20px) + 1px) 1px 1px;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+    padding: 3px 4px 2px 12px;
+  }
+
   .maintenance-statement-combobox > input {
     position: absolute;
-    inset: 1px 22px 1px 1px;
+    top: 1px;
+    left: 1px;
+    bottom: 1px;
+    right: 21px;
     width: auto;
     height: auto;
     min-width: 0;
@@ -3651,9 +3656,9 @@
   .maintenance-statement-combobox > input {
     margin: 0;
     height: auto;
-    top: 6px;
-    bottom: 2px;
-    width: calc(100% - 22px);
+    top: 1px;
+    bottom: 1px;
+    width: auto;
     padding: 2px 4px 2px 12px;
   }
 }
@@ -4052,6 +4057,19 @@
     appearance: none;
   }
 
+  /* Fourth-size sales sheets: leave the SVG's outer right rule visible.
+     The overlay amount inputs otherwise paint over that rule at the exact
+     same edge when the sheet is rendered beside the document list. */
+  .sales-estimate-sheet-line-control:not(.is-amount-only) .sales-sheet-amount-input {
+    width: calc(100% - var(--sheet-label-width) - clamp(0.5px, 0.18cqw, 1px));
+    margin-right: clamp(0.5px, 0.18cqw, 1px);
+  }
+
+  .sales-estimate-sheet-line-control.is-amount-only .sales-sheet-amount-input {
+    width: calc(100% - clamp(0.5px, 0.18cqw, 1px));
+    margin-right: clamp(0.5px, 0.18cqw, 1px);
+  }
+
   .maintenance-statement-calendar-control > input[type="date"] {
     position: absolute !important;
     inset: 0 !important;
@@ -4060,8 +4078,9 @@
     min-width: 0;
     min-height: 0;
     box-sizing: border-box;
-    padding: 0 clamp(1px, 0.45cqw, 5px);
-    padding-right: 1.15em;
+    padding: 2px clamp(1px, 0.45cqw, 5px) 2px clamp(1px, 0.45cqw, 5px);
+    padding-right: clamp(16px, 1.8cqw, 20px);
+    font-size: clamp(10px, 0.9cqw, 13px);
     line-height: 1;
     -webkit-appearance: none;
     appearance: none;
@@ -4127,6 +4146,38 @@
     font-size: 1.175cqw;
   }
 
+  .maintenance-statement-combobox > input {
+    position: absolute !important;
+    inset: 1px 21px 1px 1px;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+    padding: 3px 4px 2px 12px;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"] {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 0 clamp(1px, 0.45cqw, 5px);
+    padding-right: clamp(10px, 1.6cqw, 18px);
+    line-height: 1;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit,
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+
   .maintenance-statement-control.is-compact-date {
     font-size: 0.962cqw;
   }
@@ -4166,6 +4217,176 @@
 
   .sales-estimate-sheet-calendar-control > input[type="date"] {
     top: -2px !important;
+    font-size: 1.1cqw;
+  }
+
+  .sales-estimate-sheet-field-control[aria-label="車両displacement"] {
+    font-size: 1.15cqw;
+    letter-spacing: -0.05px;
+  }
+}
+
+/* Narrow fifth-size detail panels need a little more room for date segments.
+   Keep the 1750px-and-up reference typography unchanged. */
+@media (min-width: 1400px) and (max-width: 1749px) {
+  .maintenance-statement-control.is-compact-date {
+    font-size: 0.85cqw;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="生年月日"] {
+    font-size: 1.1cqw;
+  }
+}
+
+/* Intermediate sizes: keep intake/release dates inside their narrow cells
+   and scale the date text from the rendered statement width. */
+@media (max-width: 1399px) {
+  /* The intake/release cells reserve space for the calendar button. Keep the
+     date string just below the overlap threshold at every smaller sheet size. */
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="入庫日"],
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="出庫予定日"] {
+    font-size: clamp(5px, 0.78cqw, 7px) !important;
+  }
+
+  /* These wider cells can use a little more typography than the narrow
+     intake/release cells without colliding with their calendar buttons. */
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="生年月日"] {
+    font-size: clamp(6px, 1.25cqw, 10px) !important;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="車両inspectionDate"] {
+    font-size: clamp(6px, 1.15cqw, 10px) !important;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1399px) {
+  .maintenance-statement-control.is-compact-date {
+    font-size: clamp(5px, 0.962cqw, 9px);
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"] {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 0 clamp(1px, 0.45cqw, 5px);
+    padding-right: clamp(8px, 1.45cqw, 13px);
+    font-size: clamp(5px, 0.962cqw, 9px) !important;
+    line-height: 1;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit,
+  .maintenance-statement-calendar-control > input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+}
+
+/* First size: the smallest SVG cells need a smaller text lane beside the
+   calendar icon. Keep the icon available while allowing the full date/value
+   to remain inside its cell. */
+@media (max-width: 760px) {
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="入庫日"],
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="出庫予定日"] {
+    font-size: clamp(3px, 0.9cqw, 6px) !important;
+    letter-spacing: -0.1px;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="生年月日"] {
+    font-size: clamp(4.5px, 1.25cqw, 8px) !important;
+  }
+
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="車両inspectionDate"] {
+    font-size: clamp(4.5px, 1.15cqw, 8px) !important;
+  }
+
+  .maintenance-statement-calendar-control > .date-calendar-picker {
+    right: 1px;
+    width: clamp(3.5px, 1.15cqw, 8px);
+  }
+
+  .maintenance-statement-calendar-control .date-calendar-picker-button svg {
+    width: clamp(3.5px, 0.9cqw, 7px) !important;
+    height: clamp(3.5px, 0.9cqw, 7px) !important;
+  }
+
+  .maintenance-statement-control[aria-label="車両color"] {
+    font-size: clamp(3.4px, 0.8cqw, 8px) !important;
+    letter-spacing: -0.1px;
+    padding-inline: 1px;
+  }
+}
+
+/* First-size wide end: improve readability around 700px while keeping a
+   small, separate lane for the calendar icon. */
+@media (min-width: 650px) and (max-width: 760px) {
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="入庫日"],
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="出庫予定日"] {
+    font-size: clamp(5px, 1.1cqw, 7px) !important;
+  }
+
+  .maintenance-statement-calendar-control > .date-calendar-picker {
+    right: 0.5px;
+    width: clamp(4px, 1cqw, 7px);
+  }
+
+  .maintenance-statement-calendar-control .date-calendar-picker-button svg {
+    width: clamp(4px, 0.8cqw, 6px) !important;
+    height: clamp(4px, 0.8cqw, 6px) !important;
+  }
+}
+
+/* Around 1400px the fifth-size sheet is still narrow beside its document
+   list. Give the intake/release dates and their icons a smaller lane until
+   the wide desktop reference layout takes over. */
+@media (min-width: 1400px) and (max-width: 1749px) {
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="入庫日"],
+  .maintenance-statement-calendar-control > input[type="date"][aria-label="出庫予定日"] {
+    font-size: clamp(4px, 0.72cqw, 7px) !important;
+    padding-right: clamp(8px, 1.35cqw, 14px);
+  }
+
+  .maintenance-statement-calendar-control > .date-calendar-picker {
+    width: clamp(8px, 1.35cqw, 14px);
+  }
+
+  .maintenance-statement-calendar-control .date-calendar-picker-button svg {
+    width: clamp(7px, 1.1cqw, 12px) !important;
+    height: clamp(7px, 1.1cqw, 12px) !important;
+  }
+}
+
+/* Keep the add-item action proportional to the actual rendered sheet. The
+   SVG icon follows the label instead of growing independently at narrow or
+   wide breakpoints. */
+@media (max-width: 1399px) {
+  .maintenance-statement-add {
+    gap: 0.3em;
+    padding-inline: 0.55em;
+    font-size: clamp(4px, 1.15cqw, 10px);
+  }
+
+  .maintenance-statement-add svg {
+    width: 1em !important;
+    height: 1em !important;
+  }
+}
+
+@media (min-width: 1400px) {
+  .maintenance-statement-add {
+    gap: 0.3em;
+    padding-inline: 0.55em;
+    font-size: clamp(5px, 1.15cqw, 12px);
+  }
+
+  .maintenance-statement-add svg {
+    width: 1em !important;
+    height: 1em !important;
   }
 }
 
@@ -4628,5 +4849,13 @@
     font-size: 8px;
     letter-spacing: -0.04em;
     white-space: nowrap;
+  }
+}
+
+/* Keep the work-name input flush with the responsive dropdown button. The
+   previous fixed 21px reserve left a visible gap in smaller SVG cells. */
+@media (max-width: 1399px) {
+  .maintenance-statement-combobox > input {
+    right: calc(clamp(5px, 1.9cqw, 20px) + 1px) !important;
   }
 }

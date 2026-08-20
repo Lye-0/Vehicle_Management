@@ -113,7 +113,7 @@ function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { 
   const technicalFee = imported ? imported.technicalFees : item.technicalFee
   const summary = imported ? imported.summary ?? '' : item.summary
   return <>
-    <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y - 6} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
+    <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
     <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
