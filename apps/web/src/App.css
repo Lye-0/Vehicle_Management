@@ -2293,7 +2293,7 @@
 .sidebar-mobile-signout:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
 
 @media (max-width: 900px) {
-  .app-shell { display: block; }
+  .app-shell { position: relative; display: block; }
   .sidebar { width: 100%; min-height: 0; }
   .sidebar-brand { padding: 16px 24px; }
   .branch-card, .sidebar-footer { display: none; }
@@ -2736,7 +2736,7 @@
 /* Final mobile header and settings navigation corrections */
 @media (max-width: 760px) {
   .topbar {
-    position: relative;
+    position: static;
     height: 58px;
     align-items: center;
     flex-direction: row;
@@ -2746,10 +2746,10 @@
     -webkit-backdrop-filter: none;
   }
   .notification-button {
-    position: fixed;
-    top: 18px;
+    position: absolute;
+    top: 16px;
     right: 14px;
-    z-index: 30;
+    z-index: 40;
     margin-left: 0;
     flex: 0 0 38px;
     color: #eaf0f8;
@@ -4446,7 +4446,7 @@
    compact top bar. */
 @media (min-width: 761px) and (max-width: 900px) {
   .topbar {
-    position: relative;
+    position: static;
     height: 58px;
     min-height: 58px;
     align-items: center;
@@ -4457,12 +4457,12 @@
   }
 
   .notification-button {
-    position: fixed;
-    top: 10px;
-    right: 12px;
+    position: absolute;
+    top: 16px;
+    right: 14px;
+    z-index: 40;
     margin-left: 0;
     flex: 0 0 38px;
-    z-index: 40;
     color: #e7eefb;
   }
 
