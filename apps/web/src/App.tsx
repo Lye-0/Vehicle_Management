@@ -62,6 +62,7 @@ const pageMeta: Record<SectionId, PageMeta> = {
 
 function App() {
   const [authState, setAuthState] = useState<{ loading: boolean; user: User | null; error: string }>({ loading: true, user: null, error: '' })
+  const [initialSetupState, setInitialSetupState] = useState<{ status: 'pending' } | { status: 'completed'; session: AuthSession } | null>(null)
 
   useEffect(() => {
     try {
@@ -71,15 +72,20 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!authState.user) setInitialSetupState(null)
+  }, [authState.user])
+
   if (authState.loading) return <AuthLoading />
-  if (!authState.user) return <LoginPage initialError={authState.error} />
-  return <AuthenticatedApp user={authState.user} onUserUpdated={(nextUser) => setAuthState((current) => ({ ...current, loading: false, user: nextUser, error: '' }))} />
+  if (!authState.user) return <LoginPage initialError={authState.error} onInitialSetupStarted={() => setInitialSetupState({ status: 'pending' })} onInitialSetupCompleted={(session) => setInitialSetupState({ status: 'completed', session })} onInitialSetupFailed={() => setInitialSetupState(null)} />
+  if (initialSetupState?.status === 'pending') return <AuthLoading />
+  return <AuthenticatedApp initialSession={initialSetupState?.status === 'completed' ? initialSetupState.session : undefined} user={authState.user} onUserUpdated={(nextUser) => setAuthState((current) => ({ ...current, loading: false, user: nextUser, error: '' }))} />
 }
 
-function AuthenticatedApp({ user, onUserUpdated }: { user: User; onUserUpdated: (user: User) => void }) {
-  const [session, setSession] = useState<AuthSession | null>(null)
+function AuthenticatedApp({ initialSession, user, onUserUpdated }: { initialSession?: AuthSession; user: User; onUserUpdated: (user: User) => void }) {
+  const [session, setSession] = useState<AuthSession | null>(initialSession ?? null)
   const [sessionError, setSessionError] = useState('')
-  const [sessionLoading, setSessionLoading] = useState(true)
+  const [sessionLoading, setSessionLoading] = useState(!initialSession)
   const [activeOrganizationId, setLocalActiveOrganizationId] = useState('')
 
   const loadSession = useCallback(async () => {
@@ -98,7 +104,16 @@ function AuthenticatedApp({ user, onUserUpdated }: { user: User; onUserUpdated: 
     }
   }, [activeOrganizationId])
 
-  useEffect(() => { void loadSession() }, [loadSession])
+  useEffect(() => {
+    if (!initialSession) void loadSession()
+  }, [initialSession, loadSession])
+  useEffect(() => {
+    if (!initialSession) return
+    setSession(initialSession)
+    setSessionError('')
+    setSessionLoading(false)
+    setLocalActiveOrganizationId(initialSession.organizations[0]?.organizationId ?? '')
+  }, [initialSession])
   useEffect(() => { setActiveOrganizationId(activeOrganizationId || null) }, [activeOrganizationId])
 
   if (sessionLoading) return <AuthLoading />
@@ -237,7 +252,7 @@ function AuthLoading() {
   return <div className="auth-page"><div className="auth-card auth-loading"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><strong>車両管理を起動しています</strong><span>認証状態を確認しています。</span></div></div>
 }
 
-function LoginPage({ initialError }: { initialError?: string }) {
+function LoginPage({ initialError, onInitialSetupStarted, onInitialSetupCompleted, onInitialSetupFailed }: { initialError?: string; onInitialSetupStarted: () => void; onInitialSetupCompleted: (session: AuthSession) => void; onInitialSetupFailed: () => void }) {
   const [error, setError] = useState(initialError ?? '')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -282,10 +297,13 @@ function LoginPage({ initialError }: { initialError?: string }) {
       return
     }
     setLoading('setup')
+    onInitialSetupStarted()
     try {
       await createAccountWithEmailPassword(email, password)
-      await completeOrganizationSetup(organizationName, setupKey)
+      const session = await completeOrganizationSetup(organizationName, setupKey)
+      onInitialSetupCompleted(session)
     } catch (reason) {
+      onInitialSetupFailed()
       setError(getAuthErrorMessage(reason))
     } finally {
       setLoading('')
