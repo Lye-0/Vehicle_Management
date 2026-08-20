@@ -990,7 +990,8 @@ export function parseMaintenanceItems(value: unknown): MaintenanceItemInput[] {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
     const technicalFee = integerNumber(item.technicalFee, 0)
-    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit: stringValue(item, 'unit') || '式', unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
+    const unit = typeof item.unit === 'string' ? item.unit.trim() : '式'
+    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit, unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
   })
 }
 

@@ -4341,23 +4341,28 @@
   }
 }
 
-/* Around 1400px the fifth-size sheet is still narrow beside its document
-   list. Give the intake/release dates and their icons a smaller lane until
-   the wide desktop reference layout takes over. */
-@media (min-width: 1400px) and (max-width: 1749px) {
+/* Fifth size: use one rendered-sheet coordinate system for intake/release
+   dates at every width. The whole preview scales with the SVG, while the
+   date text, icon and reserved gap keep the same visual relationship. */
+@media (min-width: 1400px) {
   .maintenance-statement-calendar-control > input[type="date"][aria-label="入庫日"],
   .maintenance-statement-calendar-control > input[type="date"][aria-label="出庫予定日"] {
-    font-size: clamp(4px, 0.72cqw, 7px) !important;
-    padding-right: clamp(8px, 1.35cqw, 14px);
+    font-size: 0.962cqw !important;
+    padding-right: 1.35cqw;
+    letter-spacing: -0.03px;
   }
 
-  .maintenance-statement-calendar-control > .date-calendar-picker {
-    width: clamp(8px, 1.35cqw, 14px);
+  /* The picker is a sibling of the date input, so scope this adjustment to
+     the two intake/release cells instead of changing every calendar field. */
+  .maintenance-statement-calendar-control:has(> input[type="date"][aria-label="入庫日"]) > .date-calendar-picker,
+  .maintenance-statement-calendar-control:has(> input[type="date"][aria-label="出庫予定日"]) > .date-calendar-picker {
+    width: 1.35cqw;
   }
 
-  .maintenance-statement-calendar-control .date-calendar-picker-button svg {
-    width: clamp(7px, 1.1cqw, 12px) !important;
-    height: clamp(7px, 1.1cqw, 12px) !important;
+  .maintenance-statement-calendar-control:has(> input[type="date"][aria-label="入庫日"]) .date-calendar-picker-button svg,
+  .maintenance-statement-calendar-control:has(> input[type="date"][aria-label="出庫予定日"]) .date-calendar-picker-button svg {
+    width: 1.1cqw !important;
+    height: 1.1cqw !important;
   }
 }
 

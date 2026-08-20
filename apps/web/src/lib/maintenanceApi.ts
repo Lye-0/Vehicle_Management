@@ -29,7 +29,7 @@ export type MaintenanceDocumentDetails = {
     otherFee: string
   }
 }
-export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; sourceRowIndex?: number; abacusDetail?: AbacusDetailLine | null; isAbacusMigration?: boolean }
+export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number | null; unit: string; unitPrice: number | null; technicalFee: number | null; summary: string; sourceRowIndex?: number; abacusDetail?: AbacusDetailLine | null; isAbacusMigration?: boolean }
 
 export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
   staffName: '',
@@ -226,7 +226,23 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     taxRate: document.taxRate / 100,
     taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
-    items: (document.items ?? []).map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
+    items: (document.items ?? []).map(normalizeMaintenanceLineItem),
+  }
+}
+
+function normalizeMaintenanceLineItem(item: MaintenanceLineItem): MaintenanceLineItem {
+  const quantity = Number(item.quantity)
+  const unitPrice = Number(item.unitPrice)
+  const technicalFee = Number(item.technicalFee ?? 0)
+  const unit = item.unit ?? ''
+  const hasBlankUnit = unit === ''
+  return {
+    ...item,
+    quantity: hasBlankUnit && quantity === 0 ? null : quantity,
+    unit,
+    unitPrice: hasBlankUnit && unitPrice === 0 ? null : unitPrice,
+    technicalFee: hasBlankUnit && technicalFee === 0 ? null : technicalFee,
+    summary: item.summary ?? '',
   }
 }
 
@@ -235,7 +251,7 @@ function normalizeMaintenanceStatus(status: ApiMaintenanceDocument['status']): M
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+  const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity: quantity ?? 0, unit: unit ?? '', unitPrice: unitPrice ?? 0, technicalFee: technicalFee ?? 0, summary })) }
   if (input.masterSync) {
     payload.masterSync = input.masterSync
   }

@@ -242,7 +242,7 @@ function statementRows(document: MaintenanceDocumentLike): StatementRow[] {
     const unitPrice = detail ? detail.unitPrice : item.unitPrice
     const technicalFee = detail ? detail.technicalFees : item.technicalFee
     const summary = detail ? detail.summary : item.summary
-    const partAmount = detail ? detail.partAmount : Math.round(item.quantity * item.unitPrice)
+    const partAmount = detail ? detail.partAmount : Math.round((item.quantity ?? 0) * (item.unitPrice ?? 0))
     return { ...item, description: detail ? detail.description ?? '' : item.description, quantity, unit, unitPrice, technicalFee, summary, partAmount }
   })
   return rows.slice(0, 18)

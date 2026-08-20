@@ -114,10 +114,10 @@ function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { 
   const summary = imported ? imported.summary ?? '' : item.summary
   return <>
     <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal allowEmpty onCommit={(value) => onUpdateItem(item.id, 'quantity', value === null ? '' : String(value))} />
     <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'unitPrice', value === null ? '' : String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'technicalFee', value === null ? '' : String(value))} />
     <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
     <button className="maintenance-statement-remove" type="button" aria-label={`明細${index + 1}を削除`} style={controlStyle(1085, y + 3, 31, 22)} onClick={() => onRemoveItem(item.id)}><Trash2 size={13} /></button>
   </>
@@ -208,7 +208,7 @@ function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
   return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
-function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, allowEmpty = false, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number | null) => void; centered?: boolean; decimal?: boolean; allowEmpty?: boolean; className?: string }) {
   const [draft, setDraft] = useState(value === null ? '' : String(value))
   const [focused, setFocused] = useState(false)
   useEffect(() => { if (!focused) setDraft(value === null ? '' : String(value)) }, [focused, value])
@@ -223,8 +223,8 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
 
   function finish() {
     if (draft === '' || draft === '-') {
-      setDraft('0')
-      onCommit(0)
+      setDraft(allowEmpty ? '' : '0')
+      onCommit(allowEmpty ? null : 0)
     }
     setFocused(false)
   }

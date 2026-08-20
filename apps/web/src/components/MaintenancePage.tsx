@@ -358,14 +358,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function updateItem(itemId: string, field: 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary', value: string) {
     if (!selectedDocument) return
-    const nextValue = field === 'kind' ? value as MaintenanceItemKind : field === 'description' || field === 'unit' || field === 'summary' ? value : Number(value) || 0
+    const nextValue = field === 'kind' ? value as MaintenanceItemKind : field === 'description' || field === 'unit' || field === 'summary' ? value : value === '' ? null : Number(value) || 0
     replaceActiveDocument((document) => ({ ...document, items: document.items.map((item) => item.id === itemId ? { ...item, [field]: nextValue, abacusDetail: null, isAbacusMigration: false } : item) }))
     markChanged()
   }
 
   function addItem() {
     if (!selectedDocument || selectedDocument.items.length >= 18) return
-    const newItem: MaintenanceLineItem = { id: `maintenance-item-${Date.now()}`, kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }
+    const newItem: MaintenanceLineItem = { id: `maintenance-item-${Date.now()}`, kind: '作業', description: '', quantity: null, unit: '', unitPrice: null, technicalFee: null, summary: '' }
     replaceActiveDocument((document) => ({ ...document, items: [...document.items, newItem] }))
     markChanged()
   }
