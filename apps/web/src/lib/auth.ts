@@ -15,9 +15,9 @@ import {
   signInWithPopup,
   signOut,
   unlink,
-  updateEmail,
   updateProfile,
   updatePassword,
+  verifyBeforeUpdateEmail,
   type User,
 } from 'firebase/auth'
 import { getFirebaseAuth } from './firebase'
@@ -44,12 +44,15 @@ export async function sendPasswordReset(email: string) {
   return sendPasswordResetEmail(getFirebaseAuth(), normalizeEmail(email))
 }
 
-export async function changeCurrentPassword(password: string) {
-  return updatePassword(requireCurrentUser(), password)
+export async function changeCurrentPassword(currentPassword: string, newPassword: string) {
+  const user = requireCurrentUser()
+  if (!user.email) throw new Error('メールアドレスが設定されていません。')
+  await reauthenticateWithEmailPassword(user.email, currentPassword)
+  return updatePassword(user, newPassword)
 }
 
 export async function changeCurrentEmail(email: string) {
-  return updateEmail(requireCurrentUser(), normalizeEmail(email))
+  return verifyBeforeUpdateEmail(requireCurrentUser(), normalizeEmail(email))
 }
 
 export async function changeCurrentDisplayName(displayName: string) {

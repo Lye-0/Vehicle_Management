@@ -1384,8 +1384,11 @@
 .account-modal-close:disabled { cursor: wait; opacity: 0.55; }
 .account-modal .auth-error, .account-modal .settings-success { margin-top: 16px; }
 .account-modal-content { display: grid; gap: 16px; padding-top: 18px; }
+.account-modal-choice-list { display: grid; gap: 10px; }
+.account-modal-choice-list .button { justify-content: flex-start; }
 .account-modal-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .account-modal-note { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.account-modal input[readonly] { color: var(--text-secondary); background: var(--surface-subtle); cursor: default; }
 .account-modal-actions .verified-label { margin-right: auto; }
 .settings-success { padding: 10px 12px; color: #16794a; border: 1px solid #b9e7ca; border-radius: 8px; background: #eefbf2; font-size: 12px; }
 .member-list { display: grid; gap: 8px; container: member-list / inline-size; }

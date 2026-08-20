@@ -301,6 +301,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [currentUser, setCurrentUser] = useState(user)
   const [displayName, setDisplayName] = useState(user.displayName ?? '')
   const [newEmail, setNewEmail] = useState(user.email ?? '')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [linkEmail, setLinkEmail] = useState(user.email ?? '')
@@ -308,6 +309,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [loading, setLoading] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [pendingEmail, setPendingEmail] = useState('')
   const [members, setMembers] = useState<MemberRecord[]>([])
   const [currentRole, setCurrentRole] = useState<MemberRole>('employee')
   const [membersLoading, setMembersLoading] = useState(true)
@@ -316,7 +318,9 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setCurrentUser(user)
     setDisplayName(user.displayName ?? '')
     setNewEmail(user.email ?? '')
+    setCurrentPassword('')
     setLinkEmail(user.email ?? '')
+    setPendingEmail((current) => current && normalizeAccountEmail(user.email) === current ? '' : current)
   }, [user])
 
   const [memberError, setMemberError] = useState('')
@@ -326,11 +330,36 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
   const [invitation, setInvitation] = useState<{ code: string; email: string; expiresAt: string } | null>(null)
-  const [accountModal, setAccountModal] = useState<'displayName' | 'password' | 'google' | null>(null)
+  const [accountModal, setAccountModal] = useState<'displayName' | 'account-choice' | 'email' | 'password' | 'google' | null>(null)
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
   const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
   const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
+  const normalizedCurrentEmail = normalizeAccountEmail(currentUser.email)
+  const normalizedNewEmail = normalizeAccountEmail(newEmail)
+  const isDifferentEmail = Boolean(normalizedNewEmail && normalizedNewEmail !== normalizedCurrentEmail)
+
+  function openAccountChangeChooser() {
+    setError('')
+    setMessage('')
+    setAccountModal(hasPassword ? 'account-choice' : 'password')
+  }
+
+  function openEmailChangeModal() {
+    setError('')
+    setMessage('')
+    setNewEmail(pendingEmail || currentUser.email || '')
+    setAccountModal('email')
+  }
+
+  function openPasswordChangeModal() {
+    setError('')
+    setMessage('')
+    setCurrentPassword('')
+    setNewPassword('')
+    setPasswordConfirmation('')
+    setAccountModal('password')
+  }
 
   useEffect(() => {
     if (!accountModal) return
@@ -381,10 +410,16 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   }, [])
 
   async function refreshUser(profile?: { displayName?: string; email?: string | null }) {
+    const previousEmail = normalizeAccountEmail(currentUser.email)
     const wasAnonymous = currentUser.isAnonymous
     const nextUser = await refreshCurrentUser()
     if (nextUser) {
-      if (profile && !nextUser.isAnonymous) await updateCurrentProfile(profile)
+      const nextEmail = normalizeAccountEmail(nextUser.email)
+      const emailChanged = previousEmail !== nextEmail
+      const profileUpdate = profile || emailChanged
+        ? { ...(profile ?? {}), ...(emailChanged ? { email: nextUser.email } : {}) }
+        : null
+      if (profileUpdate && !nextUser.isAnonymous) await updateCurrentProfile(profileUpdate)
       setCurrentUser(nextUser)
       setDisplayName(nextUser.displayName ?? '')
       setNewEmail(nextUser.email ?? '')
@@ -394,9 +429,10 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
         setMembers(response.members)
         setCurrentRole(response.currentRole)
       }
-      setMembers((current) => current.map((member) => member.isSelf ? { ...member, displayName: profile?.displayName ?? nextUser.displayName ?? member.displayName, email: profile?.email === undefined ? nextUser.email ?? member.email : profile.email } : member))
+      setMembers((current) => current.map((member) => member.isSelf ? { ...member, displayName: profile?.displayName ?? nextUser.displayName ?? member.displayName, email: nextUser.email ?? member.email } : member))
       onUserUpdated?.(nextUser)
     }
+    return nextUser
   }
 
   async function runAction(action: string, callback: () => Promise<void>, profile?: { displayName?: string; email?: string | null }): Promise<boolean> {
@@ -428,19 +464,55 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   }
 
   async function saveEmail() {
-    if (!newEmail.trim()) {
+    const normalizedEmail = normalizeAccountEmail(newEmail)
+    if (!normalizedEmail) {
       setError('メールアドレスを入力してください。')
       return
     }
+    if (normalizedEmail === normalizedCurrentEmail) {
+      setError('現在のメールアドレスと同じです。変更先のメールアドレスを入力してください。')
+      return
+    }
+    if (pendingEmail && normalizedEmail !== pendingEmail) {
+      setError(`先に確認待ちのメールアドレス（${pendingEmail}）の確認を完了してください。`)
+      return
+    }
     const completed = await runAction('email', async () => {
-      await changeCurrentEmail(newEmail)
-      await sendCurrentEmailVerification()
-      setMessage('メールアドレスを更新し、確認メールを送信しました。')
-    }, { email: newEmail.trim().toLowerCase() })
+      await changeCurrentEmail(normalizedEmail)
+      setPendingEmail(normalizedEmail)
+      setMessage('確認メールを送信しました。メール内のリンクを開くと変更が完了します。')
+    })
     if (completed) setAccountModal(null)
   }
 
+  async function refreshEmailStatus() {
+    const requestedEmail = pendingEmail
+    setLoading('verification-refresh')
+    setError('')
+    setMessage('')
+    try {
+      const nextUser = await refreshUser()
+      const nextEmail = normalizeAccountEmail(nextUser?.email)
+      if (requestedEmail && nextEmail === requestedEmail) {
+        setPendingEmail('')
+        setMessage('メールアドレスの確認が完了しました。')
+      } else if (requestedEmail) {
+        setMessage('まだ確認が完了していません。確認メールのリンクを開いてください。')
+      } else {
+        setMessage('メール確認状態を更新しました。')
+      }
+    } catch (reason) {
+      setError(getSettingsAuthError(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
   async function savePassword() {
+    if (!currentPassword) {
+      setError('現在のパスワードを入力してください。')
+      return
+    }
     if (newPassword.length < 8) {
       setError('パスワードは8文字以上で設定してください。')
       return
@@ -450,7 +522,8 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       return
     }
     const completed = await runAction('password', async () => {
-      await changeCurrentPassword(newPassword)
+      await changeCurrentPassword(currentPassword, newPassword)
+      setCurrentPassword('')
       setNewPassword('')
       setPasswordConfirmation('')
       setMessage('パスワードを更新しました。')
@@ -588,7 +661,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
             <h3>ログイン方法</h3>
             <div className={hasPassword ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
               <strong>メールアドレス＋パスワードでログイン（{hasPassword ? '済み' : '未設定'}）</strong>
-              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setMessage(''); setAccountModal('password') }}>変更</button>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={openAccountChangeChooser}>変更</button>
             </div>
             <div className={hasGoogle ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
               <strong>Googleでログイン（{hasGoogle ? '済み' : '未設定'}）</strong>
@@ -608,19 +681,34 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       {accountModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) setAccountModal(null) }}>
         <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="account-modal-header">
-            <div><span className="page-eyebrow">アカウント設定</span><h2 id="account-modal-title">{accountModal === 'displayName' ? '表示名を変更' : accountModal === 'password' ? (hasPassword ? 'メールアドレス・パスワードを変更' : 'メールアドレス＋パスワードを追加') : 'Googleログインの設定'}</h2></div>
+            <div><span className="page-eyebrow">アカウント設定</span><h2 id="account-modal-title">{accountModal === 'displayName' ? '表示名を変更' : accountModal === 'account-choice' ? '変更する項目を選択' : accountModal === 'email' ? 'メールアドレスを変更' : accountModal === 'password' ? (hasPassword ? 'パスワードを変更' : 'メールアドレス＋パスワードを追加') : 'Googleログインの設定'}</h2></div>
             <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>×</button>
           </div>
           {error && <div className="auth-error" role="alert">{error}</div>}
           {message && <div className="settings-success" role="status">{message}</div>}
+          {accountModal === 'account-choice' && <div className="account-modal-content">
+            <p className="account-modal-note">変更する項目を選択してください。メールアドレスとパスワードは別々に変更します。</p>
+            {pendingEmail && <p className="account-modal-note" role="status">メールアドレスは {pendingEmail} の確認待ちです。先に確認メールのリンクを開いてください。</p>}
+            <div className="account-modal-choice-list">
+              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={openEmailChangeModal}>メールアドレスを変更</button>
+              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={openPasswordChangeModal}>パスワードを変更</button>
+            </div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button></div>
+          </div>}
           {accountModal === 'displayName' && <div className="account-modal-content">
             <SettingsField label="表示名" value={displayName} onChange={setDisplayName} disabled={Boolean(loading)} placeholder="例：山本 翔太" />
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '変更中…' : '変更する'}</button></div>
           </div>}
+          {accountModal === 'email' && <div className="account-modal-content">
+            <p className="account-modal-note">新しいメールアドレスへ確認メールを送信します。リンクを開くまで、現在のメールアドレスは変わりません。</p>
+            <div className="settings-form-grid"><SettingsField label="現在のメールアドレス" type="email" value={currentUser.email ?? ''} onChange={() => undefined} readOnly /><SettingsField label="新しいメールアドレス" type="email" value={newEmail} onChange={setNewEmail} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal('account-choice')}>戻る</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '送信中…' : pendingEmail && pendingEmail === normalizedNewEmail ? '確認メールを再送信' : '変更メールを送信'}</button></div>
+            {pendingEmail ? <p className="account-modal-note" role="status">確認待ち：{pendingEmail}<br />確認メールのリンクを開いた後、<button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void refreshEmailStatus()}>{loading === 'verification-refresh' ? '確認状態を更新中…' : '確認状態を更新'}</button>してください。</p> : isDifferentEmail ? <p className="account-modal-note" role="status">入力中の新しいメールアドレスは、確認メールのリンクを開くまで変更されません。</p> : currentUser.emailVerified ? <span className="verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}
+          </div>}
           {accountModal === 'password' && hasPassword && <div className="account-modal-content">
-            <div className="settings-form-grid"><SettingsField label="メールアドレス" type="email" value={newEmail} onChange={setNewEmail} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} disabled={Boolean(loading)} /></div>
-            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '変更中…' : 'メールアドレスを変更'}</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '変更中…' : 'パスワードを変更'}</button></div>
-            {currentUser.emailVerified ? <span className="verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}
+            <p className="account-modal-note">安全のため、現在のパスワードで本人確認してから変更します。現在のパスワードは保存しません。</p>
+            <div className="settings-form-grid"><SettingsField label="現在のパスワード" type="password" value={currentPassword} onChange={setCurrentPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal('account-choice')}>戻る</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '変更中…' : 'パスワードを変更'}</button></div>
           </div>}
           {accountModal === 'password' && !hasPassword && <div className="account-modal-content">
             <p className="account-modal-note">このアカウントにメールアドレスとパスワードでログインする方法を追加します。</p>
@@ -676,14 +764,22 @@ function getMemberError(error: unknown) {
 function getSettingsAuthError(error: unknown) {
   if (!(error instanceof Error) || !error.message) return 'アカウント情報の更新に失敗しました。'
   if (error.message.includes('auth/requires-recent-login')) return '安全のため、いったんログアウトして再ログインしてからお試しください。'
+  if (error.message.includes('auth/wrong-password') || error.message.includes('auth/invalid-credential') || error.message.includes('auth/invalid-login-credentials')) return '現在のパスワードが正しくありません。'
+  if (error.message.includes('auth/operation-not-allowed')) return 'このメールアドレス変更は現在許可されていません。確認メールによる変更を再度お試しください。'
   if (error.message.includes('auth/credential-already-in-use') || error.message.includes('auth/email-already-in-use')) return 'この認証情報は別のアカウントで使用されています。'
   if (error.message.includes('auth/provider-already-linked')) return 'このログイン方法はすでに連携されています。'
   if (error.message.includes('auth/account-exists-with-different-credential')) return 'このGoogleアカウントは別のユーザーに登録されています。'
   if (error.message.includes('auth/popup-blocked')) return 'ポップアップがブロックされました。ブラウザの設定を確認してください。'
   if (error.message.includes('auth/network-request-failed')) return '通信に失敗しました。接続を確認して再度お試しください。'
+  if (error.message.includes('auth/invalid-email')) return 'メールアドレスの形式を確認してください。'
+  if (error.message.includes('auth/too-many-requests')) return '確認メールの送信回数が多すぎます。時間を置いてから再度お試しください。'
   if (error.message.includes('auth/weak-password')) return 'パスワードは8文字以上で設定してください。'
   if (error.message.includes('auth/popup-closed-by-user')) return 'Googleの認証画面が閉じられました。'
   return error.message
+}
+
+function normalizeAccountEmail(email: string | null | undefined) {
+  return email?.trim().toLowerCase() ?? ''
 }
 
 function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
@@ -843,8 +939,8 @@ function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof 
   return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
 }
 
-function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; normalization?: NormalizableField }) {
-  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, readOnly = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; readOnly?: boolean; normalization?: NormalizableField }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} readOnly={readOnly} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
 }
 
 function SalesPresetPanel({ groups, onUpdate, onAdd, onRemove }: { groups: SalesItemPresetGroups; onUpdate: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAdd: (group: SalesItemPresetGroupKey) => void; onRemove: (group: SalesItemPresetGroupKey, index: number) => void }) {
