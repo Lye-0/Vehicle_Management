@@ -79,7 +79,7 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     <StatementNumberControl className="is-compact-value" ariaLabel="重量税" value={document.fees.重量税} x={422} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel="印紙代" value={document.fees.印紙代} x={509} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel="その他費用" value={document.fees.リサイクル料金} x={596} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
-    <StatementNumberControl className="is-compact-value" ariaLabel="調整額" value={document.adjustment} x={683} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="端数値引" value={document.adjustment} x={683} y={1183} width={87} height={35} centered mobileInputMode="text" onCommit={(value) => onUpdateFee('調整額', String(value))} />
 
   </div>
 }
@@ -208,7 +208,7 @@ function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
   return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
-function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, allowEmpty = false, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number | null) => void; centered?: boolean; decimal?: boolean; allowEmpty?: boolean; className?: string }) {
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, allowEmpty = false, mobileInputMode, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number | null) => void; centered?: boolean; decimal?: boolean; allowEmpty?: boolean; mobileInputMode?: 'numeric' | 'decimal' | 'text'; className?: string }) {
   const [draft, setDraft] = useState(value === null ? '' : String(value))
   const [focused, setFocused] = useState(false)
   useEffect(() => { if (!focused) setDraft(value === null ? '' : String(value)) }, [focused, value])
@@ -230,7 +230,7 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
   }
 
   const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(value === null ? '' : String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={mobileInputMode ?? (decimal ? 'decimal' : 'numeric')} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(value === null ? '' : String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
 }
 
 const statementNumberFormatter = new Intl.NumberFormat('ja-JP')

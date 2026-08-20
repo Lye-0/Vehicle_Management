@@ -1248,6 +1248,7 @@ export function SalesEstimateSheetEditor({ document, hasImage, sections, itemPre
         amount={line?.amount ?? 0}
         exists={Boolean(line)}
         candidates={candidates}
+        mobileInputMode={position.bucket === 'discounts' || position.bucket === 'vehicleSideLabor' ? 'text' : undefined}
         onChange={(patch) => onUpdateLine(position.bucket, position.index, patch)}
       />
     })}
@@ -1427,7 +1428,7 @@ function sheetPositionStyle(x: number, y: number, width: number, height: number)
   return { left: `${x / 10.55}%`, top: `${y / 14.91}%`, width: `${width / 10.55}%`, height: `${height / 14.91}%` }
 }
 
-function SheetLineControl({ position, label, amount, exists, candidates, onChange }: { position: SheetLinePosition; label: string; amount: number; exists: boolean; candidates: string[]; onChange: (patch: { label?: string; amount?: number }) => void }) {
+function SheetLineControl({ position, label, amount, exists, candidates, mobileInputMode, onChange }: { position: SheetLinePosition; label: string; amount: number; exists: boolean; candidates: string[]; mobileInputMode?: 'numeric' | 'text'; onChange: (patch: { label?: string; amount?: number }) => void }) {
   const style = {
     left: `${position.x / 10.55}%`,
     top: `${position.y / 14.91}%`,
@@ -1439,7 +1440,7 @@ function SheetLineControl({ position, label, amount, exists, candidates, onChang
     {position.fixedLabel
       ? <span className="sales-sheet-fixed-label">{position.fixedLabel}</span>
       : <SheetNameCombobox value={label} candidates={candidates} menuUp={position.menuUp} onCommit={(value) => onChange({ label: value })} />}
-    <SheetAmountInput value={amount} exists={exists} onCommit={(value) => onChange({ amount: value })} />
+    <SheetAmountInput value={amount} exists={exists} mobileInputMode={mobileInputMode} onCommit={(value) => onChange({ amount: value })} />
   </div>
 }
 
@@ -1479,7 +1480,7 @@ function SheetNameCombobox({ value, candidates, menuUp = false, onCommit }: { va
   </div>
 }
 
-function SheetAmountInput({ value, exists, onCommit }: { value: number; exists: boolean; onCommit: (value: number) => void }) {
+function SheetAmountInput({ value, exists, mobileInputMode = 'numeric', onCommit }: { value: number; exists: boolean; mobileInputMode?: 'numeric' | 'text'; onCommit: (value: number) => void }) {
   const [draft, setDraft] = useState(exists ? String(value) : '')
   const [focused, setFocused] = useState(false)
   useEffect(() => setDraft(exists ? String(value) : ''), [exists, value])
@@ -1501,7 +1502,7 @@ function SheetAmountInput({ value, exists, onCommit }: { value: number; exists: 
   return <input
     className="sales-sheet-amount-input"
     aria-label="金額"
-    inputMode="numeric"
+    inputMode={mobileInputMode}
     value={focused ? draft : draft ? formatSheetYen(Number(draft)) : ''}
     onFocus={() => {
       setDraft(exists ? String(value) : '')
