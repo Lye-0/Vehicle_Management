@@ -44,6 +44,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
   const dirtyRef = useRef(dirty)
   const enabledRef = useRef(enabled)
   const serverEnabledRef = useRef(serverEnabled)
+  const serverSaveDeferredRef = useRef(serverSaveDeferred)
   const storageKeyRef = useRef(storageKey)
   const saveRef = useRef(save)
   const onErrorRef = useRef(onError)
@@ -63,6 +64,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
   dirtyRef.current = dirty
   enabledRef.current = enabled
   serverEnabledRef.current = serverEnabled
+  serverSaveDeferredRef.current = serverSaveDeferred
   storageKeyRef.current = storageKey
   saveRef.current = save
   onErrorRef.current = onError
@@ -87,9 +89,9 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
     setLastSavedAt(null)
   }, [clearTimers, registrationKey, storageKey])
 
-  const persistLocalDraft = useCallback(async () => {
+  const persistLocalDraft = useCallback(async (force = false) => {
     const currentKey = storageKeyRef.current
-    if (!enabledRef.current || !dirtyRef.current || !currentKey) return
+    if (!enabledRef.current || (!dirtyRef.current && !force) || !currentKey) return
     const snapshot = valueRef.current
     const snapshotSignature = valueSignature(snapshot)
     try {
@@ -101,7 +103,11 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
   }, [])
 
   const flush = useCallback<AutosaveFlush>(async (force = false): Promise<boolean> => {
-    if (dirtyRef.current && storageKeyRef.current) await persistLocalDraft()
+    // 未採番の作成直後はまだ入力変更がなくても、タブ移動時に復元できるよう端末へ残す。
+    const shouldPersistLocalDraft = dirtyRef.current || serverSaveDeferredRef.current
+    if (shouldPersistLocalDraft && storageKeyRef.current) {
+      await persistLocalDraft(serverSaveDeferredRef.current && !dirtyRef.current)
+    }
     if (!serverEnabledRef.current || !dirtyRef.current) return true
     if (force) {
       blockedSignatureRef.current = null
