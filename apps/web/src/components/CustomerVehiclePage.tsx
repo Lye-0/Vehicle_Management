@@ -111,7 +111,9 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const initialNavigationRef = useRef({ customerId: initialCustomerId, vehicleId: initialVehicleId })
   const onNavigationConsumedRef = useRef(onNavigationConsumed)
   const customerAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
+  const customerAutosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const vehicleAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
+  const vehicleAutosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const customerSavedSignatureRef = useRef('')
   const vehicleSavedSignatureRef = useRef('')
   const customerUpdatedAtRef = useRef<string | null>(null)
@@ -395,7 +397,14 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
 
   function closeCustomerDialog() {
     if (!editingCustomerId) {
-      closeCustomerDialogNow()
+      if (saving) return
+      if (customerDirty && !window.confirm('入力内容と端末内の復元データを削除して、顧客の登録を中止しますか？')) return
+      const storageKey = newCustomerStorageKey
+      void customerAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
+        setNewCustomerStorageKey('customer-new')
+        registerActiveDraft('customer-new', null)
+        closeCustomerDialogNow()
+      }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
     void customerAutosaveFlushRef.current().then((flushed) => {
@@ -509,7 +518,14 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
 
   function closeVehicleDialog() {
     if (!editingVehicleId) {
-      closeVehicleDialogNow()
+      if (saving) return
+      if (vehicleDirty && !window.confirm('入力内容と端末内の復元データを削除して、車両の登録を中止しますか？')) return
+      const storageKey = newVehicleStorageKey
+      void vehicleAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
+        setNewVehicleStorageKey('vehicle-new')
+        registerActiveDraft('vehicle-new', null)
+        closeVehicleDialogNow()
+      }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
     void vehicleAutosaveFlushRef.current().then((flushed) => {
@@ -662,6 +678,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     onBlocked: (reason) => setError(reason.message),
   })
   customerAutosaveFlushRef.current = customerAutosave.flush
+  customerAutosaveCancelLocalDraftRef.current = customerAutosave.cancelLocalDraft
 
   const vehicleAutosave = useAutosave<VehicleInput>({
     value: vehicleForm,
@@ -679,6 +696,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     onBlocked: (reason) => setError(reason.message),
   })
   vehicleAutosaveFlushRef.current = vehicleAutosave.flush
+  vehicleAutosaveCancelLocalDraftRef.current = vehicleAutosave.cancelLocalDraft
 
   return (
     <>

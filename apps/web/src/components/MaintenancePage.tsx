@@ -145,6 +145,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const summaryFilterInitializedRef = useRef(false)
   const initialSortRef = useRef({ sortKey, sortDirection })
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
+  const autosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const restoredDraftDocumentIdsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
   const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
@@ -371,7 +372,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     if (draftDirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
     setActiveDraft(null)
     discardedNewDraftRef.current = true
-    void deleteDraft(newDraftStorageKey)
+    void autosaveCancelLocalDraftRef.current(newDraftStorageKey).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : '端末内の下書きを削除できませんでした。'))
     setNewDraftStorageKey('maintenance-new-document')
     registerActiveDraft('maintenance-new', null)
     draftContextRef.current = null
@@ -382,6 +383,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setPendingDraftPreview(null)
     setPendingDraftDuplicateConfirmation(undefined)
     return true
+  }
+
+  function cancelDraftCreation() {
+    if (!draftDocument || saving) return
+    if (!discardDraftIfConfirmed('作成を中止')) return
+    setSelectedDocumentId('')
+    setDocumentView('edit')
+    openMobileList()
   }
 
   function selectPersistedDocument(documentId: string) {
@@ -1048,6 +1057,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     onBlocked: (reason) => setError(reason.message),
   })
   autosaveFlushRef.current = autosave.flush
+  autosaveCancelLocalDraftRef.current = autosave.cancelLocalDraft
 
   return <>
     <div className="page-header maintenance-page-header"><div><span className="page-eyebrow">整備書類</span><h1>車検・点検・一般</h1><p>整備の受付から作業明細、見積書・請求書まで管理します。</p></div><button className="button button-primary" type="button" onClick={openCreateDialog}><Plus size={18} />整備書類を作成</button></div>
@@ -1055,7 +1065,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     {loading && <div className="customer-sync-status"><span>整備書類を読み込んでいます。</span></div>}
     <div className="maintenance-toolbar"><label className="maintenance-search"><Search size={18} /><span className="sr-only">整備書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
     <div className="document-filter-panel maintenance-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
-    <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} autosaveStatus={autosave.status} autosaveLastSavedAt={autosave.lastSavedAt} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
+    <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} autosaveStatus={autosave.status} autosaveLastSavedAt={autosave.lastSavedAt} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onCancelDraft={cancelDraftCreation} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>整備書類が見つかりません</strong><span>{loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
     {maintenanceDuplicateDialog && <MaintenanceDuplicateConfirmationDialog state={maintenanceDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleMaintenanceDuplicateCancel} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMaintenanceMasterSyncCancel} />}
@@ -1112,11 +1122,11 @@ function maintenanceDocumentMonth(issuedAt: string) {
 
 type MaintenanceHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
 
-function MaintenanceDocumentDetail({ document, isDraft, draftDirty, customers, settings, itemPresets, view, saving, saved, autosaveStatus, autosaveLastSavedAt, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onSave, onArchive, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
+function MaintenanceDocumentDetail({ document, isDraft, draftDirty, customers, settings, itemPresets, view, saving, saved, autosaveStatus, autosaveLastSavedAt, onViewChange, onUpdateHeader, onUpdateDetails, onUpdateTaxRate, onSave, onArchive, onCancelDraft, onPdfDownload, onPdfPreview, onUpdateItem, onAddItem, onRemoveItem, onUpdateFee }: MaintenanceDocumentDetailProps) {
   return <section className="panel maintenance-detail-panel">
     <div className="maintenance-detail-header">
       <div className="maintenance-detail-title"><div><div className="maintenance-detail-badges"><MaintenanceDocumentTypeTag type={document.type} /><span className={`maintenance-category-badge maintenance-category-${document.category}`}>{document.category}</span><MaintenanceStatusTag status={document.status} />{document.abacusImport?.vehicleless && <span className="document-abacus-badge">ABACUS・車両なし</span>}</div><h2>{document.id ? document.number : '未採番'}</h2><small>{document.type} ・ 発行元 {settings.shop.name}</small>{document.abacusImport?.vehicleless && <small className="document-abacus-source">ABACUS互換：顧客にのみ紐付く書類（{document.abacusImport.sourceLocation}）</small>}<AbacusLinkProvenance metadata={document.abacusImport} />{document.isAbacusMigration && <AbacusMigrationNotice document={document} />}</div></div>
-      <div className="maintenance-detail-actions"><AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} /><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={saving || (isDraft && !draftDirty)} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />出力</button><button className="button button-danger" type="button" disabled={isDraft || saving} onClick={onArchive}><Archive size={16} />アーカイブ</button></div>
+      <div className="maintenance-detail-actions"><AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} /><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfPreview}><Eye size={16} />PDFで確認</button><button className="button button-secondary" type="button" disabled={saving || (isDraft && !draftDirty)} onClick={onSave}><Save size={16} />{saving ? '保存中…' : saved ? '保存済み' : '保存'}</button><button className="button button-secondary" type="button" disabled={isDraft} onClick={onPdfDownload}><FileDown size={16} />出力</button><button className="button button-danger" type="button" disabled={saving} onClick={isDraft ? onCancelDraft : onArchive}>{isDraft ? <X size={16} /> : <Archive size={16} />}{isDraft ? 'キャンセル' : 'アーカイブ'}</button></div>
     </div>
     <div className="maintenance-document-tabs" role="tablist" aria-label="整備書類の表示"><button id="maintenance-document-edit-tab" className={view === 'edit' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'edit'} aria-controls="maintenance-document-edit-panel" onClick={() => onViewChange('edit')}><FileText size={16} />入力</button><button id="maintenance-document-preview-tab" className={view === 'preview' ? 'is-active' : ''} type="button" role="tab" aria-selected={view === 'preview'} aria-controls="maintenance-document-preview-panel" onClick={() => onViewChange('preview')}><Eye size={16} />プレビュー</button></div>
     {view === 'edit'
@@ -1144,6 +1154,7 @@ type MaintenanceDocumentDetailProps = {
   onUpdateDetails: (details: MaintenanceDocumentDetails) => void
   onSave: () => void
   onArchive: () => void
+  onCancelDraft: () => void
   onPdfDownload: () => void
   onPdfPreview: () => void
   onUpdateItem: (itemId: string, field: MaintenanceItemField, value: string) => void

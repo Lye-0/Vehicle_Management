@@ -57,6 +57,8 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
   const localTimerRef = useRef<number | null>(null)
   const inFlightRef = useRef<Promise<boolean> | null>(null)
   const pendingRef = useRef(false)
+  const localSaveGenerationRef = useRef(0)
+  const cancelledLocalDraftKeyRef = useRef<string | null>(null)
   const blockedSignatureRef = useRef<string | null>(null)
   const errorSignatureRef = useRef<string | null>(null)
 
@@ -91,16 +93,32 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
 
   const persistLocalDraft = useCallback(async (force = false) => {
     const currentKey = storageKeyRef.current
-    if (!enabledRef.current || (!dirtyRef.current && !force) || !currentKey) return
+    if (!enabledRef.current || (!dirtyRef.current && !force) || !currentKey || cancelledLocalDraftKeyRef.current === currentKey) return
+    const generation = localSaveGenerationRef.current
     const snapshot = valueRef.current
     const snapshotSignature = valueSignature(snapshot)
     try {
       await writeDraft(currentKey, snapshot)
+      if (localSaveGenerationRef.current !== generation || storageKeyRef.current !== currentKey || cancelledLocalDraftKeyRef.current === currentKey) {
+        try { await deleteDraft(currentKey) } catch { /* キャンセル後の下書き削除失敗は次回通知で確認できる */ }
+        return
+      }
       if (dirtyRef.current && valueSignature(valueRef.current) === snapshotSignature) setStatus((current) => current === 'waiting' || current === 'idle' ? 'local-saved' : current)
     } catch {
       // 端末内下書き保存に失敗しても、サーバー自動保存は継続する。
     }
   }, [])
+
+  const cancelLocalDraft = useCallback(async (key = storageKeyRef.current) => {
+    if (!key) return
+    cancelledLocalDraftKeyRef.current = key
+    localSaveGenerationRef.current += 1
+    clearTimers()
+    dirtyStartedAtRef.current = null
+    setStatus('idle')
+    setLastSavedAt(null)
+    await deleteDraft(key)
+  }, [clearTimers])
 
   const flush = useCallback<AutosaveFlush>(async (force = false): Promise<boolean> => {
     // 未採番の作成直後はまだ入力変更がなくても、タブ移動時に復元できるよう端末へ残す。
@@ -239,5 +257,5 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
 
   useEffect(() => () => clearTimers(), [clearTimers])
 
-  return { status, lastSavedAt, flush }
+  return { status, lastSavedAt, flush, cancelLocalDraft }
 }
