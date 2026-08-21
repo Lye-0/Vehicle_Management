@@ -29,6 +29,8 @@ import { setActiveOrganizationId } from './lib/api'
 import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import { createSharedSchedule, deleteSharedSchedule, updateSharedSchedule } from './lib/sharedSchedulesApi'
+import { useAutosaveNavigation } from './hooks/autosaveNavigationContext'
+import { AutosaveNavigationProvider } from './hooks/useAutosaveNavigation'
 import './App.css'
 
 type SectionId = 'dashboard' | 'customers' | 'sales' | 'maintenance' | 'inspections' | 'payments' | 'settings'
@@ -124,7 +126,7 @@ function AuthenticatedApp({ initialSession, user, onUserUpdated }: { initialSess
   if (!session.organizations.length) return <NoOrganizationPage onAccepted={() => void loadSession()} onSignOut={() => void signOutCurrentUser()} />
 
   const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
-  return <WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} />
+  return <AutosaveNavigationProvider><WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} /></AutosaveNavigationProvider>
 }
 
 function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (session: AuthSession) => void; onSignOut: () => void }) {
@@ -160,38 +162,48 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
 function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
   const [navigationTarget, setNavigationTarget] = useState<(VehicleHistoryNavigation | CustomerVehicleNavigation) | null>(null)
+  const { flushAll } = useAutosaveNavigation()
 
-  function selectSection(nextSection: SectionId) {
-    if (nextSection !== activeSection) setNavigationTarget(null)
+  async function selectSection(nextSection: SectionId) {
+    if (nextSection === activeSection) return
+    if (!await confirmAutosaveTransition(flushAll)) return
+    setNavigationTarget(null)
     setActiveSection(nextSection)
   }
 
-  function navigateFromVehicleHistory(target: VehicleHistoryNavigation) {
+  async function navigateTo(target: VehicleHistoryNavigation | CustomerVehicleNavigation) {
+    if (!await confirmAutosaveTransition(flushAll)) return
     setNavigationTarget(target)
     setActiveSection(target.section)
   }
 
-  function navigateToCustomerVehicle(target: CustomerVehicleNavigation) {
-    setNavigationTarget(target)
-    setActiveSection(target.section)
+  async function selectOrganization(organizationId: string) {
+    if (organizationId === activeOrganization.organizationId) return
+    if (!await confirmAutosaveTransition(flushAll)) return
+    onOrganizationChange(organizationId)
   }
 
-  function navigateFromDashboard(target: CustomerVehicleNavigation | VehicleHistoryNavigation) {
-    setNavigationTarget(target)
-    setActiveSection(target.section)
+  async function signOut() {
+    if (!await confirmAutosaveTransition(flushAll)) return
+    onSignOut()
   }
 
   return (
     <div className="app-shell">
-      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onOrganizationChange} activeSection={activeSection} onSelect={selectSection} onSignOut={onSignOut} />
+      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={(organizationId) => { void selectOrganization(organizationId) }} activeSection={activeSection} onSelect={(section) => { void selectSection(section) }} onSignOut={() => { void signOut() }} />
       <main className="app-main">
         <Topbar currentPage={pageMeta[activeSection]} />
         <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard onNavigate={navigateFromDashboard} /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={navigateFromVehicleHistory} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={navigateToCustomerVehicle} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={navigateFromVehicleHistory} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
+          {activeSection === 'dashboard' ? <Dashboard onNavigate={(target) => { void navigateTo(target) }} /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={(target) => { void navigateTo(target) }} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={(target) => { void navigateTo(target) }} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={(target) => { void navigateTo(target) }} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
         </div>
       </main>
     </div>
   )
+}
+
+async function confirmAutosaveTransition(flushAll: () => Promise<boolean>) {
+  const flushed = await flushAll()
+  return flushed || window.confirm('未同期の変更があります。このまま移動しますか？端末内下書きは保持されます。')
 }
 
 function SessionError({ message, onRetry }: { message: string; onRetry: () => void }) {

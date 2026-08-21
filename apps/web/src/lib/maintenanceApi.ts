@@ -53,6 +53,7 @@ export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
 
 export type MaintenanceDocument = {
   id: string
+  updatedAt: string
   number: string
   type: MaintenanceDocumentType
   status: MaintenanceStatus
@@ -91,7 +92,7 @@ export type MaintenanceDocument = {
   isSummary?: boolean
 }
 
-export type MaintenanceDocumentSummary = Pick<MaintenanceDocument, 'id' | 'number' | 'type' | 'status' | 'category' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'intakeDate' | 'issuedAt' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
+export type MaintenanceDocumentSummary = Pick<MaintenanceDocument, 'id' | 'updatedAt' | 'number' | 'type' | 'status' | 'category' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'intakeDate' | 'issuedAt' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
   total: number
   abacusImport?: AbacusDocumentImportMetadata | null
   isAbacusMigration?: boolean
@@ -123,6 +124,7 @@ export type MaintenanceDocumentInput = {
   note: string
   details: MaintenanceDocumentDetails
   items: Array<Omit<MaintenanceLineItem, 'id'>>
+  expectedUpdatedAt?: string
   mileageSync?: {
     confirmed: true
     openedMileage: number | null

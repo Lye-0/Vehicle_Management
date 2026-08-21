@@ -194,6 +194,7 @@ function serializeMaintenanceDocumentSummary(document: typeof maintenanceDocumen
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeMaintenanceStatus(document.status),
@@ -495,6 +496,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
 
   const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
+  if (typeof body.expectedUpdatedAt === 'string' && body.expectedUpdatedAt !== current.updatedAt) throw new HttpError(409, '整備書類が他の端末で更新されています。再読み込みしてください。')
   const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
   if (current.vehicleId && !requestedVehicleId) {
     throw new HttpError(400, '通常の整備書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
@@ -887,6 +889,7 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeMaintenanceStatus(document.status),

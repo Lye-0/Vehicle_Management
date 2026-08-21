@@ -42,11 +42,23 @@ import {
   updateVehicle,
   uploadVehicleFile,
 } from '../lib/customerApi'
+import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
+import { deleteDraft, readDraft } from '../lib/draftStorage'
 import { DateCalendarButton } from './DateCalendarButton'
 import { NormalizedInput } from './NormalizedValueInput'
+import { AutosaveStatus } from './AutosaveStatus'
 
 const emptyCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '' }
 const emptyVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
+function normalizeCustomerForm(form: CustomerInput): CustomerInput {
+  return { ...form, phone: normalizePhone(form.phone), postalCode: normalizePostalCode(form.postalCode ?? '') }
+}
+function normalizeVehicleForm(form: VehicleInput): VehicleInput {
+  return { ...form, year: normalizeModelYear(form.year), mileage: normalizeMileage(form.mileage), displacement: normalizeDisplacement(form.displacement) }
+}
+function formSignature(value: unknown) {
+  return JSON.stringify(value)
+}
 const customerSearchFields = ['すべて', '顧客名', 'ふりがな', 'メールアドレス', '電話番号', '住所', '車名', '登録番号', '車台番号'] as const
 type CustomerSearchField = (typeof customerSearchFields)[number]
 const customerSearchPlaceholders: Record<CustomerSearchField, string> = {
@@ -89,10 +101,18 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [vehicleForm, setVehicleForm] = useState<VehicleInput>(emptyVehicleForm)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [customerDirty, setCustomerDirty] = useState(false)
+  const [vehicleDirty, setVehicleDirty] = useState(false)
   const [error, setError] = useState('')
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null)
   const initialNavigationRef = useRef({ customerId: initialCustomerId, vehicleId: initialVehicleId })
   const onNavigationConsumedRef = useRef(onNavigationConsumed)
+  const customerAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
+  const vehicleAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
+  const customerSavedSignatureRef = useRef('')
+  const vehicleSavedSignatureRef = useRef('')
+  const customerUpdatedAtRef = useRef<string | null>(null)
+  const vehicleUpdatedAtRef = useRef<string | null>(null)
   onNavigationConsumedRef.current = onNavigationConsumed
 
   useEffect(() => {
@@ -268,84 +288,238 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }
 
   function openNewCustomerDialog() {
-    setEditingCustomerId(null)
-    setCustomerForm(emptyCustomerForm)
-    setCustomerDialogOpen(true)
+    void readDraft<CustomerInput>('customer-new').then((draft) => {
+      const shouldRestore = Boolean(draft && window.confirm('前回の顧客登録で端末に残った入力があります。復元しますか？'))
+      if (!shouldRestore) {
+        if (draft) void deleteDraft('customer-new')
+        setEditingCustomerId(null)
+        setCustomerForm(emptyCustomerForm)
+        setCustomerDirty(false)
+        customerSavedSignatureRef.current = ''
+        customerUpdatedAtRef.current = null
+      } else {
+        setEditingCustomerId(null)
+        setCustomerForm(normalizeCustomerForm(draft!.value))
+        setCustomerDirty(true)
+        customerSavedSignatureRef.current = ''
+        customerUpdatedAtRef.current = null
+        setError('端末内に残っていた顧客登録の入力を復元しました。')
+      }
+      setCustomerDialogOpen(true)
+    }).catch(() => {
+      setEditingCustomerId(null)
+      setCustomerForm(emptyCustomerForm)
+      setCustomerDirty(false)
+      customerSavedSignatureRef.current = ''
+      customerUpdatedAtRef.current = null
+      setCustomerDialogOpen(true)
+    })
   }
 
   function openEditCustomerDialog(customer: Customer) {
     setEditingCustomerId(customer.id)
-    setCustomerForm({ name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: customer.birthDate, employer: customer.employer, memo: customer.memo })
+    const form = { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: customer.birthDate, employer: customer.employer, memo: customer.memo }
+    setCustomerForm(form)
+    setCustomerDirty(false)
+    customerSavedSignatureRef.current = formSignature(normalizeCustomerForm(form))
+    customerUpdatedAtRef.current = customer.updatedAt
     setCustomerDialogOpen(true)
+    void readDraft<CustomerInput>(`customer-edit:${customer.id}`).then((draft) => {
+      if (!draft || draft.savedAt <= (Date.parse(customer.updatedAt) || 0) || customerSavedSignatureRef.current === formSignature(normalizeCustomerForm(draft.value))) return
+      setCustomerForm(draft.value)
+      setCustomerDirty(true)
+      setError('端末内に残っていた顧客情報の変更を復元しました。')
+    }).catch(() => undefined)
   }
 
-  function closeCustomerDialog() {
+  function closeCustomerDialogNow() {
     setCustomerDialogOpen(false)
     setEditingCustomerId(null)
     setCustomerForm(emptyCustomerForm)
+    setCustomerDirty(false)
   }
 
-  async function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!customerForm.name.trim()) return
-    const normalizedForm = { ...customerForm, phone: normalizePhone(customerForm.phone), postalCode: normalizePostalCode(customerForm.postalCode ?? '') }
-    setSaving(true)
+  function closeCustomerDialog() {
+    if (!editingCustomerId) {
+      closeCustomerDialogNow()
+      return
+    }
+    void customerAutosaveFlushRef.current().then((flushed) => {
+      if (flushed) closeCustomerDialogNow()
+    })
+  }
+
+  function updateCustomerForm(nextForm: CustomerInput) {
+    setCustomerForm(nextForm)
+    setCustomerDirty(true)
     setError('')
+  }
+
+  async function persistCustomerForm(id: string, form: CustomerInput): Promise<Customer> {
+    const normalizedForm = normalizeCustomerForm(form)
+    if (!normalizedForm.name.trim()) throw new AutosaveBlockedError('顧客名を入力してから保存してください。')
+    if (customerSavedSignatureRef.current === formSignature(normalizedForm)) {
+      setCustomerDirty(false)
+      const current = customers.find((customer) => customer.id === id)
+      if (!current) throw new Error('顧客情報を読み込めませんでした。')
+      return current
+    }
+    setSaving(true)
     try {
-      const savedCustomer = editingCustomerId ? await updateCustomer(editingCustomerId, normalizedForm) : await createCustomer(normalizedForm)
-      setCustomers((current) => editingCustomerId ? current.map((customer) => customer.id === savedCustomer.id ? savedCustomer : customer) : [...current, savedCustomer])
-      setSelectedCustomerId(savedCustomer.id)
-      setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
-      openMobileDetail()
-      closeCustomerDialog()
-    } catch (reason: unknown) {
-      setError(getErrorMessage(reason))
+      const savedCustomer = await updateCustomer(id, normalizedForm, customerUpdatedAtRef.current ?? undefined)
+      setCustomers((current) => current.map((customer) => customer.id === savedCustomer.id ? savedCustomer : customer))
+      customerSavedSignatureRef.current = formSignature(normalizedForm)
+      customerUpdatedAtRef.current = savedCustomer.updatedAt
+      setCustomerDirty(false)
+      void deleteDraft(`customer-edit:${savedCustomer.id}`)
+      setError('')
+      return savedCustomer
     } finally {
       setSaving(false)
     }
   }
 
+  async function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customerForm.name.trim()) return
+    const normalizedForm = normalizeCustomerForm(customerForm)
+    const editingId = editingCustomerId
+    if (!editingId) setSaving(true)
+    setError('')
+    try {
+      const savedCustomer = editingId
+        ? await persistCustomerForm(editingId, normalizedForm)
+        : await createCustomer(normalizedForm)
+      if (!savedCustomer) throw new Error('顧客情報を読み込めませんでした。')
+      if (!editingId) setCustomers((current) => [...current, savedCustomer])
+      if (!editingId) void deleteDraft('customer-new')
+      setSelectedCustomerId(savedCustomer.id)
+      setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
+      openMobileDetail()
+      closeCustomerDialogNow()
+    } catch (reason: unknown) {
+      setError(getErrorMessage(reason))
+    } finally {
+      if (!editingId) setSaving(false)
+    }
+  }
+
   function openNewVehicleDialog() {
-    setEditingVehicleId(null)
-    setVehicleForm(emptyVehicleForm)
-    setVehicleDialogOpen(true)
+    void readDraft<VehicleInput>('vehicle-new').then((draft) => {
+      const shouldRestore = Boolean(draft && window.confirm('前回の車両登録で端末に残った入力があります。復元しますか？'))
+      if (!shouldRestore) {
+        if (draft) void deleteDraft('vehicle-new')
+        setEditingVehicleId(null)
+        setVehicleForm(emptyVehicleForm)
+        setVehicleDirty(false)
+        vehicleSavedSignatureRef.current = ''
+        vehicleUpdatedAtRef.current = null
+      } else {
+        setEditingVehicleId(null)
+        setVehicleForm(normalizeVehicleForm(draft!.value))
+        setVehicleDirty(true)
+        vehicleSavedSignatureRef.current = ''
+        vehicleUpdatedAtRef.current = null
+        setError('端末に残っていた車両登録の入力を復元しました。')
+      }
+      setVehicleDialogOpen(true)
+    }).catch(() => {
+      setEditingVehicleId(null)
+      setVehicleForm(emptyVehicleForm)
+      setVehicleDirty(false)
+      vehicleSavedSignatureRef.current = ''
+      vehicleUpdatedAtRef.current = null
+      setVehicleDialogOpen(true)
+    })
   }
 
   function openEditVehicleDialog(vehicle: Vehicle) {
     setEditingVehicleId(vehicle.id)
-    setVehicleForm({ maker: vehicle.maker, model: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, note: vehicle.note, freeItem1: vehicle.freeItem1, freeItem2: vehicle.freeItem2, freeItem3: vehicle.freeItem3 })
+    const form = { maker: vehicle.maker, model: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, note: vehicle.note, freeItem1: vehicle.freeItem1, freeItem2: vehicle.freeItem2, freeItem3: vehicle.freeItem3 }
+    setVehicleForm(form)
+    setVehicleDirty(false)
+    vehicleSavedSignatureRef.current = formSignature(normalizeVehicleForm(form))
+    vehicleUpdatedAtRef.current = vehicle.updatedAt
     setVehicleDialogOpen(true)
+    void readDraft<VehicleInput>(`vehicle-edit:${vehicle.id}`).then((draft) => {
+      if (!draft || draft.savedAt <= (Date.parse(vehicle.updatedAt) || 0) || vehicleSavedSignatureRef.current === formSignature(normalizeVehicleForm(draft.value))) return
+      setVehicleForm(draft.value)
+      setVehicleDirty(true)
+      setError('端末内に残っていた車両情報の変更を復元しました。')
+    }).catch(() => undefined)
   }
 
-  function closeVehicleDialog() {
+  function closeVehicleDialogNow() {
     setVehicleDialogOpen(false)
     setEditingVehicleId(null)
     setVehicleForm(emptyVehicleForm)
+    setVehicleDirty(false)
+  }
+
+  function closeVehicleDialog() {
+    if (!editingVehicleId) {
+      closeVehicleDialogNow()
+      return
+    }
+    void vehicleAutosaveFlushRef.current().then((flushed) => {
+      if (flushed) closeVehicleDialogNow()
+    })
+  }
+
+  function updateVehicleForm(nextForm: VehicleInput) {
+    setVehicleForm(nextForm)
+    setVehicleDirty(true)
+    setError('')
+  }
+
+  async function persistVehicleForm(id: string, form: VehicleInput): Promise<Customer> {
+    const normalizedForm = normalizeVehicleForm(form)
+    if (!normalizedForm.maker.trim() || !normalizedForm.model.trim()) throw new AutosaveBlockedError('メーカーと車名を入力してから保存してください。')
+    if (vehicleSavedSignatureRef.current === formSignature(normalizedForm)) {
+      setVehicleDirty(false)
+      const current = customers.find((customer) => customer.vehicles.some((vehicle) => vehicle.id === id))
+      if (!current) throw new Error('車両情報を読み込めませんでした。')
+      return current
+    }
+    setSaving(true)
+    try {
+      const result = await updateVehicle(id, normalizedForm, vehicleUpdatedAtRef.current ?? undefined)
+      if (result.customer) setCustomers((current) => current.map((customer) => customer.id === result.customer?.id ? result.customer : customer))
+      vehicleSavedSignatureRef.current = formSignature(normalizedForm)
+      vehicleUpdatedAtRef.current = result.customer.vehicles.find((vehicle) => vehicle.id === id)?.updatedAt ?? vehicleUpdatedAtRef.current
+      setVehicleDirty(false)
+      void deleteDraft(`vehicle-edit:${id}`)
+      setError('')
+      return result.customer
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handleVehicleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedCustomer || !vehicleForm.maker.trim() || !vehicleForm.model.trim()) return
-    const normalizedForm = { ...vehicleForm, year: normalizeModelYear(vehicleForm.year), mileage: normalizeMileage(vehicleForm.mileage), displacement: normalizeDisplacement(vehicleForm.displacement) }
-    setSaving(true)
+    const normalizedForm = normalizeVehicleForm(vehicleForm)
+    const editingId = editingVehicleId
+    if (!editingId) setSaving(true)
     setError('')
     try {
-      if (editingVehicleId) {
-        await updateVehicle(editingVehicleId, normalizedForm)
-        setCustomers((current) => current.map((customer) => customer.id !== selectedCustomer.id ? customer : { ...customer, vehicles: customer.vehicles.map((vehicle) => vehicle.id === editingVehicleId ? { ...vehicle, ...normalizedForm, attachments: vehicle.attachments } : vehicle) }))
-        setSelectedVehicleId(editingVehicleId)
+      if (editingId) {
+        await persistVehicleForm(editingId, normalizedForm)
+        setSelectedVehicleId(editingId)
       } else {
         const result = await createVehicle(selectedCustomer.id, normalizedForm)
+        void deleteDraft('vehicle-new')
         setCustomers((current) => current.map((customer) => customer.id === result.customer.id ? result.customer : customer))
         setSelectedCustomerId(result.customer.id)
         setSelectedVehicleId(result.vehicleId)
       }
       openMobileDetail()
-      closeVehicleDialog()
+      closeVehicleDialogNow()
     } catch (reason: unknown) {
       setError(getErrorMessage(reason))
     } finally {
-      setSaving(false)
+      if (!editingId) setSaving(false)
     }
   }
 
@@ -418,6 +592,40 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     setAttachmentPreview(null)
   }
 
+  const customerAutosave = useAutosave<CustomerInput>({
+    value: customerForm,
+    dirty: customerDirty,
+    enabled: customerDialogOpen,
+    serverEnabled: Boolean(customerDialogOpen && editingCustomerId && customerDirty),
+    registrationKey: `customer:${editingCustomerId ?? 'new'}`,
+    storageKey: editingCustomerId ? `customer-edit:${editingCustomerId}` : 'customer-new',
+    save: async (snapshot) => {
+      if (!editingCustomerId) throw new AutosaveBlockedError()
+      await persistCustomerForm(editingCustomerId, snapshot)
+      return true
+    },
+    onError: (reason) => setError(getErrorMessage(reason)),
+    onBlocked: (reason) => setError(reason.message),
+  })
+  customerAutosaveFlushRef.current = customerAutosave.flush
+
+  const vehicleAutosave = useAutosave<VehicleInput>({
+    value: vehicleForm,
+    dirty: vehicleDirty,
+    enabled: vehicleDialogOpen,
+    serverEnabled: Boolean(vehicleDialogOpen && editingVehicleId && vehicleDirty),
+    registrationKey: `vehicle:${editingVehicleId ?? 'new'}`,
+    storageKey: editingVehicleId ? `vehicle-edit:${editingVehicleId}` : 'vehicle-new',
+    save: async (snapshot) => {
+      if (!editingVehicleId) throw new AutosaveBlockedError()
+      await persistVehicleForm(editingVehicleId, snapshot)
+      return true
+    },
+    onError: (reason) => setError(getErrorMessage(reason)),
+    onBlocked: (reason) => setError(reason.message),
+  })
+  vehicleAutosaveFlushRef.current = vehicleAutosave.flush
+
   return (
     <>
       <div className="page-header customer-page-header">
@@ -440,8 +648,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         </div>
       </div>
 
-      {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} onChange={setCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
-      {vehicleDialogOpen && selectedCustomer && <VehicleDialog form={vehicleForm} title={editingVehicleId ? '車両情報を編集' : '車両を追加'} submitLabel={editingVehicleId ? '変更を保存' : '車両を追加'} customerName={selectedCustomer.name} onChange={setVehicleForm} onClose={closeVehicleDialog} onSubmit={handleVehicleSubmit} />}
+      {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} cancelLabel={editingCustomerId ? '閉じる' : undefined} autosaveStatus={customerAutosave.status} autosaveLastSavedAt={customerAutosave.lastSavedAt} onChange={updateCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} />}
+      {vehicleDialogOpen && selectedCustomer && <VehicleDialog form={vehicleForm} title={editingVehicleId ? '車両情報を編集' : '車両を追加'} submitLabel={editingVehicleId ? '変更を保存' : '車両を追加'} cancelLabel={editingVehicleId ? '閉じる' : undefined} autosaveStatus={vehicleAutosave.status} autosaveLastSavedAt={vehicleAutosave.lastSavedAt} customerName={selectedCustomer.name} onChange={updateVehicleForm} onClose={closeVehicleDialog} onSubmit={handleVehicleSubmit} />}
       {attachmentPreview && <AttachmentPreviewModal preview={attachmentPreview} onClose={closeAttachmentPreview} />}
     </>
   )
@@ -757,12 +965,12 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
   return <div className="modal-backdrop attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="attachment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="attachment-preview-title"><div className="modal-header"><div><h2 id="attachment-preview-title">{preview.attachment.name}</h2><span className="attachment-preview-meta">{isImage ? '画像' : preview.attachment.type === 'pdf' ? 'PDF' : '添付ファイル'} ・ {formatFileSize(preview.attachment.size)}</span></div><div className="attachment-preview-header-actions">{isImage && <button className="button button-secondary" type="button" disabled={ocrStatus === 'running'} onClick={() => void recognizeText()}><FileText size={16} />{ocrButtonLabel}</button>}<button className="modal-close" type="button" aria-label="プレビューを閉じる" onClick={onClose}><X size={19} /></button></div></div><div className="attachment-preview-content">{isImage ? <div className="attachment-image-preview"><div className="attachment-image-stage"><img ref={imageRef} className="attachment-preview-image" src={preview.url} alt={preview.attachment.name} onLoad={(event) => { const image = event.currentTarget; const { width: renderedWidth, height: renderedHeight } = image.getBoundingClientRect(); setImageSize({ width: image.naturalWidth, height: image.naturalHeight, renderedWidth, renderedHeight }) }} />{ocrRegions.length > 0 && imageSize && <div ref={ocrLayerRef} className="attachment-ocr-layer" aria-label="OCRで認識した文字" onPointerDown={handleOcrPointerDown} onPointerMove={handleOcrPointerMove} onPointerUp={endOcrPointerSelection} onPointerCancel={endOcrPointerSelection}>{ocrRegions.map((region, index) => { const renderedRegionHeight = Math.max(1, ((region.y1 - region.y0) / imageSize.height) * imageSize.renderedHeight); return <span className={`attachment-ocr-token${selectedOcrRegionIndexes.has(index) ? ' is-selected' : ''}`} data-confidence={region.confidence} data-ocr-region-index={index} key={`${region.x0}-${region.y0}-${index}`} style={{ left: `${(region.x0 / imageSize.width) * 100}%`, top: `${(region.y0 / imageSize.height) * 100}%`, width: `${((region.x1 - region.x0) / imageSize.width) * 100}%`, height: `${((region.y1 - region.y0) / imageSize.height) * 100}%`, fontSize: `${renderedRegionHeight}px`, lineHeight: `${renderedRegionHeight}px` }}>{region.text}</span> })}</div>}</div>{ocrStatus === 'ready' && <span className="attachment-ocr-status" role="status">認識した文字をカーソルや指でなぞって選択できます。</span>}{ocrStatus === 'running' && <span className="attachment-ocr-status" role="status">画像内の文字を解析しています。初回は少し時間がかかります。</span>}{ocrStatus === 'empty' && <span className="attachment-ocr-status">文字を認識できませんでした。画像を拡大して再認識してください。</span>}{ocrStatus === 'error' && <span className="attachment-ocr-status is-error" role="alert">{ocrError}</span>}</div> : preview.attachment.type === 'pdf' ? <iframe className="attachment-preview-frame" src={`${preview.url}#toolbar=1`} title={`${preview.attachment.name}のプレビュー`} /> : <div className="attachment-preview-empty"><FileText size={30} /><strong>このファイル形式は画面表示に対応していません</strong><a className="button button-secondary" href={preview.url} download={preview.attachment.name}>ファイルをダウンロード</a></div>}</div></section></div>
 }
 
-function CustomerDialog({ form, title, submitLabel, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><NormalizedInput field="phone" type="tel" value={form.phone} onChange={(phone) => onChange({ ...form, phone })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><ModalDateInput ariaLabel="生年月日" value={form.birthDate} onChange={(birthDate) => onChange({ ...form, birthDate })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><NormalizedInput field="postalCode" value={form.postalCode ?? ''} onChange={(postalCode) => onChange({ ...form, postalCode })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
+function CustomerDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, onChange, onClose, onSubmit }: { form: CustomerInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><NormalizedInput field="phone" type="tel" value={form.phone} onChange={(phone) => onChange({ ...form, phone })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><ModalDateInput ariaLabel="生年月日" value={form.birthDate} onChange={(birthDate) => onChange({ ...form, birthDate })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><NormalizedInput field="postalCode" value={form.postalCode ?? ''} onChange={(postalCode) => onChange({ ...form, postalCode })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} /><ModalFooter onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={false} /></form></Modal>
 }
 
-function VehicleDialog({ form, title, submitLabel, customerName, onChange, onClose, onSubmit }: { form: VehicleInput; title: string; submitLabel: string; customerName: string; onChange: (form: VehicleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><NormalizedInput field="modelYear" value={form.year} onChange={(year) => onChange({ ...form, year })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><NormalizedInput field="mileage" value={form.mileage} onChange={(mileage) => onChange({ ...form, mileage })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><NormalizedInput field="displacement" inputMode="numeric" value={form.displacement} onChange={(displacement) => onChange({ ...form, displacement })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><ModalFooter onClose={onClose} submitLabel={submitLabel} disabled={false} /></form></Modal>
+function VehicleDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, customerName, onChange, onClose, onSubmit }: { form: VehicleInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; customerName: string; onChange: (form: VehicleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><NormalizedInput field="modelYear" value={form.year} onChange={(year) => onChange({ ...form, year })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><NormalizedInput field="mileage" value={form.mileage} onChange={(mileage) => onChange({ ...form, mileage })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><NormalizedInput field="displacement" inputMode="numeric" value={form.displacement} onChange={(displacement) => onChange({ ...form, displacement })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} /><ModalFooter onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={false} /></form></Modal>
 }
 
 function ModalDateInput({ ariaLabel, value, onChange, placeholder }: { ariaLabel: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
@@ -777,8 +985,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><h2 id="modal-title">{title}</h2><button className="modal-close" type="button" aria-label="閉じる" onClick={onClose}><X size={19} /></button></div>{children}</section></div>
 }
 
-function ModalFooter({ onClose, submitLabel, disabled }: { onClose: () => void; submitLabel: string; disabled: boolean }) {
-  return <div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose} disabled={disabled}>キャンセル</button><button className="button button-primary" type="submit" disabled={disabled}>{submitLabel}</button></div>
+function ModalFooter({ onClose, cancelLabel = 'キャンセル', submitLabel, disabled }: { onClose: () => void; cancelLabel?: string; submitLabel: string; disabled: boolean }) {
+  return <div className="modal-footer"><button className="button button-secondary" type="button" onClick={onClose} disabled={disabled}>{cancelLabel}</button><button className="button button-primary" type="submit" disabled={disabled}>{submitLabel}</button></div>
 }
 
 function formatFileSize(bytes: number) {

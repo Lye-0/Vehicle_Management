@@ -216,11 +216,14 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
 }
 
 async function updateCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  if (!await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()) throw new HttpError(404, '顧客が見つかりません。')
+  const current = await database.select({ id: customers.id, updatedAt: customers.updatedAt }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '顧客が見つかりません。')
   const body = await readJson(request)
   const name = stringValue(body, 'name')
   if (!name) throw new HttpError(400, '顧客名は必須です。')
-  await database.update(customers).set({
+  const expectedUpdatedAt = typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined
+  if (expectedUpdatedAt && expectedUpdatedAt !== current.updatedAt) throw new HttpError(409, '顧客情報が他の端末で更新されています。再読み込みしてください。')
+  const result = await database.update(customers).set({
     name,
     nameKana: nullableString(body, 'nameKana'),
     phone: nullableString(body, 'phone'),
@@ -231,7 +234,8 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
     employer: nullableCustomerEmployer(body),
     memo: nullableString(body, 'memo'),
     updatedAt: new Date().toISOString(),
-  }).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
+  }).where(expectedUpdatedAt ? and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), eq(customers.updatedAt, expectedUpdatedAt)) : and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).run()
+  if (expectedUpdatedAt && result.meta.changes !== 1) throw new HttpError(409, '顧客情報が他の端末で更新されています。再読み込みしてください。')
   return jsonResponse({ customer: await loadCustomerRecordById(database, customerId, organizationId) }, 200, env)
 }
 
@@ -266,12 +270,15 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
 }
 
 async function updateVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
-  if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
+  const current = await database.select({ id: vehicles.id, customerId: vehicles.customerId, updatedAt: vehicles.updatedAt }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+  if (!current) throw new HttpError(404, '車両が見つかりません。')
   const body = await readJson(request)
   const maker = stringValue(body, 'maker')
   const name = stringValue(body, 'model') || stringValue(body, 'name')
   if (!maker || !name) throw new HttpError(400, 'メーカーと車名は必須です。')
-  await database.update(vehicles).set({
+  const expectedUpdatedAt = typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined
+  if (expectedUpdatedAt && expectedUpdatedAt !== current.updatedAt) throw new HttpError(409, '車両情報が他の端末で更新されています。再読み込みしてください。')
+  const result = await database.update(vehicles).set({
     maker,
     name,
     model: nullableString(body, 'modelType'),
@@ -288,8 +295,9 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
     freeItem2: nullableString(body, 'freeItem2'),
     freeItem3: nullableString(body, 'freeItem3'),
     updatedAt: new Date().toISOString(),
-  }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).run()
-  return jsonResponse({ vehicleId }, 200, env)
+  }).where(expectedUpdatedAt ? and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), eq(vehicles.updatedAt, expectedUpdatedAt)) : and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).run()
+  if (expectedUpdatedAt && result.meta.changes !== 1) throw new HttpError(409, '車両情報が他の端末で更新されています。再読み込みしてください。')
+  return jsonResponse({ customer: await loadCustomerRecordById(database, current.customerId, organizationId), vehicleId }, 200, env)
 }
 
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {

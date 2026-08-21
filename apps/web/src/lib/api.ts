@@ -3,6 +3,16 @@ import { getCurrentIdToken } from './auth'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 let activeOrganizationId: string | null = null
 
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 export function setActiveOrganizationId(organizationId: string | null) {
   activeOrganizationId = organizationId
 }
@@ -13,13 +23,13 @@ export function getActiveOrganizationId() {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers: await createApiHeaders(init) })
-  if (!response.ok) throw new Error(await readApiError(response))
+  if (!response.ok) throw new ApiError(response.status, await readApiError(response))
   return response.json() as Promise<T>
 }
 
 export async function apiFetchBlob(path: string, init: RequestInit = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers: await createApiHeaders(init) })
-  if (!response.ok) throw new Error(await readApiError(response))
+  if (!response.ok) throw new ApiError(response.status, await readApiError(response))
   return response.blob()
 }
 

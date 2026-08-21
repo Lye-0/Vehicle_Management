@@ -4,13 +4,16 @@ import { normalizePhone, normalizePostalCode, type NormalizableField } from '@ve
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { fetchOrganizationPermissions, updateCurrentProfile, updateOrganizationPermissions, type OrganizationPermissions } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
+import { useAutosave } from '../hooks/useAutosave'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '../lib/backupsApi'
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
+import { deleteDraft } from '../lib/draftStorage'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
+import { AutosaveStatus } from './AutosaveStatus'
 import { AbacusRegistrationPackagePanel } from './AbacusRegistrationPackagePanel'
 import { IconWithChain } from './IconWithChain'
 import { NormalizedInput } from './NormalizedValueInput'
@@ -47,6 +50,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [permissionsDirty, setPermissionsDirty] = useState(false)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState<CsvResource | ''>('')
 
@@ -59,6 +64,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
           setBackupSettings(backupResponse.settings)
           setBackupPermissions({ canManageCreateRestore: backupResponse.canManageCreateRestore, canManageRetention: backupResponse.canManageRetention })
           setPermissions(permissionsResponse.permissions)
+          setSettingsDirty(false)
+          setPermissionsDirty(false)
           setCanManagePermissions(permissionsResponse.canManage)
           setError('')
         }
@@ -74,21 +81,25 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   function updateShop(field: keyof ShopSettings, value: string) {
     setSettings((current) => ({ ...current, shop: { ...current.shop, [field]: value } }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updateDocument(field: keyof DocumentSettings, value: string | number) {
     setSettings((current) => ({ ...current, document: { ...current.document, [field]: value } }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updateTax(field: keyof TaxSettings, value: string | number) {
     setSettings((current) => ({ ...current, tax: { ...current.tax, [field]: value } as TaxSettings }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updatePermission(field: keyof OrganizationPermissions, value: boolean) {
     setPermissions((current) => ({ ...current, [field]: value }))
+    setPermissionsDirty(true)
     setSaved(false)
   }
 
@@ -98,6 +109,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: current.salesItemPresetGroups[group].map((item, itemIndex) => itemIndex === index ? value : item),
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function addSalesPreset(group: SalesItemPresetGroupKey) {
@@ -106,6 +118,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: [...current.salesItemPresetGroups[group], ''],
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function removeSalesPreset(group: SalesItemPresetGroupKey, index: number) {
@@ -114,21 +127,25 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: current.salesItemPresetGroups[group].filter((_, itemIndex) => itemIndex !== index),
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function updateMaintenancePreset(index: number, value: string) {
     setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.map((item, itemIndex) => itemIndex === index ? value : item) }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function addMaintenancePreset() {
     setSettings((current) => ({ ...current, maintenanceItemPresets: [...current.maintenanceItemPresets, ''] }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function removeMaintenancePreset(index: number) {
     setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.filter((_, itemIndex) => itemIndex !== index) }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   async function save() {
@@ -153,8 +170,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSettings(nextSettings)
       setBackupSettings(nextBackupSettings)
       setPermissions(nextPermissions)
+      setSettingsDirty(false)
+      setPermissionsDirty(false)
       setSaved(true)
       setError('')
+      void deleteDraft('settings-draft')
       onReloadSession?.()
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : '設定を保存できませんでした。')
@@ -167,6 +187,38 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setBackupSettings(nextSettings)
     setSaved(false)
   }, [])
+
+  const autosave = useAutosave({
+    value: { settings, permissions },
+    dirty: settingsDirty || permissionsDirty,
+    enabled: !loading,
+    serverEnabled: !loading && !saving && (settingsDirty || permissionsDirty),
+    registrationKey: 'settings',
+    storageKey: 'settings-draft',
+    save: async ({ settings: nextSettings, permissions: nextPermissions }) => {
+      const normalizedSettings = {
+        ...nextSettings,
+        shop: {
+          ...nextSettings.shop,
+          postalCode: normalizePostalCode(nextSettings.shop.postalCode),
+          phone: normalizePhone(nextSettings.shop.phone),
+          fax: normalizePhone(nextSettings.shop.fax),
+        },
+      }
+      const [savedSettings, savedPermissions] = await Promise.all([
+        settingsDirty ? updateSettings(normalizedSettings) : Promise.resolve(settings),
+        permissionsDirty && canManagePermissions ? updateOrganizationPermissions(nextPermissions).then((response) => response.permissions) : Promise.resolve(permissions),
+      ])
+      setSettings(savedSettings)
+      setPermissions(savedPermissions)
+      setSettingsDirty(false)
+      setPermissionsDirty(false)
+      setSaved(true)
+      setError('')
+      return true
+    },
+    onError: (reason) => setError(reason instanceof Error ? reason.message : '設定を自動保存できませんでした。'),
+  })
 
   const visibleTabs = tabs.filter((tab) => tab.id !== 'permissions' || canManagePermissions)
 
@@ -192,7 +244,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   return (
     <>
-      <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
+      <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><div className="settings-page-actions"><AutosaveStatus status={autosave.status} lastSavedAt={autosave.lastSavedAt} /><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div></div>
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{visibleTabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
