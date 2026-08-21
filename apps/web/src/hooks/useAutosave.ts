@@ -101,6 +101,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
   }, [])
 
   const flush = useCallback<AutosaveFlush>(async (force = false): Promise<boolean> => {
+    if (dirtyRef.current && storageKeyRef.current) await persistLocalDraft()
     if (!serverEnabledRef.current || !dirtyRef.current) return true
     if (force) {
       blockedSignatureRef.current = null
@@ -166,7 +167,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
       if (!pendingRef.current || !dirtyRef.current) return result
       pendingRef.current = false
     }
-  }, [])
+  }, [persistLocalDraft])
 
   useRegisterAutosave(`autosave:${registrationKey}`, flush)
 

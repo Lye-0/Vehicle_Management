@@ -23,9 +23,12 @@ import { MaintenancePage } from './components/MaintenancePage'
 import { PaymentsPage } from './components/PaymentsPage'
 import { SalesPage } from './components/SalesPage'
 import { SettingsPage } from './components/SettingsPage'
+import { DraftRecoveryProvider } from './components/DraftRecoveryCenter'
+import { useDraftRecovery, type DraftRecoveryDestination } from './hooks/draftRecoveryContext'
 import { createAccountWithEmailPassword, observeAuthState, sendPasswordReset, signInAnonymouslyForDevelopment, signInWithEmailPassword, signInWithGoogle, signOutCurrentUser } from './lib/auth'
 import { acceptOrganizationInvitation } from './lib/membersApi'
 import { setActiveOrganizationId } from './lib/api'
+import { createDraftRunId } from './lib/draftStorage'
 import { completeInitialPasswordChange, completeOrganizationSetup, fetchAuthSession, type AuthSession, type OrganizationMembership } from './lib/organizationApi'
 import { fetchDashboard, type DashboardData } from './lib/dashboardApi'
 import { createSharedSchedule, deleteSharedSchedule, updateSharedSchedule } from './lib/sharedSchedulesApi'
@@ -89,6 +92,7 @@ function AuthenticatedApp({ initialSession, user, onUserUpdated }: { initialSess
   const [sessionError, setSessionError] = useState('')
   const [sessionLoading, setSessionLoading] = useState(!initialSession)
   const [activeOrganizationId, setLocalActiveOrganizationId] = useState('')
+  const [draftRunId] = useState(() => createDraftRunId())
 
   const loadSession = useCallback(async () => {
     setSessionLoading(true)
@@ -126,7 +130,7 @@ function AuthenticatedApp({ initialSession, user, onUserUpdated }: { initialSess
   if (!session.organizations.length) return <NoOrganizationPage onAccepted={() => void loadSession()} onSignOut={() => void signOutCurrentUser()} />
 
   const activeOrganization = session.organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? session.organizations[0]
-  return <AutosaveNavigationProvider><WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} /></AutosaveNavigationProvider>
+  return <AutosaveNavigationProvider><WorkspaceApp user={user} organizations={session.organizations} activeOrganization={activeOrganization} draftRunId={draftRunId} onOrganizationChange={setLocalActiveOrganizationId} onSignOut={() => void signOutCurrentUser()} onReloadSession={() => void loadSession()} onUserUpdated={onUserUpdated} /></AutosaveNavigationProvider>
 }
 
 function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (session: AuthSession) => void; onSignOut: () => void }) {
@@ -159,7 +163,7 @@ function InitialPasswordChangePage({ onCompleted, onSignOut }: { onCompleted: (s
   return <div className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><CarFront size={24} strokeWidth={2.4} /></span><div><strong>車両管理</strong></div></div><span className="page-eyebrow">FIRST SIGN IN</span><h1>パスワードを設定</h1><p>管理者から発行された初期パスワードを、あなた専用のパスワードへ変更してください。</p>{error && <div className="auth-error" role="alert">{error}</div>}<form className="auth-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>新しいパスワード</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" disabled={loading} /></label><label className="form-field"><span>新しいパスワード（確認）</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="もう一度入力" disabled={loading} /></label><button className="button button-primary auth-signin-button" type="submit" disabled={loading}>{loading ? '設定しています…' : 'パスワードを設定して開始'}</button></form><button className="text-button auth-back-button" type="button" disabled={loading} onClick={onSignOut}>ログアウト</button></section></div>
 }
 
-function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationChange, onSignOut, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
+function WorkspaceApp({ user, organizations, activeOrganization, draftRunId, onOrganizationChange, onSignOut, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; draftRunId: string; onOrganizationChange: (organizationId: string) => void; onSignOut: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard')
   const [navigationTarget, setNavigationTarget] = useState<(VehicleHistoryNavigation | CustomerVehicleNavigation) | null>(null)
   const { flushAll } = useAutosaveNavigation()
@@ -188,17 +192,31 @@ function WorkspaceApp({ user, organizations, activeOrganization, onOrganizationC
     onSignOut()
   }
 
+  function navigateFromRecovery(destination: DraftRecoveryDestination) {
+    setNavigationTarget(destination.section === 'sales' || destination.section === 'maintenance'
+      ? { section: destination.section, recordId: destination.recordId ?? '' }
+      : null)
+    setActiveSection(destination.section)
+  }
+
   return (
-    <div className="app-shell">
-      <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={(organizationId) => { void selectOrganization(organizationId) }} activeSection={activeSection} onSelect={(section) => { void selectSection(section) }} onSignOut={() => { void signOut() }} />
-      <main className="app-main">
-        <Topbar currentPage={pageMeta[activeSection]} />
-        <div className="page-content">
-          {activeSection === 'dashboard' ? <Dashboard onNavigate={(target) => { void navigateTo(target) }} /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={(target) => { void navigateTo(target) }} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={() => setNavigationTarget(null)} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={(target) => { void navigateTo(target) }} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={(target) => { void navigateTo(target) }} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
-        </div>
-      </main>
-    </div>
+    <DraftRecoveryProvider userId={user.uid} organizationId={activeOrganization.organizationId} runId={draftRunId} onNavigate={navigateFromRecovery}>
+      <WorkspaceContent user={user} organizations={organizations} activeOrganization={activeOrganization} activeSection={activeSection} navigationTarget={navigationTarget} onSelectSection={(section) => { void selectSection(section) }} onNavigate={(target) => { void navigateTo(target) }} onSelectOrganization={(organizationId) => { void selectOrganization(organizationId) }} onSignOut={() => { void signOut() }} onNavigationConsumed={() => setNavigationTarget(null)} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />
+    </DraftRecoveryProvider>
   )
+}
+
+function WorkspaceContent({ user, organizations, activeOrganization, activeSection, navigationTarget, onSelectSection, onNavigate, onSelectOrganization, onSignOut, onNavigationConsumed, onReloadSession, onUserUpdated }: { user: User; organizations: OrganizationMembership[]; activeOrganization: OrganizationMembership; activeSection: SectionId; navigationTarget: VehicleHistoryNavigation | CustomerVehicleNavigation | null; onSelectSection: (section: SectionId) => void; onNavigate: (target: VehicleHistoryNavigation | CustomerVehicleNavigation) => void; onSelectOrganization: (organizationId: string) => void; onSignOut: () => void; onNavigationConsumed: () => void; onReloadSession: () => void; onUserUpdated: (user: User) => void }) {
+  const { openNotifications, notificationDrafts } = useDraftRecovery()
+  return <div className="app-shell">
+    <Sidebar user={user} organizations={organizations} activeOrganization={activeOrganization} onOrganizationChange={onSelectOrganization} activeSection={activeSection} onSelect={onSelectSection} onSignOut={onSignOut} />
+    <main className="app-main">
+      <Topbar currentPage={pageMeta[activeSection]} onNotifications={openNotifications} hasNotifications={notificationDrafts.length > 0} />
+      <div className="page-content">
+        {activeSection === 'dashboard' ? <Dashboard onNavigate={onNavigate} /> : activeSection === 'customers' ? <CustomerVehiclePage onNavigate={onNavigate} initialCustomerId={navigationTarget?.section === 'customers' ? navigationTarget.customerId : undefined} initialVehicleId={navigationTarget?.section === 'customers' ? navigationTarget.vehicleId : undefined} onNavigationConsumed={onNavigationConsumed} /> : activeSection === 'sales' ? <SalesPage initialDocumentId={navigationTarget?.section === 'sales' ? navigationTarget.recordId : undefined} /> : activeSection === 'maintenance' ? <MaintenancePage initialDocumentId={navigationTarget?.section === 'maintenance' ? navigationTarget.recordId : undefined} /> : activeSection === 'inspections' ? <InspectionSchedulesPage onSelectVehicle={onNavigate} /> : activeSection === 'payments' ? <PaymentsPage initialRecordId={navigationTarget?.section === 'payments' ? navigationTarget.recordId : undefined} onNavigate={onNavigate} /> : <SettingsPage user={user} onReloadSession={onReloadSession} onUserUpdated={onUserUpdated} />}
+      </div>
+    </main>
+  </div>
 }
 
 async function confirmAutosaveTransition(flushAll: () => Promise<boolean>) {
@@ -446,11 +464,11 @@ function Sidebar({ user, organizations, activeOrganization, onOrganizationChange
   )
 }
 
-function Topbar({ currentPage }: { currentPage: PageMeta }) {
+function Topbar({ currentPage, onNotifications, hasNotifications }: { currentPage: PageMeta; onNotifications: () => void; hasNotifications: boolean }) {
   return (
     <header className="topbar">
       <div className="breadcrumb"><strong>{currentPage.title}</strong></div>
-      <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={20} /><span className="notification-dot" /></button>
+      <button className="icon-button notification-button" type="button" aria-label={hasNotifications ? '通知（未確認あり）' : '通知'} onClick={onNotifications}><Bell size={20} />{hasNotifications && <span className="notification-dot" />}</button>
     </header>
   )
 }

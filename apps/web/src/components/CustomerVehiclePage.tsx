@@ -43,10 +43,11 @@ import {
   uploadVehicleFile,
 } from '../lib/customerApi'
 import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
-import { deleteDraft, readDraft } from '../lib/draftStorage'
+import { createDraftRunId, deleteDraft, readDraft } from '../lib/draftStorage'
 import { DateCalendarButton } from './DateCalendarButton'
 import { NormalizedInput } from './NormalizedValueInput'
 import { AutosaveStatus } from './AutosaveStatus'
+import { useDraftRecovery } from '../hooks/draftRecoveryContext'
 
 const emptyCustomerForm: CustomerInput = { name: '', kana: '', phone: '', email: '', postalCode: '', address: '', birthDate: '', employer: '', memo: '' }
 const emptyVehicleForm: VehicleInput = { maker: '', model: '', modelType: '', plate: '', vin: '', year: '', inspectionDate: '', mileage: '', color: '', displacement: '', transmission: '', note: '', freeItem1: '', freeItem2: '', freeItem3: '' }
@@ -99,6 +100,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null)
   const [customerForm, setCustomerForm] = useState<CustomerInput>(emptyCustomerForm)
   const [vehicleForm, setVehicleForm] = useState<VehicleInput>(emptyVehicleForm)
+  const [newCustomerStorageKey, setNewCustomerStorageKey] = useState('customer-new')
+  const [newVehicleStorageKey, setNewVehicleStorageKey] = useState('vehicle-new')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [customerDirty, setCustomerDirty] = useState(false)
@@ -113,6 +116,9 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const vehicleSavedSignatureRef = useRef('')
   const customerUpdatedAtRef = useRef<string | null>(null)
   const vehicleUpdatedAtRef = useRef<string | null>(null)
+  const openEditCustomerDialogRef = useRef<(customer: Customer) => void>(() => undefined)
+  const openEditVehicleDialogRef = useRef<(vehicle: Vehicle) => void>(() => undefined)
+  const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
   onNavigationConsumedRef.current = onNavigationConsumed
 
   useEffect(() => {
@@ -267,6 +273,61 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
   }
 
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  useEffect(() => {
+    if (customerDialogOpen && !editingCustomerId) registerActiveDraft('customer-new', newCustomerStorageKey)
+  }, [customerDialogOpen, editingCustomerId, newCustomerStorageKey, registerActiveDraft])
+
+  useEffect(() => {
+    if (vehicleDialogOpen && !editingVehicleId) registerActiveDraft('vehicle-new', newVehicleStorageKey)
+  }, [editingVehicleId, newVehicleStorageKey, registerActiveDraft, vehicleDialogOpen])
+
+  useEffect(() => {
+    const draft = pendingRestore ?? getAutoResumeDraft('customer-new') ?? getAutoResumeDraft('vehicle-new')
+    if (!draft) return
+    if (draft.kind === 'customer-new') {
+      setNewCustomerStorageKey(draft.key)
+      setEditingCustomerId(null)
+      setCustomerForm(normalizeCustomerForm(draft.value as CustomerInput))
+      setCustomerDirty(true)
+      customerSavedSignatureRef.current = ''
+      customerUpdatedAtRef.current = null
+      setCustomerDialogOpen(true)
+      setError('端末内に残っていた顧客登録の入力を復元しました。')
+      if (pendingRestore?.key === draft.key) acknowledgeRestore(draft.key)
+      return
+    }
+    if (draft.kind === 'vehicle-new') {
+      const customer = draft.targetId ? customers.find((item) => item.id === draft.targetId) : selectedCustomer
+      if (!customer) return
+      setSelectedCustomerId(customer.id)
+      setNewVehicleStorageKey(draft.key)
+      setEditingVehicleId(null)
+      setVehicleForm(normalizeVehicleForm(draft.value as VehicleInput))
+      setVehicleDirty(true)
+      vehicleSavedSignatureRef.current = ''
+      vehicleUpdatedAtRef.current = null
+      setVehicleDialogOpen(true)
+      setError('端末内に残っていた車両登録の入力を復元しました。')
+      if (pendingRestore?.key === draft.key) acknowledgeRestore(draft.key)
+      return
+    }
+    if (draft.kind === 'customer-existing' && draft.targetId) {
+      const customer = customers.find((item) => item.id === draft.targetId)
+      if (!customer) return
+      openEditCustomerDialogRef.current(customer)
+      return
+    }
+    if (draft.kind === 'vehicle-existing' && draft.targetId) {
+      const customer = customers.find((item) => item.vehicles.some((vehicle) => vehicle.id === draft.targetId))
+      const vehicle = customer?.vehicles.find((item) => item.id === draft.targetId)
+      if (!customer || !vehicle) return
+      setSelectedCustomerId(customer.id)
+      openEditVehicleDialogRef.current(vehicle)
+    }
+  }, [acknowledgeRestore, customers, getAutoResumeDraft, pendingRestore, refreshDrafts, selectedCustomer])
+
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
     setSelectedVehicleId(customer.vehicles[0]?.id ?? '')
@@ -288,32 +349,13 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }
 
   function openNewCustomerDialog() {
-    void readDraft<CustomerInput>('customer-new').then((draft) => {
-      const shouldRestore = Boolean(draft && window.confirm('前回の顧客登録で端末に残った入力があります。復元しますか？'))
-      if (!shouldRestore) {
-        if (draft) void deleteDraft('customer-new')
-        setEditingCustomerId(null)
-        setCustomerForm(emptyCustomerForm)
-        setCustomerDirty(false)
-        customerSavedSignatureRef.current = ''
-        customerUpdatedAtRef.current = null
-      } else {
-        setEditingCustomerId(null)
-        setCustomerForm(normalizeCustomerForm(draft!.value))
-        setCustomerDirty(true)
-        customerSavedSignatureRef.current = ''
-        customerUpdatedAtRef.current = null
-        setError('端末内に残っていた顧客登録の入力を復元しました。')
-      }
-      setCustomerDialogOpen(true)
-    }).catch(() => {
-      setEditingCustomerId(null)
-      setCustomerForm(emptyCustomerForm)
-      setCustomerDirty(false)
-      customerSavedSignatureRef.current = ''
-      customerUpdatedAtRef.current = null
-      setCustomerDialogOpen(true)
-    })
+    setNewCustomerStorageKey(`customer-new:${createDraftRunId()}`)
+    setEditingCustomerId(null)
+    setCustomerForm(emptyCustomerForm)
+    setCustomerDirty(false)
+    customerSavedSignatureRef.current = ''
+    customerUpdatedAtRef.current = null
+    setCustomerDialogOpen(true)
   }
 
   function openEditCustomerDialog(customer: Customer) {
@@ -325,12 +367,24 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     customerUpdatedAtRef.current = customer.updatedAt
     setCustomerDialogOpen(true)
     void readDraft<CustomerInput>(`customer-edit:${customer.id}`).then((draft) => {
-      if (!draft || draft.savedAt <= (Date.parse(customer.updatedAt) || 0) || customerSavedSignatureRef.current === formSignature(normalizeCustomerForm(draft.value))) return
+      const explicitlyRequested = pendingRestore?.key === `customer-edit:${customer.id}`
+      if (!draft) {
+        if (explicitlyRequested) acknowledgeRestore(`customer-edit:${customer.id}`)
+        return
+      }
+      if (draft.savedAt <= (Date.parse(customer.updatedAt) || 0) || customerSavedSignatureRef.current === formSignature(normalizeCustomerForm(draft.value))) {
+        if (explicitlyRequested) acknowledgeRestore(draft.key)
+        return
+      }
+      if (!explicitlyRequested && draft.runId !== currentRunId) return
       setCustomerForm(draft.value)
       setCustomerDirty(true)
       setError('端末内に残っていた顧客情報の変更を復元しました。')
+      if (explicitlyRequested) acknowledgeRestore(draft.key)
     }).catch(() => undefined)
   }
+
+  openEditCustomerDialogRef.current = openEditCustomerDialog
 
   function closeCustomerDialogNow() {
     setCustomerDialogOpen(false)
@@ -392,7 +446,9 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         : await createCustomer(normalizedForm)
       if (!savedCustomer) throw new Error('顧客情報を読み込めませんでした。')
       if (!editingId) setCustomers((current) => [...current, savedCustomer])
-      if (!editingId) void deleteDraft('customer-new')
+      if (!editingId) void deleteDraft(newCustomerStorageKey)
+      if (!editingId) setNewCustomerStorageKey('customer-new')
+      if (!editingId) registerActiveDraft('customer-new', null)
       setSelectedCustomerId(savedCustomer.id)
       setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
       openMobileDetail()
@@ -405,32 +461,14 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }
 
   function openNewVehicleDialog() {
-    void readDraft<VehicleInput>('vehicle-new').then((draft) => {
-      const shouldRestore = Boolean(draft && window.confirm('前回の車両登録で端末に残った入力があります。復元しますか？'))
-      if (!shouldRestore) {
-        if (draft) void deleteDraft('vehicle-new')
-        setEditingVehicleId(null)
-        setVehicleForm(emptyVehicleForm)
-        setVehicleDirty(false)
-        vehicleSavedSignatureRef.current = ''
-        vehicleUpdatedAtRef.current = null
-      } else {
-        setEditingVehicleId(null)
-        setVehicleForm(normalizeVehicleForm(draft!.value))
-        setVehicleDirty(true)
-        vehicleSavedSignatureRef.current = ''
-        vehicleUpdatedAtRef.current = null
-        setError('端末に残っていた車両登録の入力を復元しました。')
-      }
-      setVehicleDialogOpen(true)
-    }).catch(() => {
-      setEditingVehicleId(null)
-      setVehicleForm(emptyVehicleForm)
-      setVehicleDirty(false)
-      vehicleSavedSignatureRef.current = ''
-      vehicleUpdatedAtRef.current = null
-      setVehicleDialogOpen(true)
-    })
+    if (!selectedCustomer) return
+    setNewVehicleStorageKey(`vehicle-new:${selectedCustomer.id}:${createDraftRunId()}`)
+    setEditingVehicleId(null)
+    setVehicleForm(emptyVehicleForm)
+    setVehicleDirty(false)
+    vehicleSavedSignatureRef.current = ''
+    vehicleUpdatedAtRef.current = null
+    setVehicleDialogOpen(true)
   }
 
   function openEditVehicleDialog(vehicle: Vehicle) {
@@ -442,12 +480,24 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     vehicleUpdatedAtRef.current = vehicle.updatedAt
     setVehicleDialogOpen(true)
     void readDraft<VehicleInput>(`vehicle-edit:${vehicle.id}`).then((draft) => {
-      if (!draft || draft.savedAt <= (Date.parse(vehicle.updatedAt) || 0) || vehicleSavedSignatureRef.current === formSignature(normalizeVehicleForm(draft.value))) return
+      const explicitlyRequested = pendingRestore?.key === `vehicle-edit:${vehicle.id}`
+      if (!draft) {
+        if (explicitlyRequested) acknowledgeRestore(`vehicle-edit:${vehicle.id}`)
+        return
+      }
+      if (draft.savedAt <= (Date.parse(vehicle.updatedAt) || 0) || vehicleSavedSignatureRef.current === formSignature(normalizeVehicleForm(draft.value))) {
+        if (explicitlyRequested) acknowledgeRestore(draft.key)
+        return
+      }
+      if (!explicitlyRequested && draft.runId !== currentRunId) return
       setVehicleForm(draft.value)
       setVehicleDirty(true)
       setError('端末内に残っていた車両情報の変更を復元しました。')
+      if (explicitlyRequested) acknowledgeRestore(draft.key)
     }).catch(() => undefined)
   }
+
+  openEditVehicleDialogRef.current = openEditVehicleDialog
 
   function closeVehicleDialogNow() {
     setVehicleDialogOpen(false)
@@ -509,7 +559,9 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         setSelectedVehicleId(editingId)
       } else {
         const result = await createVehicle(selectedCustomer.id, normalizedForm)
-        void deleteDraft('vehicle-new')
+        void deleteDraft(newVehicleStorageKey)
+        setNewVehicleStorageKey('vehicle-new')
+        registerActiveDraft('vehicle-new', null)
         setCustomers((current) => current.map((customer) => customer.id === result.customer.id ? result.customer : customer))
         setSelectedCustomerId(result.customer.id)
         setSelectedVehicleId(result.vehicleId)
@@ -598,7 +650,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     enabled: customerDialogOpen,
     serverEnabled: Boolean(customerDialogOpen && editingCustomerId && customerDirty),
     registrationKey: `customer:${editingCustomerId ?? 'new'}`,
-    storageKey: editingCustomerId ? `customer-edit:${editingCustomerId}` : 'customer-new',
+    storageKey: editingCustomerId ? `customer-edit:${editingCustomerId}` : newCustomerStorageKey,
     save: async (snapshot) => {
       if (!editingCustomerId) throw new AutosaveBlockedError()
       await persistCustomerForm(editingCustomerId, snapshot)
@@ -615,7 +667,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     enabled: vehicleDialogOpen,
     serverEnabled: Boolean(vehicleDialogOpen && editingVehicleId && vehicleDirty),
     registrationKey: `vehicle:${editingVehicleId ?? 'new'}`,
-    storageKey: editingVehicleId ? `vehicle-edit:${editingVehicleId}` : 'vehicle-new',
+    storageKey: editingVehicleId ? `vehicle-edit:${editingVehicleId}` : newVehicleStorageKey,
     save: async (snapshot) => {
       if (!editingVehicleId) throw new AutosaveBlockedError()
       await persistVehicleForm(editingVehicleId, snapshot)

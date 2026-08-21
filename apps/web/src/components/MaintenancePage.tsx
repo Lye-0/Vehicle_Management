@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Archive,
   CarFront,
@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { fetchCustomerDetail, fetchCustomerSummaries, type Customer } from '../lib/customerApi'
 import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
-import { deleteDraft, readDraft } from '../lib/draftStorage'
+import { createDraftRunId, deleteDraft, readDraft, type DraftRecord } from '../lib/draftStorage'
 import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadMaintenanceDocumentPdf, previewMaintenanceDocumentPdf } from '../lib/pdf'
 import {
@@ -53,6 +53,7 @@ import { MaintenanceDuplicateConfirmationDialog, type MaintenanceDuplicateDialog
 import { OptionalDateField } from './OptionalDateField'
 import { AbacusLinkProvenance } from './AbacusLinkProvenance'
 import { AutosaveStatus } from './AutosaveStatus'
+import { useDraftRecovery } from '../hooks/draftRecoveryContext'
 
 type CategoryFilter = 'すべて' | IntakeCategory
 type MaintenanceTypeFilter = 'すべて' | MaintenanceDocumentType
@@ -120,6 +121,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<MaintenanceCreateForm>(emptyCreateForm)
   const [draftDocument, setDraftDocument] = useState<MaintenanceDocumentLike | null>(null)
+  const [newDraftStorageKey, setNewDraftStorageKey] = useState('maintenance-new-document')
   const [draftDirty, setDraftDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
@@ -145,6 +147,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const restoredDraftDocumentIdsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
+  const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
   useEffect(() => {
     let cancelled = false
@@ -309,12 +312,61 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     })
   }
 
+  const applyRecoveredDraft = useCallback((draft: DraftRecord<MaintenanceDocumentLike>) => {
+    const customer = draft.value.customerId ? customers.find((item) => item.id === draft.value.customerId) : undefined
+    const vehicle = draft.value.vehicleId ? customer?.vehicles.find((item) => item.id === draft.value.vehicleId) : undefined
+    setNewDraftStorageKey(draft.key)
+    discardedNewDraftRef.current = false
+    draftContextRef.current = {
+      customerMode: draft.value.customerId ? 'existing' : 'new',
+      vehicleMode: draft.value.vehicleId ? 'existing' : 'new',
+      customerId: draft.value.customerId,
+      customerUpdatedAt: customer?.updatedAt ?? null,
+      vehicleId: draft.value.vehicleId,
+      vehicleUpdatedAt: vehicle?.updatedAt ?? null,
+      openedMileage: vehicle ? parseMileageString(vehicle.mileage) : null,
+    }
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(draft.value)
+    setDraftDirty(true)
+    setDirty(true)
+    setSelectedDocumentId('')
+    setSavedDocumentId('')
+    setMasterSyncDialogResult(null)
+    setMaintenanceDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setError('端末内に残っていた整備書類作成の入力を復元しました。内容を確認して保存してください。')
+    setDocumentView('edit')
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+    setCreateDialogOpen(false)
+    if (pendingRestore?.key === draft.key) acknowledgeRestore(draft.key)
+  }, [acknowledgeRestore, customers, pendingRestore])
+
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  useEffect(() => {
+    if (draftDocument) registerActiveDraft('maintenance-new', newDraftStorageKey)
+  }, [draftDocument, newDraftStorageKey, registerActiveDraft])
+
+  useEffect(() => {
+    if (loading) return
+    const pending = pendingRestore?.kind === 'maintenance-new' ? pendingRestore as DraftRecord<MaintenanceDocumentLike> : null
+    if (draftDocument && (!pending || pending.key === newDraftStorageKey)) return
+    const candidate = pending ?? getAutoResumeDraft('maintenance-new') as DraftRecord<MaintenanceDocumentLike> | null
+    if (!candidate) return
+    applyRecoveredDraft(candidate)
+  }, [applyRecoveredDraft, draftDocument, getAutoResumeDraft, loading, newDraftStorageKey, pendingRestore])
+
   function discardDraftIfConfirmed(action: string) {
     if (!draftDocument) return true
     if (draftDirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
     setActiveDraft(null)
     discardedNewDraftRef.current = true
-    void deleteDraft('maintenance-new-document')
+    void deleteDraft(newDraftStorageKey)
+    setNewDraftStorageKey('maintenance-new-document')
+    registerActiveDraft('maintenance-new', null)
     draftContextRef.current = null
     draftCustomerDuplicateConfirmedRef.current = false
     setDraftDirty(false)
@@ -631,10 +683,12 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const input = buildMaintenanceCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync, mileageSync)
       const saved = await createMaintenanceDocument(input)
       discardedNewDraftRef.current = false
-      void deleteDraft('maintenance-new-document')
+      void deleteDraft(newDraftStorageKey)
       setDocuments((current) => [saved, ...current])
       setSelectedDocumentId(saved.id)
       setActiveDraft(null)
+      setNewDraftStorageKey('maintenance-new-document')
+      registerActiveDraft('maintenance-new', null)
       draftContextRef.current = null
       draftCustomerDuplicateConfirmedRef.current = false
       setDraftDirty(false)
@@ -857,50 +911,10 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    if (discardedNewDraftRef.current) {
-      discardedNewDraftRef.current = false
-      void deleteDraft('maintenance-new-document')
-      setCreateForm(emptyCreateForm)
-      setCreateDialogOpen(true)
-      return
-    }
-    void readDraft<MaintenanceDocumentLike>('maintenance-new-document').then((draft) => {
-      if (draft && window.confirm('前回の整備書類作成で端末に残った入力があります。復元しますか？')) {
-        discardedNewDraftRef.current = false
-        const customer = draft.value.customerId ? customers.find((item) => item.id === draft.value.customerId) : undefined
-        const vehicle = draft.value.vehicleId ? customer?.vehicles.find((item) => item.id === draft.value.vehicleId) : undefined
-        draftContextRef.current = {
-          customerMode: draft.value.customerId ? 'existing' : 'new',
-          vehicleMode: draft.value.vehicleId ? 'existing' : 'new',
-          customerId: draft.value.customerId,
-          customerUpdatedAt: customer?.updatedAt ?? null,
-          vehicleId: draft.value.vehicleId,
-          vehicleUpdatedAt: vehicle?.updatedAt ?? null,
-          openedMileage: vehicle ? parseMileageString(vehicle.mileage) : null,
-        }
-        draftCustomerDuplicateConfirmedRef.current = false
-        setActiveDraft(draft.value)
-        setDraftDirty(true)
-        setDirty(true)
-        setSelectedDocumentId('')
-        setSavedDocumentId('')
-        setMasterSyncDialogResult(null)
-        setMaintenanceDuplicateDialog(null)
-        setPendingDraftPreview(null)
-        setPendingDraftDuplicateConfirmation(undefined)
-        setError('端末内に残っていた整備書類作成の入力を復元しました。内容を確認して保存してください。')
-        setDocumentView('edit')
-        openMobileDetail()
-        setCreateDialogOpen(false)
-        return
-      }
-      if (draft) void deleteDraft('maintenance-new-document')
-      setCreateForm(emptyCreateForm)
-      setCreateDialogOpen(true)
-    }).catch(() => {
-      setCreateForm(emptyCreateForm)
-      setCreateDialogOpen(true)
-    })
+    discardedNewDraftRef.current = false
+    setNewDraftStorageKey('maintenance-new-document')
+    setCreateForm(emptyCreateForm)
+    setCreateDialogOpen(true)
   }
 
   function startDraft(event: FormEvent<HTMLFormElement>) {
@@ -941,6 +955,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       keepForever: false,
       items: [{ id: 'draft-maintenance-item-1', kind: '作業', description: '', quantity: 1, unit: '式', unitPrice: 0, technicalFee: 0, summary: '' }],
     }
+    setNewDraftStorageKey(`maintenance-new-document:${createDraftRunId()}`)
     draftContextRef.current = {
       customerMode: createForm.customerMode!,
       vehicleMode: createForm.vehicleMode!,
@@ -968,21 +983,30 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   useEffect(() => {
     const target = selectedPersistedDocument
-    if (!target || target.isSummary || restoredDraftDocumentIdsRef.current.has(target.id)) return
-    restoredDraftDocumentIdsRef.current.add(target.id)
+    if (!target || target.isSummary) return
     let active = true
     const storageKey = `maintenance-document:${target.id}`
     void readDraft<MaintenanceDocument>(storageKey).then((stored) => {
       if (!active || !stored || stored.savedAt <= (Date.parse(target.updatedAt) || 0)) return
+      const explicitlyRequested = pendingRestore?.key === storageKey
+      const sameRunDraft = stored.runId === currentRunId
+      if (!explicitlyRequested && !sameRunDraft) return
+      if (restoredDraftDocumentIdsRef.current.has(target.id) && !explicitlyRequested) return
       const current = documents.find((document) => document.id === target.id)
-      if (!current || JSON.stringify(current) === JSON.stringify(stored.value)) return
+      if (!current) return
+      if (JSON.stringify(current) === JSON.stringify(stored.value)) {
+        if (explicitlyRequested) acknowledgeRestore(stored.key)
+        return
+      }
+      restoredDraftDocumentIdsRef.current.add(target.id)
       setDocuments((documents) => documents.map((document) => document.id === target.id ? stored.value : document))
       setDirty(true)
       setSavedDocumentId('')
       setError('端末内に残っていた未保存の変更を復元しました。内容を確認して保存してください。')
+      if (explicitlyRequested) acknowledgeRestore(stored.key)
     }).catch(() => undefined)
     return () => { active = false }
-  }, [documents, selectedPersistedDocument])
+  }, [acknowledgeRestore, currentRunId, documents, pendingRestore, selectedPersistedDocument])
 
   const autosave = useAutosave<MaintenanceDocumentLike | null>({
     value: selectedDocument,
@@ -991,7 +1015,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
     serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `maintenance:${selectedDocument?.id ?? 'new'}`,
-    storageKey: selectedDocument?.id ? `maintenance-document:${selectedDocument.id}` : 'maintenance-new-document',
+    storageKey: selectedDocument?.id ? `maintenance-document:${selectedDocument.id}` : newDraftStorageKey,
     save: async (snapshot) => {
       if (!snapshot?.id || !selectedPersistedDocument || selectedPersistedDocument.id !== snapshot.id || selectedPersistedDocument.isSummary) throw new AutosaveBlockedError()
       const openedMileage = documentOpenedMileageRef.current

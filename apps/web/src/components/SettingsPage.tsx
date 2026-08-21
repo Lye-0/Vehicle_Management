@@ -17,6 +17,7 @@ import { AutosaveStatus } from './AutosaveStatus'
 import { AbacusRegistrationPackagePanel } from './AbacusRegistrationPackagePanel'
 import { IconWithChain } from './IconWithChain'
 import { NormalizedInput } from './NormalizedValueInput'
+import { useDraftRecovery } from '../hooks/draftRecoveryContext'
 
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members' | 'permissions'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
@@ -54,6 +55,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
   const [permissionsDirty, setPermissionsDirty] = useState(false)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState<CsvResource | ''>('')
+  const { pendingRestore, acknowledgeRestore, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
   useEffect(() => {
     let cancelled = false
@@ -173,6 +175,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSettingsDirty(false)
       setPermissionsDirty(false)
       setSaved(true)
+      registerActiveDraft('settings', null)
       setError('')
       void deleteDraft('settings-draft')
       onReloadSession?.()
@@ -187,6 +190,27 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setBackupSettings(nextSettings)
     setSaved(false)
   }, [])
+
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  useEffect(() => {
+    if (settingsDirty || permissionsDirty) registerActiveDraft('settings', 'settings-draft')
+  }, [permissionsDirty, registerActiveDraft, settingsDirty])
+
+  useEffect(() => {
+    if (loading) return
+    const pending = pendingRestore?.kind === 'settings' ? pendingRestore : null
+    const candidate = pending ?? getAutoResumeDraft('settings')
+    if (!candidate) return
+    const restored = candidate.value as { settings?: AppSettings; permissions?: OrganizationPermissions }
+    if (restored.settings) setSettings(restored.settings)
+    if (restored.permissions) setPermissions(restored.permissions)
+    setSettingsDirty(Boolean(restored.settings))
+    setPermissionsDirty(Boolean(restored.permissions))
+    setSaved(false)
+    setError('端末内に残っていた設定の変更を復元しました。内容を確認して保存してください。')
+    if (pending) acknowledgeRestore(candidate.key)
+  }, [acknowledgeRestore, getAutoResumeDraft, loading, pendingRestore])
 
   const autosave = useAutosave({
     value: { settings, permissions },
@@ -214,6 +238,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSettingsDirty(false)
       setPermissionsDirty(false)
       setSaved(true)
+      registerActiveDraft('settings', null)
       setError('')
       return true
     },

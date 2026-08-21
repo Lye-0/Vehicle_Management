@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import { normalizeDisplacement, normalizeMileage, normalizeModelYear, normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import {
   Archive,
@@ -20,7 +20,8 @@ import {
 } from 'lucide-react'
 import { fetchCustomerDetail, fetchCustomerSummaries, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
 import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
-import { deleteDraft, readDraft } from '../lib/draftStorage'
+import { createDraftRunId, deleteDraft, readDraft, type DraftRecord } from '../lib/draftStorage'
+import { useDraftRecovery } from '../hooks/draftRecoveryContext'
 import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
 import { downloadSalesDocumentPdf, previewSalesDocumentPdf } from '../lib/pdf'
 import {
@@ -142,6 +143,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createForm, setCreateForm] = useState<SalesCreateForm>(emptyCreateForm())
   const [draftDocument, setDraftDocument] = useState<SalesDraftState>(null)
+  const [newDraftStorageKey, setNewDraftStorageKey] = useState('sales-new-document')
   const [loading, setLoading] = useState(true)
   const [documentNextCursor, setDocumentNextCursor] = useState<string | null>(null)
   const [documentHasMore, setDocumentHasMore] = useState(false)
@@ -166,6 +168,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const restoredDraftDocumentIdsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
+  const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
   function replaceDocuments(updater: (current: SalesDocument[]) => SalesDocument[]) {
     const nextDocuments = updater(documentsRef.current)
@@ -345,12 +348,59 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     })
   }
 
+  const applyRecoveredDraft = useCallback((draft: DraftRecord<SalesDocumentLike>) => {
+    const customer = draft.value.customerId ? customers.find((item) => item.id === draft.value.customerId) : undefined
+    const vehicle = draft.value.vehicleId ? customer?.vehicles.find((item) => item.id === draft.value.vehicleId) : undefined
+    setNewDraftStorageKey(draft.key)
+    discardedNewDraftRef.current = false
+    draftContextRef.current = {
+      customerMode: draft.value.customerId ? 'existing' : 'new',
+      vehicleMode: draft.value.vehicleId ? 'existing' : 'new',
+      customerId: draft.value.customerId,
+      customerUpdatedAt: customer?.updatedAt ?? null,
+      vehicleId: draft.value.vehicleId,
+      vehicleUpdatedAt: vehicle?.updatedAt ?? null,
+    }
+    draftCustomerDuplicateConfirmedRef.current = false
+    setActiveDraft(draft.value)
+    setSelectedDocumentId('')
+    setDirty(true)
+    setSaved(false)
+    setMasterSyncDialogResult(null)
+    setSalesDuplicateDialog(null)
+    setPendingDraftPreview(null)
+    setPendingDraftDuplicateConfirmation(undefined)
+    setSyncError('端末内に残っていた販売書類作成の入力を復元しました。内容を確認して保存してください。')
+    setDocumentView('edit')
+    setMobileWorkspaceView('detail')
+    if (window.matchMedia('(max-width: 1169px)').matches) window.scrollTo(0, 0)
+    setCreateDialogOpen(false)
+    if (pendingRestore?.key === draft.key) acknowledgeRestore(draft.key)
+  }, [acknowledgeRestore, customers, pendingRestore])
+
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  useEffect(() => {
+    if (draftDocument) registerActiveDraft('sales-new', newDraftStorageKey)
+  }, [draftDocument, newDraftStorageKey, registerActiveDraft])
+
+  useEffect(() => {
+    if (loading) return
+    const pending = pendingRestore?.kind === 'sales-new' ? pendingRestore as DraftRecord<SalesDocumentLike> : null
+    if (draftDocument && (!pending || pending.key === newDraftStorageKey)) return
+    const candidate = pending ?? getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
+    if (!candidate) return
+    applyRecoveredDraft(candidate)
+  }, [applyRecoveredDraft, draftDocument, getAutoResumeDraft, loading, newDraftStorageKey, pendingRestore])
+
   function discardDraftIfConfirmed(action: string) {
     if (!draftDocument) return true
     if (dirty && !window.confirm(`入力中の未保存書類を破棄して${action}しますか？`)) return false
     setActiveDraft(null)
     discardedNewDraftRef.current = true
-    void deleteDraft('sales-new-document')
+    void deleteDraft(newDraftStorageKey)
+    setNewDraftStorageKey('sales-new-document')
+    registerActiveDraft('sales-new', null)
     draftContextRef.current = null
     draftCustomerDuplicateConfirmedRef.current = false
     setDirty(false)
@@ -630,48 +680,10 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    if (discardedNewDraftRef.current) {
-      discardedNewDraftRef.current = false
-      void deleteDraft('sales-new-document')
-      setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
-      setCreateDialogOpen(true)
-      return
-    }
-    void readDraft<SalesDocumentLike>('sales-new-document').then((draft) => {
-      if (draft && window.confirm('前回の販売書類作成で端末に残った入力があります。復元しますか？')) {
-        discardedNewDraftRef.current = false
-        const customer = draft.value.customerId ? customers.find((item) => item.id === draft.value.customerId) : undefined
-        const vehicle = draft.value.vehicleId ? customer?.vehicles.find((item) => item.id === draft.value.vehicleId) : undefined
-        draftContextRef.current = {
-          customerMode: draft.value.customerId ? 'existing' : 'new',
-          vehicleMode: draft.value.vehicleId ? 'existing' : 'new',
-          customerId: draft.value.customerId,
-          customerUpdatedAt: customer?.updatedAt ?? null,
-          vehicleId: draft.value.vehicleId,
-          vehicleUpdatedAt: vehicle?.updatedAt ?? null,
-        }
-        draftCustomerDuplicateConfirmedRef.current = false
-        setActiveDraft(draft.value)
-        setSelectedDocumentId('')
-        setDirty(true)
-        setSaved(false)
-        setMasterSyncDialogResult(null)
-        setSalesDuplicateDialog(null)
-        setPendingDraftPreview(null)
-        setPendingDraftDuplicateConfirmation(undefined)
-        setSyncError('端末内に残っていた販売書類作成の入力を復元しました。内容を確認して保存してください。')
-        setDocumentView('edit')
-        openMobileDetail()
-        setCreateDialogOpen(false)
-        return
-      }
-      if (draft) void deleteDraft('sales-new-document')
-      setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
-      setCreateDialogOpen(true)
-    }).catch(() => {
-      setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
-      setCreateDialogOpen(true)
-    })
+    discardedNewDraftRef.current = false
+    setNewDraftStorageKey('sales-new-document')
+    setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
+    setCreateDialogOpen(true)
   }
 
   function startDraft(event: FormEvent<HTMLFormElement>) {
@@ -705,6 +717,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       keepForever: false,
       items: [{ id: 'draft-item-1', itemType: 'その他', description: settings.salesItemPresets[0] ?? '車両本体価格', quantity: 1, unit: '式', unitPrice: 0, taxCategory: '課税', otherAmount: 0, summary: '' }],
     }
+    setNewDraftStorageKey(`sales-new-document:${createDraftRunId()}`)
     draftContextRef.current = {
       customerMode: createForm.customerMode!,
       vehicleMode: createForm.vehicleMode!,
@@ -848,10 +861,12 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       const input = buildSalesCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync)
       const nextDocument = await createSalesDocument(input)
       discardedNewDraftRef.current = false
-      void deleteDraft('sales-new-document')
+      void deleteDraft(newDraftStorageKey)
       replaceDocuments((current) => [nextDocument, ...current])
       setSelectedDocumentId(nextDocument.id)
       setActiveDraft(null)
+      setNewDraftStorageKey('sales-new-document')
+      registerActiveDraft('sales-new', null)
       draftContextRef.current = null
       draftCustomerDuplicateConfirmedRef.current = false
       setDirty(false)
@@ -1048,21 +1063,30 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   useEffect(() => {
     const target = selectedPersistedDocument
-    if (!target || target.isSummary || restoredDraftDocumentIdsRef.current.has(target.id)) return
-    restoredDraftDocumentIdsRef.current.add(target.id)
+    if (!target || target.isSummary) return
     let active = true
     const storageKey = `sales-document:${target.id}`
     void readDraft<SalesDocument>(storageKey).then((stored) => {
       if (!active || !stored || stored.savedAt <= (Date.parse(target.updatedAt) || 0)) return
+      const explicitlyRequested = pendingRestore?.key === storageKey
+      const sameRunDraft = stored.runId === currentRunId
+      if (!explicitlyRequested && !sameRunDraft) return
+      if (restoredDraftDocumentIdsRef.current.has(target.id) && !explicitlyRequested) return
       const current = documentsRef.current.find((document) => document.id === target.id)
-      if (!current || JSON.stringify(current) === JSON.stringify(stored.value)) return
+      if (!current) return
+      if (JSON.stringify(current) === JSON.stringify(stored.value)) {
+        if (explicitlyRequested) acknowledgeRestore(stored.key)
+        return
+      }
+      restoredDraftDocumentIdsRef.current.add(target.id)
       replaceDocuments((documents) => documents.map((document) => document.id === target.id ? stored.value : document))
       setDirty(true)
       setSaved(false)
       setSyncError('端末内に残っていた未保存の変更を復元しました。内容を確認して保存してください。')
+      if (explicitlyRequested) acknowledgeRestore(stored.key)
     }).catch(() => undefined)
     return () => { active = false }
-  }, [selectedPersistedDocument])
+  }, [acknowledgeRestore, currentRunId, pendingRestore, selectedPersistedDocument])
 
   const autosave = useAutosave<SalesDocumentLike | null>({
     value: selectedDocument,
@@ -1071,7 +1095,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
     serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `sales:${selectedDocument?.id ?? 'new'}`,
-    storageKey: selectedDocument?.id ? `sales-document:${selectedDocument.id}` : 'sales-new-document',
+    storageKey: selectedDocument?.id ? `sales-document:${selectedDocument.id}` : newDraftStorageKey,
     save: async (snapshot) => {
       if (!snapshot?.id || !selectedPersistedDocument || selectedPersistedDocument.id !== snapshot.id || selectedPersistedDocument.isSummary) throw new AutosaveBlockedError()
       return saveSelectedDocument(undefined, snapshot as SalesDocument)
