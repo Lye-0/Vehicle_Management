@@ -989,6 +989,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     dirty: draftDocument ? draftDirty : dirty,
     enabled: Boolean(selectedDocument),
     serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
+    serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `maintenance:${selectedDocument?.id ?? 'new'}`,
     storageKey: selectedDocument?.id ? `maintenance-document:${selectedDocument.id}` : 'maintenance-new-document',
     save: async (snapshot) => {

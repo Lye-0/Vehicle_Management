@@ -1069,6 +1069,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     dirty,
     enabled: Boolean(selectedDocument),
     serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
+    serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `sales:${selectedDocument?.id ?? 'new'}`,
     storageKey: selectedDocument?.id ? `sales-document:${selectedDocument.id}` : 'sales-new-document',
     save: async (snapshot) => {

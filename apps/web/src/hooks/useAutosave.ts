@@ -18,6 +18,7 @@ type UseAutosaveOptions<T> = {
   dirty: boolean
   enabled?: boolean
   serverEnabled?: boolean
+  serverSaveDeferred?: boolean
   registrationKey: string
   storageKey?: string | null
   save: (value: T) => Promise<SaveResult>
@@ -36,7 +37,7 @@ function valueSignature(value: unknown) {
   }
 }
 
-export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = enabled, registrationKey, storageKey = null, save, onError, onBlocked, idleMs = 10_000, maxMs = 60_000, localMs = 500 }: UseAutosaveOptions<T>) {
+export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = enabled, serverSaveDeferred = false, registrationKey, storageKey = null, save, onError, onBlocked, idleMs = 10_000, maxMs = 60_000, localMs = 500 }: UseAutosaveOptions<T>) {
   const [status, setStatus] = useState<AutosaveStatus>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const valueRef = useRef(value)
@@ -177,6 +178,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
       maxTimerRef.current = null
       dirtyStartedAtRef.current = null
       if (!dirty) setStatus((current) => current === 'saved' ? current : 'idle')
+      else if (serverSaveDeferred) setStatus((current) => current === 'saving' ? current : 'waiting')
       return
     }
     if (!dirty || signature === lastSavedSignatureRef.current || signature === blockedSignatureRef.current || signature === errorSignatureRef.current) {
@@ -196,7 +198,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
     idleTimerRef.current = window.setTimeout(() => { void flush() }, idleMs)
     setStatus((current) => current === 'saving' ? current : 'waiting')
-  }, [clearTimers, dirty, enabled, flush, idleMs, maxMs, serverEnabled, signature])
+  }, [clearTimers, dirty, enabled, flush, idleMs, maxMs, serverEnabled, serverSaveDeferred, signature])
 
   useEffect(() => {
     if (!enabled || !dirty || !storageKey) return
