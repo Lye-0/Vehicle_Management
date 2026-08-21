@@ -12,7 +12,6 @@ import {
   FileText,
   Info,
   Pencil,
-  Plus,
   Search,
   Trash2,
   UserRound,
@@ -181,23 +180,13 @@ export function PaymentsPage({ initialRecordId, onNavigate }: { initialRecordId?
     }
   }
 
-  function focusUnpaidRecord() {
-    const firstUnpaid = records.find((record) => record.documentStatus === '入金待ち' && getPaymentStatus(record) === '未入金')
-    setStatusFilter('未入金')
-    setInvoiceTypeFilter('すべて')
-    if (firstUnpaid) {
-      setSelectedRecordId(firstUnpaid.id)
-      openMobileDetail()
-    }
-  }
-
   function resetFilters() {
     setStatusFilter('すべて')
     setInvoiceTypeFilter('すべて')
   }
 
   return <>
-    <div className="page-header payment-page-header"><div><span className="page-eyebrow">請求・入金</span><h1>入金管理</h1><p>請求ごとの入金履歴を登録し、未入金額を確認します。</p></div><button className="button button-primary" type="button" disabled={!records.length} onClick={focusUnpaidRecord}><Plus size={18} />入金を登録</button></div>
+    <div className="page-header payment-page-header"><div><span className="page-eyebrow">請求・入金</span><h1>入金管理</h1><p>請求ごとの入金履歴を登録し、未入金額を確認します。</p></div></div>
     {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
     {loading && <div className="customer-sync-status"><span>請求・入金データを読み込んでいます。</span></div>}
     <div className="payment-scope-note"><Info size={17} /><div><strong>表示対象</strong><span>販売タブの請求書と、車検・点検・一般タブの整備請求書のうち、書類状態が「入金待ち」のものだけを表示しています。</span></div></div>
