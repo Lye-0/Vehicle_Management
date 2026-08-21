@@ -166,8 +166,13 @@ function DraftRecoveryProviderContent({ userId, organizationId, runId, onNavigat
   }, [pendingRestore])
 
   const getAutoResumeDraft = useCallback((kind: DraftKind) => {
+    // 復元済みの下書きは通知再表示を抑えるため hiddenKeys に入っている。
+    // ただし、ページ移動前に現在編集中だったキーは、同じ入力を復帰させるため最優先する。
+    const activeKey = activeDraftKeys[kind]
+    const activeDraft = activeKey ? drafts.find((draft) => draft.key === activeKey && !heldKeys.has(draft.key)) : null
+    if (activeDraft) return activeDraft
     return actionableDrafts.find((draft) => draft.kind === kind && draft.runId === runId && !heldKeys.has(draft.key)) ?? null
-  }, [actionableDrafts, heldKeys, runId])
+  }, [activeDraftKeys, actionableDrafts, drafts, heldKeys, runId])
 
   const contextValue: DraftRecoveryContextValue = {
     drafts: actionableDrafts,
