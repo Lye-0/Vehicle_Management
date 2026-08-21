@@ -1162,7 +1162,11 @@ function SalesDocumentList({ incompleteDocuments, completedGroups, selectedDocum
 }
 
 function SalesDocumentCards({ documents, selectedDocumentId, onSelect }: { documents: SalesDocument[]; selectedDocumentId: string; onSelect: (id: string) => void }) {
-  return <div className="sales-document-list">{documents.map((document) => <button className={`sales-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="sales-card-top"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} />{document.abacusImport?.vehicleless && <span className="document-abacus-badge">ABACUS・車両なし</span>}<ChevronRight size={16} /></div><strong className="sales-card-number">{document.number}</strong><span className="sales-card-customer"><UserRound size={14} /><strong>{document.customerName}</strong></span><span className="sales-card-vehicle"><CarFront size={14} />{document.vehicle || '車両未指定'}{document.plate ? ` ・ ${document.plate}` : ''}</span><div className="sales-card-bottom"><span>{document.issuedAt}</span><strong>{formatYen(calculateTotals(document).total)}</strong></div></button>)}</div>
+  return <div className="sales-document-list">{documents.map((document) => <button className={`sales-document-card${document.id === selectedDocumentId ? ' is-selected' : ''}`} key={document.id} type="button" onClick={() => onSelect(document.id)}><div className="sales-card-top"><span className={`sales-type-badge sales-type-${document.type}`}>{document.type}</span><StatusTag status={document.status} />{document.abacusImport?.vehicleless && <span className="document-abacus-badge">ABACUS・車両なし</span>}<ChevronRight size={16} /></div><strong className="sales-card-number">{document.number}</strong><span className="sales-card-customer"><UserRound size={14} /><strong>{document.customerName}</strong></span><span className="sales-card-vehicle"><CarFront size={14} />{document.vehicle || '車両未指定'}{document.plate ? ` ・ ${document.plate}` : ''}</span><div className="sales-card-bottom"><span>{document.issuedAt}</span><strong>{formatYen(salesListTotal(document))}</strong></div></button>)}</div>
+}
+
+function salesListTotal(document: SalesDocument) {
+  return document.isSummary && document.total !== undefined ? document.total : calculateTotals(document).total
 }
 
 function groupCompletedSalesDocuments(documents: SalesDocument[]): CompletedSalesGroup[] {
