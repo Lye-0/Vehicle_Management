@@ -127,6 +127,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
     if (shouldPersistLocalDraft && storageKeyRef.current) {
       await persistLocalDraft(serverSaveDeferredRef.current && !dirtyRef.current)
     }
+    if (cancelledLocalDraftKeyRef.current === storageKeyRef.current) return true
     if (!serverEnabledRef.current || !dirtyRef.current) return true
     if (force) {
       blockedSignatureRef.current = null
