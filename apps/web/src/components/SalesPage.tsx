@@ -264,7 +264,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       : getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
   const selectedPersistedDocument = draftDocument || resumableNewDraft
     ? null
-    : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : filteredDocuments[0] ?? null)
+    : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
   const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
 
@@ -424,7 +424,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function cancelDraftCreation() {
     if (!draftDocument || saving) return
     if (!discardDraftIfConfirmed('作成を中止')) return
-    setSelectedDocumentId('')
+    setSelectedDocumentId(incompleteDocuments[0]?.id ?? '')
     setDocumentView('edit')
     openMobileList()
   }

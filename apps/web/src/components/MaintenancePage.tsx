@@ -389,7 +389,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   function cancelDraftCreation() {
     if (!draftDocument || saving) return
     if (!discardDraftIfConfirmed('作成を中止')) return
-    setSelectedDocumentId('')
+    setSelectedDocumentId(incompleteDocuments[0]?.id ?? '')
     setDocumentView('edit')
     openMobileList()
   }
