@@ -200,6 +200,10 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
   useEffect(() => {
     if (loading) return
     const pending = pendingRestore?.kind === 'settings' ? pendingRestore : null
+    // 通常の入力中にも端末内下書きは更新されるため、編集中は自分の下書きを
+    // 「復元」として再適用しない。ページを開き直した直後など、未編集状態の
+    // ときだけ自動復元する。明示的な復元操作（pending）の場合は常に適用する。
+    if (!pending && (settingsDirty || permissionsDirty)) return
     const candidate = pending ?? getAutoResumeDraft('settings')
     if (!candidate) return
     const restored = candidate.value as { settings?: AppSettings; permissions?: OrganizationPermissions }
@@ -208,9 +212,11 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setSettingsDirty(Boolean(restored.settings))
     setPermissionsDirty(Boolean(restored.permissions))
     setSaved(false)
-    setError('端末内に残っていた設定の変更を復元しました。内容を確認して保存してください。')
-    if (pending) acknowledgeRestore(candidate.key)
-  }, [acknowledgeRestore, getAutoResumeDraft, loading, pendingRestore])
+    if (pending) {
+      setError('端末内に残っていた設定の変更を復元しました。内容を確認して保存してください。')
+      acknowledgeRestore(candidate.key)
+    }
+  }, [acknowledgeRestore, getAutoResumeDraft, loading, pendingRestore, permissionsDirty, settingsDirty])
 
   const autosave = useAutosave({
     value: { settings, permissions },
