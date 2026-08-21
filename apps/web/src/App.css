@@ -2821,7 +2821,7 @@
     position: absolute;
     top: 16px;
     right: 14px;
-    z-index: 40;
+    z-index: 10;
     margin-left: 0;
     flex: 0 0 38px;
     color: #eaf0f8;
@@ -4532,7 +4532,7 @@
     position: absolute;
     top: 16px;
     right: 14px;
-    z-index: 40;
+    z-index: 10;
     margin-left: 0;
     flex: 0 0 38px;
     color: #e7eefb;
