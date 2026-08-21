@@ -110,9 +110,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null)
   const initialNavigationRef = useRef({ customerId: initialCustomerId, vehicleId: initialVehicleId })
   const onNavigationConsumedRef = useRef(onNavigationConsumed)
-  const customerAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const customerAutosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
-  const vehicleAutosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const vehicleAutosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const customerSavedSignatureRef = useRef('')
   const vehicleSavedSignatureRef = useRef('')
@@ -396,8 +394,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }
 
   function closeCustomerDialog() {
+    if (saving) return
     if (!editingCustomerId) {
-      if (saving) return
       if (customerDirty && !window.confirm('入力内容と端末内の復元データを削除して、顧客の登録を中止しますか？')) return
       const storageKey = newCustomerStorageKey
       void customerAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
@@ -407,9 +405,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
-    void customerAutosaveFlushRef.current().then((flushed) => {
-      if (flushed) closeCustomerDialogNow()
-    })
+    void customerAutosaveCancelLocalDraftRef.current(`customer-edit:${editingCustomerId}`).then(() => closeCustomerDialogNow()).catch((reason: unknown) => setError(getErrorMessage(reason)))
   }
 
   function updateCustomerForm(nextForm: CustomerInput) {
@@ -517,8 +513,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }
 
   function closeVehicleDialog() {
+    if (saving) return
     if (!editingVehicleId) {
-      if (saving) return
       if (vehicleDirty && !window.confirm('入力内容と端末内の復元データを削除して、車両の登録を中止しますか？')) return
       const storageKey = newVehicleStorageKey
       void vehicleAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
@@ -528,9 +524,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
-    void vehicleAutosaveFlushRef.current().then((flushed) => {
-      if (flushed) closeVehicleDialogNow()
-    })
+    void vehicleAutosaveCancelLocalDraftRef.current(`vehicle-edit:${editingVehicleId}`).then(() => closeVehicleDialogNow()).catch((reason: unknown) => setError(getErrorMessage(reason)))
   }
 
   function updateVehicleForm(nextForm: VehicleInput) {
@@ -677,7 +671,6 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     onError: (reason) => setError(getErrorMessage(reason)),
     onBlocked: (reason) => setError(reason.message),
   })
-  customerAutosaveFlushRef.current = customerAutosave.flush
   customerAutosaveCancelLocalDraftRef.current = customerAutosave.cancelLocalDraft
 
   const vehicleAutosave = useAutosave<VehicleInput>({
@@ -695,7 +688,6 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     onError: (reason) => setError(getErrorMessage(reason)),
     onBlocked: (reason) => setError(reason.message),
   })
-  vehicleAutosaveFlushRef.current = vehicleAutosave.flush
   vehicleAutosaveCancelLocalDraftRef.current = vehicleAutosave.cancelLocalDraft
 
   return (

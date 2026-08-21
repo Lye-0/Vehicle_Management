@@ -83,6 +83,7 @@ export function useAutosave<T>({ value, dirty, enabled = true, serverEnabled = e
 
   useEffect(() => {
     clearTimers()
+    cancelledLocalDraftKeyRef.current = null
     lastSavedSignatureRef.current = null
     blockedSignatureRef.current = null
     errorSignatureRef.current = null
