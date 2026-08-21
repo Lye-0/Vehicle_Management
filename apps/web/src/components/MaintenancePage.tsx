@@ -565,6 +565,25 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     return true
   }
 
+  async function fetchMaintenancePersistedSyncPreview(document: MaintenanceDocument): Promise<SyncPreviewResponse> {
+    const snapshot = openedMasterSnapshotRef.current
+    if (snapshot?.state === 'invalid') {
+      throw new AutosaveBlockedError('最新の顧客・車両情報を確認できないため自動保存を保留しています。画面を再読み込みしてください。')
+    }
+    return fetchSyncPreview({
+      documentType: 'maintenance',
+      documentId: document.id,
+      customerId: document.customerId || undefined,
+      vehicleId: document.vehicleId || undefined,
+      customerOverride: maintenanceCustomerValuesForSave(document),
+      vehicleOverride: document.details.vehicleOverride ?? undefined,
+      issuedAt: document.issuedAt.replaceAll('/', '-'),
+      openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
+      openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt : undefined,
+      mileageContext: { openedMileage: documentOpenedMileageRef.current },
+    })
+  }
+
   async function handleSaveClick() {
     if (saving || !selectedDocument) return
     if (draftDocument) {
@@ -586,33 +605,21 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       return
     }
 
-    const openedMileage = documentOpenedMileageRef.current
-
-    // Call sync-preview to check for differences
-    const snapshot = openedMasterSnapshotRef.current
+    setSaving(true)
     try {
-      const preview = await fetchSyncPreview({
-        documentType: 'maintenance',
-        documentId: selectedPersistedDocument.id,
-        customerId: selectedPersistedDocument.customerId || undefined,
-        vehicleId: selectedPersistedDocument.vehicleId || undefined,
-        customerOverride: maintenanceCustomerValuesForSave(selectedPersistedDocument),
-        vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
-        issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
-        openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
-        openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt : undefined,
-        mileageContext: { openedMileage: openedMileage },
-      })
+      const preview = await fetchMaintenancePersistedSyncPreview(selectedPersistedDocument)
 
       const hasDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0 || Boolean(preview.mileageDiff?.isChanged)
       if (hasDiffs) {
         setMasterSyncDialogResult(preview)
+        setSaving(false)
         return
       }
 
       // No differences - save directly
-      void saveSelectedDocument()
+      void saveSelectedDocument().then((saved) => { if (!saved) setSaving(false) })
     } catch (reason) {
+      setSaving(false)
       setError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
     }
   }
@@ -1024,15 +1031,17 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     value: selectedDocument,
     dirty: draftDocument ? draftDirty : dirty,
     enabled: Boolean(selectedDocument),
-    serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
+    serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty && !saving),
     serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `maintenance:${selectedDocument?.id ?? 'new'}`,
     storageKey: selectedDocument?.id ? `maintenance-document:${selectedDocument.id}` : newDraftStorageKey,
     save: async (snapshot) => {
       if (!snapshot?.id || !selectedPersistedDocument || selectedPersistedDocument.id !== snapshot.id || selectedPersistedDocument.isSummary) throw new AutosaveBlockedError()
-      const openedMileage = documentOpenedMileageRef.current
-      const inputMileage = parseMileageString(snapshot.details.vehicleOverride?.mileage ?? snapshot.vehicleDetails?.mileage ?? '')
-      if (openedMileage !== null && inputMileage !== null && inputMileage !== openedMileage) throw new AutosaveBlockedError('走行距離の変更は確認後に保存してください。')
+      const preview = await fetchMaintenancePersistedSyncPreview(snapshot as MaintenanceDocument)
+      if (preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0 || Boolean(preview.mileageDiff?.isChanged)) {
+        setMasterSyncDialogResult(preview)
+        throw new AutosaveBlockedError('顧客・車両情報・走行距離の同期確認が必要です。内容を確認して保存してください。')
+      }
       return saveSelectedDocument(undefined, undefined, snapshot as MaintenanceDocument)
     },
     onError: (reason) => setError(reason instanceof Error ? reason.message : '整備書類を自動保存できませんでした。'),

@@ -685,6 +685,24 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     }
   }
 
+  async function fetchSalesPersistedSyncPreview(document: SalesDocument): Promise<SyncPreviewResponse> {
+    const snapshot = openedMasterSnapshotRef.current
+    if (snapshot?.state === 'invalid') {
+      throw new AutosaveBlockedError('最新の顧客・車両情報を確認できないため自動保存を保留しています。画面を再読み込みしてください。')
+    }
+    return fetchSyncPreview({
+      documentType: 'sales',
+      documentId: document.id,
+      customerId: document.customerId || undefined,
+      vehicleId: document.vehicleId || undefined,
+      customerOverride: salesCustomerValuesForSave(document),
+      vehicleOverride: document.details.vehicleOverride ?? undefined,
+      issuedAt: document.issuedAt.replaceAll('/', '-'),
+      openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
+      openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt ?? undefined : undefined,
+    })
+  }
+
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
     discardedNewDraftRef.current = false
@@ -768,29 +786,21 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       return
     }
 
-    const snapshot = openedMasterSnapshotRef.current
+    setSaving(true)
     try {
-      const preview = await fetchSyncPreview({
-        documentType: 'sales',
-        documentId: selectedPersistedDocument.id,
-        customerId: selectedPersistedDocument.customerId || undefined,
-        vehicleId: selectedPersistedDocument.vehicleId || undefined,
-        customerOverride: salesCustomerValuesForSave(selectedPersistedDocument),
-        vehicleOverride: selectedPersistedDocument.details.vehicleOverride ?? undefined,
-        issuedAt: selectedPersistedDocument.issuedAt.replaceAll('/', '-'),
-        openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
-        openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt ?? undefined : undefined,
-      })
+      const preview = await fetchSalesPersistedSyncPreview(selectedPersistedDocument)
 
       const hasDiffs = preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0
       if (hasDiffs) {
         setMasterSyncDialogResult(preview)
+        setSaving(false)
         return
       }
 
       // No differences - save directly
-      void saveSelectedDocument()
+      void saveSelectedDocument().then((saved) => { if (!saved) setSaving(false) })
     } catch (reason) {
+      setSaving(false)
       setSyncError(reason instanceof Error ? reason.message : '同期プレビューの取得に失敗しました。')
     }
   }
@@ -1104,12 +1114,17 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     value: selectedDocument,
     dirty,
     enabled: Boolean(selectedDocument),
-    serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty),
+    serverEnabled: Boolean(selectedPersistedDocument && !selectedPersistedDocument.isSummary && !draftDocument && dirty && !saving),
     serverSaveDeferred: Boolean(draftDocument),
     registrationKey: `sales:${selectedDocument?.id ?? 'new'}`,
     storageKey: selectedDocument?.id ? `sales-document:${selectedDocument.id}` : newDraftStorageKey,
     save: async (snapshot) => {
       if (!snapshot?.id || !selectedPersistedDocument || selectedPersistedDocument.id !== snapshot.id || selectedPersistedDocument.isSummary) throw new AutosaveBlockedError()
+      const preview = await fetchSalesPersistedSyncPreview(snapshot as SalesDocument)
+      if (preview.customerDiffs.length > 0 || preview.vehicleDiffs.length > 0) {
+        setMasterSyncDialogResult(preview)
+        throw new AutosaveBlockedError('顧客・車両情報の同期確認が必要です。内容を確認して保存してください。')
+      }
       return saveSelectedDocument(undefined, snapshot as SalesDocument)
     },
     onError: (reason) => setSyncError(reason instanceof Error ? reason.message : '販売書類を自動保存できませんでした。'),
