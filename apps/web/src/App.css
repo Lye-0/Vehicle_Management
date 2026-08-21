@@ -421,6 +421,7 @@
 .modal-close:hover { color: var(--text); background: var(--surface-subtle); }
 .modal-form { padding: 22px 24px 24px; }
 .modal-description { display: flex; align-items: center; gap: 7px; margin: 0 0 18px; padding: 10px 12px; color: var(--text-secondary); border-radius: 8px; background: var(--surface-subtle); font-size: 12px; }
+.modal-error { padding: 10px 12px; color: var(--danger); border: 1px solid #ffcaca; border-radius: 8px; background: var(--danger-soft); font-size: 12px; line-height: 1.6; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .form-field { display: grid; gap: 7px; pointer-events: none; }
 .form-field input, .form-field textarea, .form-field select, .form-field button, .form-field [role="button"], .form-field [role="switch"] { pointer-events: auto; }

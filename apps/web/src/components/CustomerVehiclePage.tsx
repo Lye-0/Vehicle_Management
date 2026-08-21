@@ -361,6 +361,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     setEditingCustomerId(null)
     setCustomerForm(emptyCustomerForm)
     setCustomerDirty(false)
+    setError('')
     customerSavedSignatureRef.current = ''
     customerUpdatedAtRef.current = null
     setCustomerDialogOpen(true)
@@ -425,6 +426,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     const form = { name: customer.name, kana: customer.kana, phone: customer.phone, email: customer.email, postalCode: customer.postalCode, address: customer.address, birthDate: customer.birthDate, employer: customer.employer, memo: customer.memo }
     setCustomerForm(form)
     setCustomerDirty(false)
+    setError('')
     customerSavedSignatureRef.current = formSignature(normalizeCustomerForm(form))
     customerUpdatedAtRef.current = customer.updatedAt
     setCustomerDialogOpen(true)
@@ -453,6 +455,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     setEditingCustomerId(null)
     setCustomerForm(emptyCustomerForm)
     setCustomerDirty(false)
+    setError('')
   }
 
   function closeCustomerDialog() {
@@ -460,14 +463,18 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     if (!editingCustomerId) {
       if (customerDirty && !window.confirm('入力内容と端末内の復元データを削除して、顧客の登録を中止しますか？')) return
       const storageKey = newCustomerStorageKey
-      void customerAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
+      void customerAutosaveCancelLocalDraftRef.current(storageKey).then(async () => {
+        await refreshDrafts()
         setNewCustomerStorageKey('customer-new')
         registerActiveDraft('customer-new', null)
         closeCustomerDialogNow()
       }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
-    void customerAutosaveCancelLocalDraftRef.current(`customer-edit:${editingCustomerId}`).then(() => closeCustomerDialogNow()).catch((reason: unknown) => setError(getErrorMessage(reason)))
+    void customerAutosaveCancelLocalDraftRef.current(`customer-edit:${editingCustomerId}`).then(async () => {
+      await refreshDrafts()
+      closeCustomerDialogNow()
+    }).catch((reason: unknown) => setError(getErrorMessage(reason)))
   }
 
   function updateCustomerForm(nextForm: CustomerInput) {
@@ -513,10 +520,13 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         ? await persistCustomerForm(editingId, normalizedForm)
         : await createCustomer(normalizedForm)
       if (!savedCustomer) throw new Error('顧客情報を読み込めませんでした。')
+      if (!editingId) {
+        await deleteDraft(newCustomerStorageKey)
+        await refreshDrafts()
+        setNewCustomerStorageKey('customer-new')
+        registerActiveDraft('customer-new', null)
+      }
       if (!editingId) setCustomers((current) => [...current, savedCustomer])
-      if (!editingId) void deleteDraft(newCustomerStorageKey)
-      if (!editingId) setNewCustomerStorageKey('customer-new')
-      if (!editingId) registerActiveDraft('customer-new', null)
       setSelectedCustomerId(savedCustomer.id)
       setSelectedVehicleId(savedCustomer.vehicles[0]?.id ?? '')
       openMobileDetail()
@@ -534,6 +544,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     setEditingVehicleId(null)
     setVehicleForm(emptyVehicleForm)
     setVehicleDirty(false)
+    setError('')
     vehicleSavedSignatureRef.current = ''
     vehicleUpdatedAtRef.current = null
     setVehicleDialogOpen(true)
@@ -544,6 +555,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     const form = { maker: vehicle.maker, model: vehicle.model, modelType: vehicle.modelType, plate: vehicle.plate, vin: vehicle.vin, year: vehicle.year, inspectionDate: vehicle.inspectionDate, mileage: vehicle.mileage, color: vehicle.color, displacement: vehicle.displacement, transmission: vehicle.transmission, note: vehicle.note, freeItem1: vehicle.freeItem1, freeItem2: vehicle.freeItem2, freeItem3: vehicle.freeItem3 }
     setVehicleForm(form)
     setVehicleDirty(false)
+    setError('')
     vehicleSavedSignatureRef.current = formSignature(normalizeVehicleForm(form))
     vehicleUpdatedAtRef.current = vehicle.updatedAt
     setVehicleDialogOpen(true)
@@ -572,6 +584,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     setEditingVehicleId(null)
     setVehicleForm(emptyVehicleForm)
     setVehicleDirty(false)
+    setError('')
   }
 
   function closeVehicleDialog() {
@@ -579,14 +592,18 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
     if (!editingVehicleId) {
       if (vehicleDirty && !window.confirm('入力内容と端末内の復元データを削除して、車両の登録を中止しますか？')) return
       const storageKey = newVehicleStorageKey
-      void vehicleAutosaveCancelLocalDraftRef.current(storageKey).then(() => {
+      void vehicleAutosaveCancelLocalDraftRef.current(storageKey).then(async () => {
+        await refreshDrafts()
         setNewVehicleStorageKey('vehicle-new')
         registerActiveDraft('vehicle-new', null)
         closeVehicleDialogNow()
       }).catch((reason: unknown) => setError(getErrorMessage(reason)))
       return
     }
-    void vehicleAutosaveCancelLocalDraftRef.current(`vehicle-edit:${editingVehicleId}`).then(() => closeVehicleDialogNow()).catch((reason: unknown) => setError(getErrorMessage(reason)))
+    void vehicleAutosaveCancelLocalDraftRef.current(`vehicle-edit:${editingVehicleId}`).then(async () => {
+      await refreshDrafts()
+      closeVehicleDialogNow()
+    }).catch((reason: unknown) => setError(getErrorMessage(reason)))
   }
 
   function updateVehicleForm(nextForm: VehicleInput) {
@@ -633,7 +650,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         setSelectedVehicleId(editingId)
       } else {
         const result = await createVehicle(selectedCustomer.id, normalizedForm)
-        void deleteDraft(newVehicleStorageKey)
+        await deleteDraft(newVehicleStorageKey)
+        await refreshDrafts()
         setNewVehicleStorageKey('vehicle-new')
         registerActiveDraft('vehicle-new', null)
         setCustomers((current) => current.map((customer) => customer.id === result.customer.id ? result.customer : customer))
@@ -759,7 +777,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         <button className="button button-primary" type="button" onClick={openNewCustomerDialog}><Plus size={18} />顧客を登録</button>
       </div>
 
-      {(loading || error || saving) && <div className={`customer-sync-status${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}><span>{loading ? '顧客・車両データを読み込んでいます…' : saving ? '変更を保存しています…' : error}</span>{error && <button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button>}</div>}
+      {(loading || error || saving) && ((!customerDialogOpen && !vehicleDialogOpen) || pendingMasterDeletion) && <div className={`customer-sync-status${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}><span>{loading ? '顧客・車両データを読み込んでいます…' : saving ? '変更を保存しています…' : error}</span>{error && <button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button>}</div>}
 
       <div className="customer-toolbar">
         <label className="customer-search"><Search size={19} /><span className="sr-only">顧客・車両を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={customerSearchPlaceholders[searchField]} /></label>
@@ -774,8 +792,8 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         </div>
       </div>
 
-      {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} cancelLabel={editingCustomerId ? '閉じる' : undefined} autosaveStatus={customerAutosave.status} autosaveLastSavedAt={customerAutosave.lastSavedAt} saving={saving} deleteLoading={deletionLoading} onChange={updateCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} onDelete={editingCustomerId ? () => void requestMasterDeletion('customer', editingCustomerId, customerUpdatedAtRef.current) : undefined} />}
-      {vehicleDialogOpen && selectedCustomer && <VehicleDialog form={vehicleForm} title={editingVehicleId ? '車両情報を編集' : '車両を追加'} submitLabel={editingVehicleId ? '変更を保存' : '車両を追加'} cancelLabel={editingVehicleId ? '閉じる' : undefined} autosaveStatus={vehicleAutosave.status} autosaveLastSavedAt={vehicleAutosave.lastSavedAt} saving={saving} deleteLoading={deletionLoading} customerName={selectedCustomer.name} onChange={updateVehicleForm} onClose={closeVehicleDialog} onSubmit={handleVehicleSubmit} onDelete={editingVehicleId ? () => void requestMasterDeletion('vehicle', editingVehicleId, vehicleUpdatedAtRef.current) : undefined} />}
+      {customerDialogOpen && <CustomerDialog form={customerForm} title={editingCustomerId ? '顧客情報を編集' : '顧客を登録'} submitLabel={editingCustomerId ? '変更を保存' : '顧客を登録'} cancelLabel={editingCustomerId ? '閉じる' : undefined} autosaveStatus={customerAutosave.status} autosaveLastSavedAt={customerAutosave.lastSavedAt} saving={saving} deleteLoading={deletionLoading} error={error} onChange={updateCustomerForm} onClose={closeCustomerDialog} onSubmit={handleCustomerSubmit} onDelete={editingCustomerId ? () => void requestMasterDeletion('customer', editingCustomerId, customerUpdatedAtRef.current) : undefined} />}
+      {vehicleDialogOpen && selectedCustomer && <VehicleDialog form={vehicleForm} title={editingVehicleId ? '車両情報を編集' : '車両を追加'} submitLabel={editingVehicleId ? '変更を保存' : '車両を追加'} cancelLabel={editingVehicleId ? '閉じる' : undefined} autosaveStatus={vehicleAutosave.status} autosaveLastSavedAt={vehicleAutosave.lastSavedAt} saving={saving} deleteLoading={deletionLoading} error={error} customerName={selectedCustomer.name} onChange={updateVehicleForm} onClose={closeVehicleDialog} onSubmit={handleVehicleSubmit} onDelete={editingVehicleId ? () => void requestMasterDeletion('vehicle', editingVehicleId, vehicleUpdatedAtRef.current) : undefined} />}
       {pendingMasterDeletion && <MasterDeletionDialog impact={pendingMasterDeletion.impact} loading={deletionLoading} onClose={() => setPendingMasterDeletion(null)} onConfirm={() => void confirmMasterDeletion()} />}
       {attachmentPreview && <AttachmentPreviewModal preview={attachmentPreview} onClose={closeAttachmentPreview} />}
     </>
@@ -1092,12 +1110,12 @@ function AttachmentPreviewModal({ preview, onClose }: { preview: AttachmentPrevi
   return <div className="modal-backdrop attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="attachment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="attachment-preview-title"><div className="modal-header"><div><h2 id="attachment-preview-title">{preview.attachment.name}</h2><span className="attachment-preview-meta">{isImage ? '画像' : preview.attachment.type === 'pdf' ? 'PDF' : '添付ファイル'} ・ {formatFileSize(preview.attachment.size)}</span></div><div className="attachment-preview-header-actions">{isImage && <button className="button button-secondary" type="button" disabled={ocrStatus === 'running'} onClick={() => void recognizeText()}><FileText size={16} />{ocrButtonLabel}</button>}<button className="modal-close" type="button" aria-label="プレビューを閉じる" onClick={onClose}><X size={19} /></button></div></div><div className="attachment-preview-content">{isImage ? <div className="attachment-image-preview"><div className="attachment-image-stage"><img ref={imageRef} className="attachment-preview-image" src={preview.url} alt={preview.attachment.name} onLoad={(event) => { const image = event.currentTarget; const { width: renderedWidth, height: renderedHeight } = image.getBoundingClientRect(); setImageSize({ width: image.naturalWidth, height: image.naturalHeight, renderedWidth, renderedHeight }) }} />{ocrRegions.length > 0 && imageSize && <div ref={ocrLayerRef} className="attachment-ocr-layer" aria-label="OCRで認識した文字" onPointerDown={handleOcrPointerDown} onPointerMove={handleOcrPointerMove} onPointerUp={endOcrPointerSelection} onPointerCancel={endOcrPointerSelection}>{ocrRegions.map((region, index) => { const renderedRegionHeight = Math.max(1, ((region.y1 - region.y0) / imageSize.height) * imageSize.renderedHeight); return <span className={`attachment-ocr-token${selectedOcrRegionIndexes.has(index) ? ' is-selected' : ''}`} data-confidence={region.confidence} data-ocr-region-index={index} key={`${region.x0}-${region.y0}-${index}`} style={{ left: `${(region.x0 / imageSize.width) * 100}%`, top: `${(region.y0 / imageSize.height) * 100}%`, width: `${((region.x1 - region.x0) / imageSize.width) * 100}%`, height: `${((region.y1 - region.y0) / imageSize.height) * 100}%`, fontSize: `${renderedRegionHeight}px`, lineHeight: `${renderedRegionHeight}px` }}>{region.text}</span> })}</div>}</div>{ocrStatus === 'ready' && <span className="attachment-ocr-status" role="status">認識した文字をカーソルや指でなぞって選択できます。</span>}{ocrStatus === 'running' && <span className="attachment-ocr-status" role="status">画像内の文字を解析しています。初回は少し時間がかかります。</span>}{ocrStatus === 'empty' && <span className="attachment-ocr-status">文字を認識できませんでした。画像を拡大して再認識してください。</span>}{ocrStatus === 'error' && <span className="attachment-ocr-status is-error" role="alert">{ocrError}</span>}</div> : preview.attachment.type === 'pdf' ? <iframe className="attachment-preview-frame" src={`${preview.url}#toolbar=1`} title={`${preview.attachment.name}のプレビュー`} /> : <div className="attachment-preview-empty"><FileText size={30} /><strong>このファイル形式は画面表示に対応していません</strong><a className="button button-secondary" href={preview.url} download={preview.attachment.name}>ファイルをダウンロード</a></div>}</div></section></div>
 }
 
-function CustomerDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, saving, deleteLoading, onChange, onClose, onSubmit, onDelete }: { form: CustomerInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; saving: boolean; deleteLoading: boolean; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete?: () => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><NormalizedInput field="phone" type="tel" value={form.phone} onChange={(phone) => onChange({ ...form, phone })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><ModalDateInput ariaLabel="生年月日" value={form.birthDate} onChange={(birthDate) => onChange({ ...form, birthDate })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><NormalizedInput field="postalCode" value={form.postalCode ?? ''} onChange={(postalCode) => onChange({ ...form, postalCode })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter leading={<AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} />} onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={saving} deleteLoading={deleteLoading} onDelete={onDelete} deleteLabel={deleteLoading ? '削除確認中…' : '顧客を削除'} /></form></Modal>
+function CustomerDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, saving, deleteLoading, error, onChange, onClose, onSubmit, onDelete }: { form: CustomerInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; saving: boolean; deleteLoading: boolean; error: string; onChange: (form: CustomerInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete?: () => void }) {
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}>{error && <div className="modal-error" role="alert">{error}</div>}<div className="form-grid"><FormField label="顧客名" required><input autoFocus required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} placeholder="例：佐藤 太郎" /></FormField><FormField label="ふりがな"><input value={form.kana} onChange={(event) => onChange({ ...form, kana: event.target.value })} placeholder="例：さとう たろう" /></FormField><FormField label="電話番号"><NormalizedInput field="phone" type="tel" value={form.phone} onChange={(phone) => onChange({ ...form, phone })} placeholder="例：090-1234-5678" /></FormField><FormField label="メールアドレス"><input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} placeholder="例：sato@example.com" /></FormField><FormField label="生年月日"><ModalDateInput ariaLabel="生年月日" value={form.birthDate} onChange={(birthDate) => onChange({ ...form, birthDate })} placeholder="例：1990/01/23" /></FormField><FormField label="勤務先等"><input value={form.employer} onChange={(event) => onChange({ ...form, employer: event.target.value })} placeholder="例：〇〇株式会社" /></FormField><FormField label="郵便番号"><NormalizedInput field="postalCode" value={form.postalCode ?? ''} onChange={(postalCode) => onChange({ ...form, postalCode })} placeholder="例：100-0001" /></FormField><FormField label="住所"><input value={form.address} onChange={(event) => onChange({ ...form, address: event.target.value })} placeholder="例：東京都千代田区" /></FormField><FormField label="メモ"><textarea value={form.memo} onChange={(event) => onChange({ ...form, memo: event.target.value })} placeholder="連絡方法など" /></FormField></div><ModalFooter leading={<AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} />} onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={saving} deleteLoading={deleteLoading} onDelete={onDelete} deleteLabel={deleteLoading ? '削除確認中…' : '顧客を削除'} /></form></Modal>
 }
 
-function VehicleDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, saving, deleteLoading, customerName, onChange, onClose, onSubmit, onDelete }: { form: VehicleInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; saving: boolean; deleteLoading: boolean; customerName: string; onChange: (form: VehicleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete?: () => void }) {
-  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}><p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><NormalizedInput field="modelYear" value={form.year} onChange={(year) => onChange({ ...form, year })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><NormalizedInput field="mileage" value={form.mileage} onChange={(mileage) => onChange({ ...form, mileage })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><NormalizedInput field="displacement" inputMode="numeric" value={form.displacement} onChange={(displacement) => onChange({ ...form, displacement })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><ModalFooter leading={<AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} />} onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={saving} deleteLoading={deleteLoading} onDelete={onDelete} deleteLabel={deleteLoading ? '削除確認中…' : '車両を削除'} /></form></Modal>
+function VehicleDialog({ form, title, submitLabel, cancelLabel, autosaveStatus, autosaveLastSavedAt, saving, deleteLoading, error, customerName, onChange, onClose, onSubmit, onDelete }: { form: VehicleInput; title: string; submitLabel: string; cancelLabel?: string; autosaveStatus: AutosaveState; autosaveLastSavedAt: number | null; saving: boolean; deleteLoading: boolean; error: string; customerName: string; onChange: (form: VehicleInput) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete?: () => void }) {
+  return <Modal title={title} onClose={onClose}><form className="modal-form" onSubmit={onSubmit}>{error && <div className="modal-error" role="alert">{error}</div>}<p className="modal-description"><UserRound size={16} />{customerName} の車両情報を登録します。</p><div className="form-grid"><FormField label="メーカー" required><input autoFocus required value={form.maker} onChange={(event) => onChange({ ...form, maker: event.target.value })} placeholder="例：トヨタ" /></FormField><FormField label="車名" required><input required value={form.model} onChange={(event) => onChange({ ...form, model: event.target.value })} placeholder="例：プリウス" /></FormField><FormField label="型式"><input value={form.modelType} onChange={(event) => onChange({ ...form, modelType: event.target.value })} placeholder="例：6AA-ZVW60" /></FormField><FormField label="登録番号"><input value={form.plate} onChange={(event) => onChange({ ...form, plate: event.target.value })} placeholder="例：品川 500 あ 1234" /></FormField><FormField label="車台番号"><input value={form.vin} onChange={(event) => onChange({ ...form, vin: event.target.value })} placeholder="例：ZVW5000001" /></FormField><FormField label="年式"><NormalizedInput field="modelYear" value={form.year} onChange={(year) => onChange({ ...form, year })} placeholder="例：2024年" /></FormField><FormField label="車検満了日"><input type="date" value={form.inspectionDate.replace(/\//g, '-')} onChange={(event) => onChange({ ...form, inspectionDate: event.target.value.replace(/-/g, '/') })} /></FormField><FormField label="走行距離"><NormalizedInput field="mileage" value={form.mileage} onChange={(mileage) => onChange({ ...form, mileage })} placeholder="例：12,500 km" /></FormField><FormField label="車体色"><input value={form.color} onChange={(event) => onChange({ ...form, color: event.target.value })} placeholder="例：パールホワイト" /></FormField><FormField label="排気量"><NormalizedInput field="displacement" inputMode="numeric" value={form.displacement} onChange={(displacement) => onChange({ ...form, displacement })} placeholder="例：1800 cc" /></FormField><FormField label="ミッション"><input value={form.transmission} onChange={(event) => onChange({ ...form, transmission: event.target.value })} placeholder="例：CVT" /></FormField><FormField label="自由項目1"><input value={form.freeItem1} onChange={(event) => onChange({ ...form, freeItem1: event.target.value })} placeholder="例：駆動方式" /></FormField><FormField label="自由項目2"><input value={form.freeItem2} onChange={(event) => onChange({ ...form, freeItem2: event.target.value })} placeholder="自由項目" /></FormField><FormField label="自由項目3"><input value={form.freeItem3} onChange={(event) => onChange({ ...form, freeItem3: event.target.value })} placeholder="自由項目" /></FormField><FormField label="備考"><textarea value={form.note} onChange={(event) => onChange({ ...form, note: event.target.value })} placeholder="車両に関するメモ" /></FormField></div><ModalFooter leading={<AutosaveStatus status={autosaveStatus} lastSavedAt={autosaveLastSavedAt} />} onClose={onClose} cancelLabel={cancelLabel} submitLabel={submitLabel} disabled={saving} deleteLoading={deleteLoading} onDelete={onDelete} deleteLabel={deleteLoading ? '削除確認中…' : '車両を削除'} /></form></Modal>
 }
 
 function ModalDateInput({ ariaLabel, value, onChange, placeholder }: { ariaLabel: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
