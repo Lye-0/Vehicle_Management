@@ -279,7 +279,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     const allVehicles = await database
       .select({ id: vehicles.id, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
       .from(vehicles)
-      .where(eq(vehicles.organizationId, organizationId))
+      .where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .all()
     const duplicateVehicles = findDuplicateVehicles(allVehicles, newVehicle)
 
@@ -313,7 +313,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     const allCustomers = await database
       .select({ id: customers.id, name: customers.name, phone: customers.phone, email: customers.email })
       .from(customers)
-      .where(eq(customers.organizationId, organizationId))
+      .where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt)))
       .all()
     // 結果はレスポンスには含めない（作成をブロックしない）
     void findDuplicateCustomers(allCustomers, newCustomer)
@@ -345,7 +345,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && !newCustomer) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     // 部分集合チェック
     for (const f of masterSync.customerFields) {
@@ -356,7 +356,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   if (masterSync && !newVehicle) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -566,7 +566,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && masterSync.customerFields.length > 0) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     for (const f of masterSync.customerFields) {
       if (!actualCustomerDiffFields.has(f)) {
@@ -576,7 +576,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   if (masterSync && masterSync.vehicleFields.length > 0) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -745,7 +745,7 @@ async function parseMaintenanceInput(
 
   // 既存車両の所有関係検証（新規車両の場合はスキップ）
   if (vehicleId && customerId && !newCustomer) {
-    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
@@ -780,8 +780,8 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
   ])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -800,8 +800,8 @@ async function findMaintenanceDocument(database: ReturnType<typeof createDatabas
   if (!document) return null
   const [items, customer, vehicle] = await Promise.all([
     loadMaintenanceItems(database, documentId, organizationId),
-    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId))).get(),
-    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId))).get() : Promise.resolve(undefined),
+    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get(),
+    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() : Promise.resolve(undefined),
   ])
   return serializeMaintenanceDocument(document, customer, vehicle, items)
 }
@@ -814,7 +814,7 @@ async function getCurrentVehicleMileage(database: ReturnType<typeof createDataba
   if (!vehicleId) return null
   const result = await database.select({ mileage: vehicles.mileage })
     .from(vehicles)
-    .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId)))
+    .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
     .get()
   return result?.mileage ?? null
 }

@@ -84,10 +84,14 @@ export const customers = sqliteTable('customers', {
   birthDate: text('birth_date'),
   employer: text('employer'),
   memo: text('memo'),
+  deletedAt: text('deleted_at'),
+  deletedBy: text('deleted_by'),
+  deletionBatchId: text('deletion_batch_id'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('customers_organization_number_uq').on(table.organizationId, table.customerNumber),
   index('customers_organization_id_idx').on(table.organizationId),
+  index('customers_organization_deleted_at_idx').on(table.organizationId, table.deletedAt),
   index('customers_name_idx').on(table.name),
   index('customers_phone_idx').on(table.phone),
 ])
@@ -112,9 +116,13 @@ export const vehicles = sqliteTable('vehicles', {
   freeItem2: text('free_item_2'),
   freeItem3: text('free_item_3'),
   memo: text('memo'),
+  deletedAt: text('deleted_at'),
+  deletedBy: text('deleted_by'),
+  deletionBatchId: text('deletion_batch_id'),
   ...timestamps,
 }, (table) => [
   index('vehicles_organization_id_idx').on(table.organizationId),
+  index('vehicles_organization_deleted_at_idx').on(table.organizationId, table.deletedAt),
   index('vehicles_customer_id_idx').on(table.customerId),
   index('vehicles_registration_number_idx').on(table.registrationNumber),
   index('vehicles_inspection_date_idx').on(table.inspectionDate),
@@ -158,6 +166,8 @@ export const salesDocuments = sqliteTable('sales_documents', {
   archivedBy: text('archived_by'),
   purgeAt: text('purge_at'),
   keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
+  archiveReason: text('archive_reason'),
+  deletionBatchId: text('deletion_batch_id'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('sales_documents_organization_number_uq').on(table.organizationId, table.number),
@@ -214,6 +224,8 @@ export const maintenanceDocuments = sqliteTable('maintenance_documents', {
   archivedBy: text('archived_by'),
   purgeAt: text('purge_at'),
   keepForever: integer('keep_forever', { mode: 'boolean' }).notNull().default(false),
+  archiveReason: text('archive_reason'),
+  deletionBatchId: text('deletion_batch_id'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('maintenance_documents_organization_number_uq').on(table.organizationId, table.number),
@@ -283,6 +295,7 @@ export const inspectionSchedules = sqliteTable('inspection_schedules', {
   status: text('status').notNull().default('予定'),
   notifiedAt: text('notified_at'),
   note: text('note'),
+  deletionBatchId: text('deletion_batch_id'),
   ...timestamps,
 }, (table) => [
   index('inspection_schedules_organization_id_idx').on(table.organizationId),

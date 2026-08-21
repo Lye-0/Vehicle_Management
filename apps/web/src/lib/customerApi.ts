@@ -67,6 +67,17 @@ export type CustomerInput = {
   memo: string
 }
 
+export type MasterDeletionImpact = {
+  kind: 'customer' | 'vehicle'
+  id: string
+  label: string
+  vehicleCount: number
+  documentCount: number
+  archivedDocumentCount: number
+  inspectionCount: number
+  attachmentCount: number
+}
+
 export type VehiclelessDocument = {
   id: string
   kind: 'sales' | 'maintenance'
@@ -206,6 +217,15 @@ export async function updateCustomer(id: string, input: CustomerInput, expectedU
   return mapCustomer(response.customer)
 }
 
+export async function fetchCustomerDeletionImpact(id: string) {
+  const response = await apiFetch<{ impact: MasterDeletionImpact }>(`/api/customers/${encodeURIComponent(id)}/deletion-impact`)
+  return response.impact
+}
+
+export async function deleteCustomer(id: string, expectedUpdatedAt?: string) {
+  return apiFetch<{ deleted: true; kind: 'customer'; customerId: string; vehicleIds: string[] }>(`/api/customers/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: true, expectedUpdatedAt }) })
+}
+
 export async function createVehicle(customerId: string, input: VehicleInput) {
   const response = await apiFetch<{ customer: ApiCustomer; vehicleId: string }>(`/api/customers/${customerId}/vehicles`, { method: 'POST', body: JSON.stringify(toVehiclePayload(input)) })
   return { customer: mapCustomer(response.customer), vehicleId: response.vehicleId }
@@ -214,6 +234,15 @@ export async function createVehicle(customerId: string, input: VehicleInput) {
 export async function updateVehicle(id: string, input: VehicleInput, expectedUpdatedAt?: string) {
   const response = await apiFetch<{ customer: ApiCustomer; vehicleId: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(toVehiclePayload(input, expectedUpdatedAt)) })
   return { customer: mapCustomer(response.customer), vehicleId: response.vehicleId }
+}
+
+export async function fetchVehicleDeletionImpact(id: string) {
+  const response = await apiFetch<{ impact: MasterDeletionImpact }>(`/api/vehicles/${encodeURIComponent(id)}/deletion-impact`)
+  return response.impact
+}
+
+export async function deleteVehicle(id: string, expectedUpdatedAt?: string) {
+  return apiFetch<{ deleted: true; kind: 'vehicle'; customerId: string; vehicleIds: string[] }>(`/api/vehicles/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: true, expectedUpdatedAt }) })
 }
 
 export async function uploadVehicleFile(vehicleId: string, file: File) {

@@ -1,13 +1,15 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm'
 import { customers, inspectionSchedules, maintenanceDocuments, mileageHistories, paymentRecords, salesDocuments, vehicleFiles, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
-import { requireOrganizationContext } from '../auth/organization'
+import { requireAdminOrganizationContext, requireOrganizationContext } from '../auth/organization'
+import { loadBackupSettings } from '../backup-settings'
 import { createDatabase } from '../db/client'
 import { assertRequestContentLength, corsHeaders, HttpError, jsonResponse, readFormData, readJson } from '../http'
 import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
+import { deleteMaster, getMasterDeletionImpact, type MasterDeletionKind } from '../master-deletion'
 import { createB2Storage } from '../storage/b2'
 
 const maximumAttachmentSize = 20 * 1024 * 1024
@@ -34,6 +36,18 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
+    const customerDeletionImpactMatch = pathname.match(/^\/api\/customers\/([^/]+)\/deletion-impact$/)
+    if (customerDeletionImpactMatch) {
+      if (request.method !== 'GET') throw new HttpError(405, 'この操作には対応していません。')
+      return await getDeletionImpact(request, env, database, 'customer', decodeURIComponent(customerDeletionImpactMatch[1]))
+    }
+
+    const vehicleDeletionImpactMatch = pathname.match(/^\/api\/vehicles\/([^/]+)\/deletion-impact$/)
+    if (vehicleDeletionImpactMatch) {
+      if (request.method !== 'GET') throw new HttpError(405, 'この操作には対応していません。')
+      return await getDeletionImpact(request, env, database, 'vehicle', decodeURIComponent(vehicleDeletionImpactMatch[1]))
+    }
+
     const vehiclelessDocumentsMatch = pathname.match(/^\/api\/customers\/([^/]+)\/vehicleless-documents$/)
     if (vehiclelessDocumentsMatch) {
       if (request.method === 'GET') return await listVehiclelessDocuments(env, database, decodeURIComponent(vehiclelessDocumentsMatch[1]), organizationId)
@@ -44,6 +58,7 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     if (customerMatch) {
       if (request.method === 'GET') return await getCustomer(env, database, customerMatch[1], organizationId)
       if (request.method === 'PATCH') return await updateCustomer(request, env, database, customerMatch[1], organizationId)
+      if (request.method === 'DELETE') return await deleteMasterFromRoute(request, env, database, 'customer', decodeURIComponent(customerMatch[1]))
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
@@ -76,6 +91,7 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     if (vehicleMatch) {
       if (request.method === 'GET') return await getVehicle(env, database, vehicleMatch[1], organizationId)
       if (request.method === 'PATCH') return await updateVehicle(request, env, database, vehicleMatch[1], organizationId)
+      if (request.method === 'DELETE') return await deleteMasterFromRoute(request, env, database, 'vehicle', decodeURIComponent(vehicleMatch[1]))
       throw new HttpError(405, 'この操作には対応していません。')
     }
 
@@ -86,6 +102,22 @@ export async function handleCustomerRoutes(request: Request, env: Env): Promise<
     console.error(error)
     return jsonResponse({ error: '顧客・車両データの処理に失敗しました。' }, 500, env)
   }
+}
+
+async function getDeletionImpact(request: Request, env: Env, database: ReturnType<typeof createDatabase>, kind: MasterDeletionKind, id: string) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const impact = await getMasterDeletionImpact(database, context.organization.organizationId, kind, id)
+  return jsonResponse({ impact }, 200, env)
+}
+
+async function deleteMasterFromRoute(request: Request, env: Env, database: ReturnType<typeof createDatabase>, kind: MasterDeletionKind, id: string) {
+  const context = await requireAdminOrganizationContext(request, env, database)
+  const body = await readJson(request)
+  if (body.confirmation !== true) throw new HttpError(400, '削除確認が必要です。')
+  const expectedUpdatedAt = typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined
+  const settings = await loadBackupSettings(database, context.organization.organizationId)
+  const result = await deleteMaster(database, context.organization.organizationId, kind, id, context.user.uid, settings.archiveRetentionDays, expectedUpdatedAt)
+  return jsonResponse({ deleted: true, kind, customerId: result.customerId, vehicleIds: result.vehicleIds }, 200, env)
 }
 
 async function listCustomers(request: Request, env: Env, database: ReturnType<typeof createDatabase>, organizationId: string) {
@@ -104,7 +136,7 @@ async function listCustomerSummaries(url: URL, env: Env, database: ReturnType<ty
   const query = url.searchParams.get('q')?.trim() ?? ''
   const field = url.searchParams.get('field')?.trim() ?? 'すべて'
   const cursor = decodeCustomerCursor(url.searchParams.get('cursor'))
-  const conditions = [eq(customers.organizationId, organizationId)]
+  const conditions = [eq(customers.organizationId, organizationId), isNull(customers.deletedAt)]
   if (cursor) conditions.push(or(gt(customers.name, cursor.name), and(eq(customers.name, cursor.name), gt(customers.id, cursor.id)))!)
 
   const pattern = `%${query}%`
@@ -114,10 +146,10 @@ async function listCustomerSummaries(url: URL, env: Env, database: ReturnType<ty
         : field === 'メールアドレス' ? like(customers.email, pattern)
           : field === '電話番号' ? like(customers.phone, pattern)
             : field === '住所' ? like(customers.address, pattern)
-              : field === '車名' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.name LIKE ${pattern})`
-                : field === '登録番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.registration_number LIKE ${pattern})`
-                  : field === '車台番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.chassis_number LIKE ${pattern})`
-                    : or(like(customers.name, pattern), like(customers.nameKana, pattern), like(customers.phone, pattern), like(customers.email, pattern), like(customers.address, pattern), sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND (search_vehicle.name LIKE ${pattern} OR search_vehicle.registration_number LIKE ${pattern} OR search_vehicle.chassis_number LIKE ${pattern}))`)!
+              : field === '車名' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.deleted_at IS NULL AND search_vehicle.name LIKE ${pattern})`
+                : field === '登録番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.deleted_at IS NULL AND search_vehicle.registration_number LIKE ${pattern})`
+                  : field === '車台番号' ? sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.deleted_at IS NULL AND search_vehicle.chassis_number LIKE ${pattern})`
+                    : or(like(customers.name, pattern), like(customers.nameKana, pattern), like(customers.phone, pattern), like(customers.email, pattern), like(customers.address, pattern), sql`EXISTS (SELECT 1 FROM vehicles search_vehicle WHERE search_vehicle.customer_id = ${customers.id} AND search_vehicle.organization_id = ${organizationId} AND search_vehicle.deleted_at IS NULL AND (search_vehicle.name LIKE ${pattern} OR search_vehicle.registration_number LIKE ${pattern} OR search_vehicle.chassis_number LIKE ${pattern}))`)!
     conditions.push(customerSearch)
   }
 
@@ -148,8 +180,8 @@ function decodeCustomerCursor(value: string | null): { name: string; id: string 
 
 async function loadCustomerRecords(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [customerRows, vehicleRows, fileRows] = await Promise.all([
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).orderBy(asc(customers.name)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).orderBy(asc(vehicles.name)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).orderBy(asc(customers.name)).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).orderBy(asc(vehicles.name)).all(),
     database.select().from(vehicleFiles).where(eq(vehicleFiles.organizationId, organizationId)).orderBy(asc(vehicleFiles.createdAt)).all(),
   ])
   const filesByVehicle = groupBy(fileRows, (file) => file.vehicleId)
@@ -216,7 +248,7 @@ async function createCustomer(request: Request, env: Env, database: ReturnType<t
 }
 
 async function updateCustomer(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  const current = await database.select({ id: customers.id, updatedAt: customers.updatedAt }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  const current = await database.select({ id: customers.id, updatedAt: customers.updatedAt }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()
   if (!current) throw new HttpError(404, '顧客が見つかりません。')
   const body = await readJson(request)
   const name = stringValue(body, 'name')
@@ -240,7 +272,7 @@ async function updateCustomer(request: Request, env: Env, database: ReturnType<t
 }
 
 async function createVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  if (!await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()) throw new HttpError(404, '顧客が見つかりません。')
+  if (!await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()) throw new HttpError(404, '顧客が見つかりません。')
   const body = await readJson(request)
   const maker = stringValue(body, 'maker')
   const name = stringValue(body, 'model') || stringValue(body, 'name')
@@ -270,7 +302,7 @@ async function createVehicle(request: Request, env: Env, database: ReturnType<ty
 }
 
 async function updateVehicle(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
-  const current = await database.select({ id: vehicles.id, customerId: vehicles.customerId, updatedAt: vehicles.updatedAt }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+  const current = await database.select({ id: vehicles.id, customerId: vehicles.customerId, updatedAt: vehicles.updatedAt }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
   if (!current) throw new HttpError(404, '車両が見つかりません。')
   const body = await readJson(request)
   const maker = stringValue(body, 'maker')
@@ -301,7 +333,7 @@ async function updateVehicle(request: Request, env: Env, database: ReturnType<ty
 }
 
 async function uploadVehicleFile(request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
-  if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()) throw new HttpError(404, '車両が見つかりません。')
+  if (!await database.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()) throw new HttpError(404, '車両が見つかりません。')
   assertRequestContentLength(request, maximumAttachmentSize + 1024 * 1024, { required: true })
   const formData = await readFormData(request, maximumAttachmentSize + 1024 * 1024)
   const file = formData.get('file')
@@ -367,10 +399,10 @@ async function getCustomer(env: Env, database: ReturnType<typeof createDatabase>
 }
 
 async function getVehicle(env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
-  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, decodeURIComponent(vehicleId)), eq(vehicles.organizationId, organizationId))).get()
+  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, decodeURIComponent(vehicleId)), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
   const [customer, files] = await Promise.all([
-    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
+    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get(),
     database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicle.id), eq(vehicleFiles.organizationId, organizationId))).orderBy(asc(vehicleFiles.createdAt)).all(),
   ])
   return jsonResponse({ vehicle: serializeVehicle(vehicle, files), customer: customer ? { id: customer.id, name: customer.name, nameKana: customer.nameKana, phone: customer.phone, updatedAt: customer.updatedAt } : null }, 200, env)
@@ -381,7 +413,7 @@ async function listVehicleSummaries(request: Request, env: Env, database: Return
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 500) || 500, 1), 500)
   const q = url.searchParams.get('q')?.trim() ?? ''
   const field = url.searchParams.get('field')?.trim() ?? 'すべて'
-  const conditions = [eq(vehicles.organizationId, organizationId), sql`${vehicles.inspectionDate} IS NOT NULL AND ${vehicles.inspectionDate} <> ''`]
+  const conditions = [eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt), isNull(customers.deletedAt), sql`${vehicles.inspectionDate} IS NOT NULL AND ${vehicles.inspectionDate} <> ''`]
   if (q) {
     const pattern = `%${q}%`
     const search = field === '顧客名' ? like(customers.name, pattern)
@@ -403,9 +435,9 @@ async function listVehicleSummaries(request: Request, env: Env, database: Return
 }
 
 async function loadCustomerRecordById(database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  const customer = await database.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  const customer = await database.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()
   if (!customer) return null
-  const vehicleRows = await database.select().from(vehicles).where(and(eq(vehicles.customerId, customerId), eq(vehicles.organizationId, organizationId))).orderBy(asc(vehicles.name)).all()
+  const vehicleRows = await database.select().from(vehicles).where(and(eq(vehicles.customerId, customerId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).orderBy(asc(vehicles.name)).all()
   const fileRows = vehicleRows.length > 0 ? await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.organizationId, organizationId), inArray(vehicleFiles.vehicleId, vehicleRows.map((vehicle) => vehicle.id)))).orderBy(asc(vehicleFiles.createdAt)).all() : []
   const filesByVehicle = groupBy(fileRows.filter((file) => vehicleRows.some((vehicle) => vehicle.id === file.vehicleId)), (file) => file.vehicleId)
   return {
@@ -463,7 +495,7 @@ type VehiclelessDocumentSummary = {
 }
 
 async function listVehiclelessDocuments(env: Env, database: ReturnType<typeof createDatabase>, customerId: string, organizationId: string) {
-  const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()
   if (!customer) throw new HttpError(404, '顧客が見つかりません。')
 
   const [salesRows, maintenanceRows] = await Promise.all([
@@ -514,16 +546,16 @@ function compareVehiclelessDocuments(left: VehiclelessDocumentSummary, right: Ve
 }
 
 async function getVehicleHistory(env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, organizationId: string) {
-  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+  const vehicle = await database.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
   if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
 
   const [customer, sales, maintenance, schedules, files, mileageHistoryRows] = await Promise.all([
-    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId))).get(),
-    database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId))).orderBy(desc(salesDocuments.issuedAt)).all(),
-    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
-    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
+    database.select().from(customers).where(and(eq(customers.id, vehicle.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get(),
+    database.select().from(salesDocuments).where(and(eq(salesDocuments.vehicleId, vehicleId), eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.issuedAt)).all(),
+    database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.vehicleId, vehicleId), eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.issuedAt)).all(),
+    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.vehicleId, vehicleId), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
     database.select().from(vehicleFiles).where(and(eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).orderBy(desc(vehicleFiles.createdAt)).all(),
-    database.select().from(mileageHistories).where(and(eq(mileageHistories.vehicleId, vehicleId), eq(mileageHistories.organizationId, organizationId))).all(),
+    database.select({ mileage: mileageHistories.mileage, maintenanceDocumentId: mileageHistories.maintenanceDocumentId }).from(mileageHistories).innerJoin(maintenanceDocuments, and(eq(mileageHistories.maintenanceDocumentId, maintenanceDocuments.id), eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).where(and(eq(mileageHistories.vehicleId, vehicleId), eq(mileageHistories.organizationId, organizationId))).all(),
   ])
   const documentIds = [...sales.map((document) => document.id), ...maintenance.map((document) => document.id)]
   const payments = documentIds.length > 0 ? await database.select().from(paymentRecords).where(and(eq(paymentRecords.organizationId, organizationId), inArray(paymentRecords.documentId, documentIds))).orderBy(desc(paymentRecords.paymentDate), desc(paymentRecords.updatedAt)).all() : []

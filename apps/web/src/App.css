@@ -392,6 +392,7 @@
 .empty-detail span { font-size: 12px; }
 
 .modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15, 27, 46, 0.48); backdrop-filter: blur(4px); }
+.master-deletion-backdrop { z-index: 40; }
 .modal { width: min(100%, 620px); max-height: min(760px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 70px rgba(15, 27, 46, 0.25); }
 .attachment-preview-backdrop { z-index: 30; }
 .attachment-preview-modal { width: min(100%, 960px); max-height: min(880px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 70px rgba(15, 27, 46, 0.3); }
@@ -445,7 +446,20 @@
 .optional-date-field-toggle.is-enabled .optional-date-field-toggle-track > span { transform: translateX(12px); }
 .optional-date-field input:disabled { color: var(--text-muted); background: #f1f4f8; cursor: not-allowed; }
 .modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
-.modal-footer > .autosave-status { margin-right: auto; }
+.modal-footer-leading { min-width: 0; display: flex; align-items: center; gap: 9px; margin-right: auto; }
+.modal-footer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.modal-footer-leading > .autosave-status { margin-right: 0; }
+.modal-delete-button { white-space: nowrap; }
+.master-deletion-content { display: grid; gap: 14px; padding: 22px 24px 24px; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.master-deletion-content p { margin: 0; }
+.master-deletion-warning { color: var(--text); font-size: 15px; font-weight: 800; }
+.master-deletion-impact-list { display: grid; gap: 1px; margin: 0; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.master-deletion-impact-list > div { display: flex; justify-content: space-between; gap: 16px; padding: 9px 12px; background: var(--surface-subtle); }
+.master-deletion-impact-list > div + div { border-top: 1px solid var(--border); }
+.master-deletion-impact-list dt { color: var(--text-secondary); }
+.master-deletion-impact-list dd { margin: 0; color: var(--text); font-weight: 800; }
+.master-deletion-note { padding: 10px 12px; border-radius: 8px; background: #fff8ed; color: #8a5a17; }
+.master-deletion-footer { display: flex; justify-content: flex-end; gap: 9px; padding-top: 5px; }
 .button-secondary { color: var(--text-secondary); border-color: var(--border); background: var(--surface); }
 .button-secondary:hover { color: var(--text); border-color: #c3d0de; background: var(--surface-subtle); }
 
@@ -2479,6 +2493,8 @@
   .modal-header > div { min-width: 0; }
   .modal-form, .payment-delete-body { padding-left: 18px; padding-right: 18px; }
   .modal-footer, .master-sync-modal-footer, .pc-restore-modal-footer, .pc-backup-warning-footer { flex-wrap: wrap; }
+  .modal-footer-leading, .modal-footer-actions { width: 100%; }
+  .modal-footer-actions { justify-content: flex-end; }
   .modal-footer .button, .master-sync-modal-footer .button, .pc-restore-modal-footer .button, .pc-backup-warning-footer .button { flex: 1 1 140px; }
   .modal.master-sync-modal, .account-modal { max-height: calc(100dvh - 24px) !important; }
   .modal.master-sync-modal .modal-form { overflow-y: auto; }
@@ -2517,6 +2533,9 @@
   .modal, .account-modal { max-height: calc(100dvh - 16px); border-radius: 12px; }
   .modal-header { padding: 14px; }
   .modal-form, .payment-delete-body { padding-left: 14px; padding-right: 14px; }
+  .master-deletion-content { padding: 18px 14px 14px; }
+  .master-deletion-footer { flex-direction: column-reverse; }
+  .master-deletion-footer .button { width: 100%; }
   .modal-footer .button, .master-sync-modal-footer .button, .pc-restore-modal-footer .button, .pc-backup-warning-footer .button { flex-basis: 100%; }
   .auth-page { min-height: 100dvh; padding: 16px; align-content: center; }
   .auth-card { padding: 22px 18px; border-radius: 16px; }
