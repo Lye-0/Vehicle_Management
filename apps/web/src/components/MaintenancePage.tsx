@@ -226,7 +226,9 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     ? null
     : pendingRestore?.kind === 'maintenance-new'
       ? pendingRestore as DraftRecord<MaintenanceDocumentLike>
-      : getAutoResumeDraft('maintenance-new') as DraftRecord<MaintenanceDocumentLike> | null
+      : discardedNewDraftRef.current
+        ? null
+        : getAutoResumeDraft('maintenance-new') as DraftRecord<MaintenanceDocumentLike> | null
   const selectedPersistedDocument = draftDocument || resumableNewDraft
     ? null
     : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
@@ -362,6 +364,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   useEffect(() => {
     if (loading) return
     const pending = pendingRestore?.kind === 'maintenance-new' ? pendingRestore as DraftRecord<MaintenanceDocumentLike> : null
+    if (!pending && discardedNewDraftRef.current) return
     if (draftDocument && (!pending || pending.key === newDraftStorageKey)) return
     const candidate = pending ?? getAutoResumeDraft('maintenance-new') as DraftRecord<MaintenanceDocumentLike> | null
     if (!candidate) return
@@ -706,8 +709,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const currentContext = draftContextRef.current ?? context
       const input = buildMaintenanceCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync, mileageSync)
       const saved = await createMaintenanceDocument(input)
-      discardedNewDraftRef.current = false
-      void deleteDraft(newDraftStorageKey)
+      const draftStorageKey = newDraftStorageKey
+      discardedNewDraftRef.current = true
+      try {
+        await autosaveCancelLocalDraftRef.current(draftStorageKey)
+        await refreshDrafts()
+      } catch (reason) {
+        setError(reason instanceof Error ? `書類は保存されましたが、端末内の下書きを削除できませんでした。${reason.message}` : '書類は保存されましたが、端末内の下書きを削除できませんでした。')
+      }
       setDocuments((current) => [saved, ...current])
       setSelectedDocumentId(saved.id)
       setActiveDraft(null)
@@ -935,7 +944,6 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    discardedNewDraftRef.current = false
     setNewDraftStorageKey('maintenance-new-document')
     setCreateForm(emptyCreateForm)
     setCreateDialogOpen(true)
@@ -944,6 +952,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   function startDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!isValidCreateSelection(createForm)) return
+    discardedNewDraftRef.current = false
     const customer = createForm.customerMode === 'existing' ? customers.find((item) => item.id === createForm.customerId) : undefined
     const vehicle = createForm.vehicleMode === 'existing' ? customer?.vehicles.find((item) => item.id === createForm.vehicleId) : undefined
     const draft: MaintenanceDocumentLike = {

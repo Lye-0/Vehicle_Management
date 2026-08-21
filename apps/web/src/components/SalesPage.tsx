@@ -261,7 +261,9 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     ? null
     : pendingRestore?.kind === 'sales-new'
       ? pendingRestore as DraftRecord<SalesDocumentLike>
-      : getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
+      : discardedNewDraftRef.current
+        ? null
+        : getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
   const selectedPersistedDocument = draftDocument || resumableNewDraft
     ? null
     : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
@@ -396,6 +398,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   useEffect(() => {
     if (loading) return
     const pending = pendingRestore?.kind === 'sales-new' ? pendingRestore as DraftRecord<SalesDocumentLike> : null
+    if (!pending && discardedNewDraftRef.current) return
     if (draftDocument && (!pending || pending.key === newDraftStorageKey)) return
     const candidate = pending ?? getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
     if (!candidate) return
@@ -715,7 +718,6 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
   function openCreateDialog() {
     if (!discardDraftIfConfirmed('新しい書類を作成')) return
-    discardedNewDraftRef.current = false
     setNewDraftStorageKey('sales-new-document')
     setCreateForm({ type: '見積書', customerMode: null, customerId: '', vehicleMode: null, vehicleId: '' })
     setCreateDialogOpen(true)
@@ -724,6 +726,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function startDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!isValidCreateSelection(createForm)) return
+    discardedNewDraftRef.current = false
     const customer = createForm.customerMode === 'existing' ? customers.find((item) => item.id === createForm.customerId) : undefined
     const vehicle = createForm.vehicleMode === 'existing' ? customer?.vehicles.find((item) => item.id === createForm.vehicleId) : undefined
     const draft: SalesDocumentLike = {
@@ -887,8 +890,14 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       const currentContext = draftContextRef.current ?? context
       const input = buildSalesCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync)
       const nextDocument = await createSalesDocument(input)
-      discardedNewDraftRef.current = false
-      void deleteDraft(newDraftStorageKey)
+      const draftStorageKey = newDraftStorageKey
+      discardedNewDraftRef.current = true
+      try {
+        await autosaveCancelLocalDraftRef.current(draftStorageKey)
+        await refreshDrafts()
+      } catch (reason) {
+        setSyncError(reason instanceof Error ? `書類は保存されましたが、端末内の下書きを削除できませんでした。${reason.message}` : '書類は保存されましたが、端末内の下書きを削除できませんでした。')
+      }
       replaceDocuments((current) => [nextDocument, ...current])
       setSelectedDocumentId(nextDocument.id)
       setActiveDraft(null)
