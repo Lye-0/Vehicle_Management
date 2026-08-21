@@ -444,7 +444,8 @@
 .optional-date-field-toggle.is-enabled .optional-date-field-toggle-track { background: var(--primary); }
 .optional-date-field-toggle.is-enabled .optional-date-field-toggle-track > span { transform: translateX(12px); }
 .optional-date-field input:disabled { color: var(--text-muted); background: #f1f4f8; cursor: not-allowed; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.modal-footer > .autosave-status { margin-right: auto; }
 .button-secondary { color: var(--text-secondary); border-color: var(--border); background: var(--surface); }
 .button-secondary:hover { color: var(--text); border-color: #c3d0de; background: var(--surface-subtle); }
 
