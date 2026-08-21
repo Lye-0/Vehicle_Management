@@ -255,7 +255,14 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedSalesDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : filteredDocuments[0] ?? null)
+  const resumableNewDraft = draftDocument
+    ? null
+    : pendingRestore?.kind === 'sales-new'
+      ? pendingRestore as DraftRecord<SalesDocumentLike>
+      : getAutoResumeDraft('sales-new') as DraftRecord<SalesDocumentLike> | null
+  const selectedPersistedDocument = draftDocument || resumableNewDraft
+    ? null
+    : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : filteredDocuments[0] ?? null)
   const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
 

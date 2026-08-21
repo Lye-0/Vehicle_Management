@@ -220,7 +220,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const incompleteDocuments = useMemo(() => filteredDocuments.filter((document) => document.status === '下書き' || document.status === '入金待ち'), [filteredDocuments])
   const completedGroups = useMemo(() => groupCompletedDocuments(filteredDocuments.filter((document) => document.status === '完了')), [filteredDocuments])
 
-  const selectedPersistedDocument = filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
+  const resumableNewDraft = draftDocument
+    ? null
+    : pendingRestore?.kind === 'maintenance-new'
+      ? pendingRestore as DraftRecord<MaintenanceDocumentLike>
+      : getAutoResumeDraft('maintenance-new') as DraftRecord<MaintenanceDocumentLike> | null
+  const selectedPersistedDocument = draftDocument || resumableNewDraft
+    ? null
+    : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
   const selectedDocument: MaintenanceDocumentLike | null = draftDocument ?? selectedPersistedDocument
   const totals = selectedDocument ? calculateMaintenanceStatementTotals(selectedDocument) : null
 
