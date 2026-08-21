@@ -89,6 +89,8 @@ export type MaintenanceDocument = {
   archivedBy: string | null
   purgeAt: string | null
   keepForever: boolean
+  /** 一覧の要約レスポンスに含まれる保存済み合計金額。詳細書類では計算値を優先します。 */
+  total?: number
   items: MaintenanceLineItem[]
   isSummary?: boolean
 }

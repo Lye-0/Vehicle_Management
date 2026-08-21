@@ -926,7 +926,7 @@
 .maintenance-card-customer, .maintenance-card-vehicle { display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .maintenance-card-customer svg, .maintenance-card-vehicle svg { flex: 0 0 auto; color: var(--text-muted); }
 .maintenance-card-bottom { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-top: 4px; color: var(--text-muted); font-size: 10px; }
-.maintenance-card-bottom strong { color: var(--text-secondary); font-size: 10px; }
+.maintenance-card-bottom strong { color: var(--text); font-size: 13px; }
 .maintenance-detail-panel { min-width: 0; padding: 0; overflow: hidden; }
 .maintenance-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px; border-bottom: 1px solid var(--border); }
 .maintenance-detail-title { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 0 1 auto; }
@@ -1866,7 +1866,8 @@
   .sales-card-bottom,
   .maintenance-card-bottom,
   .payment-card-bottom { font-size: 9px; }
-  .sales-card-bottom strong { font-size: 11px; }
+  .sales-card-bottom strong,
+  .maintenance-card-bottom strong { font-size: 11px; }
 
   .sales-document-tabs,
   .maintenance-document-tabs { position: sticky; z-index: 3; top: 0; }
