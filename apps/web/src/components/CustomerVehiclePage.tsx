@@ -292,6 +292,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
   }, [editingVehicleId, newVehicleStorageKey, registerActiveDraft, vehicleDialogOpen])
 
   useEffect(() => {
+    if (!pendingRestore && (customerDialogOpen || vehicleDialogOpen)) return
     const draft = pendingRestore ?? getAutoResumeDraft('customer-new') ?? getAutoResumeDraft('vehicle-new')
     if (!draft) return
     if (draft.kind === 'customer-new') {
@@ -334,7 +335,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
       setSelectedCustomerId(customer.id)
       openEditVehicleDialogRef.current(vehicle)
     }
-  }, [acknowledgeRestore, customers, getAutoResumeDraft, pendingRestore, refreshDrafts, selectedCustomer])
+  }, [acknowledgeRestore, customerDialogOpen, customers, getAutoResumeDraft, pendingRestore, refreshDrafts, selectedCustomer, vehicleDialogOpen])
 
   function selectCustomer(customer: Customer) {
     setSelectedCustomerId(customer.id)
