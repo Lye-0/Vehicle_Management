@@ -521,7 +521,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         : await createCustomer(normalizedForm)
       if (!savedCustomer) throw new Error('顧客情報を読み込めませんでした。')
       if (!editingId) {
-        await deleteDraft(newCustomerStorageKey)
+        await customerAutosaveCancelLocalDraftRef.current(newCustomerStorageKey)
         await refreshDrafts()
         setNewCustomerStorageKey('customer-new')
         registerActiveDraft('customer-new', null)
@@ -650,7 +650,7 @@ export function CustomerVehiclePage({ onNavigate, initialCustomerId, initialVehi
         setSelectedVehicleId(editingId)
       } else {
         const result = await createVehicle(selectedCustomer.id, normalizedForm)
-        await deleteDraft(newVehicleStorageKey)
+        await vehicleAutosaveCancelLocalDraftRef.current(newVehicleStorageKey)
         await refreshDrafts()
         setNewVehicleStorageKey('vehicle-new')
         registerActiveDraft('vehicle-new', null)
