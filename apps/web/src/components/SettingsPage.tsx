@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
@@ -41,7 +41,7 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
   { key: 'accessories', title: '付属品・特別仕様明細', description: '付属品・特別仕様の品名欄で表示します。' },
 ]
 
-export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
+export function SettingsPage({ user, onReloadSession, onUserUpdated, onOrganizationNameChanged }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void; onOrganizationNameChanged?: (name: string) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
   const [backupPermissions, setBackupPermissions] = useState({ canManageCreateRestore: false, canManageRetention: false })
@@ -55,6 +55,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
   const [permissionsDirty, setPermissionsDirty] = useState(false)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState<CsvResource | ''>('')
+  const persistedShopNameRef = useRef(defaultSettings.shop.name)
   const { pendingRestore, acknowledgeRestore, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
   useEffect(() => {
@@ -66,6 +67,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
           setBackupSettings(backupResponse.settings)
           setBackupPermissions({ canManageCreateRestore: backupResponse.canManageCreateRestore, canManageRetention: backupResponse.canManageRetention })
           setPermissions(permissionsResponse.permissions)
+          persistedShopNameRef.current = nextSettings.shop.name
           setSettingsDirty(false)
           setPermissionsDirty(false)
           setCanManagePermissions(permissionsResponse.canManage)
@@ -170,6 +172,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
         canManagePermissions ? updateOrganizationPermissions(permissions).then((response) => response.permissions) : Promise.resolve(permissions),
       ])
       setSettings(nextSettings)
+      persistedShopNameRef.current = nextSettings.shop.name
       setBackupSettings(nextBackupSettings)
       setPermissions(nextPermissions)
       setSettingsDirty(false)
@@ -239,6 +242,8 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
         settingsDirty ? updateSettings(normalizedSettings) : Promise.resolve(settings),
         permissionsDirty && canManagePermissions ? updateOrganizationPermissions(nextPermissions).then((response) => response.permissions) : Promise.resolve(permissions),
       ])
+      const organizationNameChanged = Boolean(savedSettings.shop.name) && savedSettings.shop.name !== persistedShopNameRef.current
+      persistedShopNameRef.current = savedSettings.shop.name
       setSettings(savedSettings)
       setPermissions(savedPermissions)
       setSettingsDirty(false)
@@ -246,6 +251,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       setSaved(true)
       registerActiveDraft('settings', null)
       setError('')
+      if (organizationNameChanged) onOrganizationNameChanged?.(savedSettings.shop.name)
       return true
     },
     onError: (reason) => setError(reason instanceof Error ? reason.message : '設定を自動保存できませんでした。'),
