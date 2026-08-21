@@ -984,11 +984,16 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   useEffect(() => {
     const target = selectedPersistedDocument
     if (!target || target.isSummary) return
+    if (pendingRestore?.kind === 'maintenance-existing' && pendingRestore.key !== `maintenance-document:${target.id}`) return
     let active = true
     const storageKey = `maintenance-document:${target.id}`
-    void readDraft<MaintenanceDocument>(storageKey).then((stored) => {
-      if (!active || !stored || stored.savedAt <= (Date.parse(target.updatedAt) || 0)) return
-      const explicitlyRequested = pendingRestore?.key === storageKey
+    const explicitlyRequested = pendingRestore?.key === storageKey
+    const draftPromise = explicitlyRequested
+      ? Promise.resolve(pendingRestore as DraftRecord<MaintenanceDocument>)
+      : readDraft<MaintenanceDocument>(storageKey)
+    void draftPromise.then((stored) => {
+      if (!active || !stored) return
+      if (!explicitlyRequested && stored.savedAt <= (Date.parse(target.updatedAt) || 0)) return
       const sameRunDraft = stored.runId === currentRunId
       if (!explicitlyRequested && !sameRunDraft) return
       if (restoredDraftDocumentIdsRef.current.has(target.id) && !explicitlyRequested) return
