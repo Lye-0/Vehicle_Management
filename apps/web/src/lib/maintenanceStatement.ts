@@ -1,4 +1,5 @@
 import type { MaintenanceDocumentLike, MaintenanceLineItem } from './maintenanceApi'
+import { resolveDocumentCustomerField } from './documentCustomerField'
 import type { AppSettings } from './settingsApi'
 
 export const maintenanceStatementWidth = 1122
@@ -37,7 +38,9 @@ export function calculateMaintenanceStatementTotals(
 export function buildMaintenanceStatementSvg(document: MaintenanceDocumentLike, settings: AppSettings, options: MaintenanceStatementSvgOptions = {}) {
   const hideEditableValues = options.hideEditableValues ?? false
   const totals = calculateMaintenanceStatementTotals(document)
-  const customer = document.details.customerOverride ?? document.customerDetails
+  const customer = { ...document.customerDetails, ...(document.details.customerOverride ?? {}) }
+  const birthDate = resolveDocumentCustomerField(document.details.customerOverride, 'birthDate', document.details.customerBirthDate, customer.birthDate)
+  const employer = resolveDocumentCustomerField(document.details.customerOverride, 'employer', document.details.customerEmployer, customer.employer)
   const vehicle = document.details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
   const labels = document.details.labels
   const documentTitle = defaultDocumentTitle(document.type)
@@ -93,9 +96,9 @@ export function buildMaintenanceStatementSvg(document: MaintenanceDocumentLike, 
   ${valueText(145, 205, statementValue(customer.postalCode ? `〒${customer.postalCode}` : '', hideEditableValues), 'start')}
   ${valueText(145, 233, statementValue(customer.address, hideEditableValues), 'start')}
   ${headerText(590, 115, '生年月日')}${headerText(590, 157, '電話番号')}${headerText(590, 200, '勤務先等')}${headerText(590, 242, '連絡先TEL')}
-  ${valueText(665, 119, statementValue(dateSlash(document.details.customerBirthDate), hideEditableValues), 'start', 14)}
+  ${valueText(665, 119, statementValue(dateSlash(birthDate), hideEditableValues), 'start', 14)}
   ${valueText(665, 158, statementValue(customer.phone, hideEditableValues), 'start', 14)}
-  ${valueText(665, 200, statementValue(document.details.customerEmployer, hideEditableValues), 'start', 14)}
+  ${valueText(665, 200, statementValue(employer, hideEditableValues), 'start', 14)}
   ${valueText(665, 242, statementValue(document.details.customerContactPhone, hideEditableValues), 'start', 14)}
 
   ${roundedBox(832, 90, 250, 255)}

@@ -885,8 +885,12 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
-  const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
-  const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
+  const customerBirthDate = hasOwnRecordField(details.customerOverride, 'birthDate')
+    ? normalizeCustomerBirthDateForStorage(details.customerOverride?.birthDate)
+    : details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
+  const customerEmployer = hasOwnRecordField(details.customerOverride, 'employer')
+    ? normalizeCustomerEmployerValue(details.customerOverride?.employer)
+    : details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
     id: document.id,
     updatedAt: document.updatedAt,
@@ -1058,8 +1062,8 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     phone: normalizePhone(stringValue(customerOverride, 'phone')),
     postalCode: normalizePostalCode(stringValue(customerOverride, 'postalCode')),
     address: stringValue(customerOverride, 'address'),
-    birthDate: normalizeCustomerBirthDateForStorage(stringValue(customerOverride, 'birthDate')),
-    employer: normalizeCustomerEmployerValue(stringValue(customerOverride, 'employer')),
+    ...(hasOwnRecordField(customerOverride, 'birthDate') ? { birthDate: normalizeCustomerBirthDateForStorage(stringValue(customerOverride, 'birthDate')) } : {}),
+    ...(hasOwnRecordField(customerOverride, 'employer') ? { employer: normalizeCustomerEmployerValue(stringValue(customerOverride, 'employer')) } : {}),
   }
   const normalizedVehicleOverride = {
     maker: stringValue(vehicleOverride, 'maker'),
@@ -1084,7 +1088,7 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     bankName: stringValue(source, 'bankName'),
     bankAccount: stringValue(source, 'bankAccount'),
     bankAccountHolder: stringValue(source, 'bankAccountHolder'),
-    customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
+    customerOverride: (hasOverrideValue(normalizedCustomerOverride) || hasOwnRecordField(customerOverride, 'birthDate') || hasOwnRecordField(customerOverride, 'employer')) ? normalizedCustomerOverride as Record<string, string> : null,
     vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
     labels: {
       documentTitle: '',
@@ -1103,6 +1107,10 @@ function hasOverrideValue(value: Record<string, string | boolean>) {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function hasOwnRecordField(record: object | null | undefined, field: string) {
+  return record !== null && record !== undefined && Object.prototype.hasOwnProperty.call(record, field)
 }
 
 export type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; amount: number }

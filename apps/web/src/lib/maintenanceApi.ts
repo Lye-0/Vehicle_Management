@@ -1,6 +1,7 @@
 import { apiFetch } from './api'
 import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
 import type { AbacusDetailLine, AbacusDetailReport, AbacusDocumentAmounts } from './abacusDetail'
+import { hasOwnField } from './documentCustomerField'
 
 export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
 export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -271,22 +272,29 @@ function toPayload(input: MaintenanceDocumentInput) {
 
 function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | undefined): MaintenanceDocumentDetails {
   const details = value ?? defaultMaintenanceDocumentDetails
+  const sourceCustomerOverride = details.customerOverride
+  const hasCustomerOverride = sourceCustomerOverride && (
+    hasMaintenanceOverrideValue(sourceCustomerOverride)
+    || hasOwnField(sourceCustomerOverride, 'birthDate')
+    || hasOwnField(sourceCustomerOverride, 'employer')
+  )
+  const customerOverride = hasCustomerOverride ? ({
+    name: sourceCustomerOverride.name,
+    kana: sourceCustomerOverride.kana,
+    phone: sourceCustomerOverride.phone,
+    email: sourceCustomerOverride.email ?? '',
+    postalCode: sourceCustomerOverride.postalCode,
+    address: sourceCustomerOverride.address,
+    ...(hasOwnField(sourceCustomerOverride, 'birthDate') ? { birthDate: sourceCustomerOverride.birthDate ?? '' } : {}),
+    ...(hasOwnField(sourceCustomerOverride, 'employer') ? { employer: sourceCustomerOverride.employer ?? '' } : {}),
+  } as MaintenanceDocumentDetails['customerOverride']) : null
   return {
     ...defaultMaintenanceDocumentDetails,
     ...details,
     bankName: typeof details.bankName === 'string' ? details.bankName : '',
     bankAccount: typeof details.bankAccount === 'string' ? details.bankAccount : '',
     bankAccountHolder: typeof details.bankAccountHolder === 'string' ? details.bankAccountHolder : '',
-    customerOverride: details.customerOverride && hasMaintenanceOverrideValue(details.customerOverride) ? {
-      name: details.customerOverride.name,
-      kana: details.customerOverride.kana,
-      phone: details.customerOverride.phone,
-      email: details.customerOverride.email ?? '',
-      postalCode: details.customerOverride.postalCode,
-      address: details.customerOverride.address,
-      birthDate: details.customerOverride.birthDate ?? '',
-      employer: details.customerOverride.employer ?? '',
-    } : null,
+    customerOverride,
     vehicleOverride: details.vehicleOverride && hasMaintenanceOverrideValue(details.vehicleOverride) ? {
       maker: details.vehicleOverride.maker,
       name: details.vehicleOverride.name,

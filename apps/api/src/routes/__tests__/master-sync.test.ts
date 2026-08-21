@@ -311,6 +311,36 @@ describe("POST masterSync", () => {
     expect(customer?.employer).toBe("整備先株式会社");
   });
 
+  it("整備書類で生年月日・勤務先等を空欄にした値をPATCH後も保持する", async () => {
+    const cid = "ms-cust-empty-birth-employer-001";
+    const vid = "ms-veh-empty-birth-employer-001";
+    const did = "ms-doc-empty-birth-employer-001";
+    await seedCustomer(cid, "整備書類の空欄保持確認");
+    await env.DB.prepare("UPDATE customers SET birth_date = ?, employer = ? WHERE id = ?")
+      .bind("1990/01/23", "旧整備勤務先株式会社", cid)
+      .run();
+    await seedVehicle(vid, cid, "マツダ", "デミオ");
+    await seedDoc(did, "M-MS-EMPTY-BIRTH-001", cid, vid, "2026-08-01");
+
+    const res = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${did}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "",
+        customerEmployer: "",
+        customerOverride: { name: "整備書類の空欄保持確認", kana: "", phone: "", postalCode: "", address: "", birthDate: "", employer: "" },
+        vehicleOverride: null,
+      },
+      items: [],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(body.document.customerDetails.birthDate).toBe("");
+    expect(body.document.customerDetails.employer).toBe("");
+    expect(body.document.details.customerBirthDate).toBe("");
+    expect(body.document.details.customerEmployer).toBe("");
+  });
+
   it("新規顧客＋新規車両＋整備書類を一体作成", async () => {
     const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
       type: "整備見積書",

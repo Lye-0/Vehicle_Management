@@ -11,6 +11,7 @@ import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/ma
 import { DateCalendarButton } from './DateCalendarButton'
 import { toNativeDateValue } from './dateInput'
 import { sanitizeNormalizedDraft, toEditableNormalizedValue } from './normalizedInput'
+import { resolveDocumentCustomerField } from '../lib/documentCustomerField'
 
 export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
 export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
@@ -31,8 +32,8 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   const customer = {
     ...document.customerDetails,
     ...(details.customerOverride ?? {}),
-    birthDate: details.customerBirthDate || details.customerOverride?.birthDate || document.customerDetails.birthDate || '',
-    employer: details.customerEmployer || details.customerOverride?.employer || document.customerDetails.employer || '',
+    birthDate: normalizeMaintenanceCustomerBirthDate(resolveDocumentCustomerField(details.customerOverride, 'birthDate', details.customerBirthDate, document.customerDetails.birthDate)),
+    employer: normalizeMaintenanceCustomerEmployer(resolveDocumentCustomerField(details.customerOverride, 'employer', details.customerEmployer, document.customerDetails.employer)),
   }
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
 
@@ -206,6 +207,11 @@ function normalizeMaintenanceCustomerBirthDate(value: string | null | undefined)
 
 function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
   return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
+}
+
+function normalizeMaintenanceCustomerEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized === 'employer' ? '' : normalized
 }
 
 function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, allowEmpty = false, mobileInputMode, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number | null) => void; centered?: boolean; decimal?: boolean; allowEmpty?: boolean; mobileInputMode?: 'numeric' | 'decimal' | 'text'; className?: string }) {

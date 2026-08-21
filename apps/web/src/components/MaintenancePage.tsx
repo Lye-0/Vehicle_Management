@@ -42,6 +42,7 @@ import {
   type MaintenanceStatus,
 } from '../lib/maintenanceApi'
 import { buildMaintenanceStatementSvg, calculateMaintenanceStatementTotals } from '../lib/maintenanceStatement'
+import { resolveDocumentCustomerField } from '../lib/documentCustomerField'
 import { defaultSettings, fetchSettings, type AppSettings } from '../lib/settingsApi'
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
@@ -1320,8 +1321,8 @@ function currentMaintenanceCustomerValues(document: MaintenanceDocumentLike): No
   const base = { ...document.customerDetails, ...(override ?? {}) }
   return {
     ...base,
-    birthDate: normalizeMaintenanceCustomerBirthDate(document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate),
-    employer: normalizeMaintenanceCustomerEmployer(document.details.customerEmployer || override?.employer || document.customerDetails.employer),
+    birthDate: normalizeMaintenanceCustomerBirthDate(resolveDocumentCustomerField(override, 'birthDate', document.details.customerBirthDate, document.customerDetails.birthDate)),
+    employer: normalizeMaintenanceCustomerEmployer(resolveDocumentCustomerField(override, 'employer', document.details.customerEmployer, document.customerDetails.employer)),
   }
 }
 

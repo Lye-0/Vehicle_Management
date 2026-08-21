@@ -645,8 +645,12 @@ function serializeSalesDocument(
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
-  const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
-  const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
+  const customerBirthDate = hasOwnRecordField(details.customerOverride, 'birthDate')
+    ? customerBirthDateValue(details.customerOverride?.birthDate)
+    : details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
+  const customerEmployer = hasOwnRecordField(details.customerOverride, 'employer')
+    ? customerEmployerValue(details.customerOverride?.employer)
+    : details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
     id: document.id,
     updatedAt: document.updatedAt,
@@ -802,6 +806,15 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
   const requiredDocuments = parseRecord(record.requiredDocuments)
   const customerOverride = isRecord(record.customerOverride) ? record.customerOverride : null
   const vehicleOverride = isRecord(record.vehicleOverride) ? record.vehicleOverride : null
+  const normalizedCustomerOverride = customerOverride ? ({
+    name: limitedString(customerOverride.name, '', 200),
+    kana: limitedString(customerOverride.kana, '', 200),
+    phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
+    postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
+    address: limitedString(customerOverride.address, '', 500),
+    ...(hasOwnRecordField(customerOverride, 'birthDate') ? { birthDate: customerBirthDateValue(customerOverride.birthDate) } : {}),
+    ...(hasOwnRecordField(customerOverride, 'employer') ? { employer: customerEmployerValue(customerOverride.employer) } : {}),
+  } as NonNullable<SalesDocumentDetails['customerOverride']>) : null
   return {
     salesCategory: limitedString(record.salesCategory, '中古車', 100),
     staffName: limitedString(record.staffName, '', 100),
@@ -810,15 +823,7 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
     customerEmployer: customerEmployerValue(record.customerEmployer),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
     selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
-    customerOverride: customerOverride ? {
-      name: limitedString(customerOverride.name, '', 200),
-      kana: limitedString(customerOverride.kana, '', 200),
-      phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
-      postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
-      address: limitedString(customerOverride.address, '', 500),
-      birthDate: customerBirthDateValue(customerOverride.birthDate),
-      employer: customerEmployerValue(customerOverride.employer),
-    } : null,
+    customerOverride: normalizedCustomerOverride,
     vehicleOverride: vehicleOverride ? {
       maker: limitedString(vehicleOverride.maker, '', 100),
       name: limitedString(vehicleOverride.name, '', 200),
@@ -973,6 +978,10 @@ function optionalVehicleDate(value: unknown) {
 
 function stringValue(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? body[key].trim() : ''
+}
+
+function hasOwnRecordField(record: object | null | undefined, field: string) {
+  return record !== null && record !== undefined && Object.prototype.hasOwnProperty.call(record, field)
 }
 
 function nullableString(body: Record<string, unknown>, key: string) {

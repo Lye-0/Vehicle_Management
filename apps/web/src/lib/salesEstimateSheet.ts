@@ -1,5 +1,6 @@
 import type { SalesDocumentLike } from './salesApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, salesDocumentAmountTitle, salesDocumentTitle } from './salesEstimate'
+import { resolveDocumentCustomerField } from './documentCustomerField'
 import type { AppSettings } from './settingsApi'
 
 const WIDTH = 1055
@@ -306,10 +307,12 @@ function imageCustomerBlock(document: SalesDocumentLike, imageHref: string) {
 function expandedCustomerBlock(document: SalesDocumentLike) {
   const customer = { ...document.customerDetails, ...document.details.customerOverride }
   const details = document.details
+  const birthDate = resolveDocumentCustomerField(document.details.customerOverride, 'birthDate', details.customerBirthDate, customer.birthDate)
+  const employer = resolveDocumentCustomerField(document.details.customerOverride, 'employer', details.customerEmployer, customer.employer)
   const rows: Array<[string, string]> = [
-    ['生年月日', formatSlashDate(details.customerBirthDate || customer.birthDate)],
+    ['生年月日', formatSlashDate(birthDate)],
     ['電話番号', customer.phone || document.phone || '未登録'],
-    ['勤務先等', details.customerEmployer || customer.employer || '未設定'],
+    ['勤務先等', employer || '未設定'],
     ['連絡先TEL', details.customerContactPhone || customer.contactPhone || '未設定'],
   ]
   const { x, y, width, height } = salesEstimateSheetLayout.customer

@@ -44,6 +44,7 @@ import {
 import { defaultSettings, fetchSettings, type AppSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups } from '../lib/settingsApi'
 import { buildSalesEstimateSections, calculateSalesEstimateTotals, calculateSalesLineAmount, type SalesEstimateEditableBucket, type SalesEstimateSections, type SalesTotals } from '../lib/salesEstimate'
 import { buildSalesEstimateSheetSvg, salesEstimateSheetLayout } from '../lib/salesEstimateSheet'
+import { resolveDocumentCustomerField } from '../lib/documentCustomerField'
 import { DocumentFilterGroup, type DocumentFilterOption } from './DocumentFilterGroup'
 import { compareSortableDocuments, type DocumentSortDirection, type DocumentSortKey } from './DocumentSort'
 import { DocumentSortControls } from './DocumentSortControls'
@@ -1894,8 +1895,8 @@ function currentSalesCustomerValues(document: SalesDocumentLike): NonNullable<Sa
   }
   return {
     ...base,
-    birthDate: normalizeSalesCustomerBirthDate(document.details.customerBirthDate || override?.birthDate || document.customerDetails.birthDate),
-    employer: normalizeSalesCustomerEmployer(document.details.customerEmployer || override?.employer || document.customerDetails.employer),
+    birthDate: normalizeSalesCustomerBirthDate(resolveDocumentCustomerField(override, 'birthDate', document.details.customerBirthDate, document.customerDetails.birthDate)),
+    employer: normalizeSalesCustomerEmployer(resolveDocumentCustomerField(override, 'employer', document.details.customerEmployer, document.customerDetails.employer)),
   }
 }
 
