@@ -787,7 +787,7 @@ export function parseSalesItems(value: unknown): SalesItemInput[] {
     const taxCategoryValue = stringValue(item, 'taxCategory')
     return {
       itemType: salesItemTypes.has(itemTypeValue) ? itemTypeValue : 'その他',
-      description: stringValue(item, 'description'),
+      description: preserveLeadingText(item, 'description'),
       quantity,
       unit: stringValue(item, 'unit') || '式',
       unitPrice,
@@ -885,6 +885,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function limitedString(value: unknown, fallback: string, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : fallback
+}
+
+function preserveLeadingText(body: Record<string, unknown>, key: string) {
+  const value = body[key]
+  return typeof value === 'string' && value.trim() ? value : ''
 }
 
 function nonNegativeInteger(value: unknown, fallback: number) {

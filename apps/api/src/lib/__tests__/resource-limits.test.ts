@@ -21,6 +21,13 @@ describe('resource limits', () => {
     expect(item).toMatchObject({ quantity: 0, unit: '', unitPrice: 0, technicalFee: 0, amount: 0 })
   })
 
+  it('preserves leading spaces in sales and maintenance detail descriptions', () => {
+    const [salesItem] = parseSalesDocumentItems([{ itemType: '付属品・特別仕様', description: '  フロアマット', quantity: 1, unit: '式', unitPrice: 100 }])
+    const [maintenanceItem] = parseMaintenanceDocumentItems([{ description: '  ブレーキフルード', quantity: 1, unit: '個', unitPrice: 100, technicalFee: 0, summary: '' }])
+    expect(salesItem.description).toBe('  フロアマット')
+    expect(maintenanceItem.description).toBe('  ブレーキフルード')
+  })
+
   it('rejects oversized CSV detail arrays and delimited fields', () => {
     const details = JSON.stringify(Array.from({ length: maximumDocumentItemCount + 1 }, () => ({})))
     const delimited = Array.from({ length: maximumDocumentItemCount + 1 }, () => '明細').join(' / ')

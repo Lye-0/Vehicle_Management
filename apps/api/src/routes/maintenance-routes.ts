@@ -998,7 +998,7 @@ export function parseMaintenanceItems(value: unknown): MaintenanceItemInput[] {
     const unitPrice = integerNumber(item.unitPrice, 0)
     const technicalFee = integerNumber(item.technicalFee, 0)
     const unit = typeof item.unit === 'string' ? item.unit.trim() : '式'
-    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit, unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
+    return { kind: item.kind === '部品' ? '部品' : '作業', description: preserveLeadingText(item, 'description'), quantity, unit, unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
   })
 }
 
@@ -1028,6 +1028,10 @@ function groupBy<T>(items: T[], getKey: (item: T) => string) {
 }
 
 function stringValue(body: Record<string, unknown>, key: string) { return typeof body[key] === 'string' ? body[key].trim() : '' }
+function preserveLeadingText(body: Record<string, unknown>, key: string) {
+  const value = body[key]
+  return typeof value === 'string' && value.trim() ? value : ''
+}
 function normalizeCustomerEmployerValue(value: unknown) {
   const normalized = typeof value === 'string' ? value.normalize('NFKC').trim().slice(0, 200) : ''
   return normalized === 'employer' ? '' : normalized
