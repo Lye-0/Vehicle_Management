@@ -443,8 +443,8 @@ internal static partial class Program
         }
 
         abacusProcess.Refresh();
-        var probePath = Path.Combine(AppContext.BaseDirectory, "VehicleManagement.LegacyAutomationProbe.exe");
-        if (!File.Exists(probePath))
+        var probePath = ResolveAutomationProbePath();
+        if (probePath is null)
         {
             return new LegacyHostMessage(
                 "abacus-automation-inspected",
@@ -519,6 +519,21 @@ internal static partial class Program
             Architecture: HostArchitecture,
             TargetArchitecture: abacusExecutablePath is null ? null : ReadPeArchitecture(abacusExecutablePath),
             AutomationServer: "FMPRO.Application (x86 probe)");
+    }
+
+    private static string? ResolveAutomationProbePath()
+    {
+        var executableName = OperatingSystem.IsWindows()
+            ? "VehicleManagement.LegacyAutomationProbe.exe"
+            : "VehicleManagement.LegacyAutomationProbe";
+
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Probe", executableName),
+            Path.Combine(AppContext.BaseDirectory, executableName),
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     private static int GetNativeWindowDepth(IntPtr windowHandle, IntPtr rootHandle)
