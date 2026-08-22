@@ -137,6 +137,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const [maintenanceDuplicateDialog, setMaintenanceDuplicateDialog] = useState<MaintenanceDuplicateDialogState | null>(null)
   const [pendingDraftPreview, setPendingDraftPreview] = useState<SyncPreviewResponse | null>(null)
   const [pendingDraftDuplicateConfirmation, setPendingDraftDuplicateConfirmation] = useState<MaintenanceDuplicateConfirmation | undefined>(undefined)
+  const documentsRef = useRef<MaintenanceDocument[]>([])
   const draftDocumentRef = useRef<MaintenanceDocumentLike | null>(null)
   const draftContextRef = useRef<MaintenanceDraftContext | null>(null)
   const draftCustomerDuplicateConfirmedRef = useRef(false)
@@ -151,19 +152,29 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const discardedNewDraftRef = useRef(false)
   const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
+  function replaceDocuments(updater: (current: MaintenanceDocument[]) => MaintenanceDocument[]) {
+    const nextDocuments = updater(documentsRef.current)
+    documentsRef.current = nextDocuments
+    setDocuments(nextDocuments)
+  }
+
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
     Promise.all([fetchMaintenanceDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchCustomerSummaries({ limit: 100 }), fetchSettings()])
       .then(([documentPage, customerPage, nextSettings]) => {
         if (cancelled) return
         const nextDocuments = documentPage.documents
         const nextCustomers = customerPage.customers.map(mapCustomerSummaryToRecord)
-        setDocuments(nextDocuments)
+        const detailedInitialDocument = documentsRef.current.find((document) => document.id === initialDocumentId && !document.isSummary)
+        const documentsWithInitialDetail = detailedInitialDocument ? [detailedInitialDocument, ...nextDocuments.filter((document) => document.id !== detailedInitialDocument.id)] : nextDocuments
+        documentsRef.current = documentsWithInitialDetail
+        setDocuments(documentsWithInitialDetail)
         setDocumentNextCursor(documentPage.nextCursor)
         setDocumentHasMore(documentPage.hasMore)
         setCustomers(nextCustomers)
         setSettings(nextSettings)
-        const nextSelectedDocumentId = initialDocumentId ?? nextDocuments.find((d) => d.status !== '完了')?.id ?? nextDocuments[0]?.id ?? ''
+        const nextSelectedDocumentId = initialDocumentId ?? documentsWithInitialDetail.find((d) => d.status !== '完了')?.id ?? documentsWithInitialDetail[0]?.id ?? ''
         setSelectedDocumentId(nextSelectedDocumentId)
         if (nextSelectedDocumentId) setMobileWorkspaceView('detail')
         setError('')
@@ -182,6 +193,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     const timer = window.setTimeout(() => {
       void fetchMaintenanceDocumentSummaries({ q: query, type: typeFilter, category: categoryFilter, status: statusFilter, sortKey, sortDirection, limit: 100 }).then((page) => {
         if (!active) return
+        documentsRef.current = page.documents
         setDocuments(page.documents)
         setDocumentNextCursor(page.nextCursor)
         setDocumentHasMore(page.hasMore)
@@ -198,7 +210,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setLoadingMoreDocuments(true)
     try {
       const page = await fetchMaintenanceDocumentSummaries({ q: query, type: typeFilter, category: categoryFilter, status: statusFilter, sortKey, sortDirection, cursor: documentNextCursor, limit: 100 })
-      setDocuments((current) => [...current, ...page.documents.filter((document) => !current.some((item) => item.id === document.id))])
+      replaceDocuments((current) => [...current, ...page.documents.filter((document) => !current.some((item) => item.id === document.id))])
       setDocumentNextCursor(page.nextCursor)
       setDocumentHasMore(page.hasMore)
     } catch (reason: unknown) {
@@ -240,7 +252,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     let active = true
     void fetchMaintenanceDocument(initialDocumentId).then((detail) => {
       if (!active) return
-      setDocuments((current) => [detail, ...current])
+      replaceDocuments((current) => [detail, ...current.filter((document) => document.id !== detail.id)])
       setSelectedDocumentId(detail.id)
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '指定された整備書類を読み込めませんでした。')
@@ -254,7 +266,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     let active = true
     void fetchMaintenanceDocument(target.id).then((detail) => {
       if (!active) return
-      setDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
+      replaceDocuments((current) => current.map((document) => document.id === detail.id ? detail : document))
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '整備書類の詳細を読み込めませんでした。')
     })
@@ -307,7 +319,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       // 支払期限の変更で一覧順が変わっても別書類へ切り替わらないようにする。
       setSelectedDocumentId(selectedPersistedDocument.id)
     }
-    setDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as MaintenanceDocument : document))
+    replaceDocuments((current) => current.map((document) => document.id === selectedPersistedDocument.id ? updater(document) as MaintenanceDocument : document))
   }
 
   function openMobileDetail() {
@@ -490,7 +502,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     if (draftDocument) {
       replaceActiveDocument((document) => ({ ...document, [field]: value }))
     } else {
-      setDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
+      replaceDocuments((current) => current.map((document) => document.id !== selectedDocument.id ? document : updateMaintenanceHeader(document, field, value, customers)))
     }
     markChanged()
   }
@@ -515,7 +527,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setError('')
     try {
       await archiveMaintenanceDocument(selectedPersistedDocument.id)
-      setDocuments((current) => current.filter((document) => document.id !== selectedPersistedDocument.id))
+      replaceDocuments((current) => current.filter((document) => document.id !== selectedPersistedDocument.id))
       setSelectedDocumentId('')
       setSavedDocumentId('')
     } catch (reason: unknown) {
@@ -536,7 +548,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const inputWithMasterSync = masterSync ? { ...input, masterSync } : input
       const saved = await updateMaintenanceDocument(selectedPersistedDocument.id, inputWithMasterSync)
       void deleteDraft(`maintenance-document:${saved.id}`)
-      setDocuments((current) => current.map((document) => document.id === saved.id ? saved : document))
+      replaceDocuments((current) => current.map((document) => document.id === saved.id ? saved : document))
       setSavedDocumentId(saved.id)
       setDirty(false)
       // Update documentOpenedMileage after successful save
@@ -717,7 +729,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       } catch (reason) {
         setError(reason instanceof Error ? `書類は保存されましたが、端末内の下書きを削除できませんでした。${reason.message}` : '書類は保存されましたが、端末内の下書きを削除できませんでした。')
       }
-      setDocuments((current) => [saved, ...current])
+      replaceDocuments((current) => [saved, ...current.filter((document) => document.id !== saved.id)])
       setSelectedDocumentId(saved.id)
       setActiveDraft(null)
       setNewDraftStorageKey('maintenance-new-document')
@@ -1030,14 +1042,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const sameRunDraft = stored.runId === currentRunId
       if (!explicitlyRequested && !sameRunDraft) return
       if (restoredDraftDocumentIdsRef.current.has(target.id) && !explicitlyRequested) return
-      const current = documents.find((document) => document.id === target.id)
+      const current = documentsRef.current.find((document) => document.id === target.id)
       if (!current) return
       if (JSON.stringify(current) === JSON.stringify(stored.value)) {
         if (explicitlyRequested) acknowledgeRestore(stored.key)
         return
       }
       restoredDraftDocumentIdsRef.current.add(target.id)
-      setDocuments((documents) => documents.map((document) => document.id === target.id ? stored.value : document))
+      replaceDocuments((documents) => documents.map((document) => document.id === target.id ? stored.value : document))
       setDirty(true)
       setSavedDocumentId('')
       setError('端末内に残っていた未保存の変更を復元しました。内容を確認して保存してください。')
