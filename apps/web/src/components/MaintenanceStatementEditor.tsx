@@ -116,7 +116,7 @@ function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { 
   return <>
     <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal allowEmpty onCommit={(value) => onUpdateItem(item.id, 'quantity', value === null ? '' : String(value))} />
-    <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
+    <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered mobileInputMode="text" onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'unitPrice', value === null ? '' : String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'technicalFee', value === null ? '' : String(value))} />
     <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
@@ -156,7 +156,7 @@ function StatementNameCombobox({ value, candidates, ariaLabel, x, y, width, heig
   </div>
 }
 
-function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', calendarControlClassName = '', normalization, readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; calendarControlClassName?: string; normalization?: NormalizableField; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean }) {
+function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange, centered = false, className = '', calendarControlClassName = '', normalization, readOnly = false, displayPrefix = '', normalizeOnBlur, calendar = false, mobileInputMode }: { ariaLabel: string; value: string; x: number; y: number; width: number; height: number; onChange: (value: string) => void; centered?: boolean; className?: string; calendarControlClassName?: string; normalization?: NormalizableField; readOnly?: boolean; displayPrefix?: string; normalizeOnBlur?: (value: string) => string; calendar?: boolean; mobileInputMode?: 'text' | 'numeric' | 'decimal' | 'tel' }) {
   const [draft, setDraft] = useState(() => normalization ? toEditableNormalizedValue(normalization, value) : value)
   const [focused, setFocused] = useState(false)
   useEffect(() => {
@@ -192,7 +192,7 @@ function StatementTextControl({ ariaLabel, value, x, y, width, height, onChange,
     if (normalized !== value) onChange(normalized)
   }
   const inputClassName = `maintenance-statement-control${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`
-  const inputProps = { 'aria-label': ariaLabel, className: inputClassName, value: displayValue, readOnly, onFocus: normalization ? beginEdit : undefined, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: finish }
+  const inputProps = { 'aria-label': ariaLabel, className: inputClassName, inputMode: mobileInputMode, value: displayValue, readOnly, onFocus: normalization ? beginEdit : undefined, onChange: (event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value), onBlur: finish }
   if (!calendar) return <input {...inputProps} style={controlStyle(x, y, width, height)} />
   return <div className={`maintenance-statement-calendar-control${calendarControlClassName ? ` ${calendarControlClassName}` : ''}`} style={controlStyle(x, y, width, height)}>
     <input {...inputProps} type="date" value={toNativeDateValue(value)} onChange={(event) => onChange(event.target.value.replaceAll('-', '/'))} style={{ position: 'relative', inset: 'auto', width: '100%', height: '100%' }} />
