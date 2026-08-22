@@ -52,7 +52,8 @@ function Publish-Project {
         [Parameter(Mandatory)]
         [string]$PlatformTarget,
         [Parameter(Mandatory)]
-        [string]$Destination
+        [string]$Destination,
+        [switch]$SkipLegacyHostCopy
     )
 
     Write-Host "Publishing $Project ($Runtime, $Configuration, self-contained)..."
@@ -68,13 +69,16 @@ function Publish-Project {
         "-p:DebugSymbols=false",
         "-p:DebugType=None"
     )
+    if ($SkipLegacyHostCopy) {
+        $arguments += "-p:SkipLegacyHostCopy=true"
+    }
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed ($LASTEXITCODE): $Project"
     }
 }
 
-Publish-Project $companionProject "win-x64" "x64" $companionPublish
+Publish-Project $companionProject "win-x64" "x64" $companionPublish -SkipLegacyHostCopy
 Publish-Project $legacyHostProject "win-x64" "x64" $legacyHostPublish
 Publish-Project $probeProject "win-x86" "x86" $probePublish
 
