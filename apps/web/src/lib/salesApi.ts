@@ -111,6 +111,7 @@ export type SalesLineItem = {
 
 export type SalesDocument = {
   id: string
+  updatedAt: string
   number: string
   type: SalesDocumentType
   status: SalesStatus
@@ -138,11 +139,13 @@ export type SalesDocument = {
   archivedBy: string | null
   purgeAt: string | null
   keepForever: boolean
+  /** 一覧の要約レスポンスに含まれる保存済み合計金額。詳細書類では計算値を優先します。 */
+  total?: number
   items: SalesLineItem[]
   isSummary?: boolean
 }
 
-export type SalesDocumentSummary = Pick<SalesDocument, 'id' | 'number' | 'type' | 'status' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'issuedAt' | 'dueDate' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
+export type SalesDocumentSummary = Pick<SalesDocument, 'id' | 'updatedAt' | 'number' | 'type' | 'status' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'issuedAt' | 'dueDate' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
   total: number
   abacusImport?: AbacusDocumentImportMetadata | null
   isAbacusMigration?: boolean
@@ -293,6 +296,7 @@ export type SalesDocumentInput = {
   note: string
   details: SalesDocumentDetails
   items: Array<Omit<SalesLineItem, 'id'>>
+  expectedUpdatedAt?: string
   masterSync?: {
     confirmed: true
     customerFields: string[]
@@ -333,6 +337,7 @@ function toPayload(input: SalesDocumentInput) {
       otherAmount: item.otherAmount,
       summary: item.summary,
     })),
+    expectedUpdatedAt: input.expectedUpdatedAt,
   }
   if (input.masterSync) {
     payload.masterSync = input.masterSync

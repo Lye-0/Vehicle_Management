@@ -173,6 +173,7 @@ function serializeSalesDocumentSummary(document: typeof salesDocuments.$inferSel
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeSalesStatus(document.status),
@@ -241,7 +242,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     const allVehicles = await database
       .select({ id: vehicles.id, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
       .from(vehicles)
-      .where(eq(vehicles.organizationId, organizationId))
+      .where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .all()
     const duplicateVehicles = findDuplicateVehicles(allVehicles, newVehicle)
 
@@ -271,7 +272,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
     const allCustomers = await database
       .select({ id: customers.id, name: customers.name, phone: customers.phone, email: customers.email })
       .from(customers)
-      .where(eq(customers.organizationId, organizationId))
+      .where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt)))
       .all()
     void findDuplicateCustomers(allCustomers, newCustomer)
   }
@@ -288,7 +289,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && !newCustomer) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     for (const f of masterSync.customerFields) {
       if (!actualCustomerDiffFields.has(f)) {
@@ -298,7 +299,7 @@ async function createSalesDocument(request: Request, env: Env, database: ReturnT
   }
 
   if (masterSync && !newVehicle && input.vehicleId) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -415,6 +416,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
 
   const currentItems = await loadSalesItems(database, documentId, organizationId)
   const body = await readJson(request)
+  if (typeof body.expectedUpdatedAt === 'string' && body.expectedUpdatedAt !== current.updatedAt) throw new HttpError(409, '販売書類が他の端末で更新されています。再読み込みしてください。')
   const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
   if (current.vehicleId && !requestedVehicleId) {
     throw new HttpError(400, '通常の販売書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
@@ -460,7 +462,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && masterSync.customerFields.length > 0) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     for (const f of masterSync.customerFields) {
       if (!actualCustomerDiffFields.has(f)) {
@@ -470,7 +472,7 @@ async function updateSalesDocument(request: Request, env: Env, database: ReturnT
   }
 
   if (masterSync && masterSync.vehicleFields.length > 0 && input.vehicleId) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -562,8 +564,8 @@ async function loadSalesDocuments(database: ReturnType<typeof createDatabase>, o
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(salesDocuments).where(eq(salesDocuments.organizationId, organizationId)).orderBy(desc(salesDocuments.issuedAt), desc(salesDocuments.number)).all(),
     database.select().from(salesDocumentItems).where(eq(salesDocumentItems.organizationId, organizationId)).orderBy(asc(salesDocumentItems.sortOrder)).all(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
   ])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -582,8 +584,8 @@ async function findSalesDocument(database: ReturnType<typeof createDatabase>, do
   if (!document) return null
   const [items, customer, vehicle] = await Promise.all([
     loadSalesItems(database, documentId, organizationId),
-    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId))).get(),
-    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId))).get() : Promise.resolve(undefined),
+    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get(),
+    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() : Promise.resolve(undefined),
   ])
   return serializeSalesDocument(document, customer, vehicle, items)
 }
@@ -608,13 +610,13 @@ async function parseSalesDocumentInput(
 
   const customerId = stringValue(body, 'customerId')
   if (!newCustomer) {
-    const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get() : null
+    const customer = customerId ? await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() : null
     if (!customer) throw new HttpError(400, '顧客を選択してください。')
   }
 
   const vehicleId = nullableString(body, 'vehicleId')
   if (vehicleId && !newVehicle) {
-    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
@@ -643,10 +645,15 @@ function serializeSalesDocument(
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
-  const customerBirthDate = details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
-  const customerEmployer = details.customerEmployer || customerEmployerValue(customer?.employer)
+  const customerBirthDate = hasOwnRecordField(details.customerOverride, 'birthDate')
+    ? customerBirthDateValue(details.customerOverride?.birthDate)
+    : details.customerBirthDate || customerBirthDateValue(customer?.birthDate)
+  const customerEmployer = hasOwnRecordField(details.customerOverride, 'employer')
+    ? customerEmployerValue(details.customerOverride?.employer)
+    : details.customerEmployer || customerEmployerValue(customer?.employer)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeSalesStatus(document.status),
@@ -799,6 +806,15 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
   const requiredDocuments = parseRecord(record.requiredDocuments)
   const customerOverride = isRecord(record.customerOverride) ? record.customerOverride : null
   const vehicleOverride = isRecord(record.vehicleOverride) ? record.vehicleOverride : null
+  const normalizedCustomerOverride = customerOverride ? ({
+    name: limitedString(customerOverride.name, '', 200),
+    kana: limitedString(customerOverride.kana, '', 200),
+    phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
+    postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
+    address: limitedString(customerOverride.address, '', 500),
+    ...(hasOwnRecordField(customerOverride, 'birthDate') ? { birthDate: customerBirthDateValue(customerOverride.birthDate) } : {}),
+    ...(hasOwnRecordField(customerOverride, 'employer') ? { employer: customerEmployerValue(customerOverride.employer) } : {}),
+  } as NonNullable<SalesDocumentDetails['customerOverride']>) : null
   return {
     salesCategory: limitedString(record.salesCategory, '中古車', 100),
     staffName: limitedString(record.staffName, '', 100),
@@ -807,15 +823,7 @@ export function parseSalesDetails(value: unknown): SalesDocumentDetails {
     customerEmployer: customerEmployerValue(record.customerEmployer),
     customerContactPhone: limitedString(record.customerContactPhone, '', 50),
     selectedImageAttachmentId: limitedString(record.selectedImageAttachmentId, '', 128),
-    customerOverride: customerOverride ? {
-      name: limitedString(customerOverride.name, '', 200),
-      kana: limitedString(customerOverride.kana, '', 200),
-      phone: normalizePhone(limitedString(customerOverride.phone, '', 50)),
-      postalCode: normalizePostalCode(limitedString(customerOverride.postalCode, '', 20)),
-      address: limitedString(customerOverride.address, '', 500),
-      birthDate: customerBirthDateValue(customerOverride.birthDate),
-      employer: customerEmployerValue(customerOverride.employer),
-    } : null,
+    customerOverride: normalizedCustomerOverride,
     vehicleOverride: vehicleOverride ? {
       maker: limitedString(vehicleOverride.maker, '', 100),
       name: limitedString(vehicleOverride.name, '', 200),
@@ -970,6 +978,10 @@ function optionalVehicleDate(value: unknown) {
 
 function stringValue(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? body[key].trim() : ''
+}
+
+function hasOwnRecordField(record: object | null | undefined, field: string) {
+  return record !== null && record !== undefined && Object.prototype.hasOwnProperty.call(record, field)
 }
 
 function nullableString(body: Record<string, unknown>, key: string) {

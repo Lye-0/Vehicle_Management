@@ -11,6 +11,7 @@ import { maintenanceStatementHeight, maintenanceStatementWidth } from '../lib/ma
 import { DateCalendarButton } from './DateCalendarButton'
 import { toNativeDateValue } from './dateInput'
 import { sanitizeNormalizedDraft, toEditableNormalizedValue } from './normalizedInput'
+import { resolveDocumentCustomerField } from '../lib/documentCustomerField'
 
 export type MaintenanceStatementItemField = 'kind' | 'description' | 'quantity' | 'unit' | 'unitPrice' | 'technicalFee' | 'summary'
 export type MaintenanceStatementHeaderField = 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note'
@@ -31,8 +32,8 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
   const customer = {
     ...document.customerDetails,
     ...(details.customerOverride ?? {}),
-    birthDate: details.customerBirthDate || details.customerOverride?.birthDate || document.customerDetails.birthDate || '',
-    employer: details.customerEmployer || details.customerOverride?.employer || document.customerDetails.employer || '',
+    birthDate: normalizeMaintenanceCustomerBirthDate(resolveDocumentCustomerField(details.customerOverride, 'birthDate', details.customerBirthDate, document.customerDetails.birthDate)),
+    employer: normalizeMaintenanceCustomerEmployer(resolveDocumentCustomerField(details.customerOverride, 'employer', details.customerEmployer, document.customerDetails.employer)),
   }
   const vehicle = details.vehicleOverride ?? document.vehicleDetails ?? emptyVehicle
 
@@ -79,7 +80,7 @@ export function MaintenanceStatementEditor({ document, itemPresets, onUpdateHead
     <StatementNumberControl className="is-compact-value" ariaLabel="重量税" value={document.fees.重量税} x={422} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('重量税', String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel="印紙代" value={document.fees.印紙代} x={509} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('印紙代', String(value))} />
     <StatementNumberControl className="is-compact-value" ariaLabel="その他費用" value={document.fees.リサイクル料金} x={596} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('リサイクル料金', String(value))} />
-    <StatementNumberControl className="is-compact-value" ariaLabel="調整額" value={document.adjustment} x={683} y={1183} width={87} height={35} centered onCommit={(value) => onUpdateFee('調整額', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel="端数値引" value={document.adjustment} x={683} y={1183} width={87} height={35} centered mobileInputMode="text" onCommit={(value) => onUpdateFee('調整額', String(value))} />
 
   </div>
 }
@@ -113,11 +114,11 @@ function LineEditor({ item, index, itemPresets, onUpdateItem, onRemoveItem }: { 
   const technicalFee = imported ? imported.technicalFees : item.technicalFee
   const summary = imported ? imported.summary ?? '' : item.summary
   return <>
-    <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y - 6} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal onCommit={(value) => onUpdateItem(item.id, 'quantity', String(value))} />
+    <StatementNameCombobox value={description} candidates={itemPresets} ariaLabel={`明細${index + 1}の内容`} x={74} y={y} width={318} height={28} onCommit={(value) => onUpdateItem(item.id, 'description', value)} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の数量`} value={quantity} x={392} y={y} width={80} height={28} centered decimal allowEmpty onCommit={(value) => onUpdateItem(item.id, 'quantity', value === null ? '' : String(value))} />
     <StatementTextControl className="is-compact-value" ariaLabel={`明細${index + 1}の単位`} value={unit} x={472} y={y} width={84} height={28} centered onChange={(value) => onUpdateItem(item.id, 'unit', value)} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} onCommit={(value) => onUpdateItem(item.id, 'unitPrice', String(value))} />
-    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} onCommit={(value) => onUpdateItem(item.id, 'technicalFee', String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の部品単価`} value={unitPrice} x={556} y={y} width={113} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'unitPrice', value === null ? '' : String(value))} />
+    <StatementNumberControl className="is-compact-value" ariaLabel={`明細${index + 1}の技術料`} value={technicalFee} x={785} y={y} width={166} height={28} allowEmpty onCommit={(value) => onUpdateItem(item.id, 'technicalFee', value === null ? '' : String(value))} />
     <StatementTextControl className="is-item-text is-compact-value" ariaLabel={`明細${index + 1}の摘要`} value={summary} x={951} y={y} width={132} height={28} onChange={(value) => onUpdateItem(item.id, 'summary', value)} />
     <button className="maintenance-statement-remove" type="button" aria-label={`明細${index + 1}を削除`} style={controlStyle(1085, y + 3, 31, 22)} onClick={() => onRemoveItem(item.id)}><Trash2 size={13} /></button>
   </>
@@ -208,7 +209,12 @@ function normalizeMaintenanceCustomerBirthDateOnBlur(value: string) {
   return normalizeMaintenanceCustomerBirthDate(value).replaceAll('-', '/')
 }
 
-function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number) => void; centered?: boolean; decimal?: boolean; className?: string }) {
+function normalizeMaintenanceCustomerEmployer(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.normalize('NFKC').trim() : ''
+  return normalized === 'employer' ? '' : normalized
+}
+
+function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommit, centered = false, decimal = false, allowEmpty = false, mobileInputMode, className = '' }: { ariaLabel: string; value: number | null; x: number; y: number; width: number; height: number; onCommit: (value: number | null) => void; centered?: boolean; decimal?: boolean; allowEmpty?: boolean; mobileInputMode?: 'numeric' | 'decimal' | 'text'; className?: string }) {
   const [draft, setDraft] = useState(value === null ? '' : String(value))
   const [focused, setFocused] = useState(false)
   useEffect(() => { if (!focused) setDraft(value === null ? '' : String(value)) }, [focused, value])
@@ -223,14 +229,14 @@ function StatementNumberControl({ ariaLabel, value, x, y, width, height, onCommi
 
   function finish() {
     if (draft === '' || draft === '-') {
-      setDraft('0')
-      onCommit(0)
+      setDraft(allowEmpty ? '' : '0')
+      onCommit(allowEmpty ? null : 0)
     }
     setFocused(false)
   }
 
   const displayValue = focused || draft === '' || draft === '-' ? draft : formatStatementNumber(Number(draft))
-  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={decimal ? 'decimal' : 'numeric'} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(value === null ? '' : String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
+  return <input aria-label={ariaLabel} className={`maintenance-statement-control is-number${centered ? ' is-centered' : ''}${className ? ` ${className}` : ''}`} inputMode={mobileInputMode ?? (decimal ? 'decimal' : 'numeric')} value={displayValue} style={controlStyle(x, y, width, height)} onFocus={() => { setFocused(true); setDraft(value === null ? '' : String(value)) }} onChange={(event) => update(event.target.value.replaceAll(',', ''))} onBlur={finish} />
 }
 
 const statementNumberFormatter = new Intl.NumberFormat('ja-JP')

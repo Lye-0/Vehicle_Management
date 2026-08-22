@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { customers, inspectionSchedules, vehicles } from '@vehicle-management/database'
 import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
@@ -39,13 +39,13 @@ async function listSchedules(request: Request, env: Env, database: ReturnType<ty
   const url = new URL(request.url)
   const vehicleId = url.searchParams.get('vehicleId')?.trim() ?? ''
   const status = url.searchParams.get('status')?.trim() ?? ''
-  const conditions = [eq(inspectionSchedules.organizationId, organizationId)]
+  const conditions = [eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId)]
   if (vehicleId) conditions.push(eq(inspectionSchedules.vehicleId, vehicleId))
   if (status && inspectionStatuses.has(status)) conditions.push(eq(inspectionSchedules.status, status))
   const [rows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(inspectionSchedules).where(and(...conditions)).orderBy(asc(inspectionSchedules.dueDate)).all(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
   ])
   return jsonResponse({ schedules: serializeSchedules(rows, customerRows, vehicleRows) }, 200, env)
 }
@@ -58,25 +58,26 @@ async function createSchedule(request: Request, env: Env, database: ReturnType<t
 }
 
 async function updateSchedule(request: Request, env: Env, database: ReturnType<typeof createDatabase>, id: string, organizationId: string) {
-  const current = await database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).get()
+  const current = await database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).get()
   if (!current) throw new HttpError(404, '点検予定が見つかりません。')
   const body = await readJson(request)
   const input = await parseScheduleInput({ ...body, customerId: body.customerId ?? current.customerId, vehicleId: body.vehicleId ?? current.vehicleId, inspectionType: body.inspectionType ?? current.inspectionType, dueDate: body.dueDate ?? current.dueDate, status: body.status ?? current.status, note: body.note === undefined ? current.note : body.note, notifiedAt: body.notifiedAt === undefined ? current.notifiedAt : body.notifiedAt }, database, organizationId)
-  await database.update(inspectionSchedules).set({ ...input, updatedAt: new Date().toISOString() }).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).run()
+  const result = await database.update(inspectionSchedules).set({ ...input, updatedAt: new Date().toISOString() }).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).run()
+  if (!result.success || result.meta.changes !== 1) throw new HttpError(409, '点検予定が他の端末で更新または削除されています。再読み込みしてください。')
   return jsonResponse({ schedule: await findSchedule(database, id, organizationId) }, 200, env)
 }
 
 async function deleteSchedule(env: Env, database: ReturnType<typeof createDatabase>, id: string, organizationId: string) {
-  const result = await database.delete(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).run()
+  const result = await database.delete(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).run()
   if (!result.success || result.meta.changes === 0) throw new HttpError(404, '点検予定が見つかりません。')
   return jsonResponse({ deleted: true }, 200, env)
 }
 
 async function findSchedule(database: ReturnType<typeof createDatabase>, id: string, organizationId: string) {
   const [row, customerRows, vehicleRows] = await Promise.all([
-    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).get(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).get(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
   ])
   if (!row) return null
   return serializeSchedules([row], customerRows, vehicleRows)[0] ?? null
@@ -84,10 +85,10 @@ async function findSchedule(database: ReturnType<typeof createDatabase>, id: str
 
 async function parseScheduleInput(body: Record<string, unknown>, database: ReturnType<typeof createDatabase>, organizationId: string) {
   const customerId = stringValue(body, 'customerId')
-  const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId))).get()
+  const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()
   if (!customer) throw new HttpError(400, '顧客を選択してください。')
   const vehicleId = stringValue(body, 'vehicleId')
-  const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+  const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
   if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   const inspectionType = stringValue(body, 'inspectionType')
   if (!inspectionTypes.has(inspectionType)) throw new HttpError(400, '点検種別が不正です。')

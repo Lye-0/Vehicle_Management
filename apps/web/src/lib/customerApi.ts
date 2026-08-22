@@ -67,6 +67,17 @@ export type CustomerInput = {
   memo: string
 }
 
+export type MasterDeletionImpact = {
+  kind: 'customer' | 'vehicle'
+  id: string
+  label: string
+  vehicleCount: number
+  documentCount: number
+  archivedDocumentCount: number
+  inspectionCount: number
+  attachmentCount: number
+}
+
 export type VehiclelessDocument = {
   id: string
   kind: 'sales' | 'maintenance'
@@ -201,9 +212,18 @@ export async function createCustomer(input: CustomerInput) {
   return mapCustomer(response.customer)
 }
 
-export async function updateCustomer(id: string, input: CustomerInput) {
-  const response = await apiFetch<{ customer: ApiCustomer }>(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(toCustomerPayload(input)) })
+export async function updateCustomer(id: string, input: CustomerInput, expectedUpdatedAt?: string) {
+  const response = await apiFetch<{ customer: ApiCustomer }>(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(toCustomerPayload(input, expectedUpdatedAt)) })
   return mapCustomer(response.customer)
+}
+
+export async function fetchCustomerDeletionImpact(id: string) {
+  const response = await apiFetch<{ impact: MasterDeletionImpact }>(`/api/customers/${encodeURIComponent(id)}/deletion-impact`)
+  return response.impact
+}
+
+export async function deleteCustomer(id: string, expectedUpdatedAt?: string) {
+  return apiFetch<{ deleted: true; kind: 'customer'; customerId: string; vehicleIds: string[] }>(`/api/customers/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: true, expectedUpdatedAt }) })
 }
 
 export async function createVehicle(customerId: string, input: VehicleInput) {
@@ -211,8 +231,18 @@ export async function createVehicle(customerId: string, input: VehicleInput) {
   return { customer: mapCustomer(response.customer), vehicleId: response.vehicleId }
 }
 
-export async function updateVehicle(id: string, input: VehicleInput) {
-  await apiFetch<{ vehicleId: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(toVehiclePayload(input)) })
+export async function updateVehicle(id: string, input: VehicleInput, expectedUpdatedAt?: string) {
+  const response = await apiFetch<{ customer: ApiCustomer; vehicleId: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(toVehiclePayload(input, expectedUpdatedAt)) })
+  return { customer: mapCustomer(response.customer), vehicleId: response.vehicleId }
+}
+
+export async function fetchVehicleDeletionImpact(id: string) {
+  const response = await apiFetch<{ impact: MasterDeletionImpact }>(`/api/vehicles/${encodeURIComponent(id)}/deletion-impact`)
+  return response.impact
+}
+
+export async function deleteVehicle(id: string, expectedUpdatedAt?: string) {
+  return apiFetch<{ deleted: true; kind: 'vehicle'; customerId: string; vehicleIds: string[] }>(`/api/vehicles/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: true, expectedUpdatedAt }) })
 }
 
 export async function uploadVehicleFile(vehicleId: string, file: File) {
@@ -316,11 +346,11 @@ function formatDate(date: string) {
   return date.slice(0, 10).replace(/-/g, '/')
 }
 
-function toCustomerPayload(input: CustomerInput) {
-  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, birthDate: input.birthDate, employer: input.employer, memo: input.memo }
+function toCustomerPayload(input: CustomerInput, expectedUpdatedAt?: string) {
+  return { name: input.name, nameKana: input.kana, phone: input.phone, email: input.email, postalCode: input.postalCode ?? '', address: input.address, birthDate: input.birthDate, employer: input.employer, memo: input.memo, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}) }
 }
 
-function toVehiclePayload(input: VehicleInput) {
+function toVehiclePayload(input: VehicleInput, expectedUpdatedAt?: string) {
   return {
     maker: input.maker,
     name: input.model,
@@ -337,6 +367,7 @@ function toVehiclePayload(input: VehicleInput) {
     freeItem1: input.freeItem1,
     freeItem2: input.freeItem2,
     freeItem3: input.freeItem3,
+    ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
   }
 }
 

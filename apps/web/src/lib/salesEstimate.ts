@@ -163,7 +163,7 @@ export function buildSalesEstimateSections(document: SalesDocumentLike): SalesEs
 }
 
 export function salesLineLabel(item: Pick<SalesLineItem, 'itemType' | 'description' | 'abacusDetail'>) {
-  return item.abacusDetail?.description?.trim() || item.description.trim() || item.itemType.trim() || 'その他'
+  return item.abacusDetail?.description || item.description || item.itemType || 'その他'
 }
 
 export function emptySalesDocumentDetails(): SalesDocumentDetails {
@@ -188,21 +188,31 @@ export function emptySalesDocumentDetails(): SalesDocumentDetails {
 
 function classifySalesItem(item: SalesLineItem): SalesItemBucket {
   const itemType = item.itemType.trim()
-  const label = `${itemType} ${item.abacusDetail?.description ?? item.description}`
+  const description = item.abacusDetail?.description ?? item.description
+
+  // itemType での分類を優先
   if (itemType === '法定費用') return 'legalNonTaxable'
   if (itemType === '手続代行費用') return 'taxableFees'
   if (itemType === '実費・預託金') return 'nonTaxableFees'
-  if (itemType === '車両本体価格' || label.includes('車両本体価格')) return 'vehicleBase'
-  if (itemType === '値引き' || label.includes('値引')) return 'discounts'
-  if (itemType === '付属品・特別仕様' || itemType === '取付工賃' || label.includes('付属品') || label.includes('特別仕様')) return 'accessories'
-  if (itemType === '車両販売工賃' || label.includes('車両販売側工賃')) return 'vehicleSideLabor'
+  if (itemType === '車両本体価格') return 'vehicleBase'
+  if (itemType === '値引き') return 'discounts'
+  if (itemType === '付属品・特別仕様' || itemType === '取付工賃') return 'accessories'
+  if (itemType === '車両販売工賃') return 'vehicleSideLabor'
   if (itemType === '下取車') return 'tradeIns'
-  if (itemType === '頭金' || itemType === '残金' || label.includes('頭金') || label.includes('残金')) return 'payments'
+  if (itemType === '頭金' || itemType === '残金') return 'payments'
+
+  // itemType で分類できない場合のみ、description で分類
+  const label = `${itemType} ${description}`
   if (isRecycleItem(item)) return 'nonTaxableFees'
+  if (label.includes('車両本体価格')) return 'vehicleBase'
+  if (label.includes('値引')) return 'discounts'
+  if (label.includes('付属品') || label.includes('特別仕様')) return 'accessories'
+  if (label.includes('車両販売側工賃')) return 'vehicleSideLabor'
+  if (label.includes('下取')) return 'tradeIns'
+  if (label.includes('頭金') || label.includes('残金')) return 'payments'
   if (legalFeeKeywords.some((keyword) => label.includes(keyword))) return 'legalNonTaxable'
   if (nonTaxableFeeKeywords.some((keyword) => label.includes(keyword))) return 'nonTaxableFees'
   if (taxableFeeKeywords.some((keyword) => label.includes(keyword))) return 'taxableFees'
-  if (label.includes('下取')) return 'tradeIns'
   if (item.taxCategory === '非課税') return 'nonTaxableFees'
   if (item.taxCategory === '対象外') return 'outOfScopeFees'
   return 'taxableFees'

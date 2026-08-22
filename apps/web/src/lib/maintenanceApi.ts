@@ -1,6 +1,7 @@
 import { apiFetch } from './api'
 import type { AbacusDocumentImportMetadata } from './abacusDocumentMetadata'
 import type { AbacusDetailLine, AbacusDetailReport, AbacusDocumentAmounts } from './abacusDetail'
+import { hasOwnField } from './documentCustomerField'
 
 export type MaintenanceDocumentType = '整備見積書' | '整備請求書'
 export type MaintenanceStatus = '下書き' | '入金待ち' | '完了' | 'アーカイブ済み'
@@ -29,7 +30,7 @@ export type MaintenanceDocumentDetails = {
     otherFee: string
   }
 }
-export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; sourceRowIndex?: number; abacusDetail?: AbacusDetailLine | null; isAbacusMigration?: boolean }
+export type MaintenanceLineItem = { id: string; kind: MaintenanceItemKind; description: string; quantity: number | null; unit: string; unitPrice: number | null; technicalFee: number | null; summary: string; sourceRowIndex?: number; abacusDetail?: AbacusDetailLine | null; isAbacusMigration?: boolean }
 
 export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
   staffName: '',
@@ -53,6 +54,7 @@ export const defaultMaintenanceDocumentDetails: MaintenanceDocumentDetails = {
 
 export type MaintenanceDocument = {
   id: string
+  updatedAt: string
   number: string
   type: MaintenanceDocumentType
   status: MaintenanceStatus
@@ -87,11 +89,13 @@ export type MaintenanceDocument = {
   archivedBy: string | null
   purgeAt: string | null
   keepForever: boolean
+  /** 一覧の要約レスポンスに含まれる保存済み合計金額。詳細書類では計算値を優先します。 */
+  total?: number
   items: MaintenanceLineItem[]
   isSummary?: boolean
 }
 
-export type MaintenanceDocumentSummary = Pick<MaintenanceDocument, 'id' | 'number' | 'type' | 'status' | 'category' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'intakeDate' | 'issuedAt' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
+export type MaintenanceDocumentSummary = Pick<MaintenanceDocument, 'id' | 'updatedAt' | 'number' | 'type' | 'status' | 'category' | 'customerId' | 'customerName' | 'phone' | 'vehicleId' | 'vehicle' | 'plate' | 'intakeDate' | 'issuedAt' | 'archivedAt' | 'archivedPreviousStatus' | 'archivedBy' | 'purgeAt' | 'keepForever'> & {
   total: number
   abacusImport?: AbacusDocumentImportMetadata | null
   isAbacusMigration?: boolean
@@ -123,6 +127,7 @@ export type MaintenanceDocumentInput = {
   note: string
   details: MaintenanceDocumentDetails
   items: Array<Omit<MaintenanceLineItem, 'id'>>
+  expectedUpdatedAt?: string
   mileageSync?: {
     confirmed: true
     openedMileage: number | null
@@ -226,7 +231,23 @@ function mapMaintenanceDocument(document: ApiMaintenanceDocument): MaintenanceDo
     taxRate: document.taxRate / 100,
     taxRounding: document.taxRounding === '四捨五入' ? '四捨五入' : '切り捨て',
     note: document.note ?? '',
-    items: (document.items ?? []).map((item) => ({ ...item, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), technicalFee: Number(item.technicalFee ?? 0), summary: item.summary ?? '' })),
+    items: (document.items ?? []).map(normalizeMaintenanceLineItem),
+  }
+}
+
+function normalizeMaintenanceLineItem(item: MaintenanceLineItem): MaintenanceLineItem {
+  const quantity = Number(item.quantity)
+  const unitPrice = Number(item.unitPrice)
+  const technicalFee = Number(item.technicalFee ?? 0)
+  const unit = item.unit ?? ''
+  const hasBlankUnit = unit === ''
+  return {
+    ...item,
+    quantity: hasBlankUnit && quantity === 0 ? null : quantity,
+    unit,
+    unitPrice: hasBlankUnit && unitPrice === 0 ? null : unitPrice,
+    technicalFee: hasBlankUnit && technicalFee === 0 ? null : technicalFee,
+    summary: item.summary ?? '',
   }
 }
 
@@ -235,7 +256,7 @@ function normalizeMaintenanceStatus(status: ApiMaintenanceDocument['status']): M
 }
 
 function toPayload(input: MaintenanceDocumentInput) {
-  const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity, unit, unitPrice, technicalFee, summary })) }
+  const payload: Record<string, unknown> = { ...input, number: input.number || undefined, issuedAt: input.issuedAt ? toApiDate(input.issuedAt) : undefined, intakeDate: toApiDate(input.intakeDate), plannedReleaseDate: toApiDate(input.plannedReleaseDate), completionDate: input.completionDate ? toApiDate(input.completionDate) : undefined, taxRate: Math.round(input.taxRate * 100), rounding: input.taxRounding, items: input.items.map(({ description, kind, quantity, unit, unitPrice, technicalFee, summary }) => ({ description, kind, quantity: quantity ?? 0, unit: unit ?? '', unitPrice: unitPrice ?? 0, technicalFee: technicalFee ?? 0, summary })) }
   if (input.masterSync) {
     payload.masterSync = input.masterSync
   }
@@ -253,22 +274,29 @@ function toPayload(input: MaintenanceDocumentInput) {
 
 function normalizeMaintenanceDetails(value: MaintenanceDocumentDetails | null | undefined): MaintenanceDocumentDetails {
   const details = value ?? defaultMaintenanceDocumentDetails
+  const sourceCustomerOverride = details.customerOverride
+  const hasCustomerOverride = sourceCustomerOverride && (
+    hasMaintenanceOverrideValue(sourceCustomerOverride)
+    || hasOwnField(sourceCustomerOverride, 'birthDate')
+    || hasOwnField(sourceCustomerOverride, 'employer')
+  )
+  const customerOverride = hasCustomerOverride ? ({
+    name: sourceCustomerOverride.name,
+    kana: sourceCustomerOverride.kana,
+    phone: sourceCustomerOverride.phone,
+    email: sourceCustomerOverride.email ?? '',
+    postalCode: sourceCustomerOverride.postalCode,
+    address: sourceCustomerOverride.address,
+    ...(hasOwnField(sourceCustomerOverride, 'birthDate') ? { birthDate: sourceCustomerOverride.birthDate ?? '' } : {}),
+    ...(hasOwnField(sourceCustomerOverride, 'employer') ? { employer: sourceCustomerOverride.employer ?? '' } : {}),
+  } as MaintenanceDocumentDetails['customerOverride']) : null
   return {
     ...defaultMaintenanceDocumentDetails,
     ...details,
     bankName: typeof details.bankName === 'string' ? details.bankName : '',
     bankAccount: typeof details.bankAccount === 'string' ? details.bankAccount : '',
     bankAccountHolder: typeof details.bankAccountHolder === 'string' ? details.bankAccountHolder : '',
-    customerOverride: details.customerOverride && hasMaintenanceOverrideValue(details.customerOverride) ? {
-      name: details.customerOverride.name,
-      kana: details.customerOverride.kana,
-      phone: details.customerOverride.phone,
-      email: details.customerOverride.email ?? '',
-      postalCode: details.customerOverride.postalCode,
-      address: details.customerOverride.address,
-      birthDate: details.customerOverride.birthDate ?? '',
-      employer: details.customerOverride.employer ?? '',
-    } : null,
+    customerOverride,
     vehicleOverride: details.vehicleOverride && hasMaintenanceOverrideValue(details.vehicleOverride) ? {
       maker: details.vehicleOverride.maker,
       name: details.vehicleOverride.name,

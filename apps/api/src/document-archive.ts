@@ -1,5 +1,6 @@
-import { and, eq, lte } from 'drizzle-orm'
-import { maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments } from '@vehicle-management/database'
+import { and, eq, lte, sql } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
+import { customers, maintenanceDocuments, maintenanceItems, paymentEntries, paymentRecords, salesDocumentItems, salesDocuments, vehicles } from '@vehicle-management/database'
 import type { Database } from './db/client'
 import { addDays } from './backup-settings'
 
@@ -13,14 +14,14 @@ export async function archiveDocument(database: Database, kind: ArchivedDocument
     const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
     if (!current) return false
     const previousStatus = current.status === 'アーカイブ済み' ? current.archivedPreviousStatus ?? '下書き' : current.status
-    await database.update(salesDocuments).set({ status: 'アーカイブ済み', archivedAt: updatedAt, archivedPreviousStatus: previousStatus, archivedBy: userId, purgeAt, keepForever: false, updatedAt }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
+    await database.update(salesDocuments).set({ status: 'アーカイブ済み', archivedAt: updatedAt, archivedPreviousStatus: previousStatus, archivedBy: userId, purgeAt, keepForever: false, updatedAt, ...(current.archivedAt ? {} : { archiveReason: 'manual', deletionBatchId: null }) }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
     return true
   }
 
   const current = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
   if (!current) return false
   const previousStatus = current.status === 'アーカイブ済み' ? current.archivedPreviousStatus ?? '下書き' : current.status
-  await database.update(maintenanceDocuments).set({ status: 'アーカイブ済み', archivedAt: updatedAt, archivedPreviousStatus: previousStatus, archivedBy: userId, purgeAt, keepForever: false, updatedAt }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
+  await database.update(maintenanceDocuments).set({ status: 'アーカイブ済み', archivedAt: updatedAt, archivedPreviousStatus: previousStatus, archivedBy: userId, purgeAt, keepForever: false, updatedAt, ...(current.archivedAt ? {} : { archiveReason: 'manual', deletionBatchId: null }) }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
   return true
 }
 
@@ -28,15 +29,31 @@ export async function restoreArchivedDocument(database: Database, kind: Archived
   const updatedAt = new Date().toISOString()
   if (kind === 'sales') {
     const current = await database.select().from(salesDocuments).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).get()
-    if (!current) return false
-    await database.update(salesDocuments).set({ status: current.archivedPreviousStatus && current.archivedPreviousStatus !== 'アーカイブ済み' ? current.archivedPreviousStatus : '下書き', archivedAt: null, archivedPreviousStatus: null, archivedBy: null, purgeAt: null, updatedAt }).where(and(eq(salesDocuments.id, documentId), eq(salesDocuments.organizationId, organizationId))).run()
-    return true
+    if (!current || current.archivedAt === null) return false
+    return await restoreDocumentWithParents(database, 'sales', current, organizationId, updatedAt)
   }
 
   const current = await database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).get()
-  if (!current) return false
-  await database.update(maintenanceDocuments).set({ status: current.archivedPreviousStatus && current.archivedPreviousStatus !== 'アーカイブ済み' ? current.archivedPreviousStatus : '下書き', archivedAt: null, archivedPreviousStatus: null, archivedBy: null, purgeAt: null, updatedAt }).where(and(eq(maintenanceDocuments.id, documentId), eq(maintenanceDocuments.organizationId, organizationId))).run()
-  return true
+  if (!current || current.archivedAt === null) return false
+  return await restoreDocumentWithParents(database, 'maintenance', current, organizationId, updatedAt)
+}
+
+async function restoreDocumentWithParents(database: Database, kind: ArchivedDocumentKind, current: typeof salesDocuments.$inferSelect | typeof maintenanceDocuments.$inferSelect, organizationId: string, updatedAt: string) {
+  const statements: BatchItem<'sqlite'>[] = []
+  if (current.deletionBatchId) {
+    const restoreGuard = sql`EXISTS (SELECT 1 FROM ${kind === 'sales' ? salesDocuments : maintenanceDocuments} WHERE id = ${current.id} AND organization_id = ${organizationId} AND archived_at IS NOT NULL AND deletion_batch_id = ${current.deletionBatchId})`
+    statements.push(database.update(customers).set({ deletedAt: null, deletedBy: null, deletionBatchId: null, updatedAt }).where(and(eq(customers.id, current.customerId), eq(customers.organizationId, organizationId), sql`${customers.deletedAt} IS NOT NULL`, eq(customers.deletionBatchId, current.deletionBatchId), restoreGuard)))
+    if (current.vehicleId) {
+      statements.push(database.update(vehicles).set({ deletedAt: null, deletedBy: null, deletionBatchId: null, updatedAt }).where(and(eq(vehicles.id, current.vehicleId), eq(vehicles.organizationId, organizationId), sql`${vehicles.deletedAt} IS NOT NULL`, eq(vehicles.deletionBatchId, current.deletionBatchId), restoreGuard)))
+    }
+  }
+  if (kind === 'sales') {
+    statements.push(database.update(salesDocuments).set({ status: current.archivedPreviousStatus && current.archivedPreviousStatus !== 'アーカイブ済み' ? current.archivedPreviousStatus : '下書き', archivedAt: null, archivedPreviousStatus: null, archivedBy: null, purgeAt: null, archiveReason: null, deletionBatchId: null, updatedAt }).where(and(eq(salesDocuments.id, current.id), eq(salesDocuments.organizationId, organizationId), sql`${salesDocuments.archivedAt} IS NOT NULL`)))
+  } else {
+    statements.push(database.update(maintenanceDocuments).set({ status: current.archivedPreviousStatus && current.archivedPreviousStatus !== 'アーカイブ済み' ? current.archivedPreviousStatus : '下書き', archivedAt: null, archivedPreviousStatus: null, archivedBy: null, purgeAt: null, archiveReason: null, deletionBatchId: null, updatedAt }).where(and(eq(maintenanceDocuments.id, current.id), eq(maintenanceDocuments.organizationId, organizationId), sql`${maintenanceDocuments.archivedAt} IS NOT NULL`)))
+  }
+  const results = await database.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  return results.at(-1)?.meta.changes === 1
 }
 
 export async function setArchiveKeepForever(database: Database, kind: ArchivedDocumentKind, documentId: string, organizationId: string, keepForever: boolean, retentionDays: number) {

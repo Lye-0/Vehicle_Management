@@ -16,6 +16,11 @@ describe('resource limits', () => {
     expect(() => parseMaintenanceDocumentItems(items)).toThrow(HttpError)
   })
 
+  it('keeps explicitly blank maintenance detail values empty while calculating them as zero', () => {
+    const [item] = parseMaintenanceDocumentItems([{ description: '', quantity: 0, unit: '', unitPrice: null, technicalFee: null, summary: '' }])
+    expect(item).toMatchObject({ quantity: 0, unit: '', unitPrice: 0, technicalFee: 0, amount: 0 })
+  })
+
   it('rejects oversized CSV detail arrays and delimited fields', () => {
     const details = JSON.stringify(Array.from({ length: maximumDocumentItemCount + 1 }, () => ({})))
     const delimited = Array.from({ length: maximumDocumentItemCount + 1 }, () => '明細').join(' / ')

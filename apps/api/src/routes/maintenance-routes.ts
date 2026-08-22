@@ -194,6 +194,7 @@ function serializeMaintenanceDocumentSummary(document: typeof maintenanceDocumen
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeMaintenanceStatus(document.status),
@@ -278,7 +279,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     const allVehicles = await database
       .select({ id: vehicles.id, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
       .from(vehicles)
-      .where(eq(vehicles.organizationId, organizationId))
+      .where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .all()
     const duplicateVehicles = findDuplicateVehicles(allVehicles, newVehicle)
 
@@ -312,7 +313,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     const allCustomers = await database
       .select({ id: customers.id, name: customers.name, phone: customers.phone, email: customers.email })
       .from(customers)
-      .where(eq(customers.organizationId, organizationId))
+      .where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt)))
       .all()
     // 結果はレスポンスには含めない（作成をブロックしない）
     void findDuplicateCustomers(allCustomers, newCustomer)
@@ -344,7 +345,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && !newCustomer) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     // 部分集合チェック
     for (const f of masterSync.customerFields) {
@@ -355,7 +356,7 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   if (masterSync && !newVehicle) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -495,6 +496,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
 
   const currentItems = await loadMaintenanceItems(database, documentId, organizationId)
   const body = await readJson(request)
+  if (typeof body.expectedUpdatedAt === 'string' && body.expectedUpdatedAt !== current.updatedAt) throw new HttpError(409, '整備書類が他の端末で更新されています。再読み込みしてください。')
   const requestedVehicleId = body.vehicleId === undefined ? current.vehicleId : nullableString(body, 'vehicleId')
   if (current.vehicleId && !requestedVehicleId) {
     throw new HttpError(400, '通常の整備書類から車両を外すことはできません。車両なしはABACUS互換書類だけに対応しています。')
@@ -564,7 +566,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   let currentVehicleForSync: typeof vehicles.$inferSelect | null = null
 
   if (masterSync && masterSync.customerFields.length > 0) {
-    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId))).get() ?? null
+    currentCustomerForSync = await database.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get() ?? null
     actualCustomerDiffFields = computeActualCustomerDiffFields(currentCustomerForSync, input.details.customerOverride ?? null)
     for (const f of masterSync.customerFields) {
       if (!actualCustomerDiffFields.has(f)) {
@@ -574,7 +576,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   if (masterSync && masterSync.vehicleFields.length > 0) {
-    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId))).get() ?? null
+    currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
       if (!actualVehicleDiffFields.has(f)) {
@@ -743,7 +745,7 @@ async function parseMaintenanceInput(
 
   // 既存車両の所有関係検証（新規車両の場合はスキップ）
   if (vehicleId && customerId && !newCustomer) {
-    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId))).get()
+    const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
     if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
@@ -778,8 +780,8 @@ async function loadMaintenanceDocuments(database: ReturnType<typeof createDataba
   const [documentRows, itemRows, customerRows, vehicleRows] = await Promise.all([
     database.select().from(maintenanceDocuments).where(eq(maintenanceDocuments.organizationId, organizationId)).orderBy(desc(maintenanceDocuments.issuedAt), desc(maintenanceDocuments.number)).all(),
     database.select().from(maintenanceItems).where(eq(maintenanceItems.organizationId, organizationId)).orderBy(asc(maintenanceItems.sortOrder)).all(),
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
   ])
   const itemsByDocument = groupBy(itemRows, (item) => item.documentId)
   const customersById = new Map(customerRows.map((customer) => [customer.id, customer]))
@@ -798,8 +800,8 @@ async function findMaintenanceDocument(database: ReturnType<typeof createDatabas
   if (!document) return null
   const [items, customer, vehicle] = await Promise.all([
     loadMaintenanceItems(database, documentId, organizationId),
-    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId))).get(),
-    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId))).get() : Promise.resolve(undefined),
+    database.select().from(customers).where(and(eq(customers.id, document.customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get(),
+    document.vehicleId ? database.select().from(vehicles).where(and(eq(vehicles.id, document.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() : Promise.resolve(undefined),
   ])
   return serializeMaintenanceDocument(document, customer, vehicle, items)
 }
@@ -812,7 +814,7 @@ async function getCurrentVehicleMileage(database: ReturnType<typeof createDataba
   if (!vehicleId) return null
   const result = await database.select({ mileage: vehicles.mileage })
     .from(vehicles)
-    .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId)))
+    .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
     .get()
   return result?.mileage ?? null
 }
@@ -883,10 +885,15 @@ function serializeMaintenanceDocument(document: typeof maintenanceDocuments.$inf
   const abacusImport = parseAbacusDocumentImportMetadata(document.detailsJson)
   const abacusDetails = parseAbacusDetailEnvelope(document.detailsJson)
   const abacusLines = new Map(abacusDetails?.lines.map((line) => [line.sourceRowIndex, line]) ?? [])
-  const customerBirthDate = details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
-  const customerEmployer = details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
+  const customerBirthDate = hasOwnRecordField(details.customerOverride, 'birthDate')
+    ? normalizeCustomerBirthDateForStorage(details.customerOverride?.birthDate)
+    : details.customerBirthDate || normalizeCustomerBirthDateForStorage(customer?.birthDate)
+  const customerEmployer = hasOwnRecordField(details.customerOverride, 'employer')
+    ? normalizeCustomerEmployerValue(details.customerOverride?.employer)
+    : details.customerEmployer || normalizeCustomerEmployerValue(customer?.employer)
   return {
     id: document.id,
+    updatedAt: document.updatedAt,
     number: document.number,
     type: document.type,
     status: normalizeMaintenanceStatus(document.status),
@@ -990,7 +997,8 @@ export function parseMaintenanceItems(value: unknown): MaintenanceItemInput[] {
     const quantity = nonNegativeNumber(item.quantity, 1)
     const unitPrice = integerNumber(item.unitPrice, 0)
     const technicalFee = integerNumber(item.technicalFee, 0)
-    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit: stringValue(item, 'unit') || '式', unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
+    const unit = typeof item.unit === 'string' ? item.unit.trim() : '式'
+    return { kind: item.kind === '部品' ? '部品' : '作業', description: stringValue(item, 'description'), quantity, unit, unitPrice, technicalFee, summary: stringValue(item, 'summary'), amount: Math.round(quantity * unitPrice) + technicalFee }
   })
 }
 
@@ -1054,8 +1062,8 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     phone: normalizePhone(stringValue(customerOverride, 'phone')),
     postalCode: normalizePostalCode(stringValue(customerOverride, 'postalCode')),
     address: stringValue(customerOverride, 'address'),
-    birthDate: normalizeCustomerBirthDateForStorage(stringValue(customerOverride, 'birthDate')),
-    employer: normalizeCustomerEmployerValue(stringValue(customerOverride, 'employer')),
+    ...(hasOwnRecordField(customerOverride, 'birthDate') ? { birthDate: normalizeCustomerBirthDateForStorage(stringValue(customerOverride, 'birthDate')) } : {}),
+    ...(hasOwnRecordField(customerOverride, 'employer') ? { employer: normalizeCustomerEmployerValue(stringValue(customerOverride, 'employer')) } : {}),
   }
   const normalizedVehicleOverride = {
     maker: stringValue(vehicleOverride, 'maker'),
@@ -1080,7 +1088,7 @@ function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
     bankName: stringValue(source, 'bankName'),
     bankAccount: stringValue(source, 'bankAccount'),
     bankAccountHolder: stringValue(source, 'bankAccountHolder'),
-    customerOverride: hasOverrideValue(normalizedCustomerOverride) ? normalizedCustomerOverride : null,
+    customerOverride: (hasOverrideValue(normalizedCustomerOverride) || hasOwnRecordField(customerOverride, 'birthDate') || hasOwnRecordField(customerOverride, 'employer')) ? normalizedCustomerOverride as Record<string, string> : null,
     vehicleOverride: hasOverrideValue(normalizedVehicleOverride) ? normalizedVehicleOverride : null,
     labels: {
       documentTitle: '',
@@ -1099,6 +1107,10 @@ function hasOverrideValue(value: Record<string, string | boolean>) {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function hasOwnRecordField(record: object | null | undefined, field: string) {
+  return record !== null && record !== undefined && Object.prototype.hasOwnProperty.call(record, field)
 }
 
 export type MaintenanceItemInput = { kind: '作業' | '部品'; description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; summary: string; amount: number }

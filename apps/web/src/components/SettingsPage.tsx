@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import { normalizePhone, normalizePostalCode, type NormalizableField } from '@vehicle-management/shared'
 import { Archive, Banknote, Building2, CheckCircle2, Clock3, Copy, Download, FileText, FileUp, Plus, ReceiptText, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Trash2, Upload, UserPlus, UserRound, UsersRound } from 'lucide-react'
 import { fetchOrganizationPermissions, updateCurrentProfile, updateOrganizationPermissions, type OrganizationPermissions } from '../lib/organizationApi'
 import { apiFetchBlob } from '../lib/api'
+import { useAutosave } from '../hooks/useAutosave'
 import { addEmailPasswordLogin, addGoogleLogin, changeCurrentDisplayName, changeCurrentEmail, changeCurrentPassword, refreshCurrentUser, removeLoginProvider, sendCurrentEmailVerification } from '../lib/auth'
 import { defaultSettings, fetchSettings, flattenSalesItemPresetGroups, updateSettings, type AppSettings, type DocumentSettings, type SalesItemPresetGroupKey, type SalesItemPresetGroups, type ShopSettings, type TaxSettings } from '../lib/settingsApi'
 import { createMember, fetchMembers, removeMemberFromOrganization, updateMember, type MemberRecord, type MemberRole } from '../lib/membersApi'
 import { commitCsvImport, previewCsvImport, type CsvImportPreview, type CsvImportResource, type CsvImportResult } from '../lib/importApi'
 import { fetchBackupSettings, updateBackupSettings, type BackupSettings } from '../lib/backupsApi'
 import { deleteArchive, fetchArchives, restoreArchive, updateArchiveRetention, type ArchiveRecord } from '../lib/archivesApi'
+import { deleteDraft } from '../lib/draftStorage'
 import { BackupSettingsPanel } from './BackupSettingsPanel'
+import { AutosaveStatus } from './AutosaveStatus'
 import { AbacusRegistrationPackagePanel } from './AbacusRegistrationPackagePanel'
 import { IconWithChain } from './IconWithChain'
 import { NormalizedInput } from './NormalizedValueInput'
+import { useDraftRecovery } from '../hooks/draftRecoveryContext'
 
 type SettingsTab = 'shop' | 'tax' | 'masters' | 'archive' | 'data' | 'members' | 'permissions'
 type CsvResource = 'customers' | 'vehicles' | 'sales' | 'maintenance' | 'payments'
@@ -37,7 +41,7 @@ const salesPresetColumns: Array<{ key: SalesItemPresetGroupKey; title: string; d
   { key: 'accessories', title: '付属品・特別仕様明細', description: '付属品・特別仕様の品名欄で表示します。' },
 ]
 
-export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void }) {
+export function SettingsPage({ user, onReloadSession, onUserUpdated, onOrganizationNameChanged }: { user: User; onReloadSession?: () => void; onUserUpdated?: (user: User) => void; onOrganizationNameChanged?: (name: string) => void }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [backupSettings, setBackupSettings] = useState<BackupSettings>(initialBackupSettings)
   const [backupPermissions, setBackupPermissions] = useState({ canManageCreateRestore: false, canManageRetention: false })
@@ -47,8 +51,12 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [permissionsDirty, setPermissionsDirty] = useState(false)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState<CsvResource | ''>('')
+  const persistedShopNameRef = useRef(defaultSettings.shop.name)
+  const { pendingRestore, acknowledgeRestore, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
   useEffect(() => {
     let cancelled = false
@@ -59,6 +67,9 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
           setBackupSettings(backupResponse.settings)
           setBackupPermissions({ canManageCreateRestore: backupResponse.canManageCreateRestore, canManageRetention: backupResponse.canManageRetention })
           setPermissions(permissionsResponse.permissions)
+          persistedShopNameRef.current = nextSettings.shop.name
+          setSettingsDirty(false)
+          setPermissionsDirty(false)
           setCanManagePermissions(permissionsResponse.canManage)
           setError('')
         }
@@ -74,21 +85,25 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   function updateShop(field: keyof ShopSettings, value: string) {
     setSettings((current) => ({ ...current, shop: { ...current.shop, [field]: value } }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updateDocument(field: keyof DocumentSettings, value: string | number) {
     setSettings((current) => ({ ...current, document: { ...current.document, [field]: value } }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updateTax(field: keyof TaxSettings, value: string | number) {
     setSettings((current) => ({ ...current, tax: { ...current.tax, [field]: value } as TaxSettings }))
+    setSettingsDirty(true)
     setSaved(false)
   }
 
   function updatePermission(field: keyof OrganizationPermissions, value: boolean) {
     setPermissions((current) => ({ ...current, [field]: value }))
+    setPermissionsDirty(true)
     setSaved(false)
   }
 
@@ -98,6 +113,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: current.salesItemPresetGroups[group].map((item, itemIndex) => itemIndex === index ? value : item),
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function addSalesPreset(group: SalesItemPresetGroupKey) {
@@ -106,6 +122,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: [...current.salesItemPresetGroups[group], ''],
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function removeSalesPreset(group: SalesItemPresetGroupKey, index: number) {
@@ -114,21 +131,25 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
       [group]: current.salesItemPresetGroups[group].filter((_, itemIndex) => itemIndex !== index),
     }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function updateMaintenancePreset(index: number, value: string) {
     setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.map((item, itemIndex) => itemIndex === index ? value : item) }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function addMaintenancePreset() {
     setSettings((current) => ({ ...current, maintenanceItemPresets: [...current.maintenanceItemPresets, ''] }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   function removeMaintenancePreset(index: number) {
     setSettings((current) => ({ ...current, maintenanceItemPresets: current.maintenanceItemPresets.filter((_, itemIndex) => itemIndex !== index) }))
     setSaved(false)
+    setSettingsDirty(true)
   }
 
   async function save() {
@@ -151,10 +172,15 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
         canManagePermissions ? updateOrganizationPermissions(permissions).then((response) => response.permissions) : Promise.resolve(permissions),
       ])
       setSettings(nextSettings)
+      persistedShopNameRef.current = nextSettings.shop.name
       setBackupSettings(nextBackupSettings)
       setPermissions(nextPermissions)
+      setSettingsDirty(false)
+      setPermissionsDirty(false)
       setSaved(true)
+      registerActiveDraft('settings', null)
       setError('')
+      void deleteDraft('settings-draft')
       onReloadSession?.()
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : '設定を保存できませんでした。')
@@ -167,6 +193,69 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
     setBackupSettings(nextSettings)
     setSaved(false)
   }, [])
+
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  useEffect(() => {
+    if (settingsDirty || permissionsDirty) registerActiveDraft('settings', 'settings-draft')
+  }, [permissionsDirty, registerActiveDraft, settingsDirty])
+
+  useEffect(() => {
+    if (loading) return
+    const pending = pendingRestore?.kind === 'settings' ? pendingRestore : null
+    // 通常の入力中にも端末内下書きは更新されるため、編集中は自分の下書きを
+    // 「復元」として再適用しない。ページを開き直した直後など、未編集状態の
+    // ときだけ自動復元する。明示的な復元操作（pending）の場合は常に適用する。
+    if (!pending && (settingsDirty || permissionsDirty)) return
+    const candidate = pending ?? getAutoResumeDraft('settings')
+    if (!candidate) return
+    const restored = candidate.value as { settings?: AppSettings; permissions?: OrganizationPermissions }
+    if (restored.settings) setSettings(restored.settings)
+    if (restored.permissions) setPermissions(restored.permissions)
+    setSettingsDirty(Boolean(restored.settings))
+    setPermissionsDirty(Boolean(restored.permissions))
+    setSaved(false)
+    if (pending) {
+      setError('端末内に残っていた設定の変更を復元しました。内容を確認して保存してください。')
+      acknowledgeRestore(candidate.key)
+    }
+  }, [acknowledgeRestore, getAutoResumeDraft, loading, pendingRestore, permissionsDirty, settingsDirty])
+
+  const autosave = useAutosave({
+    value: { settings, permissions },
+    dirty: settingsDirty || permissionsDirty,
+    enabled: !loading,
+    serverEnabled: !loading && !saving && (settingsDirty || permissionsDirty),
+    registrationKey: 'settings',
+    storageKey: 'settings-draft',
+    save: async ({ settings: nextSettings, permissions: nextPermissions }) => {
+      const normalizedSettings = {
+        ...nextSettings,
+        shop: {
+          ...nextSettings.shop,
+          postalCode: normalizePostalCode(nextSettings.shop.postalCode),
+          phone: normalizePhone(nextSettings.shop.phone),
+          fax: normalizePhone(nextSettings.shop.fax),
+        },
+      }
+      const [savedSettings, savedPermissions] = await Promise.all([
+        settingsDirty ? updateSettings(normalizedSettings) : Promise.resolve(settings),
+        permissionsDirty && canManagePermissions ? updateOrganizationPermissions(nextPermissions).then((response) => response.permissions) : Promise.resolve(permissions),
+      ])
+      const organizationNameChanged = Boolean(savedSettings.shop.name) && savedSettings.shop.name !== persistedShopNameRef.current
+      persistedShopNameRef.current = savedSettings.shop.name
+      setSettings(savedSettings)
+      setPermissions(savedPermissions)
+      setSettingsDirty(false)
+      setPermissionsDirty(false)
+      setSaved(true)
+      registerActiveDraft('settings', null)
+      setError('')
+      if (organizationNameChanged) onOrganizationNameChanged?.(savedSettings.shop.name)
+      return true
+    },
+    onError: (reason) => setError(reason instanceof Error ? reason.message : '設定を自動保存できませんでした。'),
+  })
 
   const visibleTabs = tabs.filter((tab) => tab.id !== 'permissions' || canManagePermissions)
 
@@ -192,7 +281,7 @@ export function SettingsPage({ user, onReloadSession, onUserUpdated }: { user: U
 
   return (
     <>
-      <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div>
+      <div className="page-header settings-page-header"><div><span className="page-eyebrow">共通設定</span><h1>設定</h1><p>店舗情報、帳票、税金・保険料、明細候補を管理します。</p></div><div className="settings-page-actions"><AutosaveStatus status={autosave.status} lastSavedAt={autosave.lastSavedAt} /><button className="button button-primary" type="button" onClick={save} disabled={loading || saving}><Save size={18} />{saving ? '保存中…' : saved ? '保存済み' : '設定を保存'}</button></div></div>
       {error && <div className="customer-sync-status is-error"><span>{error}</span><button className="text-button" type="button" onClick={() => window.location.reload()}>再読み込み</button></div>}
       <div className="settings-layout">
         <nav className="panel settings-nav" aria-label="設定メニュー">{visibleTabs.map(({ id, label, description, icon: Icon }) => <button className={activeTab === id ? 'is-active' : ''} type="button" key={id} onClick={() => setActiveTab(id)}><span className="settings-nav-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span></button>)}</nav>
@@ -301,6 +390,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [currentUser, setCurrentUser] = useState(user)
   const [displayName, setDisplayName] = useState(user.displayName ?? '')
   const [newEmail, setNewEmail] = useState(user.email ?? '')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [linkEmail, setLinkEmail] = useState(user.email ?? '')
@@ -308,6 +398,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [loading, setLoading] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [pendingEmail, setPendingEmail] = useState('')
   const [members, setMembers] = useState<MemberRecord[]>([])
   const [currentRole, setCurrentRole] = useState<MemberRole>('employee')
   const [membersLoading, setMembersLoading] = useState(true)
@@ -316,7 +407,9 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
     setCurrentUser(user)
     setDisplayName(user.displayName ?? '')
     setNewEmail(user.email ?? '')
+    setCurrentPassword('')
     setLinkEmail(user.email ?? '')
+    setPendingEmail((current) => current && normalizeAccountEmail(user.email) === current ? '' : current)
   }, [user])
 
   const [memberError, setMemberError] = useState('')
@@ -326,11 +419,36 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
   const [invitation, setInvitation] = useState<{ code: string; email: string; expiresAt: string } | null>(null)
-  const [accountModal, setAccountModal] = useState<'displayName' | 'password' | 'google' | null>(null)
+  const [accountModal, setAccountModal] = useState<'displayName' | 'account-choice' | 'email' | 'password' | 'google' | null>(null)
 
   const hasPassword = currentUser.providerData.some((provider) => provider.providerId === 'password')
   const hasGoogle = currentUser.providerData.some((provider) => provider.providerId === 'google.com')
   const canManageMembers = currentRole === 'owner' || currentRole === 'admin'
+  const normalizedCurrentEmail = normalizeAccountEmail(currentUser.email)
+  const normalizedNewEmail = normalizeAccountEmail(newEmail)
+  const isDifferentEmail = Boolean(normalizedNewEmail && normalizedNewEmail !== normalizedCurrentEmail)
+
+  function openAccountChangeChooser() {
+    setError('')
+    setMessage('')
+    setAccountModal(hasPassword ? 'account-choice' : 'password')
+  }
+
+  function openEmailChangeModal() {
+    setError('')
+    setMessage('')
+    setNewEmail(pendingEmail || currentUser.email || '')
+    setAccountModal('email')
+  }
+
+  function openPasswordChangeModal() {
+    setError('')
+    setMessage('')
+    setCurrentPassword('')
+    setNewPassword('')
+    setPasswordConfirmation('')
+    setAccountModal('password')
+  }
 
   useEffect(() => {
     if (!accountModal) return
@@ -381,10 +499,16 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   }, [])
 
   async function refreshUser(profile?: { displayName?: string; email?: string | null }) {
+    const previousEmail = normalizeAccountEmail(currentUser.email)
     const wasAnonymous = currentUser.isAnonymous
     const nextUser = await refreshCurrentUser()
     if (nextUser) {
-      if (profile && !nextUser.isAnonymous) await updateCurrentProfile(profile)
+      const nextEmail = normalizeAccountEmail(nextUser.email)
+      const emailChanged = previousEmail !== nextEmail
+      const profileUpdate = profile || emailChanged
+        ? { ...(profile ?? {}), ...(emailChanged ? { email: nextUser.email } : {}) }
+        : null
+      if (profileUpdate && !nextUser.isAnonymous) await updateCurrentProfile(profileUpdate)
       setCurrentUser(nextUser)
       setDisplayName(nextUser.displayName ?? '')
       setNewEmail(nextUser.email ?? '')
@@ -394,9 +518,10 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
         setMembers(response.members)
         setCurrentRole(response.currentRole)
       }
-      setMembers((current) => current.map((member) => member.isSelf ? { ...member, displayName: profile?.displayName ?? nextUser.displayName ?? member.displayName, email: profile?.email === undefined ? nextUser.email ?? member.email : profile.email } : member))
+      setMembers((current) => current.map((member) => member.isSelf ? { ...member, displayName: profile?.displayName ?? nextUser.displayName ?? member.displayName, email: nextUser.email ?? member.email } : member))
       onUserUpdated?.(nextUser)
     }
+    return nextUser
   }
 
   async function runAction(action: string, callback: () => Promise<void>, profile?: { displayName?: string; email?: string | null }): Promise<boolean> {
@@ -428,19 +553,55 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   }
 
   async function saveEmail() {
-    if (!newEmail.trim()) {
+    const normalizedEmail = normalizeAccountEmail(newEmail)
+    if (!normalizedEmail) {
       setError('メールアドレスを入力してください。')
       return
     }
+    if (normalizedEmail === normalizedCurrentEmail) {
+      setError('現在のメールアドレスと同じです。変更先のメールアドレスを入力してください。')
+      return
+    }
+    if (pendingEmail && normalizedEmail !== pendingEmail) {
+      setError(`先に確認待ちのメールアドレス（${pendingEmail}）の確認を完了してください。`)
+      return
+    }
     const completed = await runAction('email', async () => {
-      await changeCurrentEmail(newEmail)
-      await sendCurrentEmailVerification()
-      setMessage('メールアドレスを更新し、確認メールを送信しました。')
-    }, { email: newEmail.trim().toLowerCase() })
+      await changeCurrentEmail(normalizedEmail)
+      setPendingEmail(normalizedEmail)
+      setMessage('確認メールを送信しました。メール内のリンクを開くと変更が完了します。')
+    })
     if (completed) setAccountModal(null)
   }
 
+  async function refreshEmailStatus() {
+    const requestedEmail = pendingEmail
+    setLoading('verification-refresh')
+    setError('')
+    setMessage('')
+    try {
+      const nextUser = await refreshUser()
+      const nextEmail = normalizeAccountEmail(nextUser?.email)
+      if (requestedEmail && nextEmail === requestedEmail) {
+        setPendingEmail('')
+        setMessage('メールアドレスの確認が完了しました。')
+      } else if (requestedEmail) {
+        setMessage('まだ確認が完了していません。確認メールのリンクを開いてください。')
+      } else {
+        setMessage('メール確認状態を更新しました。')
+      }
+    } catch (reason) {
+      setError(getSettingsAuthError(reason))
+    } finally {
+      setLoading('')
+    }
+  }
+
   async function savePassword() {
+    if (!currentPassword) {
+      setError('現在のパスワードを入力してください。')
+      return
+    }
     if (newPassword.length < 8) {
       setError('パスワードは8文字以上で設定してください。')
       return
@@ -450,7 +611,8 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       return
     }
     const completed = await runAction('password', async () => {
-      await changeCurrentPassword(newPassword)
+      await changeCurrentPassword(currentPassword, newPassword)
+      setCurrentPassword('')
       setNewPassword('')
       setPasswordConfirmation('')
       setMessage('パスワードを更新しました。')
@@ -588,7 +750,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
             <h3>ログイン方法</h3>
             <div className={hasPassword ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
               <strong>メールアドレス＋パスワードでログイン（{hasPassword ? '済み' : '未設定'}）</strong>
-              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={() => { setError(''); setMessage(''); setAccountModal('password') }}>変更</button>
+              <button className="button button-secondary account-change-button" type="button" disabled={Boolean(loading)} onClick={openAccountChangeChooser}>変更</button>
             </div>
             <div className={hasGoogle ? 'account-login-row is-linked' : 'account-login-row is-unlinked'}>
               <strong>Googleでログイン（{hasGoogle ? '済み' : '未設定'}）</strong>
@@ -608,19 +770,34 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
       {accountModal && <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) setAccountModal(null) }}>
         <section className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="account-modal-header">
-            <div><span className="page-eyebrow">アカウント設定</span><h2 id="account-modal-title">{accountModal === 'displayName' ? '表示名を変更' : accountModal === 'password' ? (hasPassword ? 'メールアドレス・パスワードを変更' : 'メールアドレス＋パスワードを追加') : 'Googleログインの設定'}</h2></div>
+            <div><span className="page-eyebrow">アカウント設定</span><h2 id="account-modal-title">{accountModal === 'displayName' ? '表示名を変更' : accountModal === 'account-choice' ? '変更する項目を選択' : accountModal === 'email' ? 'メールアドレスを変更' : accountModal === 'password' ? (hasPassword ? 'パスワードを変更' : 'メールアドレス＋パスワードを追加') : 'Googleログインの設定'}</h2></div>
             <button className="account-modal-close" type="button" aria-label="閉じる" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>×</button>
           </div>
           {error && <div className="auth-error" role="alert">{error}</div>}
           {message && <div className="settings-success" role="status">{message}</div>}
+          {accountModal === 'account-choice' && <div className="account-modal-content">
+            <p className="account-modal-note">変更する項目を選択してください。メールアドレスとパスワードは別々に変更します。</p>
+            {pendingEmail && <p className="account-modal-note" role="status">メールアドレスは {pendingEmail} の確認待ちです。先に確認メールのリンクを開いてください。</p>}
+            <div className="account-modal-choice-list">
+              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={openEmailChangeModal}>メールアドレスを変更</button>
+              <button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={openPasswordChangeModal}>パスワードを変更</button>
+            </div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button></div>
+          </div>}
           {accountModal === 'displayName' && <div className="account-modal-content">
             <SettingsField label="表示名" value={displayName} onChange={setDisplayName} disabled={Boolean(loading)} placeholder="例：山本 翔太" />
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void saveDisplayName()}>{loading === 'displayName' ? '変更中…' : '変更する'}</button></div>
           </div>}
+          {accountModal === 'email' && <div className="account-modal-content">
+            <p className="account-modal-note">新しいメールアドレスへ確認メールを送信します。リンクを開くまで、現在のメールアドレスは変わりません。</p>
+            <div className="settings-form-grid"><SettingsField label="現在のメールアドレス" type="email" value={currentUser.email ?? ''} onChange={() => undefined} readOnly /><SettingsField label="新しいメールアドレス" type="email" value={newEmail} onChange={setNewEmail} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal('account-choice')}>戻る</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '送信中…' : pendingEmail && pendingEmail === normalizedNewEmail ? '確認メールを再送信' : '変更メールを送信'}</button></div>
+            {pendingEmail ? <p className="account-modal-note" role="status">確認待ち：{pendingEmail}<br />確認メールのリンクを開いた後、<button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void refreshEmailStatus()}>{loading === 'verification-refresh' ? '確認状態を更新中…' : '確認状態を更新'}</button>してください。</p> : isDifferentEmail ? <p className="account-modal-note" role="status">入力中の新しいメールアドレスは、確認メールのリンクを開くまで変更されません。</p> : currentUser.emailVerified ? <span className="verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}
+          </div>}
           {accountModal === 'password' && hasPassword && <div className="account-modal-content">
-            <div className="settings-form-grid"><SettingsField label="メールアドレス" type="email" value={newEmail} onChange={setNewEmail} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} disabled={Boolean(loading)} /></div>
-            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => void saveEmail()}>{loading === 'email' ? '変更中…' : 'メールアドレスを変更'}</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '変更中…' : 'パスワードを変更'}</button></div>
-            {currentUser.emailVerified ? <span className="verified-label">メール確認済み</span> : <button className="text-button" type="button" disabled={Boolean(loading)} onClick={() => void runAction('verification', async () => { await sendCurrentEmailVerification(); setMessage('確認メールを送信しました。') })}>{loading === 'verification' ? '送信中…' : '確認メールを送信'}</button>}
+            <p className="account-modal-note">安全のため、現在のパスワードで本人確認してから変更します。現在のパスワードは保存しません。</p>
+            <div className="settings-form-grid"><SettingsField label="現在のパスワード" type="password" value={currentPassword} onChange={setCurrentPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード" type="password" value={newPassword} onChange={setNewPassword} disabled={Boolean(loading)} /><SettingsField label="新しいパスワード（確認）" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} disabled={Boolean(loading)} /></div>
+            <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal('account-choice')}>戻る</button><button className="button button-secondary" type="button" disabled={Boolean(loading)} onClick={() => setAccountModal(null)}>キャンセル</button><button className="button button-primary" type="button" disabled={Boolean(loading)} onClick={() => void savePassword()}>{loading === 'password' ? '変更中…' : 'パスワードを変更'}</button></div>
           </div>}
           {accountModal === 'password' && !hasPassword && <div className="account-modal-content">
             <p className="account-modal-note">このアカウントにメールアドレスとパスワードでログインする方法を追加します。</p>
@@ -676,14 +853,22 @@ function getMemberError(error: unknown) {
 function getSettingsAuthError(error: unknown) {
   if (!(error instanceof Error) || !error.message) return 'アカウント情報の更新に失敗しました。'
   if (error.message.includes('auth/requires-recent-login')) return '安全のため、いったんログアウトして再ログインしてからお試しください。'
+  if (error.message.includes('auth/wrong-password') || error.message.includes('auth/invalid-credential') || error.message.includes('auth/invalid-login-credentials')) return '現在のパスワードが正しくありません。'
+  if (error.message.includes('auth/operation-not-allowed')) return 'このメールアドレス変更は現在許可されていません。確認メールによる変更を再度お試しください。'
   if (error.message.includes('auth/credential-already-in-use') || error.message.includes('auth/email-already-in-use')) return 'この認証情報は別のアカウントで使用されています。'
   if (error.message.includes('auth/provider-already-linked')) return 'このログイン方法はすでに連携されています。'
   if (error.message.includes('auth/account-exists-with-different-credential')) return 'このGoogleアカウントは別のユーザーに登録されています。'
   if (error.message.includes('auth/popup-blocked')) return 'ポップアップがブロックされました。ブラウザの設定を確認してください。'
   if (error.message.includes('auth/network-request-failed')) return '通信に失敗しました。接続を確認して再度お試しください。'
+  if (error.message.includes('auth/invalid-email')) return 'メールアドレスの形式を確認してください。'
+  if (error.message.includes('auth/too-many-requests')) return '確認メールの送信回数が多すぎます。時間を置いてから再度お試しください。'
   if (error.message.includes('auth/weak-password')) return 'パスワードは8文字以上で設定してください。'
   if (error.message.includes('auth/popup-closed-by-user')) return 'Googleの認証画面が閉じられました。'
   return error.message
+}
+
+function normalizeAccountEmail(email: string | null | undefined) {
+  return email?.trim().toLowerCase() ?? ''
 }
 
 function CsvExportPanel({ exporting, onExport }: { exporting: CsvResource | ''; onExport: (resource: CsvResource) => void }) {
@@ -790,10 +975,7 @@ function ShopSettingsPanel({ settings, editable, onUpdate: saveUpdate }: { setti
 function ShopLogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [error, setError] = useState('')
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-    if (!file) return
+  function readFile(file: File) {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
       setError('PNG・JPEG・WebPの画像を選択してください。')
       return
@@ -817,7 +999,20 @@ function ShopLogoField({ value, onChange }: { value: string; onChange: (value: s
     reader.readAsDataURL(file)
   }
 
-  return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone"><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) readFile(file)
+  }
+
+  function handleDrop(event: ReactDragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    event.currentTarget.classList.remove('is-dragging')
+    const file = event.dataTransfer.files[0]
+    if (file) readFile(file)
+  }
+
+  return <div className="form-field settings-field-wide settings-logo-field"><span>企業ロゴ</span><div className="settings-logo-control">{value ? <div className="settings-logo-preview"><img src={value} alt="登録中の企業ロゴ" /><div className="settings-logo-actions"><label className="button button-secondary settings-logo-button">ロゴを変更<input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label><button className="text-button settings-logo-remove" type="button" onClick={() => { setError(''); onChange('') }}><Trash2 size={14} />削除</button></div></div> : <label className="settings-logo-dropzone" onDragEnter={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging') }} onDragLeave={(event) => event.currentTarget.classList.remove('is-dragging')} onDrop={handleDrop}><Upload size={22} /><strong>企業ロゴを選択</strong><small>PNG・JPEG・WebP / 1MB以下</small><input className="settings-logo-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} /></label>}{error && <small className="settings-logo-error" role="alert">{error}</small>}</div></div>
 }
 
 function TaxSettingsPanel({ settings, editable, onUpdateTax: saveTaxUpdate, onUpdateDocument }: { settings: AppSettings; editable: boolean; onUpdateTax: (field: keyof TaxSettings, value: string | number) => void; onUpdateDocument: (field: keyof DocumentSettings, value: string | number) => void }) {
@@ -833,8 +1028,8 @@ function SettingsPanelHeader({ icon: Icon, title, description }: { icon: typeof 
   return <div className="settings-panel-heading"><span className="settings-panel-icon"><Icon size={22} /></span><div><span className="page-eyebrow">設定項目</span><h2>{title}</h2><p>{description}</p></div></div>
 }
 
-function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; normalization?: NormalizableField }) {
-  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
+function SettingsField({ label, value, onChange, placeholder, required, wide, type = 'text', disabled = false, readOnly = false, normalization }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; wide?: boolean; type?: 'text' | 'email' | 'password'; disabled?: boolean; readOnly?: boolean; normalization?: NormalizableField }) {
+  return <label className={`form-field${wide ? ' settings-field-wide' : ''}`}><span>{label}{required && <em>必須</em>}</span>{normalization ? <NormalizedInput field={normalization} inputMode={normalization === 'phone' ? 'tel' : 'numeric'} type="text" required={required} disabled={disabled} value={value} onChange={onChange} placeholder={placeholder} /> : <input type={type} required={required} disabled={disabled} readOnly={readOnly} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>
 }
 
 function SalesPresetPanel({ groups, onUpdate, onAdd, onRemove }: { groups: SalesItemPresetGroups; onUpdate: (group: SalesItemPresetGroupKey, index: number, value: string) => void; onAdd: (group: SalesItemPresetGroupKey) => void; onRemove: (group: SalesItemPresetGroupKey, index: number) => void }) {

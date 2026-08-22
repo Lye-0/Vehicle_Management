@@ -222,6 +222,43 @@ describe("POST sales documents masterSync", () => {
     expect(patched.document.details.customerEmployer).toBe("販売先株式会社");
   });
 
+  it("販売書類で生年月日・勤務先等を空欄にした値をPATCH後も保持する", async () => {
+    const cid = "sms-cust-empty-birth-employer-001";
+    const vid = "sms-veh-empty-birth-employer-001";
+    await seedCustomer(cid, "販売書類の空欄保持確認");
+    await env.DB.prepare("UPDATE customers SET birth_date = ?, employer = ? WHERE id = ?")
+      .bind("1990/01/23", "旧勤務先株式会社", cid)
+      .run();
+    await seedVehicle(vid, cid, "マツダ", "デミオ");
+
+    const createRes = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
+      type: "請求書",
+      customerId: cid,
+      vehicleId: vid,
+      details: { customerOverride: null, vehicleOverride: null },
+      items: [],
+    }));
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json() as { document: { id: string } };
+
+    const patchRes = await SELF.fetch(patchReq(`https://example.com/api/sales-documents/${created.document.id}`, {
+      customerId: cid,
+      vehicleId: vid,
+      details: {
+        customerBirthDate: "",
+        customerEmployer: "",
+        customerOverride: { name: "販売書類の空欄保持確認", kana: "", phone: "", postalCode: "", address: "", birthDate: "", employer: "" },
+        vehicleOverride: null,
+      },
+    }));
+    expect(patchRes.status).toBe(200);
+    const patched = await patchRes.json() as { document: { customerDetails: { birthDate: string; employer: string }; details: { customerBirthDate: string; customerEmployer: string } } };
+    expect(patched.document.customerDetails.birthDate).toBe("");
+    expect(patched.document.customerDetails.employer).toBe("");
+    expect(patched.document.details.customerBirthDate).toBe("");
+    expect(patched.document.details.customerEmployer).toBe("");
+  });
+
   it("販売書類の生年月日に省略形式を入力してもPATCH後に消さない", async () => {
     const cid = "sms-cust-birth-partial-patch-001";
     const vid = "sms-veh-birth-partial-patch-001";

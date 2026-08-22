@@ -24,12 +24,12 @@ export async function handleDashboardRoutes(request: Request, env: Env): Promise
 
 async function loadDashboard(database: ReturnType<typeof createDatabase>, organizationId: string) {
   const [customerRows, vehicleRows, salesRows, maintenanceRows, paymentRows, scheduleRows, sharedScheduleRows, staffProfileRows] = await Promise.all([
-    database.select().from(customers).where(eq(customers.organizationId, organizationId)).all(),
-    database.select().from(vehicles).where(eq(vehicles.organizationId, organizationId)).all(),
+    database.select().from(customers).where(and(eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).all(),
+    database.select().from(vehicles).where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).all(),
     database.select().from(salesDocuments).where(and(eq(salesDocuments.organizationId, organizationId), isNull(salesDocuments.archivedAt))).orderBy(desc(salesDocuments.updatedAt)).all(),
     database.select().from(maintenanceDocuments).where(and(eq(maintenanceDocuments.organizationId, organizationId), isNull(maintenanceDocuments.archivedAt))).orderBy(desc(maintenanceDocuments.updatedAt)).all(),
     database.select().from(paymentRecords).where(eq(paymentRecords.organizationId, organizationId)).orderBy(desc(paymentRecords.updatedAt)).all(),
-    database.select().from(inspectionSchedules).where(eq(inspectionSchedules.organizationId, organizationId)).orderBy(desc(inspectionSchedules.dueDate)).all(),
+    database.select().from(inspectionSchedules).where(and(eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).orderBy(desc(inspectionSchedules.dueDate)).all(),
     database.select().from(sharedSchedules).where(eq(sharedSchedules.organizationId, organizationId)).orderBy(desc(sharedSchedules.startDate)).all(),
     database.select().from(staffProfiles).all(),
   ])

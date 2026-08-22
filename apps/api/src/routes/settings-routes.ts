@@ -222,7 +222,7 @@ function integerValue(value: unknown, fallback: number, minimum: number, maximum
 
 function listValue(value: unknown, fallback: string[]) {
   if (!Array.isArray(value)) return fallback
-  const list = value.filter((item): item is string => typeof item === 'string').map((item) => item.trim().slice(0, 100)).filter(Boolean)
+  const list = value.filter((item): item is string => typeof item === 'string').map((item) => item.replace(/\s+$/, '').slice(0, 100)).filter(Boolean)
   return Array.from(new Set(list)).slice(0, 100)
 }
 
