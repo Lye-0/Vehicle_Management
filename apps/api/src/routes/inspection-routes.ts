@@ -62,12 +62,13 @@ async function updateSchedule(request: Request, env: Env, database: ReturnType<t
   if (!current) throw new HttpError(404, '点検予定が見つかりません。')
   const body = await readJson(request)
   const input = await parseScheduleInput({ ...body, customerId: body.customerId ?? current.customerId, vehicleId: body.vehicleId ?? current.vehicleId, inspectionType: body.inspectionType ?? current.inspectionType, dueDate: body.dueDate ?? current.dueDate, status: body.status ?? current.status, note: body.note === undefined ? current.note : body.note, notifiedAt: body.notifiedAt === undefined ? current.notifiedAt : body.notifiedAt }, database, organizationId)
-  await database.update(inspectionSchedules).set({ ...input, updatedAt: new Date().toISOString() }).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).run()
+  const result = await database.update(inspectionSchedules).set({ ...input, updatedAt: new Date().toISOString() }).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).run()
+  if (!result.success || result.meta.changes !== 1) throw new HttpError(409, '点検予定が他の端末で更新または削除されています。再読み込みしてください。')
   return jsonResponse({ schedule: await findSchedule(database, id, organizationId) }, 200, env)
 }
 
 async function deleteSchedule(env: Env, database: ReturnType<typeof createDatabase>, id: string, organizationId: string) {
-  const result = await database.delete(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId))).run()
+  const result = await database.delete(inspectionSchedules).where(and(eq(inspectionSchedules.id, id), eq(inspectionSchedules.organizationId, organizationId), isNull(inspectionSchedules.deletionBatchId))).run()
   if (!result.success || result.meta.changes === 0) throw new HttpError(404, '点検予定が見つかりません。')
   return jsonResponse({ deleted: true }, 200, env)
 }

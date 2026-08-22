@@ -361,20 +361,41 @@ async function uploadVehicleFile(request: Request, env: Env, database: ReturnTyp
   return jsonResponse({ file: storedFile ? serializeFile(storedFile) : null }, 201, env)
 }
 
+async function loadActiveVehicleFile(database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string, organizationId: string) {
+  return database.select({
+    id: vehicleFiles.id,
+    objectKey: vehicleFiles.objectKey,
+    fileName: vehicleFiles.fileName,
+    contentType: vehicleFiles.contentType,
+    sizeBytes: vehicleFiles.sizeBytes,
+  }).from(vehicleFiles)
+    .innerJoin(vehicles, eq(vehicles.id, vehicleFiles.vehicleId))
+    .innerJoin(customers, eq(customers.id, vehicles.customerId))
+    .where(and(
+      eq(vehicleFiles.id, fileId),
+      eq(vehicleFiles.vehicleId, vehicleId),
+      eq(vehicleFiles.organizationId, organizationId),
+      eq(vehicles.organizationId, organizationId),
+      eq(customers.organizationId, organizationId),
+      isNull(vehicles.deletedAt),
+      isNull(customers.deletedAt),
+    )).get()
+}
+
 async function deleteVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string, organizationId: string) {
-  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).get()
+  const file = await loadActiveVehicleFile(database, vehicleId, fileId, organizationId)
   if (!file) throw new HttpError(404, '添付ファイルが見つかりません。')
   try {
     await createB2Storage(env).deleteObject(file.objectKey)
   } catch {
     throw new HttpError(503, 'ファイル保存先を利用できません。')
   }
-  await database.delete(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.organizationId, organizationId))).run()
+  await database.delete(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).run()
   return jsonResponse({ deleted: true }, 200, env)
 }
 
 async function downloadVehicleFile(_request: Request, env: Env, database: ReturnType<typeof createDatabase>, vehicleId: string, fileId: string, organizationId: string) {
-  const file = await database.select().from(vehicleFiles).where(and(eq(vehicleFiles.id, fileId), eq(vehicleFiles.vehicleId, vehicleId), eq(vehicleFiles.organizationId, organizationId))).get()
+  const file = await loadActiveVehicleFile(database, vehicleId, fileId, organizationId)
   if (!file) throw new HttpError(404, '添付ファイルが見つかりません。')
   let response: Response
   try {
