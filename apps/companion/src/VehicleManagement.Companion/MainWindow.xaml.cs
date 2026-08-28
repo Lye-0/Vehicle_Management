@@ -11052,7 +11052,8 @@ public partial class MainWindow : Window
 
     private string AcceptLegacyGraphCustomerMerge(
         AbacusLegacyExportCandidateGraphCustomer sourceCustomer,
-        AbacusLegacyExportCandidateGraphCustomer targetCustomer)
+        AbacusLegacyExportCandidateGraphCustomer targetCustomer,
+        bool deferRecommendationRebuild = false)
     {
         // 統合確定はデータ状態の変更であり、アコーディオンの開閉状態は変更しません。
         // 仮グループから論理顧客グループへIDが変わる場合だけ、直前の開閉状態を引き継ぎます。
@@ -11217,8 +11218,12 @@ public partial class MainWindow : Window
             mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
 
         InvalidateLegacyGraphImportConfirmation();
-        RebuildLegacyGraphRecommendationCandidatesForCustomers(
-            mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
+        if (LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterMerge(deferRecommendationRebuild))
+        {
+            RebuildLegacyGraphRecommendationCandidatesForCustomers(
+                mergeGroup.CustomerIds.ToHashSet(StringComparer.Ordinal));
+        }
+
         return mergeGroup.GroupId;
     }
 
@@ -12170,7 +12175,13 @@ public partial class MainWindow : Window
                 var logicalCustomer = groupCustomers[0];
                 foreach (var targetCustomer in groupCustomers.Skip(1))
                 {
-                    appliedMergeKey = AcceptLegacyGraphCustomerMerge(logicalCustomer, targetCustomer);
+                    // 一括確定では各グループごとの候補再計算を遅延し、全グループの
+                    // 所属変更が終わってから一度だけ再計算します。通常の1件処理は
+                    // デフォルト値のまま、従来どおり直後に再計算します。
+                    appliedMergeKey = AcceptLegacyGraphCustomerMerge(
+                        logicalCustomer,
+                        targetCustomer,
+                        deferRecommendationRebuild: true);
                 }
 
                 if (candidateDraftBeforeApply is not null)
@@ -12192,6 +12203,15 @@ public partial class MainWindow : Window
             {
                 await Dispatcher.Yield(DispatcherPriority.Background);
             }
+        }
+
+        if (LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterBulkMergeBatch(groupEntries.Count))
+        {
+            LegacyGraphStatusText.Text =
+                "一括確定した顧客の推薦候補を再計算しています…";
+            LegacyGraphStatusText.Foreground = ToBrush("#52647A");
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            RebuildLegacyGraphRecommendationCandidates();
         }
 
         if (!TryApproveAllLegacyGraphCustomers(

@@ -132,6 +132,22 @@ public static class LegacyGraphCustomerRecommendationMembership
     public static bool ShouldHidePending(bool endpointsInSameMergeGroup) => endpointsInSameMergeGroup;
 }
 
+public static class LegacyGraphRecommendationRebuildPolicy
+{
+    /// <summary>
+    /// 通常の顧客統合では、統合直後に候補を再構築します。
+    /// 一括確定では呼び出し側が全件反映後にまとめて再構築します。
+    /// </summary>
+    public static bool ShouldRebuildAfterMerge(bool deferRecommendationRebuild) =>
+        !deferRecommendationRebuild;
+
+    /// <summary>
+    /// 一括確定で候補再構築が必要なのは、統合候補を実際に反映した場合だけです。
+    /// </summary>
+    public static bool ShouldRebuildAfterBulkMergeBatch(int appliedGroupCount) =>
+        appliedGroupCount > 0;
+}
+
 /// <summary>
 /// Matching UIの顧客統合Recommendationを、方向付きのグループ移動へ渡す前に正規化します。
 /// RecommendationのSubject/Targetは表示上の関係を表すだけで、統合先を表すものではありません。

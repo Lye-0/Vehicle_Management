@@ -37,6 +37,7 @@ var tests = new (string Name, Action Test)[]
     ("顧客確定に伴う一括解決は個別の別人履歴にならない", CustomerApprovalResolutionDoesNotBecomeIndividualHistory),
     ("作業再開の検証失敗は保存済みチェックポイントを変更しない", ResumeValidationFailureDoesNotMutateCheckpoint),
     ("手動移動後の書類所有者は元顧客ではなく現在の顧客を使う", ManualDocumentOwnerUsesCurrentCustomer),
+    ("一括顧客確定は推薦候補再構築を全件反映後にまとめる", BulkCustomerApprovalDefersRecommendationRebuild),
     ("現在の書類車両解決は手動移動先を優先する", CurrentDocumentVehicleResolutionPrefersManualLink),
     ("最終パッケージの書類除外は現在の車両・顧客所属を使う", FinalPackageUsesCurrentDocumentOwnership),
     ("顧客なし車両への手動接続は現在顧客として解決される", ManualVehicleCustomerOwnershipIsCurrent),
@@ -997,6 +998,18 @@ static void ManualVehicleCustomerOwnershipIsCurrent()
                 null,
                 "customer:a") is not null,
         "顧客なし車両への手動接続を、Recommendation適用可能な現在顧客として扱えていません。");
+}
+
+static void BulkCustomerApprovalDefersRecommendationRebuild()
+{
+    Assert(!LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterMerge(
+                deferRecommendationRebuild: true) &&
+           LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterMerge(
+               deferRecommendationRebuild: false),
+        "一括統合と通常統合の推薦候補再構築ポリシーが分離されていません。");
+    Assert(LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterBulkMergeBatch(193) &&
+           !LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterBulkMergeBatch(0),
+        "一括統合後の推薦候補再構築条件が不正です。");
 }
 
 static void CheckpointSaveDefersWhileBusy()
