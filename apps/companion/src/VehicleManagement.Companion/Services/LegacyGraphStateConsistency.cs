@@ -142,9 +142,10 @@ public static class LegacyGraphRecommendationRebuildPolicy
         !deferRecommendationRebuild;
 
     /// <summary>
-    /// 一括確定で候補再構築が必要なのは、統合候補を実際に反映した場合だけです。
+    /// 一括確定で推薦状態のスコープを再確認するのは、統合候補を実際に反映した場合だけです。
+    /// 顧客の所属だけが変わる一括処理では、推薦候補の再生成は行いません。
     /// </summary>
-    public static bool ShouldRebuildAfterBulkMergeBatch(int appliedGroupCount) =>
+    public static bool ShouldReconcileAfterBulkMergeBatch(int appliedGroupCount) =>
         appliedGroupCount > 0;
 }
 

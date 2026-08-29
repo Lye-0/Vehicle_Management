@@ -1007,9 +1007,9 @@ static void BulkCustomerApprovalDefersRecommendationRebuild()
            LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterMerge(
                deferRecommendationRebuild: false),
         "一括統合と通常統合の推薦候補再構築ポリシーが分離されていません。");
-    Assert(LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterBulkMergeBatch(193) &&
-           !LegacyGraphRecommendationRebuildPolicy.ShouldRebuildAfterBulkMergeBatch(0),
-        "一括統合後の推薦候補再構築条件が不正です。");
+    Assert(LegacyGraphRecommendationRebuildPolicy.ShouldReconcileAfterBulkMergeBatch(193) &&
+           !LegacyGraphRecommendationRebuildPolicy.ShouldReconcileAfterBulkMergeBatch(0),
+        "一括統合後の推薦状態スコープの再確認条件が不正です。");
 }
 
 static void CheckpointSaveDefersWhileBusy()
