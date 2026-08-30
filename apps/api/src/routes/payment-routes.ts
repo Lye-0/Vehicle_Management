@@ -4,6 +4,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { decodeBase64Url, encodeBase64Url } from '../lib/base64url'
 import { normalizeCalendarDate } from '../lib/date-utils'
 
 const paymentDocumentTypes = new Set(['販売請求書', '整備請求書'])
@@ -144,14 +145,13 @@ function comparePaymentSummaryRows(left: PaymentSummaryRow, right: PaymentSummar
 type PaymentSummaryRow = { document: InvoiceRow; customerName: string | null; customerPhone: string | null; vehicleMaker: string | null; vehicleName: string | null; plate: string | null; paidAmount: number | null; paymentDate: string | null; method: string | null; note: string | null; paymentId: string | null }
 
 function encodePaymentCursor(value: PaymentCursor) {
-  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  return encodeBase64Url(JSON.stringify(value))
 }
 
 function decodePaymentCursor(value: string | null): PaymentCursor | null {
   if (!value) return null
   try {
-    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
-    const parsed = JSON.parse(atob(padded)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; documentId?: unknown; issuedAt?: unknown }
+    const parsed = JSON.parse(decodeBase64Url(value)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; documentId?: unknown; issuedAt?: unknown }
     if (typeof parsed.sortKey === 'string' && typeof parsed.sortDirection === 'string' && typeof parsed.value === 'string' && typeof parsed.documentId === 'string') return { sortKey: normalizePaymentSortKey(parsed.sortKey), sortDirection: normalizePaymentSortDirection(parsed.sortDirection), value: parsed.value, documentId: parsed.documentId }
     if (typeof parsed.issuedAt === 'string' && typeof parsed.documentId === 'string') return { sortKey: 'issuedAt', sortDirection: 'desc', value: parsed.issuedAt, documentId: parsed.documentId }
     return null

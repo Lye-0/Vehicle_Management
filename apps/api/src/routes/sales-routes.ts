@@ -11,6 +11,7 @@ import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import { parseAbacusDetailEnvelope } from '../lib/abacus-detail-metadata'
+import { decodeBase64Url, encodeBase64Url } from '../lib/base64url'
 import { assertArrayLength, assertD1BatchStatementCount, maximumDocumentItemCount } from '../lib/resource-limits'
 import {
   CUSTOMER_FIELD_TO_DB_COLUMN,
@@ -150,14 +151,13 @@ function salesSortValue(document: typeof salesDocuments.$inferSelect, customerNa
 }
 
 function encodeDocumentCursor(value: DocumentCursor) {
-  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  return encodeBase64Url(JSON.stringify(value))
 }
 
 function decodeDocumentCursor(value: string | null): DocumentCursor | null {
   if (!value) return null
   try {
-    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
-    const parsed = JSON.parse(atob(padded)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; id?: unknown; issuedAt?: unknown; number?: unknown }
+    const parsed = JSON.parse(decodeBase64Url(value)) as { sortKey?: unknown; sortDirection?: unknown; value?: unknown; id?: unknown; issuedAt?: unknown; number?: unknown }
     if (typeof parsed.sortKey === 'string' && typeof parsed.sortDirection === 'string' && typeof parsed.value === 'string' && typeof parsed.id === 'string') {
       const sortKey = normalizeSummarySortKey(parsed.sortKey)
       const sortDirection = normalizeSummarySortDirection(parsed.sortDirection)

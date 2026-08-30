@@ -9,6 +9,7 @@ import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metada
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { normalizeCustomerBirthDateForStorage } from '../lib/master-sync-helpers'
 import { assertAttachmentSignature, assertSupportedAttachmentContentType, attachmentKind, createVehicleFileObjectKey } from '../lib/file-validation'
+import { decodeBase64Url, encodeBase64Url } from '../lib/base64url'
 import { deleteMaster, getMasterDeletionImpact, type MasterDeletionKind } from '../master-deletion'
 import { createB2Storage } from '../storage/b2'
 
@@ -166,14 +167,13 @@ async function listCustomerSummaries(url: URL, env: Env, database: ReturnType<ty
 }
 
 function encodeCustomerCursor(value: { name: string; id: string }) {
-  return btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  return encodeBase64Url(JSON.stringify(value))
 }
 
 function decodeCustomerCursor(value: string | null): { name: string; id: string } | null {
   if (!value) return null
   try {
-    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)
-    const parsed = JSON.parse(atob(padded)) as { name?: unknown; id?: unknown }
+    const parsed = JSON.parse(decodeBase64Url(value)) as { name?: unknown; id?: unknown }
     return typeof parsed.name === 'string' && typeof parsed.id === 'string' ? { name: parsed.name, id: parsed.id } : null
   } catch { return null }
 }
