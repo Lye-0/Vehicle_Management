@@ -7,7 +7,12 @@ import { parseMaintenanceItems as parseMaintenanceImportItems, parseSalesItems a
 
 describe('resource limits', () => {
   it('rejects a D1 batch over the application statement budget', () => {
+    expect(() => assertD1BatchStatementCount(maximumD1BatchStatementCount)).not.toThrow()
     expect(() => assertD1BatchStatementCount(maximumD1BatchStatementCount + 1)).toThrow(HttpError)
+  })
+
+  it('allows the current large graph-final registration statement count', () => {
+    expect(() => assertD1BatchStatementCount(1_665)).not.toThrow()
   })
 
   it('rejects oversized document item arrays before statement creation', () => {
