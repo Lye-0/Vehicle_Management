@@ -65,8 +65,10 @@ type CompletedMaintenanceGroup = { key: string; label: string; documents: Mainte
 
 type MasterSnapshot =
   | { state: 'loading' }
-  | { state: 'ready'; customerId: string; vehicleId: string; customerUpdatedAt: string; vehicleUpdatedAt: string; mileage: number | null }
+  | { state: 'ready'; customerId: string; vehicleId: string | null; customerUpdatedAt: string; vehicleUpdatedAt: string | null; mileage: number | null }
   | { state: 'invalid' }
+
+type DocumentCustomerReference = { id: string; name: string; phone: string; updatedAt: string }
 
 type MaintenanceDraftContext = {
   customerMode: 'existing' | 'new'
@@ -143,12 +145,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   const draftCustomerDuplicateConfirmedRef = useRef(false)
   const documentOpenedMileageRef = useRef<number | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
+  const lastOpenedRelationKeyRef = useRef<string | null>(null)
   const openedMasterSnapshotRef = useRef<MasterSnapshot | null>(null)
   const summaryFilterInitializedRef = useRef(false)
   const initialSortRef = useRef({ sortKey, sortDirection })
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const autosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const restoredDraftDocumentsRef = useRef(new Map<string, MaintenanceDocument>())
+  const documentCustomerReferencesRef = useRef(new Map<string, DocumentCustomerReference>())
   const customerDetailRequestsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
   const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
@@ -264,6 +268,34 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     })
     return () => { active = false }
   }, [documents, initialDocumentId])
+
+  useEffect(() => {
+    const target = selectedPersistedDocument
+    if (!target?.id || !target.customerId) return
+
+    let reference = documentCustomerReferencesRef.current.get(target.id)
+    if (!reference) {
+      reference = { id: target.customerId, name: target.customerName, phone: target.phone, updatedAt: target.updatedAt }
+      documentCustomerReferencesRef.current.set(target.id, reference)
+    }
+
+    const current = customers.find((customer) => customer.id === reference!.id)
+    if (!current) {
+      setCustomers((items) => items.some((customer) => customer.id === reference!.id)
+        ? items
+        : [mapCustomerSummaryToRecord({ id: reference!.id, name: reference!.name, kana: '', phone: reference!.phone, updatedAt: reference!.updatedAt }), ...items])
+    }
+    if (current && !current.isSummary) return
+    if (customerDetailRequestsRef.current.has(reference.id)) return
+    customerDetailRequestsRef.current.add(reference.id)
+    let active = true
+    void fetchCustomerDetail(reference.id).then((detail) => {
+      if (active) setCustomers((items) => upsertCustomer(items, detail))
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : '顧客情報を読み込めませんでした。')
+    }).finally(() => { customerDetailRequestsRef.current.delete(reference!.id) })
+    return () => { active = false }
+  }, [selectedPersistedDocument, customers])
 
   useEffect(() => {
     const target = selectedPersistedDocument
@@ -432,36 +464,48 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     })
   }
 
-  // Reset documentOpenedMileage and openedMasterSnapshot only when selected document ID changes
+  // Reset documentOpenedMileage and openedMasterSnapshot when the selected document
+  // or its customer/vehicle relation changes.
   useEffect(() => {
     if (draftDocument) {
       lastOpenedDocumentIdRef.current = null
+      lastOpenedRelationKeyRef.current = null
       documentOpenedMileageRef.current = null
       openedMasterSnapshotRef.current = null
       return
     }
     const currentDocumentId = selectedPersistedDocument?.id ?? null
-    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
-    lastOpenedDocumentIdRef.current = currentDocumentId
     if (!selectedPersistedDocument) {
+      lastOpenedDocumentIdRef.current = null
+      lastOpenedRelationKeyRef.current = null
       documentOpenedMileageRef.current = null
       openedMasterSnapshotRef.current = null
       return
     }
-    const overrideMileage = parseMileageString(selectedPersistedDocument.details.vehicleOverride?.mileage)
-    documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedPersistedDocument.mileage)
+
+    const relationKey = `${currentDocumentId}:${selectedPersistedDocument.customerId}:${selectedPersistedDocument.vehicleId ?? ''}`
+    const relationChanged = relationKey !== lastOpenedRelationKeyRef.current
+    if (!relationChanged && openedMasterSnapshotRef.current && openedMasterSnapshotRef.current.state !== 'loading') return
+    lastOpenedDocumentIdRef.current = currentDocumentId
+    lastOpenedRelationKeyRef.current = relationKey
+    if (relationChanged) {
+      const overrideMileage = parseMileageString(selectedPersistedDocument.details.vehicleOverride?.mileage)
+      documentOpenedMileageRef.current = overrideMileage ?? parseMileageString(selectedPersistedDocument.mileage)
+    }
 
     // Initialize openedMasterSnapshot when document, customer, and vehicle are all available
     const foundCustomer = customers.find((c) => c.id === selectedPersistedDocument.customerId)
-    const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
-    if (foundCustomer && foundVehicle) {
+    const foundVehicle = selectedPersistedDocument.vehicleId
+      ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
+      : undefined
+    if (foundCustomer && (!selectedPersistedDocument.vehicleId || foundVehicle)) {
       openedMasterSnapshotRef.current = {
         state: 'ready',
         customerId: foundCustomer.id,
-        vehicleId: foundVehicle.id,
+        vehicleId: foundVehicle?.id ?? null,
         customerUpdatedAt: foundCustomer.updatedAt,
-        vehicleUpdatedAt: foundVehicle.updatedAt,
-        mileage: parseMileageString(foundVehicle.mileage),
+        vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+        mileage: foundVehicle ? parseMileageString(foundVehicle.mileage) : null,
       }
     } else {
       openedMasterSnapshotRef.current = { state: 'loading' }
@@ -510,6 +554,12 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   function updateHeader(field: 'number' | 'type' | 'status' | 'category' | 'customerId' | 'vehicleId' | 'intakeDate' | 'plannedReleaseDate' | 'issuedAt' | 'dueDate' | 'note', value: string) {
     if (!selectedDocument) return
     if (draftDocument && (field === 'customerId' || field === 'vehicleId')) return
+    if (!draftDocument && (field === 'customerId' || field === 'vehicleId')) {
+      // 顧客・車両を切り替えた直後は、旧マスタの更新日時を新しい対象へ
+      // 誤適用しないよう、次の描画で新しい関係のスナップショットを作り直す。
+      lastOpenedRelationKeyRef.current = null
+      openedMasterSnapshotRef.current = { state: 'loading' }
+    }
     if (draftDocument) {
       replaceActiveDocument((document) => ({ ...document, [field]: value }))
     } else {
@@ -529,6 +579,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     }
     setDirty(true)
     setSavedDocumentId('')
+    setError('')
   }
 
   async function archiveSelectedDocument() {
@@ -569,18 +620,18 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
 
       // Re-fetch customers to get latest updatedAt and mileage
       try {
-        const foundCustomer = await fetchCustomerDetail(selectedPersistedDocument.customerId)
+        const foundCustomer = await fetchCustomerDetail(documentToSave.customerId)
         setCustomers((current) => upsertCustomer(current, foundCustomer))
         // Update openedMasterSnapshot with latest values
-        const foundVehicle = foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId)
-        if (foundCustomer && foundVehicle) {
+        const foundVehicle = documentToSave.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === documentToSave.vehicleId) : undefined
+        if (foundCustomer && (!documentToSave.vehicleId || foundVehicle)) {
           openedMasterSnapshotRef.current = {
             state: 'ready',
             customerId: foundCustomer.id,
-            vehicleId: foundVehicle.id,
+            vehicleId: foundVehicle?.id ?? null,
             customerUpdatedAt: foundCustomer.updatedAt,
-            vehicleUpdatedAt: foundVehicle.updatedAt,
-            mileage: parseMileageString(foundVehicle.mileage),
+            vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
+            mileage: foundVehicle ? parseMileageString(foundVehicle.mileage) : null,
           }
         } else {
           openedMasterSnapshotRef.current = { state: 'loading' }
@@ -617,7 +668,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       vehicleOverride: document.details.vehicleOverride ?? undefined,
       issuedAt: document.issuedAt.replaceAll('/', '-'),
       openedCustomerUpdatedAt: snapshot?.state === 'ready' ? snapshot.customerUpdatedAt : undefined,
-      openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt : undefined,
+      openedVehicleUpdatedAt: snapshot?.state === 'ready' ? snapshot.vehicleUpdatedAt ?? undefined : undefined,
       mileageContext: { openedMileage: documentOpenedMileageRef.current },
     })
   }

@@ -297,6 +297,67 @@ describe("sync-previewの車両なし整備書類", () => {
   });
 });
 
+describe("既存書類の顧客・車両変更", () => {
+  it("顧客変更後も同期プレビューと保存を許可", async () => {
+    const originalCustomerId = "ms-cust-relation-original";
+    const nextCustomerId = "ms-cust-relation-next";
+    const documentId = "ms-doc-relation-customer";
+    await seedCustomer(originalCustomerId, "元の顧客");
+    await seedCustomer(nextCustomerId, "変更後の顧客");
+    await seedVehiclelessMaintenanceDoc(documentId, "M-MS-RELATION-CUSTOMER", originalCustomerId, "2026-08-01", JSON.stringify({
+      abacusImport: {
+        documentKey: "整備書類|seibi.csv|relation|1",
+        sourceLocation: "seibi.csv relation",
+        vehicleless: true,
+      },
+    }));
+
+    const preview = await SELF.fetch(postReq("https://example.com/api/sync-preview", {
+      documentType: "maintenance",
+      documentId,
+      customerId: nextCustomerId,
+      issuedAt: "2026-08-01",
+      customerOverride: { name: "変更後の顧客" },
+    }));
+    expect(preview.status).toBe(200);
+    await expect(preview.json()).resolves.toMatchObject({ resolvedCustomerId: nextCustomerId });
+
+    const saved = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${documentId}`, {
+      customerId: nextCustomerId,
+      vehicleId: null,
+      details: { customerOverride: null, vehicleOverride: null },
+    }));
+    expect(saved.status).toBe(200);
+
+    const row = await env.DB.prepare("SELECT customer_id, vehicle_id FROM maintenance_documents WHERE id = ?")
+      .bind(documentId)
+      .first<{ customer_id: string; vehicle_id: string | null }>();
+    expect(row).toEqual({ customer_id: nextCustomerId, vehicle_id: null });
+  });
+
+  it("顧客変更時に別顧客の車両を指定すると拒否", async () => {
+    const originalCustomerId = "ms-cust-relation-vehicle-original";
+    const nextCustomerId = "ms-cust-relation-vehicle-next";
+    const originalVehicleId = "ms-veh-relation-vehicle-original";
+    const nextVehicleId = "ms-veh-relation-vehicle-next";
+    const documentId = "ms-doc-relation-vehicle";
+    await seedCustomer(originalCustomerId, "車両変更元顧客");
+    await seedCustomer(nextCustomerId, "車両変更先顧客");
+    await seedVehicle(originalVehicleId, originalCustomerId, "トヨタ", "元車両");
+    await seedVehicle(nextVehicleId, nextCustomerId, "ホンダ", "先車両");
+    await seedDoc(documentId, "M-MS-RELATION-VEHICLE", originalCustomerId, originalVehicleId, "2026-08-01");
+
+    const response = await SELF.fetch(postReq("https://example.com/api/sync-preview", {
+      documentType: "maintenance",
+      documentId,
+      customerId: originalCustomerId,
+      vehicleId: nextVehicleId,
+      issuedAt: "2026-08-01",
+    }));
+    expect(response.status).toBe(400);
+  });
+});
+
 describe("車両なしABACUS整備書類の更新", () => {
   it("車両なしと移行メタデータを保持したまま出庫予定日を更新", async () => {
     const cid = "ms-cust-vehicleless-abacus-patch";

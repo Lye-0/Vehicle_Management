@@ -747,6 +747,11 @@ async function parseMaintenanceInput(
   const customerId = overrideCustomerId || stringValue(body, 'customerId')
   if (!customerId && !newCustomer) throw new HttpError(400, '顧客を選択してください。')
 
+  if (customerId && !newCustomer) {
+    const customer = await database.select({ id: customers.id }).from(customers).where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt))).get()
+    if (!customer) throw new HttpError(400, '顧客を選択してください。')
+  }
+
   const vehicleId = overrideVehicleId !== undefined ? overrideVehicleId : nullableString(body, 'vehicleId')
 
   // 既存車両の所有関係検証（新規車両の場合はスキップ）

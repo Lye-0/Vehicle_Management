@@ -1,4 +1,4 @@
-import { and, desc, eq, ne } from 'drizzle-orm'
+import { and, desc, eq, isNull, ne } from 'drizzle-orm'
 import {
   customers,
   maintenanceDocuments,
@@ -160,16 +160,9 @@ async function computeSyncPreview(
       && !newVehicle
       && !newCustomer
 
-    // customerId/vehicleIdの整合性
-    const effectiveCustomerId = customerId ?? doc.customerId
-    const effectiveVehicleId = vehicleId ?? doc.vehicleId
-    if (effectiveCustomerId && doc.customerId !== effectiveCustomerId) {
-      // 既存仕様: 顧客の付け替えは許可されていないはず
-      throw new HttpError(400, '指定されたcustomerIdが書類の顧客と一致しません。')
-    }
-    if (effectiveVehicleId && doc.vehicleId !== effectiveVehicleId) {
-      throw new HttpError(400, '指定されたvehicleIdが書類の車両と一致しません。')
-    }
+    // 既存書類の顧客・車両変更は画面上で許可しているため、旧レコードとの
+    // ID一致は要求しない。指定先の組織・削除状態・顧客と車両の所有関係は、
+    // 下の顧客・車両解決処理で検証する。
   }
 
   // 2. 排他的入力検証
@@ -193,7 +186,7 @@ async function computeSyncPreview(
     const customer = await database
       .select()
       .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId)))
+      .where(and(eq(customers.id, customerId), eq(customers.organizationId, organizationId), isNull(customers.deletedAt)))
       .get()
     if (!customer) throw new HttpError(404, '顧客が見つかりません。')
     resolvedCustomerId = customer.id
@@ -204,7 +197,7 @@ async function computeSyncPreview(
     const vehicle = await database
       .select()
       .from(vehicles)
-      .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId)))
+      .where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .get()
     if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
     // 所有関係検証

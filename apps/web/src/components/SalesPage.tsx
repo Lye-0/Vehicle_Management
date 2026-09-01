@@ -71,6 +71,8 @@ type SalesMasterSnapshot =
   | { state: 'ready'; customerId: string; customerUpdatedAt: string; vehicleId: string | null; vehicleUpdatedAt: string | null }
   | { state: 'invalid' }
 
+type DocumentCustomerReference = { id: string; name: string; phone: string; updatedAt: string }
+
 type SalesDraftContext = {
   customerMode: 'existing' | 'new'
   vehicleMode: 'existing' | 'new'
@@ -164,11 +166,13 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const draftCustomerDuplicateConfirmedRef = useRef(false)
   const openedMasterSnapshotRef = useRef<SalesMasterSnapshot | null>(null)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
+  const lastOpenedRelationKeyRef = useRef<string | null>(null)
   const summaryFilterInitializedRef = useRef(false)
   const initialSortRef = useRef({ sortKey, sortDirection })
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const autosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const restoredDraftDocumentIdsRef = useRef(new Set<string>())
+  const documentCustomerReferencesRef = useRef(new Map<string, DocumentCustomerReference>())
   const customerDetailRequestsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
   const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
@@ -285,6 +289,34 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     })
     return () => { active = false }
   }, [documents, initialDocumentId])
+
+  useEffect(() => {
+    const target = selectedPersistedDocument
+    if (!target?.id || !target.customerId) return
+
+    let reference = documentCustomerReferencesRef.current.get(target.id)
+    if (!reference) {
+      reference = { id: target.customerId, name: target.customerName, phone: target.phone, updatedAt: target.updatedAt }
+      documentCustomerReferencesRef.current.set(target.id, reference)
+    }
+
+    const current = customers.find((customer) => customer.id === reference!.id)
+    if (!current) {
+      setCustomers((items) => items.some((customer) => customer.id === reference!.id)
+        ? items
+        : [mapCustomerSummaryToRecord({ id: reference!.id, name: reference!.name, kana: '', phone: reference!.phone, updatedAt: reference!.updatedAt }), ...items])
+    }
+    if (current && !current.isSummary) return
+    if (customerDetailRequestsRef.current.has(reference.id)) return
+    customerDetailRequestsRef.current.add(reference.id)
+    let active = true
+    void fetchCustomerDetail(reference.id).then((detail) => {
+      if (active) setCustomers((items) => upsertCustomer(items, detail))
+    }).catch((reason: unknown) => {
+      if (active) setSyncError(reason instanceof Error ? reason.message : '顧客情報を読み込めませんでした。')
+    }).finally(() => { customerDetailRequestsRef.current.delete(reference!.id) })
+    return () => { active = false }
+  }, [selectedPersistedDocument, customers])
 
   useEffect(() => {
     const target = selectedPersistedDocument
@@ -448,20 +480,29 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     })
   }
 
-  // Initialize openedMasterSnapshot when document changes
+  // Initialize openedMasterSnapshot when the selected document or its
+  // customer/vehicle relation changes.
   useEffect(() => {
     if (draftDocument) {
       lastOpenedDocumentIdRef.current = null
+      lastOpenedRelationKeyRef.current = null
       openedMasterSnapshotRef.current = null
       return
     }
     const currentDocumentId = selectedPersistedDocument?.id ?? null
-    if (currentDocumentId === lastOpenedDocumentIdRef.current) return
-    lastOpenedDocumentIdRef.current = currentDocumentId
     if (!selectedPersistedDocument) {
+      lastOpenedDocumentIdRef.current = null
+      lastOpenedRelationKeyRef.current = null
       openedMasterSnapshotRef.current = null
       return
     }
+
+    const relationKey = `${currentDocumentId}:${selectedPersistedDocument.customerId}:${selectedPersistedDocument.vehicleId ?? ''}`
+    const relationChanged = relationKey !== lastOpenedRelationKeyRef.current
+    if (!relationChanged && openedMasterSnapshotRef.current && openedMasterSnapshotRef.current.state !== 'loading') return
+    lastOpenedDocumentIdRef.current = currentDocumentId
+    lastOpenedRelationKeyRef.current = relationKey
+
     const foundCustomer = customers.find((c) => c.id === selectedPersistedDocument.customerId)
     const foundVehicle = selectedPersistedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId) : null
     if (foundCustomer) {
@@ -550,6 +591,12 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   function updateHeader(field: SalesHeaderField, value: string) {
     if (!selectedDocument || field === 'number') return
     if (draftDocument && (field === 'customerId' || field === 'vehicleId')) return
+    if (!draftDocument && (field === 'customerId' || field === 'vehicleId')) {
+      // 顧客・車両を切り替えた直後に、旧マスタの更新日時を新しい対象へ
+      // 誤適用しないよう、次の描画でスナップショットを作り直す。
+      lastOpenedRelationKeyRef.current = null
+      openedMasterSnapshotRef.current = { state: 'loading' }
+    }
     const nextCustomer = customers.find((customer) => customer.id === (field === 'customerId' ? value : selectedDocument.customerId))
     const nextVehicleId = field === 'customerId' ? nextCustomer?.vehicles[0]?.id ?? null : field === 'vehicleId' ? value || null : selectedDocument.vehicleId
     const nextVehicle = nextCustomer?.vehicles.find((vehicle) => vehicle.id === nextVehicleId)
@@ -606,6 +653,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     }
     setDirty(true)
     setSaved(false)
+    setSyncError('')
   }
 
   async function archiveSelectedDocument() {
@@ -669,15 +717,15 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
 
       // Re-fetch customers to get latest updatedAt
       try {
-        const foundCustomer = await fetchCustomerDetail(selectedPersistedDocument.customerId)
+        const foundCustomer = await fetchCustomerDetail(documentToSave.customerId)
         setCustomers((current) => upsertCustomer(current, foundCustomer))
-        const foundVehicle = selectedPersistedDocument.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === selectedPersistedDocument.vehicleId) : null
+        const foundVehicle = documentToSave.vehicleId ? foundCustomer?.vehicles.find((v) => v.id === documentToSave.vehicleId) : null
         if (foundCustomer) {
           openedMasterSnapshotRef.current = {
             state: 'ready',
             customerId: foundCustomer.id,
             customerUpdatedAt: foundCustomer.updatedAt,
-            vehicleId: selectedPersistedDocument.vehicleId,
+            vehicleId: documentToSave.vehicleId,
             vehicleUpdatedAt: foundVehicle?.updatedAt ?? null,
           }
         } else {
