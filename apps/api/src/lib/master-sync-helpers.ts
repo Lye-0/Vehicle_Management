@@ -503,7 +503,7 @@ export type CombinationValidation = {
   vehicleId?: string
   newVehicle?: NewVehicleInput
   documentType: 'sales' | 'maintenance'
-  /** 既存の車両なし販売書類を編集するための後方互換用。新規保存では指定しない。 */
+  /** 既存の車両なし販売書類・ABACUS移行整備書類を編集するための後方互換用。新規保存では指定しない。 */
   allowVehicleless?: boolean
 }
 
