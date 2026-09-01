@@ -16,6 +16,7 @@ afterAll(async () => {
   await env.DB.prepare('DELETE FROM sales_document_items WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM maintenance_items WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM sales_documents WHERE organization_id = ?').bind(testOrganizationId).run()
+  await env.DB.prepare('DELETE FROM mileage_histories WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM maintenance_documents WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM vehicle_files WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM vehicles WHERE organization_id = ?').bind(testOrganizationId).run()
@@ -195,6 +196,45 @@ describe('ABACUS registration', () => {
     ])
   })
 
+  it('registers migrated maintenance recorded mileage for a linked vehicle', async () => {
+    const detailJson = JSON.stringify({
+      version: 1,
+      kind: 'abacus-detail-lines',
+      sourceFile: 'abx-cs-sb.ucs',
+      recordIdHex: 'MILEAGE-1',
+      documentNumber: '9004',
+      customerName: '整備走行距離登録テスト顧客',
+      vehicleName: 'テスト車',
+      registrationNumber: '',
+      chassisNumber: '',
+      lines: [{ description: '作業', quantity: 1, unit: null, unitPrice: 2000, partAmount: 2000, technicalFees: null, summary: null, sourceRowIndex: 1 }],
+      financialLines: [],
+      partsSubtotal: 2000,
+      technicalSubtotal: null,
+      abacusSubtotal: 2000,
+      abacusTotal: null,
+      abacusTax: null,
+      abacusTaxRate: null,
+      detailAmount: 2000,
+      excludedDetailCount: 0,
+      amountOnlyRowCount: 0,
+      matchStatus: 'matched',
+      warning: '',
+      recordedMileage: 71235,
+    })
+    const packageFiles = await createGraphFinalPackage('gate19-maintenance-mileage', '', detailJson, { maintenanceVehicle: true })
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(response.status).toBe(200)
+
+    const mileage = await env.DB.prepare('SELECT vehicle_id AS vehicleId, mileage FROM mileage_histories WHERE maintenance_document_id = ? AND organization_id = ?').bind(packageFiles.maintenanceId, testOrganizationId).first<{ vehicleId: string; mileage: number }>()
+    expect(mileage).toEqual({ vehicleId: packageFiles.vehicleId, mileage: 71235 })
+
+    const historyResponse = await SELF.fetch(new Request(`https://example.com/api/vehicles/${encodeURIComponent(packageFiles.vehicleId!)}/history`, { headers: authHeaders() }))
+    expect(historyResponse.status).toBe(200)
+    const historyBody = await historyResponse.json() as { maintenance: Array<{ id: string; recordedMileage: number | null }> }
+    expect(historyBody.maintenance.find((document) => document.id === packageFiles.maintenanceId)?.recordedMileage).toBe(71235)
+  })
+
   it('registers Gate19 maintenance technical fees and planned release date', async () => {
     const detailJson = JSON.stringify({
       version: 1,
@@ -228,6 +268,61 @@ describe('ABACUS registration', () => {
     expect(document).toEqual({ intakeDate: '2019-10-09', plannedReleaseDate: '2019-10-11', issuedAt: '2019-10-09', subtotal: 15800, tax: 1580, total: 17380 })
     const items = await env.DB.prepare('SELECT description, quantity, unit, unit_price AS unitPrice, technical_fee AS technicalFee, amount FROM maintenance_items WHERE document_id = ? AND organization_id = ? ORDER BY sort_order').bind(packageFiles.maintenanceId, testOrganizationId).all<{ description: string; quantity: number; unit: string; unitPrice: number; technicalFee: number; amount: number }>()
     expect(items.results).toEqual([{ description: 'エンジンS/W 交換', quantity: 1, unit: '式', unitPrice: 13800, technicalFee: 2000, amount: 15800 }])
+  })
+
+  it('registers Gate19 maintenance financial lines as fees and adjustment', async () => {
+    const detailJson = JSON.stringify({
+      version: 1,
+      kind: 'abacus-detail-lines',
+      sourceFile: 'abx-cs-sb.ucs',
+      recordIdHex: 'C10401',
+      documentNumber: '9004',
+      customerName: '整備費用内訳登録テスト顧客',
+      vehicleName: '',
+      registrationNumber: '',
+      chassisNumber: '',
+      lines: [{ description: '作業', quantity: 1, unit: null, unitPrice: 1000, partAmount: 1000, technicalFees: null, summary: null, sourceRowIndex: 1 }],
+      financialLines: [
+        { description: '自賠責', itemType: '法定費用', taxCategory: '非課税', amount: 25800, sourceRowIndex: 91 },
+        { description: '重量税', itemType: '法定費用', taxCategory: '非課税', amount: 6600, sourceRowIndex: 92 },
+        { description: '印紙代', itemType: '法定費用', taxCategory: '非課税', amount: 1400, sourceRowIndex: 93 },
+        { description: 'リサイクル料金', itemType: '法定費用', taxCategory: '非課税', amount: 12300, sourceRowIndex: 94 },
+        { description: '端数値引', itemType: '調整', taxCategory: '対象外', amount: -500, sourceRowIndex: 95 },
+      ],
+      partsSubtotal: 1000,
+      technicalSubtotal: null,
+      abacusSubtotal: 1000,
+      abacusTotal: null,
+      abacusTax: null,
+      abacusTaxRate: null,
+      detailAmount: 1000,
+      excludedDetailCount: 17,
+      amountOnlyRowCount: 0,
+      matchStatus: 'matched',
+      warning: '',
+    })
+    const packageFiles = await createGraphFinalPackage('gate19-maintenance-financial', '', detailJson)
+    const response = await postGraphFinalRegistration(packageFiles, 'ABACUS登録を実行')
+    expect(response.status).toBe(200)
+
+    const items = await env.DB.prepare('SELECT item_type AS itemType, description, amount FROM maintenance_items WHERE document_id = ? AND organization_id = ? ORDER BY sort_order').bind(packageFiles.maintenanceId, testOrganizationId).all<{ itemType: string; description: string; amount: number }>()
+    expect(items.results).toEqual([
+      { itemType: '作業', description: '作業', amount: 1000 },
+      { itemType: '法定費用', description: '自賠責', amount: 25800 },
+      { itemType: '法定費用', description: '重量税', amount: 6600 },
+      { itemType: '法定費用', description: '印紙代', amount: 1400 },
+      { itemType: '法定費用', description: 'リサイクル料金', amount: 12300 },
+      { itemType: '調整', description: '端数値引', amount: -500 },
+    ])
+
+    const documentResponse = await SELF.fetch(new Request(`https://example.com/api/maintenance-documents/${encodeURIComponent(packageFiles.maintenanceId)}`, { headers: authHeaders() }))
+    expect(documentResponse.status).toBe(200)
+    const documentBody = await documentResponse.json() as { document: { fees: Record<string, number>; adjustment: number; items: unknown[] } }
+    expect(documentBody.document).toMatchObject({
+      fees: { 自賠責: 25800, 重量税: 6600, 印紙代: 1400, リサイクル料金: 12300 },
+      adjustment: -500,
+    })
+    expect(documentBody.document.items).toHaveLength(1)
   })
 
   it('restores Gate24 document types, point-inspection category, and date-based status', async () => {
@@ -347,12 +442,13 @@ async function postRegistration(packageFiles: Awaited<ReturnType<typeof createPa
   return SELF.fetch(new Request(probe.url, { method: 'POST', headers, body }))
 }
 
-async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '', maintenanceDetailJson = '') {
+async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '', maintenanceDetailJson = '', options: { maintenanceVehicle?: boolean } = {}) {
   const customer = suffix === 'finaltest' ? 'merge-preview:same-name:最終登録テスト' : `merge-preview:same-name:最終登録テスト-${suffix}`
   const customerName = '最終登録テスト顧客'
   const salesId = suffix === 'finaltest' ? 'abacus-sales-finaltest' : `abacus-sales-${suffix}`
   const maintenanceId = suffix === 'finaltest' ? 'abacus-maintenance-finaltest' : `abacus-maintenance-${suffix}`
   const duplicateMaintenanceId = suffix === 'finaltest' ? 'abacus-maintenance-finaltest-2' : `abacus-maintenance-${suffix}-2`
+  const maintenanceVehicleId = options.maintenanceVehicle ? `abacus-vehicle-${suffix}` : null
   const technicalMaintenance = maintenanceDetailJson.includes('"documentNumber":"9006"')
   const maintenanceNumber = maintenanceDetailJson ? (technicalMaintenance ? '9006' : '9004') : '9002'
   const duplicateMaintenanceNumber = maintenanceDetailJson ? (technicalMaintenance ? '9007' : '9005') : '9002'
@@ -362,15 +458,18 @@ async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '
   const maintenanceSubtotal = technicalMaintenance ? '15800' : '61905'
   const maintenanceTax = technicalMaintenance ? '1580' : '3095'
   const maintenanceTotal = technicalMaintenance ? '17380' : '65000'
-  const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', [customer, 'ABACUS-CUSTOMER-NUMBER-', customerName, '', '', '', '', '', '', '0'].join(',')].join('\n')
-  const vehiclesCsv = '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考'
+  const customersCsv = ['顧客ID,顧客番号,顧客名,ふりがな,電話番号,メールアドレス,郵便番号,住所,メモ,車両台数', [customer, 'ABACUS-CUSTOMER-NUMBER-', customerName, '', '', '', '', '', '', maintenanceVehicleId ? '1' : '0'].join(',')].join('\n')
+  const vehiclesCsv = [
+    '車両ID,顧客ID,顧客名,メーカー,車名,型式,登録番号,車台番号,年式,車検満了日,走行距離,車体色,排気量,ミッション,記録簿,備考',
+    ...(maintenanceVehicleId ? [[maintenanceVehicleId, customer, customerName, 'テストメーカー', 'テスト車', '', '', '', '', '', '80000', '', '', '', '', ''].join(',')] : []),
+  ].join('\n')
   const salesNumber = salesDetailJson ? '9003' : '9001'
   const salesCsv = ['書類ID,書類番号,書類種別,ステータス,顧客名,車名,登録番号,発行日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [salesId, salesNumber, '請求書', '下書き', customerName, '', '', '2026-01-02', '', '10', salesDetailJson ? '1184390' : '1000', salesDetailJson ? '58303' : '0', salesDetailJson ? '1242693' : '1000', '移行販売', 'ABACUSテスト', csvCell(salesDetailJson)].join(',')].join('\n')
-  const maintenanceCsv = ['書類ID,書類番号,書類種別,入庫区分,ステータス,顧客名,車名,登録番号,入庫日,出庫予定日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [maintenanceId, maintenanceNumber, '整備請求書', '一般整備', '下書き', customerName, '', '', maintenanceDetailJson ? maintenanceIntakeDate : '', maintenanceDetailJson ? maintenanceCompletionDate : '', '', maintenanceDetailJson ? maintenanceTaxRate : '10', maintenanceDetailJson ? maintenanceSubtotal : '2000', maintenanceDetailJson ? maintenanceTax : '0', maintenanceDetailJson ? maintenanceTotal : '2000', '移行整備', 'ABACUSテスト', csvCell(maintenanceDetailJson)].join(','), [duplicateMaintenanceId, duplicateMaintenanceNumber, '整備請求書', '一般整備', '下書き', customerName, '', '', '', '', '', '10', '', '0', '', '移行整備2', 'ABACUSテスト', ''].join(',')].join('\n')
+  const maintenanceCsv = ['書類ID,書類番号,書類種別,入庫区分,ステータス,顧客名,車名,登録番号,入庫日,出庫予定日,支払期限,税率,小計,消費税,合計,明細,備考,明細詳細', [maintenanceId, maintenanceNumber, '整備請求書', '一般整備', '下書き', customerName, maintenanceVehicleId ? 'テスト車' : '', '', maintenanceDetailJson ? maintenanceIntakeDate : '', maintenanceDetailJson ? maintenanceCompletionDate : '', '', maintenanceDetailJson ? maintenanceTaxRate : '10', maintenanceDetailJson ? maintenanceSubtotal : '2000', maintenanceDetailJson ? maintenanceTax : '0', maintenanceDetailJson ? maintenanceTotal : '2000', '移行整備', 'ABACUSテスト', csvCell(maintenanceDetailJson)].join(','), [duplicateMaintenanceId, duplicateMaintenanceNumber, '整備請求書', '一般整備', '下書き', customerName, maintenanceVehicleId ? 'テスト車' : '', '', '', '', '', '10', '', '0', '', '移行整備2', 'ABACUSテスト', ''].join(',')].join('\n')
   const linksJson = JSON.stringify({ version: 1, kind: 'abacus-export-import-document-links', status: 'finalization-preview', documents: [
     { documentKey: `販売書類|final|${salesNumber}`, documentId: salesId, documentKind: '販売書類', documentNumber: salesNumber, customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'hanbai.csv #1', warning: '' },
-    { documentKey: `整備書類|final|${maintenanceNumber}`, documentId: maintenanceId, documentKind: '整備書類', documentNumber: maintenanceNumber, customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'seibi.csv #1', warning: '' },
-    { documentKey: `整備書類|final|${duplicateMaintenanceNumber}|2`, documentId: duplicateMaintenanceId, documentKind: '整備書類', documentNumber: duplicateMaintenanceNumber, customerId: customer, customerName, vehicleId: null, vehicleName: null, vehicleless: true, sourceLocation: 'seibi.csv #2', warning: '' },
+    { documentKey: `整備書類|final|${maintenanceNumber}`, documentId: maintenanceId, documentKind: '整備書類', documentNumber: maintenanceNumber, customerId: customer, customerName, vehicleId: maintenanceVehicleId, vehicleName: maintenanceVehicleId ? 'テスト車' : null, vehicleless: !maintenanceVehicleId, sourceLocation: 'seibi.csv #1', warning: '' },
+    { documentKey: `整備書類|final|${duplicateMaintenanceNumber}|2`, documentId: duplicateMaintenanceId, documentKind: '整備書類', documentNumber: duplicateMaintenanceNumber, customerId: customer, customerName, vehicleId: maintenanceVehicleId, vehicleName: maintenanceVehicleId ? 'テスト車' : null, vehicleless: !maintenanceVehicleId, sourceLocation: 'seibi.csv #2', warning: '' },
   ], excludedDocumentKeys: [] })
   const files = [
     ['customers.csv', customersCsv],
@@ -380,12 +479,12 @@ async function createGraphFinalPackage(suffix = 'finaltest', salesDetailJson = '
     ['document-links.json', linksJson],
   ] as const
   const dataFiles = await Promise.all(files.map(async ([fileName, content]) => ({ fileName, sizeBytes: byteLength(content), sha256: await sha256(content) })))
-  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: 0, salesRowCount: 1, maintenanceRowCount: 2, vehiclelessDocumentCount: 3, excludedDocumentCount: 0, imageCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
+  const manifest = JSON.stringify({ version: 1, kind: 'abacus-export-import-final-package', status: 'registration-preview', summary: { customerRowCount: 1, vehicleRowCount: maintenanceVehicleId ? 1 : 0, salesRowCount: 1, maintenanceRowCount: 2, vehiclelessDocumentCount: maintenanceVehicleId ? 1 : 3, excludedDocumentCount: 0, imageCount: 0 }, dataFiles, warnings: [], groups: [{ groupKey: 'same-name:test', origin: 'same-name', approved: true, sourceCustomerIds: ['source-test'], customerId: customer, customerName }], documents: [
     { documentKey: `販売書類|final|${salesNumber}`, documentId: salesId, kind: '販売書類', customerId: customer, vehicleId: null, sourceLocation: 'hanbai.csv #1', vehicleless: true },
-    { documentKey: `整備書類|final|${maintenanceNumber}`, documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #1', vehicleless: true },
-    { documentKey: `整備書類|final|${duplicateMaintenanceNumber}|2`, documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: null, sourceLocation: 'seibi.csv #2', vehicleless: true },
+    { documentKey: `整備書類|final|${maintenanceNumber}`, documentId: maintenanceId, kind: '整備書類', customerId: customer, vehicleId: maintenanceVehicleId, sourceLocation: 'seibi.csv #1', vehicleless: !maintenanceVehicleId },
+    { documentKey: `整備書類|final|${duplicateMaintenanceNumber}|2`, documentId: duplicateMaintenanceId, kind: '整備書類', customerId: customer, vehicleId: maintenanceVehicleId, sourceLocation: 'seibi.csv #2', vehicleless: !maintenanceVehicleId },
   ], excludedDocumentKeys: [] })
-  return { manifest, manifestSha256: await sha256(manifest), files, customerId: customer, salesId, maintenanceId, duplicateMaintenanceId }
+  return { manifest, manifestSha256: await sha256(manifest), files, customerId: customer, vehicleId: maintenanceVehicleId, salesId, maintenanceId, duplicateMaintenanceId }
 }
 
 async function createGate24Package() {

@@ -27,6 +27,7 @@ const maximumCustomerBatchRows = 8 // 11変数/行
 const maximumVehicleBatchRows = 5 // 17変数/行
 const maximumSalesDocumentBatchRows = 5 // 17変数/行
 const maximumMaintenanceDocumentRows = 4 // 21変数/行
+const maximumMileageHistoryBatchRows = 12 // 7変数/行
 const maximumSalesItemBatchRows = 6 // 13変数/行
 const maximumMaintenanceItemBatchRows = 7 // 12変数/行
 
@@ -172,6 +173,7 @@ type AbacusDetailPayload = {
   rawDocumentType: string | null
   rawMaintenanceCategory: string | null
   classificationWarning: string | null
+  recordedMileage: number | null
 }
 
 type AbacusDetailReport = {
@@ -765,6 +767,8 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
   const rawDocumentType = nullableJsonText(record.rawDocumentType, 100)
   const rawMaintenanceCategory = nullableJsonText(record.rawMaintenanceCategory, 200)
   const classificationWarning = nullableJsonText(record.classificationWarning, 500)
+  const recordedMileage = nullableJsonInteger(record.recordedMileage)
+  if (recordedMileage !== null && (recordedMileage < 0 || !Number.isSafeInteger(recordedMileage))) throw new HttpError(400, 'ABACUS明細詳細JSONの走行距離が不正です。')
   return {
     version: 1,
     kind: 'abacus-detail-lines',
@@ -791,6 +795,7 @@ function parseAbacusDetailPayload(value: string): AbacusDetailPayload | null {
     rawDocumentType,
     rawMaintenanceCategory,
     classificationWarning,
+    recordedMileage,
   }
 }
 
@@ -1110,6 +1115,17 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
     const values = chunk.flatMap(({ link, row }) => [row.id, organizationId, row.number, row.type, row.category, row.status, link.customerId, link.vehicleId, row.intakeDate, row.plannedReleaseDate, null, row.issuedAt, row.dueDate, row.taxRate, '切り捨て', row.subtotal, row.tax, row.total, row.note, JSON.stringify(buildAbacusDetailsEnvelope(link, row)), now])
     statements.push(database.$client.prepare(`INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, intake_date, planned_release_date, completion_date, issued_at, due_date, tax_rate, tax_rounding, subtotal, tax, total, note, details_json, updated_at) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
   }
+  const mileageHistoryRows = maintenanceRows.flatMap((item) => {
+    const mileage = item.row.detailPayload?.recordedMileage
+    return item.link.vehicleId && mileage !== null && mileage !== undefined
+      ? [{ link: item.link, row: item.row, mileage }]
+      : []
+  })
+  for (const chunk of chunked(mileageHistoryRows, maximumMileageHistoryBatchRows)) {
+    const placeholders = chunk.map(() => '(?,?,?,?,?,?,?)').join(',')
+    const values = chunk.flatMap(({ link, row, mileage }) => [crypto.randomUUID(), organizationId, link.vehicleId, row.id, mileage, now, now])
+    statements.push(database.$client.prepare(`INSERT INTO mileage_histories (id, organization_id, vehicle_id, maintenance_document_id, mileage, created_at, updated_at) VALUES ${placeholders} ON CONFLICT (organization_id, maintenance_document_id) DO UPDATE SET mileage = excluded.mileage, vehicle_id = excluded.vehicle_id, updated_at = excluded.updated_at`).bind(...values))
+  }
   const items = await Promise.all(rows.flatMap(({ kind, link, row }) => detailLinesForRow(kind, row).map((line) => ({ kind, link, row, line }))).map(async (item) => ({ ...item, id: await stableFileId(`${organizationId}\u0000${item.row.id}\u0000detail\u0000${item.line.line.sourceRowIndex}`) })))
   for (const chunk of chunked(items, Math.min(maximumSalesItemBatchRows, maximumMaintenanceItemBatchRows))) {
     const salesItems = chunk.filter((item) => item.kind === 'sales')
@@ -1121,7 +1137,7 @@ async function createFinalDocumentStatements(database: ReturnType<typeof createD
     const maintenanceItemsForChunk = chunk.filter((item) => item.kind === 'maintenance')
     if (maintenanceItemsForChunk.length > 0) {
       const placeholders = maintenanceItemsForChunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?)').join(',')
-      const values = maintenanceItemsForChunk.flatMap((item) => { const row = item.row as FinalMaintenanceRow; const normalized = maintenanceDetailValues(item.line.line); return [item.id, organizationId, row.id, normalized.kind, normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, normalized.technicalFee, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
+      const values = maintenanceItemsForChunk.flatMap((item) => { const row = item.row as FinalMaintenanceRow; const normalized = maintenanceDetailValues(item.line.line); return [item.id, organizationId, row.id, item.line.itemType, normalized.description, normalized.quantity, normalized.unit, normalized.unitPrice, normalized.technicalFee, normalized.summary, normalized.amount, normalized.sourceRowIndex] })
       statements.push(database.$client.prepare(`INSERT INTO maintenance_items (id, organization_id, document_id, item_type, description, quantity, unit, unit_price, technical_fee, summary, amount, sort_order) VALUES ${placeholders} ON CONFLICT(id) DO NOTHING`).bind(...values))
     }
   }
@@ -1170,24 +1186,23 @@ function detailLinesForRow(kind: 'sales' | 'maintenance', row: FinalSalesRow | F
       itemType: kind === 'sales' ? '付属品・特別仕様' : '作業',
       taxCategory: '課税',
     }))
-    if (kind === 'sales') {
-      const financialLines = row.detailPayload.financialLines.map((financialLine) => ({
-        line: {
-          description: financialLine.description,
-          quantity: 1,
-          unit: '式',
-          unitPrice: financialLine.amount,
-          partAmount: financialLine.amount,
-          technicalFees: null,
-          summary: null,
-          sourceRowIndex: financialLine.sourceRowIndex,
-        },
-        itemType: financialLine.itemType,
-        taxCategory: financialLine.taxCategory,
-      }))
-      return [...detailLines, ...financialLines]
-    }
-    return detailLines
+    // 販売だけでなく整備書類も、明細表とは別の法定費用・調整額を
+    // financialLines として保持しているため、同じ形式で登録します。
+    const financialLines = row.detailPayload.financialLines.map((financialLine) => ({
+      line: {
+        description: financialLine.description,
+        quantity: 1,
+        unit: '式',
+        unitPrice: financialLine.amount,
+        partAmount: financialLine.amount,
+        technicalFees: null,
+        summary: null,
+        sourceRowIndex: financialLine.sourceRowIndex,
+      },
+      itemType: financialLine.itemType,
+      taxCategory: financialLine.taxCategory,
+    }))
+    return [...detailLines, ...financialLines]
   }
   return [{
     line: {
@@ -1229,7 +1244,6 @@ function maintenanceDetailValues(line: AbacusDetailLine) {
   const technicalFee = line.technicalFees ?? 0
   const amount = line.partAmount ?? Math.round(quantity * unitPrice)
   return {
-    kind: '作業',
     description: line.description ?? '',
     quantity,
     unit: line.unit ?? '式',

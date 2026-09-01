@@ -30,7 +30,8 @@ public sealed record AbacusDetailJsonDocument(
     string? RawDocumentType = null,
     string? RawMaintenanceCategory = null,
     string? ClassificationWarning = null,
-    AbacusRecommendationProfile? MatchProfile = null);
+    AbacusRecommendationProfile? MatchProfile = null,
+    long? RecordedMileage = null);
 
 public sealed record AbacusDetailMatch(
     AbacusUcsDetailDocument? Document,
@@ -64,7 +65,8 @@ public sealed class AbacusDetailMapper
         string? rawDocumentType = null,
         string? rawMaintenanceCategory = null,
         string? classificationWarning = null,
-        AbacusRecommendationProfile? matchProfile = null)
+        AbacusRecommendationProfile? matchProfile = null,
+        long? recordedMileage = null)
     {
         var document = match.Document;
         var payload = new AbacusDetailJsonDocument(
@@ -93,7 +95,8 @@ public sealed class AbacusDetailMapper
             string.IsNullOrWhiteSpace(rawDocumentType) ? null : rawDocumentType.Trim(),
             string.IsNullOrWhiteSpace(rawMaintenanceCategory) ? null : rawMaintenanceCategory.Trim(),
             string.IsNullOrWhiteSpace(classificationWarning) ? null : classificationWarning.Trim(),
-            matchProfile);
+            matchProfile,
+            recordedMileage);
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false });
     }
 

@@ -18,7 +18,7 @@ public sealed record AbacusDetailLine(
 }
 
 /// <summary>
-/// 販売書類の車両本体価格・諸費用など、ABACUSの明細表とは別の金額欄です。
+/// ABACUSの明細表とは別の金額欄です。
 /// 元の行明細と区別して保持し、登録時にWebの対応する内訳へ変換します。
 /// </summary>
 public sealed record AbacusDetailFinancialLine(
@@ -50,7 +50,9 @@ public sealed record AbacusUcsDetailDocument(
     public long DetailAmount =>
         Lines.Sum(line => line.PartAmount ?? 0) +
         Lines.Sum(line => line.TechnicalFees ?? 0) +
-        (FinancialLines?.Sum(line => line.Amount) ?? 0);
+        (string.Equals(Kind, "販売書類", StringComparison.Ordinal)
+            ? FinancialLines?.Sum(line => line.Amount) ?? 0
+            : 0);
 }
 
 public sealed record AbacusUcsDetailReadResult(
@@ -145,7 +147,7 @@ public sealed class AbacusFp5DetailReader
                 if (line.HasValue && (line.Quantity is not null || line.Unit is not null || line.UnitPrice is not null || line.PartAmount is not null || line.TechnicalFees is not null || line.Summary is not null)) lines.Add(line);
             }
 
-            var financialLines = isSales ? CreateSalesFinancialLines(fields, lines) : [];
+            var financialLines = isSales ? CreateSalesFinancialLines(fields, lines) : MapMaintenanceFinancialLines(fields);
             (long? Subtotal, long? Tax, long? Total)? salesAmounts = isSales ? ReadSalesAmounts(fields, financialLines) : null;
 
             var documentNumber = FirstNonEmpty(fields, 0x1F, 0x8055, 0x81A2) ?? ExtractTrailingNumber(FirstNonEmpty(fields, 0x8162));
@@ -202,6 +204,26 @@ public sealed class AbacusFp5DetailReader
         return result;
     }
 
+    /// <summary>
+    /// 整備書類の明細表とは別に保存されている法定費用・調整額を復元します。
+    /// 0x8163は新しいデータのリサイクル料金、0x810Cは旧データのその他費用欄です。
+    /// 0x80CE/0x80E4のような合計欄は個別費用との二重計上になるため使用しません。
+    /// </summary>
+    public static IReadOnlyList<AbacusDetailFinancialLine> MapMaintenanceFinancialLines(
+        IReadOnlyDictionary<int, string> fields)
+    {
+        var result = new List<AbacusDetailFinancialLine>();
+        AddFinancialLine(result, fields, 0x76, "自賠責", "法定費用", "非課税", 91);
+        AddFinancialLine(result, fields, 0x75, "重量税", "法定費用", "非課税", 92);
+        AddFinancialLine(result, fields, 0x80CD, "印紙代", "法定費用", "非課税", 93);
+
+        // 旧形式では同じ表示枠が0x810C（諸費用金額④）に保存されています。
+        var otherFee = NullableLong(fields, 0x8163) ?? NullableLong(fields, 0x810C);
+        AddFinancialLine(result, otherFee, "リサイクル料金", "法定費用", "非課税", 94);
+        AddFinancialLine(result, fields, 0x80D0, "端数値引", "調整", "対象外", 95);
+        return result;
+    }
+
     private static void AddFinancialLine(
         ICollection<AbacusDetailFinancialLine> result,
         IReadOnlyDictionary<int, string> fields,
@@ -211,7 +233,17 @@ public sealed class AbacusFp5DetailReader
         string taxCategory,
         int sourceRowIndex)
     {
-        var value = NullableLong(fields, reference);
+        AddFinancialLine(result, NullableLong(fields, reference), description, itemType, taxCategory, sourceRowIndex);
+    }
+
+    private static void AddFinancialLine(
+        ICollection<AbacusDetailFinancialLine> result,
+        long? value,
+        string description,
+        string itemType,
+        string taxCategory,
+        int sourceRowIndex)
+    {
         if (value is null || value.Value == 0) return;
         result.Add(new AbacusDetailFinancialLine(description, itemType, taxCategory, value.Value, sourceRowIndex));
     }

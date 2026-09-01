@@ -1,5 +1,7 @@
 using VehicleManagement.AbacusImport;
 using VehicleManagement.Companion.Services;
+using Microsoft.VisualBasic.FileIO;
+using System.Text;
 using System.Text.Json;
 
 var tests = new (string Name, Action Test)[]
@@ -8,6 +10,9 @@ var tests = new (string Name, Action Test)[]
     ("顧客名の軽微な誤字は顧客おすすめになる", FuzzyCustomerNameMatch),
     ("同姓同名は承認可能候補にならない", SameNameConflict),
     ("顧客同士の一部一致は統合おすすめになる", CustomerIntegrationRecommendation),
+    ("整備UCSの法定費用内訳を抽出する", MaintenanceFinancialLinesAreMapped),
+    ("整備UCSの法定費用を明細合計へ二重計上しない", MaintenanceDetailAmountExcludesFinancialLines),
+    ("整備CSVの走行距離を明細詳細JSONへ保持する", MaintenanceMileageIsCopiedToDetailJson),
     ("識別子競合は承認可能候補にならない", IdentifierConflict),
     ("顧客なし車両は顧客おすすめになる", UnconnectedVehicleMatch),
     ("入力順を変えても候補順と根拠が変わらない", DeterministicOutput),
@@ -216,6 +221,119 @@ static void DeterministicOutput()
     Assert(first.Select(candidate => candidate.Reason)
             .SequenceEqual(second.Select(candidate => candidate.Reason), StringComparer.Ordinal),
         "候補根拠が入力順の影響を受けています。");
+}
+
+static void MaintenanceFinancialLinesAreMapped()
+{
+    var fields = new Dictionary<int, string>
+    {
+        [0x76] = "25800",
+        [0x75] = "6600",
+        [0x80CD] = "1400",
+        [0x8163] = "12300",
+        [0x810C] = "10800",
+        [0x80D0] = "-500",
+    };
+
+    var lines = AbacusFp5DetailReader.MapMaintenanceFinancialLines(fields);
+    var actual = lines.Select(line => (line.Description, line.ItemType, line.TaxCategory, line.Amount, line.SourceRowIndex)).ToArray();
+    var expected = new[]
+    {
+        ("自賠責", "法定費用", "非課税", 25800L, 91),
+        ("重量税", "法定費用", "非課税", 6600L, 92),
+        ("印紙代", "法定費用", "非課税", 1400L, 93),
+        ("リサイクル料金", "法定費用", "非課税", 12300L, 94),
+        ("端数値引", "調整", "対象外", -500L, 95),
+    };
+    Assert(actual.SequenceEqual(expected), "整備UCSの法定費用内訳または項目種別が正しく抽出されていません。");
+
+    var legacyLines = AbacusFp5DetailReader.MapMaintenanceFinancialLines(
+        new Dictionary<int, string> { [0x810C] = "10800" });
+    Assert(legacyLines.Single().Description == "リサイクル料金" && legacyLines.Single().Amount == 10800,
+        "旧形式の諸費用金額④を法定費用内訳へ復元できていません。");
+}
+
+static void MaintenanceDetailAmountExcludesFinancialLines()
+{
+    var document = new AbacusUcsDetailDocument(
+        "整備書類",
+        "abx-cs-sb.ucs",
+        "C10121",
+        "9004",
+        "整備明細登録テスト顧客",
+        "",
+        "",
+        "",
+        [new AbacusDetailLine("作業", 1, "式", 100, 100, 20, null, 1)],
+        100,
+        20,
+        120,
+        null,
+        0,
+        [new AbacusDetailFinancialLine("重量税", "法定費用", "非課税", 6600, 91)]);
+
+    Assert(document.DetailAmount == 120,
+        "整備書類の法定費用が作業明細合計へ二重計上されています。");
+
+    using var serialized = JsonDocument.Parse(AbacusDetailMapper.Serialize(
+        new AbacusDetailMatch(document, "matched", "")));
+    Assert(serialized.RootElement.GetProperty("financialLines").GetArrayLength() == 1 &&
+           serialized.RootElement.GetProperty("detailAmount").GetInt64() == 120,
+           "整備書類の法定費用内訳または作業明細合計が詳細JSONへ引き継がれていません。");
+}
+
+static void MaintenanceMileageIsCopiedToDetailJson()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-maintenance-mileage-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    try
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var maintenanceFields = new string[29];
+        maintenanceFields[0] = "2026/08/01";
+        maintenanceFields[1] = "MILEAGE-1";
+        maintenanceFields[2] = "整備請求書";
+        maintenanceFields[4] = "走行距離テスト";
+        maintenanceFields[21] = "71235";
+        maintenanceFields[24] = "一般整備";
+        maintenanceFields[25] = "2026/08/01";
+        maintenanceFields[27] = "2000";
+        var shiftJis = Encoding.GetEncoding(932);
+        File.WriteAllText(Path.Combine(sourceRoot, "hanbai.csv"), string.Empty, shiftJis);
+        File.WriteAllText(Path.Combine(sourceRoot, "syaryou.csv"), string.Empty, shiftJis);
+        File.WriteAllText(Path.Combine(sourceRoot, "seibi.csv"), string.Join(",", maintenanceFields), shiftJis);
+
+        var result = new AbacusLegacyExportPreviewStore()
+            .CreateAsync(sourceRoot, destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        using var parser = new TextFieldParser(
+            Path.Combine(result.PackagePath, "maintenance.csv"),
+            Encoding.UTF8,
+            detectEncoding: true)
+        {
+            TextFieldType = FieldType.Delimited,
+            HasFieldsEnclosedInQuotes = true,
+            TrimWhiteSpace = false,
+        };
+        parser.SetDelimiters(",");
+        _ = parser.ReadFields();
+        var row = parser.ReadFields();
+        Assert(row is not null && row.Length == 18, "走行距離テスト用の整備CSVが出力されていません。");
+        using var details = JsonDocument.Parse(row![17]);
+        Assert(details.RootElement.GetProperty("recordedMileage").GetInt64() == 71235,
+            "整備CSV21列目の走行距離が明細詳細JSONへ保持されていません。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 static void MissingInformationIsStructured()

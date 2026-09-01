@@ -336,7 +336,8 @@ public sealed class AbacusLegacyExportPreviewStore
                         match.Vehicle,
                         document.VehicleName,
                         Text(source, 19),
-                        Text(source, 20))),
+                        Text(source, 20)),
+                    recordedMileage: ParseOptionalMileage(Text(source, 21))),
             };
             CountDetailMatch(detailMatch, ref detailMappedDocumentCount, ref detailReviewDocumentCount, ref detailUnsupportedDocumentCount, ref detailExcludedRowCount, ref amountOnlyDetailRowCount);
             var intakeDate = NormalizeCalendarDate(Text(source, 25));
@@ -1000,6 +1001,14 @@ public sealed class AbacusLegacyExportPreviewStore
         return long.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number <= int.MaxValue
             ? number.ToString(CultureInfo.InvariantCulture)
             : "";
+    }
+
+    private static long? ParseOptionalMileage(string value)
+    {
+        var normalized = NormalizeNonNegativeInteger(value);
+        return long.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out var mileage)
+            ? mileage
+            : null;
     }
 
     private static string NormalizeModelYear(string value)

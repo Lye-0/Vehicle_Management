@@ -637,13 +637,22 @@ function extractMileageFromDetailsJson(detailsJson: string | null): number | nul
     const parsed = JSON.parse(detailsJson)
     if (!parsed || typeof parsed !== 'object') return null
     const vehicleOverride = parsed.vehicleOverride
-    if (!vehicleOverride || typeof vehicleOverride !== 'object') return null
-    const mileage = vehicleOverride.mileage
-    if (typeof mileage !== 'string') return null
-    const digits = mileage.replace(/[^0-9]/g, '')
-    if (!digits) return null
-    const parsed2 = Number(digits)
-    return Number.isFinite(parsed2) ? parsed2 : null
+    if (vehicleOverride && typeof vehicleOverride === 'object') {
+      const mileage = vehicleOverride.mileage
+      if (typeof mileage === 'string') {
+        const digits = mileage.replace(/[^0-9]/g, '')
+        if (digits) {
+          const parsed2 = Number(digits)
+          if (Number.isFinite(parsed2)) return parsed2
+        }
+      }
+    }
+    const abacusDetails = parsed.abacusDetails
+    if (!abacusDetails || typeof abacusDetails !== 'object') return null
+    const recordedMileage = abacusDetails.recordedMileage
+    return typeof recordedMileage === 'number' && Number.isSafeInteger(recordedMileage) && recordedMileage >= 0
+      ? recordedMileage
+      : null
   } catch {
     return null
   }
