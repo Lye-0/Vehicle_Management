@@ -355,7 +355,11 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
     }
   }
 
-  if (masterSync && !newVehicle) {
+  if (masterSync && !newVehicle && masterSync.vehicleFields.length > 0 && !input.vehicleId) {
+    throw new HttpError(400, '車両なし書類では車両情報を同期できません。')
+  }
+
+  if (masterSync && !newVehicle && input.vehicleId) {
     currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
@@ -515,7 +519,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     category: body.category ?? current.category,
     number: body.number === undefined ? current.number : body.number,
     customerId: body.customerId ?? current.customerId,
-    vehicleId: body.vehicleId ?? current.vehicleId,
+    vehicleId: requestedVehicleId,
     intakeDate: body.intakeDate === undefined ? current.intakeDate : body.intakeDate,
     plannedReleaseDate: body.plannedReleaseDate === undefined ? current.plannedReleaseDate ?? current.completionDate : body.plannedReleaseDate,
     completionDate: body.completionDate === undefined ? current.completionDate : body.completionDate,
@@ -529,6 +533,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
   }, database, organizationId)
+  const detailsForStorage = preserveAbacusMetadata(parseDetailsJson(current.detailsJson), input.details)
 
   // mileageSync検証
   if (mileageSync) {
@@ -576,6 +581,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   if (masterSync && masterSync.vehicleFields.length > 0) {
+    if (!input.vehicleId) throw new HttpError(400, '車両なし書類では車両情報を同期できません。')
     currentVehicleForSync = await database.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get() ?? null
     actualVehicleDiffFields = computeActualVehicleDiffFields(currentVehicleForSync, input.details.vehicleOverride ?? null)
     for (const f of masterSync.vehicleFields) {
@@ -646,7 +652,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     number, input.type, input.category, input.status, input.customerId, input.vehicleId,
     input.intakeDate, input.plannedReleaseDate, input.completionDate, input.issuedAt, input.dueDate,
     input.taxRate, input.rounding, totals.subtotal, totals.tax, totals.total,
-    input.note, JSON.stringify(input.details), now, documentId, organizationId
+    input.note, JSON.stringify(detailsForStorage), now, documentId, organizationId
   ))
 
   // 明細DELETE + INSERT
@@ -727,7 +733,7 @@ async function parseMaintenanceInput(
   database: ReturnType<typeof createDatabase>,
   organizationId: string,
   overrideCustomerId?: string,
-  overrideVehicleId?: string,
+  overrideVehicleId?: string | null,
   newCustomer?: NewCustomerInput,
   _newVehicle?: NewVehicleInput,
 ): Promise<MaintenanceInput> {
@@ -741,7 +747,7 @@ async function parseMaintenanceInput(
   const customerId = overrideCustomerId || stringValue(body, 'customerId')
   if (!customerId && !newCustomer) throw new HttpError(400, '顧客を選択してください。')
 
-  const vehicleId = overrideVehicleId || stringValue(body, 'vehicleId')
+  const vehicleId = overrideVehicleId !== undefined ? overrideVehicleId : nullableString(body, 'vehicleId')
 
   // 既存車両の所有関係検証（新規車両の場合はスキップ）
   if (vehicleId && customerId && !newCustomer) {
@@ -760,7 +766,7 @@ async function parseMaintenanceInput(
     status,
     category,
     customerId: customerId || '',
-    vehicleId: vehicleId || '',
+    vehicleId,
     intakeDate: nullableDate(body.intakeDate),
     plannedReleaseDate: nullableDate(body.plannedReleaseDate),
     completionDate: nullableDate(body.completionDate),
@@ -1055,6 +1061,16 @@ function parseDetailsJson(value: string | null) {
   }
 }
 
+const abacusMetadataKeys = ['abacusImport', 'abacusDetails', 'abacusDetailReport', 'abacusAmounts'] as const
+
+function preserveAbacusMetadata(currentDetails: Record<string, unknown>, details: MaintenanceDetails) {
+  const preservedDetails: Record<string, unknown> = { ...details }
+  for (const key of abacusMetadataKeys) {
+    if (hasOwnRecordField(currentDetails, key)) preservedDetails[key] = currentDetails[key]
+  }
+  return preservedDetails
+}
+
 function parseMaintenanceDetails(value: unknown): MaintenanceDetails {
   const source = recordValue(value)
   const customerOverride = recordValue(source.customerOverride)
@@ -1131,4 +1147,4 @@ type MaintenanceDetails = {
   vehicleOverride: Record<string, string | boolean> | null
   labels: Record<string, string>
 }
-type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; details: MaintenanceDetails; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }
+type MaintenanceInput = { number: string | null; type: string; status: string; category: string; customerId: string; vehicleId: string | null; intakeDate: string | null; plannedReleaseDate: string | null; completionDate: string | null; issuedAt: string; dueDate: string | null; taxRate: number; rounding: '切り捨て' | '四捨五入'; note: string | null; details: MaintenanceDetails; items: MaintenanceItemInput[]; fees: Record<FeeName, number>; adjustment: number }

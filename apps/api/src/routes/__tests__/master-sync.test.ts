@@ -297,6 +297,42 @@ describe("sync-previewの車両なし整備書類", () => {
   });
 });
 
+describe("車両なしABACUS整備書類の更新", () => {
+  it("車両なしと移行メタデータを保持したまま出庫予定日を更新", async () => {
+    const cid = "ms-cust-vehicleless-abacus-patch";
+    const did = "ms-doc-vehicleless-abacus-patch";
+    const metadata = {
+      abacusImport: {
+        documentKey: "整備書類|seibi.csv|2|1",
+        sourceLocation: "seibi.csv #2",
+        vehicleless: true,
+      },
+      abacusDetails: {
+        kind: "abacus-detail-lines",
+        version: 1,
+        matchStatus: "matched",
+        lines: [],
+      },
+      abacusAmounts: { subtotal: 12000, tax: 1200, total: 13200 },
+    };
+    await seedCustomer(cid, "ABACUS車両なし更新顧客");
+    await seedVehiclelessMaintenanceDoc(did, "M-MS-VEHICLELESS-ABACUS-PATCH", cid, "2026-08-01", JSON.stringify(metadata));
+
+    const res = await SELF.fetch(patchReq(`https://example.com/api/maintenance-documents/${did}`, {
+      plannedReleaseDate: "2026-08-09",
+      details: { staffName: "更新後担当者", customerOverride: null, vehicleOverride: null },
+    }));
+
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare("SELECT vehicle_id, planned_release_date, details_json FROM maintenance_documents WHERE id = ?")
+      .bind(did)
+      .first<{ vehicle_id: string | null; planned_release_date: string | null; details_json: string }>();
+    expect(row?.vehicle_id).toBeNull();
+    expect(row?.planned_release_date).toBe("2026-08-09");
+    expect(JSON.parse(row!.details_json)).toMatchObject({ ...metadata, staffName: "更新後担当者" });
+  });
+});
+
 describe("POST masterSync", () => {
   it("整備書類の新規顧客で生年月日・勤務先を保存", async () => {
     const res = await SELF.fetch(postReq("https://example.com/api/maintenance-documents", {
