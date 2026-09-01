@@ -76,6 +76,12 @@ async function seedDoc(id: string, number: string, customerId: string, vehicleId
   ).bind(id, TEST_ORG, number, "整備見積書", "一般整備", "下書き", customerId, vehicleId, issuedAt).run();
 }
 
+async function seedVehiclelessMaintenanceDoc(id: string, number: string, customerId: string, issuedAt: string, detailsJson: string) {
+  await env.DB.prepare(
+    "INSERT INTO maintenance_documents (id, organization_id, number, type, category, status, customer_id, vehicle_id, issued_at, details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, TEST_ORG, number, "整備見積書", "一般整備", "下書き", customerId, null, issuedAt, detailsJson).run();
+}
+
 async function getCustomerUpdatedAt(id: string): Promise<string> {
   const row = await env.DB.prepare("SELECT updated_at FROM customers WHERE id = ?").bind(id).first<{ updated_at: string }>();
   return row!.updated_at;
@@ -246,6 +252,48 @@ describe("PATCH masterSync", () => {
 
     const phone = await env.DB.prepare("SELECT phone FROM customers WHERE id = ?").bind(cid).first<{ phone: string | null }>();
     expect(phone?.phone).toBe("090-9999-9999");
+  });
+});
+
+describe("sync-previewの車両なし整備書類", () => {
+  it("ABACUS移行の車両なし書類を既存編集として許可", async () => {
+    const cid = "ms-cust-vehicleless-abacus";
+    const did = "ms-doc-vehicleless-abacus";
+    await seedCustomer(cid, "ABACUS車両なし顧客");
+    await seedVehiclelessMaintenanceDoc(did, "M-MS-VEHICLELESS-ABACUS", cid, "2026-08-01", JSON.stringify({
+      abacusImport: {
+        documentKey: "整備書類|seibi.csv|1|1",
+        sourceLocation: "seibi.csv #1",
+        vehicleless: true,
+      },
+    }));
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sync-preview", {
+      documentType: "maintenance",
+      documentId: did,
+      customerId: cid,
+      issuedAt: "2026-08-01",
+      customerOverride: { name: "ABACUS車両なし顧客" },
+    }));
+
+    expect(res.status).toBe(200);
+  });
+
+  it("通常の車両なし整備書類は引き続き拒否", async () => {
+    const cid = "ms-cust-vehicleless-normal";
+    const did = "ms-doc-vehicleless-normal";
+    await seedCustomer(cid, "通常車両なし顧客");
+    await seedVehiclelessMaintenanceDoc(did, "M-MS-VEHICLELESS-NORMAL", cid, "2026-08-01", "{}");
+
+    const res = await SELF.fetch(postReq("https://example.com/api/sync-preview", {
+      documentType: "maintenance",
+      documentId: did,
+      customerId: cid,
+      issuedAt: "2026-08-01",
+      customerOverride: { name: "通常車両なし顧客" },
+    }));
+
+    expect(res.status).toBe(400);
   });
 });
 

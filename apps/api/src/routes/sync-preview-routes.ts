@@ -9,6 +9,7 @@ import { UnauthorizedError } from '../auth/firebase'
 import { requireOrganizationContext } from '../auth/organization'
 import { createDatabase } from '../db/client'
 import { HttpError, jsonResponse, readJson } from '../http'
+import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
 import {
   CUSTOMER_FIELD_LABELS,
   CUSTOMER_SYNC_ALLOWLIST,
@@ -138,16 +139,22 @@ async function computeSyncPreview(
   if (documentId) {
     const docTable = documentType === 'sales' ? salesDocuments : maintenanceDocuments
     const doc = await database
-      .select({ id: docTable.id, customerId: docTable.customerId, vehicleId: docTable.vehicleId })
+      .select({ id: docTable.id, customerId: docTable.customerId, vehicleId: docTable.vehicleId, detailsJson: docTable.detailsJson })
       .from(docTable)
       .where(and(eq(docTable.id, documentId), eq(docTable.organizationId, organizationId)))
       .get()
     if (!doc) throw new HttpError(404, '書類が見つかりません。')
 
-    // 過去の販売書類には車両なしのレコードが残っている可能性があるため、
+    // 過去の販売書類と、ABACUS移行で作成された車両なし整備書類は、
     // 既存レコードの通常編集に限ってsync-previewの車両必須検証を緩和する。
-    // 新規POST（documentIdなし）では必ず車両を要求する。
-    allowVehicleless = documentType === 'sales'
+    // 新規POST（documentIdなし）や通常の車両なし整備書類では車両を要求する。
+    const isAbacusVehiclelessMaintenance = documentType === 'maintenance'
+      && doc.vehicleId === null
+      && parseAbacusDocumentImportMetadata(doc.detailsJson)?.vehicleless === true
+    allowVehicleless = (
+      documentType === 'sales'
+      || isAbacusVehiclelessMaintenance
+    )
       && doc.vehicleId === null
       && !vehicleId
       && !newVehicle

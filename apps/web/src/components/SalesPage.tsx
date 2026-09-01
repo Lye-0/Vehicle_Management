@@ -169,6 +169,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const autosaveFlushRef = useRef<() => Promise<boolean>>(async () => true)
   const autosaveCancelLocalDraftRef = useRef<(key?: string) => Promise<void>>(async () => undefined)
   const restoredDraftDocumentIdsRef = useRef(new Set<string>())
+  const customerDetailRequestsRef = useRef(new Set<string>())
   const discardedNewDraftRef = useRef(false)
   const { pendingRestore, acknowledgeRestore, currentRunId, getAutoResumeDraft, refreshDrafts, registerActiveDraft } = useDraftRecovery()
 
@@ -267,7 +268,8 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   const selectedPersistedDocument = draftDocument || resumableNewDraft
     ? null
     : filteredDocuments.find((document) => document.id === selectedDocumentId) ?? (initialDocumentId ? null : incompleteDocuments[0] ?? filteredDocuments[0] ?? null)
-  const selectedDocument: SalesDocumentLike | null = draftDocument ?? selectedPersistedDocument
+  // 要約書類の詳細取得中は編集対象にしない。入力後に遅れて到着した詳細で編集内容を上書きしないため。
+  const selectedDocument: SalesDocumentLike | null = draftDocument ?? (selectedPersistedDocument?.isSummary ? null : selectedPersistedDocument)
   const selectedTotals = selectedDocument ? calculateSalesEstimateTotals(selectedDocument) : null
 
   useEffect(() => {
@@ -301,13 +303,15 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     const customerId = selectedPersistedDocument?.customerId
     if (!customerId) return
     const current = customers.find((customer) => customer.id === customerId)
-    if (!current?.isSummary) return
+    if (current && !current.isSummary) return
+    if (customerDetailRequestsRef.current.has(customerId)) return
+    customerDetailRequestsRef.current.add(customerId)
     let active = true
     void fetchCustomerDetail(customerId).then((detail) => {
-      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
+      setCustomers((items) => upsertCustomer(items, detail))
     }).catch((reason: unknown) => {
       if (active) setSyncError(reason instanceof Error ? reason.message : '顧客情報を読み込めませんでした。')
-    })
+    }).finally(() => { customerDetailRequestsRef.current.delete(customerId) })
     return () => { active = false }
   }, [selectedPersistedDocument?.customerId, customers])
 
@@ -315,12 +319,12 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
     const customerId = createForm.customerMode === 'existing' ? createForm.customerId : ''
     if (!customerId) return
     const current = customers.find((customer) => customer.id === customerId)
-    if (!current?.isSummary) return
-    let active = true
+    if (current && !current.isSummary) return
+    if (customerDetailRequestsRef.current.has(customerId)) return
+    customerDetailRequestsRef.current.add(customerId)
     void fetchCustomerDetail(customerId).then((detail) => {
-      if (active) setCustomers((items) => items.map((customer) => customer.id === detail.id ? detail : customer))
-    }).catch(() => undefined)
-    return () => { active = false }
+      setCustomers((items) => upsertCustomer(items, detail))
+    }).catch(() => undefined).finally(() => { customerDetailRequestsRef.current.delete(customerId) })
   }, [createForm.customerId, createForm.customerMode, customers])
 
   function setActiveDraft(nextDraft: SalesDocumentLike | null) {
@@ -1159,7 +1163,7 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
       {loading && <div className="customer-sync-status"><span>販売書類を読み込んでいます。</span></div>}
       <div className="sales-toolbar"><label className="sales-search"><Search size={18} /><span className="sr-only">販売書類を検索</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="書類番号、顧客名、車名で検索" /></label><DocumentSortControls sortKey={sortKey} sortDirection={sortDirection} onSortKeyChange={setSortKey} onSortDirectionChange={setSortDirection} /></div>
       <div className="document-filter-panel sales-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={filterType} options={salesDocumentTypeFilterOptions} onChange={setFilterType} /><DocumentFilterGroup label="状態" value={statusFilter} options={salesStatusFilterOptions} onChange={setStatusFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setFilterType('すべて'); setStatusFilter('すべて') }} disabled={filterType === 'すべて' && statusFilter === 'すべて'}>条件をリセット</button></div>
-      <div className={`sales-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />販売書類一覧へ戻る</button>{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} autosaveStatus={autosave.status} autosaveLastSavedAt={autosave.lastSavedAt} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onCancelDraft={cancelDraftCreation} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{loading ? '販売書類を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{loading ? 'しばらくお待ちください。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
+       <div className={`sales-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><SalesDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />販売書類一覧へ戻る</button>{selectedDocument && selectedTotals ? <SalesDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} totals={selectedTotals} shopName={settings.shop.name} settings={settings} itemPresets={settings.salesItemPresets} customers={customers} view={documentView} dirty={dirty} saving={saving} saved={saved} autosaveStatus={autosave.status} autosaveLastSavedAt={autosave.lastSavedAt} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onUpdateTradeIn={updateTradeIn} onUpdateCredit={updateCredit} onUpdateRequiredDocument={updateRequiredDocument} onUpdateItem={updateLineItem} onUpdateSheetLine={updateEstimateSheetLine} onAddItem={addLineItem} onRemoveItem={removeLineItem} onSave={handleSaveClick} onArchive={() => void archiveSelectedDocument()} onCancelDraft={cancelDraftCreation} onPdfDownload={() => { if (selectedPersistedDocument) void downloadSalesDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewSalesDocumentPdf(selectedPersistedDocument, settings) }} /> : <div className="panel sales-empty"><FileText size={30} /><strong>{selectedPersistedDocument?.isSummary ? '販売書類の詳細を読み込んでいます' : '販売書類が見つかりません'}</strong><span>{selectedPersistedDocument?.isSummary ? 'しばらくお待ちください。' : loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
       {createDialogOpen && <SalesDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
       {salesDuplicateDialog && <SalesDuplicateConfirmationDialog state={salesDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleSalesDuplicateCancel} />}
       {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={undefined} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMasterSyncCancel} />}
@@ -1218,13 +1222,16 @@ function SalesDocumentDetail({ document, isDraft, totals, shopName, settings, it
 function SalesDocumentEditor(props: { document: SalesDocumentLike; isDraft: boolean; totals: SalesTotals; itemPresets: string[]; customers: Customer[]; defaultDueDate: string; onUpdateHeader: (field: SalesHeaderField, value: string) => void; onUpdateDetails: (patch: Partial<SalesDocumentDetails>) => void; onUpdateTaxRate: (value: number) => void; onUpdateTradeIn: (field: keyof SalesDocumentDetails['tradeIn'], value: string) => void; onUpdateCredit: (field: keyof SalesDocumentDetails['credit'], value: string | boolean) => void; onUpdateRequiredDocument: (field: keyof SalesDocumentDetails['requiredDocuments'], value: string | boolean) => void; onUpdateItem: (itemId: string, field: SalesItemField, value: string) => void; onAddItem: () => void; onRemoveItem: (itemId: string) => void }) {
   const { document, isDraft, customers, defaultDueDate, onUpdateHeader } = props
   const selectedCustomer = customers.find((customer) => customer.id === document.customerId)
+  const selectedCustomerOption = document.customerId && !selectedCustomer
+    ? <option value={document.customerId}>{document.customerName}</option>
+    : null
   return <>
     <section className="document-header-editor">
       <div className="document-header-editor-title"><div><h3>書類基本情報</h3><span>顧客・車両、日付、状態などの基本情報を入力できます。</span></div></div>
       <div className="form-grid">
         <label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}><option>見積書</option><option>請求書</option></select></label>
         <label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}><option>下書き</option><option>入金待ち</option><option>完了</option></select></label>
-         <label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+         <label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{selectedCustomerOption}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
          <label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && document.abacusImport?.vehicleless && <option value="">ABACUS互換：車両なし</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select>{!isDraft && document.vehicleId === null && !document.abacusImport?.vehicleless && <small className="form-field-hint">通常のWeb書類は車両必須です。</small>}</label>
         <label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label>
         <OptionalDateField id="sales-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} />
