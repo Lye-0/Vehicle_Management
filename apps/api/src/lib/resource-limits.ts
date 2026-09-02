@@ -2,7 +2,9 @@ import { HttpError } from '../http'
 
 export const maximumDocumentItemCount = 100
 export const maximumCsvDetailItemCount = 100
-export const maximumD1BatchStatementCount = 2_000
+// 現行の大規模なグラフ確定パッケージは2,062文を必要とするため、
+// 同じD1バッチの原子性を保ったまま、今後の明細増加分を含めて3,000文まで許可する。
+export const maximumD1BatchStatementCount = 3_000
 
 export function assertArrayLength(value: unknown, maximum: number, message: string) {
   if (Array.isArray(value) && value.length > maximum) throw new HttpError(413, message)

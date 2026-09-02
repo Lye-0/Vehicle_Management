@@ -12,7 +12,7 @@ describe('resource limits', () => {
   })
 
   it('allows the current large graph-final registration statement count', () => {
-    expect(() => assertD1BatchStatementCount(1_665)).not.toThrow()
+    expect(() => assertD1BatchStatementCount(2_062)).not.toThrow()
   })
 
   it('rejects oversized document item arrays before statement creation', () => {
