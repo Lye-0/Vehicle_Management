@@ -11,6 +11,8 @@ var tests = new (string Name, Action Test)[]
     ("同姓同名は承認可能候補にならない", SameNameConflict),
     ("顧客同士の一部一致は統合おすすめになる", CustomerIntegrationRecommendation),
     ("整備UCSの法定費用内訳を抽出する", MaintenanceFinancialLinesAreMapped),
+    ("整備移行の消費税は法定費用・調整額を含めずに算出する", MaintenanceAmountsExcludeFinancialLinesFromTax),
+    ("最終パッケージの整備消費税も法定費用・調整額を含めずに算出する", FinalPackageMaintenanceAmountsExcludeFinancialLinesFromTax),
     ("整備UCSの法定費用を明細合計へ二重計上しない", MaintenanceDetailAmountExcludesFinancialLines),
     ("整備CSVの走行距離を明細詳細JSONへ保持する", MaintenanceMileageIsCopiedToDetailJson),
     ("識別子競合は承認可能候補にならない", IdentifierConflict),
@@ -251,6 +253,47 @@ static void MaintenanceFinancialLinesAreMapped()
         new Dictionary<int, string> { [0x810C] = "10800" });
     Assert(legacyLines.Single().Description == "リサイクル料金" && legacyLines.Single().Amount == 10800,
         "旧形式の諸費用金額④を法定費用内訳へ復元できていません。");
+
+    var doubleNegativeLines = AbacusFp5DetailReader.MapMaintenanceFinancialLines(
+        new Dictionary<int, string> { [0x80D0] = "--301" });
+    Assert(doubleNegativeLines.Single().Description == "端数値引" && doubleNegativeLines.Single().Amount == -301,
+        "整備UCSの二重マイナス形式の端数値引を復元できていません。");
+}
+
+static void MaintenanceAmountsExcludeFinancialLinesFromTax()
+{
+    var financialLines = new AbacusDetailFinancialLine[]
+    {
+        new("自賠責", "法定費用", "非課税", 25800, 91),
+        new("重量税", "法定費用", "非課税", 6600, 92),
+        new("印紙代", "法定費用", "非課税", 1400, 93),
+        new("リサイクル料金", "法定費用", "非課税", 12300, 94),
+        new("端数値引", "調整", "対象外", -500, 95),
+    };
+    var document = new AbacusUcsDetailDocument(
+        "整備書類",
+        "abx-cs-sb.ucs",
+        "C10559",
+        "1663",
+        "金額復元テスト顧客",
+        "",
+        "",
+        "",
+        [new AbacusDetailLine("作業", 1, "式", 11400, 11400, 0, null, 1)],
+        11400,
+        0,
+        11400,
+        58140,
+        0,
+        financialLines,
+        null,
+        10);
+    var detailsJson = AbacusDetailMapper.Serialize(new AbacusDetailMatch(document, "matched", ""));
+
+    var amounts = AbacusLegacyExportPreviewStore.ResolveAmounts("整備書類", detailsJson, "58140", "2026-05-07");
+
+    Assert(amounts.Subtotal == "11400" && amounts.Tax == "1140" && amounts.Total == "58140",
+        "整備書類の法定費用・調整額を消費税へ混入させずに金額を復元できていません。");
 }
 
 static void MaintenanceDetailAmountExcludesFinancialLines()
@@ -280,6 +323,126 @@ static void MaintenanceDetailAmountExcludesFinancialLines()
     Assert(serialized.RootElement.GetProperty("financialLines").GetArrayLength() == 1 &&
            serialized.RootElement.GetProperty("detailAmount").GetInt64() == 120,
            "整備書類の法定費用内訳または作業明細合計が詳細JSONへ引き継がれていません。");
+}
+
+static void FinalPackageMaintenanceAmountsExcludeFinancialLinesFromTax()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"gate28-final-maintenance-amounts-{Guid.NewGuid():N}");
+    var sourceRoot = Path.Combine(root, "source");
+    var destinationRoot = Path.Combine(root, "destination");
+    Directory.CreateDirectory(sourceRoot);
+    Directory.CreateDirectory(destinationRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "manifest.json"), "{}");
+    try
+    {
+        var financialLines = new AbacusDetailFinancialLine[]
+        {
+            new("自賠責", "法定費用", "非課税", 17650, 91),
+            new("重量税", "法定費用", "非課税", 15000, 92),
+            new("印紙代", "法定費用", "非課税", 1600, 93),
+            new("リサイクル料金", "法定費用", "非課税", 11000, 94),
+            new("端数値引", "調整", "対象外", -273, 95),
+        };
+        var detailDocument = new AbacusUcsDetailDocument(
+            "整備書類",
+            "abx-cs-sb.ucs",
+            "C10492",
+            "1469",
+            "植野裕美",
+            "",
+            "和泉330な8725",
+            "WAUZZZ8V6FA095942",
+            [
+                new AbacusDetailLine("車検点検整備費用", null, null, null, null, 25000, null, 1),
+                new AbacusDetailLine("エンジンオイル交換", 4, null, 1800, 7200, 500, null, 3),
+                new AbacusDetailLine("ブレーキフルード（ＤＯＴ4）交換", 1, null, 3330, 3330, 4900, null, 5),
+            ],
+            10530,
+            30400,
+            40930,
+            null,
+            0,
+            financialLines);
+        var detailsJson = AbacusDetailMapper.Serialize(new AbacusDetailMatch(detailDocument, "matched", ""));
+        var document = new AbacusLegacyExportCandidateGraphDocument(
+            "整備書類",
+            "seibi.csv",
+            1,
+            "1469",
+            "植野裕美",
+            "",
+            "和泉330な8725",
+            "2023-05-17",
+            "90000",
+            "一意一致",
+            "",
+            "v1",
+            ["v1"],
+            ["c1"],
+            detailsJson,
+            "2023-05-17",
+            "2023-05-20",
+            "請求書",
+            "車検整備");
+        var vehicle = new AbacusLegacyExportCandidateGraphVehicle(
+            "v1", "c1", "植野裕美", "AUDI", "A3", "", "", "36589", "和泉330な8725", "WAUZZZ8V6FA095942", [document]);
+        var customer = new AbacusLegacyExportCandidateGraphCustomer(
+            "c1", "number-1", "植野裕美", "うえのひろみ", "", "", "", "", "", [vehicle], []);
+        var graph = new AbacusLegacyExportCandidateGraphResult(
+            sourceRoot,
+            [customer],
+            [document],
+            [],
+            [],
+            1,
+            0,
+            0,
+            []);
+        var group = new AbacusLegacyGraphFinalCustomerGroup(
+            "customer:c1",
+            "single",
+            true,
+            ["c1"],
+            "c1",
+            "number-1",
+            "植野裕美",
+            "うえのひろみ",
+            "",
+            "",
+            "",
+            "",
+            "");
+        var snapshot = new AbacusLegacyGraphFinalizationSnapshot(
+            [group],
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            [],
+            true);
+
+        var result = new AbacusLegacyGraphFinalPackageStore()
+            .CreateAsync(graph, snapshot, destinationRoot)
+            .GetAwaiter()
+            .GetResult();
+        using var parser = new TextFieldParser(result.MaintenanceCsvPath, Encoding.UTF8, detectEncoding: true)
+        {
+            TextFieldType = FieldType.Delimited,
+            HasFieldsEnclosedInQuotes = true,
+            TrimWhiteSpace = false,
+        };
+        parser.SetDelimiters(",");
+        _ = parser.ReadFields();
+        var row = parser.ReadFields();
+        Assert(row is not null && row.Length == 18 &&
+               row[12] == "40930" && row[13] == "4093" && row[14] == "90000",
+            "最終パッケージの整備CSVが法定費用・調整額を消費税へ混入させています。");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 static void MaintenanceMileageIsCopiedToDetailJson()

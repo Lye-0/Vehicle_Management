@@ -294,8 +294,20 @@ public sealed class AbacusFp5DetailReader
     private static decimal? ParseDecimal(string? value) =>
         decimal.TryParse(value?.Replace(",", "", StringComparison.Ordinal), NumberStyles.Number, CultureInfo.InvariantCulture, out var result) ? result : null;
 
-    private static long? ParseLong(string? value) =>
-        long.TryParse(value?.Replace(",", "", StringComparison.Ordinal), NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : null;
+    private static long? ParseLong(string? value)
+    {
+        var normalized = value?.Replace(",", "", StringComparison.Ordinal).Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return null;
+
+        if (normalized[0] == '-')
+        {
+            normalized = normalized.TrimStart('-').Trim();
+            if (normalized.Length == 0) return null;
+            normalized = $"-{normalized}";
+        }
+
+        return long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : null;
+    }
 
     private static string? FirstNonEmpty(IReadOnlyDictionary<int, string> fields, params int[] references) =>
         references.Select(reference => NullableText(fields, reference)).FirstOrDefault(value => value is not null);

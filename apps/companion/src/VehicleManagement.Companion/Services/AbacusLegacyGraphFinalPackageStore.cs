@@ -1003,27 +1003,11 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         var vehicleName = finalDocument.Vehicle?.VehicleName ?? "";
         var registrationNumber = finalDocument.Vehicle?.RegistrationNumber ?? "";
         var amountWasMissing = string.IsNullOrWhiteSpace(document.TotalAmount);
-        var sourceTotal = amountWasMissing ? 0L : ParseAmount(document.TotalAmount);
-        var totalValue = detail?.AbacusTotal ?? (sourceTotal == 0 ? null : sourceTotal);
-        var total = (totalValue ?? 0).ToString(CultureInfo.InvariantCulture);
-        var taxRateValue = detail?.AbacusTaxRate ?? InferLegacyTaxRate(document.DocumentDate);
-        var taxValue = detail?.AbacusTax;
-        var subtotalValue = detail?.AbacusSubtotal;
-        if (totalValue is not null && taxValue is null)
-        {
-            if (detail is not null && detail.DetailAmount == totalValue.Value)
-            {
-                taxValue = CalculateIncludedTax(totalValue.Value, taxRateValue);
-                subtotalValue = totalValue.Value - taxValue.Value;
-            }
-            else if (subtotalValue is not null)
-            {
-                taxValue = Math.Max(0, totalValue.Value - subtotalValue.Value);
-            }
-        }
-        var subtotal = (subtotalValue ?? totalValue ?? 0).ToString(CultureInfo.InvariantCulture);
-        var tax = (taxValue ?? 0).ToString(CultureInfo.InvariantCulture);
-        var taxRate = taxRateValue.ToString(CultureInfo.InvariantCulture);
+        var amounts = AbacusLegacyExportPreviewStore.ResolveAmounts(
+            document.Kind,
+            document.DetailsJson,
+            document.TotalAmount,
+            document.DocumentDate);
         var maintenanceIntakeDate = string.IsNullOrWhiteSpace(document.MaintenanceIntakeDate)
             ? document.DocumentDate
             : document.MaintenanceIntakeDate;
@@ -1059,10 +1043,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 maintenanceIntakeDate,
                 maintenanceCompletionDate,
                 "",
-                taxRate,
-                subtotal,
-                tax,
-                total,
+                amounts.TaxRate,
+                amounts.Subtotal,
+                amounts.Tax,
+                amounts.Total,
                 "",
                 memo,
                 document.DetailsJson,
@@ -1077,10 +1061,10 @@ public sealed class AbacusLegacyGraphFinalPackageStore
                 registrationNumber,
                 document.DocumentDate,
                 "",
-                taxRate,
-                subtotal,
-                tax,
-                total,
+                amounts.TaxRate,
+                amounts.Subtotal,
+                amounts.Tax,
+                amounts.Total,
                 "",
                 memo,
                 document.DetailsJson,
@@ -1099,20 +1083,6 @@ public sealed class AbacusLegacyGraphFinalPackageStore
         finalDocument.Document.Kind == "整備書類"
             ? (!string.IsNullOrWhiteSpace(maintenanceIntakeDate) ? maintenanceIntakeDate : maintenanceCompletionDate) ?? ""
             : finalDocument.Document.DocumentDate;
-
-    private static long ParseAmount(string value) =>
-        long.TryParse(value.Trim().Replace(",", "", StringComparison.Ordinal), NumberStyles.Integer, CultureInfo.InvariantCulture, out var amount)
-            ? amount
-            : 0;
-
-    private static long CalculateIncludedTax(long total, long taxRate) =>
-        taxRate <= 0 ? 0 : (long)Math.Floor(total * (double)taxRate / (100d + taxRate));
-
-    private static long InferLegacyTaxRate(string date)
-    {
-        if (!DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed)) return 10;
-        return parsed >= new DateTime(2019, 10, 1) ? 10 : parsed >= new DateTime(2014, 4, 1) ? 8 : 5;
-    }
 
     private static string GetDocumentKey(AbacusLegacyExportCandidateGraphDocument document) =>
         string.Join("|", document.Kind, document.SourceFileName, document.SourceRowNumber, document.DocumentNumber);

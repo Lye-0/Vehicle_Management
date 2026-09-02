@@ -719,7 +719,7 @@ public sealed class AbacusLegacyExportPreviewStore
         foreach (var candidate in candidates)
         {
             var customer = customers[candidate.CustomerKey];
-            var amounts = ResolveAmounts(candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
+            var amounts = ResolveAmounts(candidate.Kind, candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
             AppendCsvRow(builder, [
                 candidate.DocumentId,
                 candidate.Number,
@@ -752,7 +752,7 @@ public sealed class AbacusLegacyExportPreviewStore
         foreach (var candidate in candidates)
         {
             var customer = customers[candidate.CustomerKey];
-            var amounts = ResolveAmounts(candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
+            var amounts = ResolveAmounts(candidate.Kind, candidate.DetailsJson, candidate.Total, candidate.IssuedAt);
             AppendCsvRow(builder, [
                 candidate.DocumentId,
                 candidate.Number,
@@ -778,7 +778,7 @@ public sealed class AbacusLegacyExportPreviewStore
         return Utf8WithBom.GetBytes(builder.ToString());
     }
 
-    private static (string TaxRate, string Subtotal, string Tax, string Total) ResolveAmounts(string detailsJson, string sourceTotal, string issuedAt)
+    internal static (string TaxRate, string Subtotal, string Tax, string Total) ResolveAmounts(string documentKind, string detailsJson, string sourceTotal, string issuedAt)
     {
         var detail = ParseDetailJson(detailsJson);
         var sourceTotalValue = ParseAmount(sourceTotal);
@@ -795,7 +795,15 @@ public sealed class AbacusLegacyExportPreviewStore
             }
             else if (subtotalValue is not null)
             {
-                taxValue = Math.Max(0, totalValue.Value - subtotalValue.Value);
+                var maintenanceFinancialTotal = string.Equals(documentKind, "整備書類", StringComparison.Ordinal) &&
+                    detail is not null &&
+                    detail.FinancialLines is { Count: > 0 }
+                    ? detail.FinancialLines.Sum(line => line.Amount)
+                    : (long?)null;
+                var derivedTax = totalValue.Value - subtotalValue.Value - (maintenanceFinancialTotal ?? 0);
+                taxValue = maintenanceFinancialTotal is not null && derivedTax >= 0
+                    ? derivedTax
+                    : Math.Max(0, totalValue.Value - subtotalValue.Value);
             }
         }
 
