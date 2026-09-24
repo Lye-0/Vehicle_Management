@@ -15,6 +15,13 @@
       "when": 1787329103971,
       "tag": "0001_pink_texas_twister",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790249945513,
+      "tag": "0002_employee_reissue",
+      "breakpoints": true
     }
   ]
 }

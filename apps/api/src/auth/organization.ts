@@ -158,15 +158,26 @@ export async function completeInitialPasswordChange(database: Database, env: Env
   if (!account) throw new HttpError(404, '認証アカウント情報が見つかりません。')
   if (!account.mustChangePassword) return
   if (!idToken) throw new HttpError(401, '認証トークンが見つかりません。')
+  const operation = crypto.randomUUID()
+  const claim = await database.$client.prepare(`UPDATE auth_accounts SET initial_password_operation = ?
+    WHERE uid = ? AND must_change_password = 1 AND initial_password_operation IS NULL
+    AND EXISTS (SELECT 1 FROM organization_memberships WHERE uid = ? AND status = 'active')`)
+    .bind(operation, uid, uid).run()
+  if (claim.meta.changes !== 1) throw new HttpError(409, '所属がないか、初期パスワードの処理中です。管理者に確認してください。')
   try {
     await updatePasswordWithIdToken(env, idToken, password)
   } catch (error) {
+    // A definite Firebase rejection did not change the password. An uncertain network
+    // failure retains the marker for explicit reconciliation, rather than unsafe retries.
+    if (error instanceof IdentityToolkitError) {
+      await database.update(authAccounts).set({ initialPasswordOperation: null }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.initialPasswordOperation, operation))).run()
+    }
     if (error instanceof IdentityToolkitError && error.code === 'WEAK_PASSWORD') throw new HttpError(400, 'パスワードは8文字以上で設定してください。')
     if (error instanceof IdentityToolkitError && ['INVALID_ID_TOKEN', 'TOKEN_EXPIRED', 'USER_NOT_FOUND'].includes(error.code)) throw new HttpError(401, '認証情報を確認できません。')
     throw new HttpError(503, 'パスワードを変更できませんでした。Firebaseの設定を確認してください。')
   }
   const now = new Date().toISOString()
-  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: now, updatedAt: now }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.mustChangePassword, true))).run()
+  await database.update(authAccounts).set({ mustChangePassword: false, initialPasswordChangedAt: now, initialPasswordOperation: null, updatedAt: now }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.initialPasswordOperation, operation))).run()
 }
 
 export async function ensureDevelopmentMembership(database: Database, env: Env, user: FirebaseUser) {

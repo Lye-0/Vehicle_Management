@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { authAccounts, organizationInvites, organizationMemberships, staffProfiles } from '@vehicle-management/database'
-import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser } from '../auth/identity-toolkit'
+import { IdentityToolkitError, createEmailPasswordUser, deleteEmailPasswordUser, getPasswordUpdatedAt } from '../auth/identity-toolkit'
+import { firebaseAdminClient } from '../auth/firebase-admin'
 import { requireAdminOrganizationContext, requireOrganizationContext, type OrganizationRole } from '../auth/organization'
 import { requireAuthenticatedUser, UnauthorizedError } from '../auth/firebase'
 import { createDatabase } from '../db/client'
@@ -49,6 +50,8 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
     createdUser = await createEmailPasswordUser(env, email, temporaryPassword)
   } catch (error) {
     if (error instanceof IdentityToolkitError && error.code === 'EMAIL_EXISTS') {
+      const recovered = await readdPendingMember(database, env, context.organization.organizationId, email, displayName, temporaryPassword)
+      if (recovered) return jsonResponse(recovered, 201, env)
       const invitation = await createOrganizationInvitation(database, context.organization.organizationId, email, context.user.uid)
       return jsonResponse({ member: null, invitation }, 201, env)
     }
@@ -56,52 +59,82 @@ async function createMember(request: Request, env: Env, database: ReturnType<typ
   }
 
   const memberUid = createdUser.uid
-  let membershipCreated = false
   try {
     const now = new Date().toISOString()
-    await database.insert(organizationMemberships).values({
+    const authUpdatedAt = await getPasswordUpdatedAt(env, createdUser.uid, createdUser.idToken)
+    await database.batch([database.insert(organizationMemberships).values({
       id: membershipId,
       organizationId: context.organization.organizationId,
       uid: createdUser.uid,
       role: 'employee',
       status: 'active',
       updatedAt: now,
-    }).run()
-    membershipCreated = true
-    await database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }).run()
-    await database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, updatedAt: now }).run()
+    }),
+      database.insert(staffProfiles).values({ uid: createdUser.uid, displayName, email, role: 'employee', updatedAt: now }),
+      database.insert(authAccounts).values({ uid: createdUser.uid, mustChangePassword: true, initialPasswordIssuedAt: now, initialPasswordOrganizationId: context.organization.organizationId, initialPasswordAuthUpdatedAt: authUpdatedAt, updatedAt: now }),
+    ])
   } catch (error) {
-    if (membershipCreated) {
-      try {
-        await database.delete(organizationMemberships).where(eq(organizationMemberships.id, membershipId)).run()
-      } catch (databaseCleanupError) {
-        console.error(databaseCleanupError)
-      }
-    }
-    if (createdUser) {
-      try {
-        await database.delete(authAccounts).where(eq(authAccounts.uid, createdUser.uid)).run()
-        await database.delete(staffProfiles).where(eq(staffProfiles.uid, createdUser.uid)).run()
-      } catch (databaseCleanupError) {
-        console.error(databaseCleanupError)
-      }
+    // A lost D1 response does not prove the batch failed. Check before removing Auth.
+    const [storedAccount, storedMembership] = await Promise.all([
+      database.select({ uid: authAccounts.uid }).from(authAccounts).where(eq(authAccounts.uid, memberUid)).get(),
+      database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(eq(organizationMemberships.id, membershipId)).get(),
+    ])
+    if (!storedAccount && !storedMembership) {
       try {
         await deleteEmailPasswordUser(env, createdUser.idToken)
       } catch (cleanupError) {
         console.error(cleanupError)
       }
     }
-    throw error
+    if (!storedAccount || !storedMembership) throw error
   }
 
-  const members = await listMembers(database, context.organization.organizationId, context.user.uid)
-  const member = members.find((item) => item.uid === memberUid)
-  return jsonResponse({ member, ...(temporaryPassword ? { temporaryPassword } : {}) }, 201, env)
+  return jsonResponse({ member: { uid: memberUid, displayName, email, role: 'employee', status: 'active', mustChangePassword: true, isSelf: false }, temporaryPassword }, 201, env)
+}
+
+export async function readdPendingMember(database: ReturnType<typeof createDatabase>, env: Env, organizationId: string, email: string, displayName: string, temporaryPassword: string) {
+  const matches = await database.select({ uid: staffProfiles.uid }).from(staffProfiles).where(eq(staffProfiles.email, email)).all()
+  if (matches.length !== 1) return null
+  const uid = matches[0].uid
+  const account = await database.select().from(authAccounts).where(eq(authAccounts.uid, uid)).get()
+  // A matching email or pending invitation is never proof of the originating organization.
+  if (!account || account.initialPasswordOrganizationId !== organizationId || !account.mustChangePassword || account.initialPasswordChangedAt || account.initialPasswordAuthUpdatedAt === null) return null
+  if (account.initialPasswordOperation) throw new HttpError(409, '初期パスワードの処理中、または結果確認が必要です。システム管理者に連絡してください。')
+  const memberships = await database.select({ id: organizationMemberships.id }).from(organizationMemberships).where(eq(organizationMemberships.uid, uid)).all()
+  if (memberships.length) throw new HttpError(409, 'このアカウントはすでに組織に所属しています。初期パスワードは変更していません。')
+  const admin = await firebaseAdminClient(env)
+  const user = await admin.lookup(uid)
+  if (!user || user.email?.toLowerCase() !== email || user.disabled || user.emailVerified || user.providerUserInfo?.length !== 1 || user.providerUserInfo[0].providerId !== 'password' || user.passwordUpdatedAt !== account.initialPasswordAuthUpdatedAt) {
+    throw new HttpError(409, 'アカウントの状態が初期登録時から変更されています。初期パスワードは再発行していません。')
+  }
+  const operation = crypto.randomUUID()
+  const claimed = await database.$client.prepare(`UPDATE auth_accounts SET initial_password_operation = ?
+    WHERE uid = ? AND initial_password_organization_id = ? AND must_change_password = 1
+    AND initial_password_changed_at IS NULL AND initial_password_operation IS NULL
+    AND initial_password_auth_updated_at = ?
+    AND NOT EXISTS (SELECT 1 FROM organization_memberships WHERE uid = ?)`)
+    .bind(operation, uid, organizationId, account.initialPasswordAuthUpdatedAt, uid).run()
+  if (claimed.meta.changes !== 1) throw new HttpError(409, 'アカウントの状態が変わりました。一覧を再読み込みしてください。')
+  // Keep the operation marker on uncertain Auth/D1 failures. Never retry a password reset
+  // blindly: the user might have changed it outside the application in the meantime.
+  await admin.setPassword(uid, temporaryPassword)
+  const updated = await admin.lookup(uid)
+  if (!updated || updated.localId !== uid || updated.email?.toLowerCase() !== email || updated.disabled || typeof updated.passwordUpdatedAt !== 'number' || !Number.isFinite(updated.passwordUpdatedAt)) throw new HttpError(503, '再発行結果の確認が必要です。システム管理者に連絡してください。')
+  const now = new Date().toISOString()
+  await database.batch([
+    database.insert(organizationMemberships).values({ id: crypto.randomUUID(), organizationId, uid, role: 'employee', status: 'active', updatedAt: now }),
+    database.update(staffProfiles).set({ displayName, email, role: 'employee', updatedAt: now }).where(eq(staffProfiles.uid, uid)),
+    database.update(authAccounts).set({ initialPasswordIssuedAt: now, initialPasswordAuthUpdatedAt: updated.passwordUpdatedAt, initialPasswordOperation: null, updatedAt: now }).where(and(eq(authAccounts.uid, uid), eq(authAccounts.initialPasswordOperation, operation))),
+    database.update(organizationInvites).set({ status: 'revoked', updatedAt: now }).where(and(eq(organizationInvites.organizationId, organizationId), eq(organizationInvites.email, email), eq(organizationInvites.status, 'pending'))),
+  ])
+  return { member: { uid, displayName, email, role: 'employee', status: 'active', mustChangePassword: true, isSelf: false }, temporaryPassword }
 }
 
 async function acceptInvitation(request: Request, env: Env, database: ReturnType<typeof createDatabase>) {
   const user = await requireAuthenticatedUser(request, env)
   if (user.isAnonymous || !user.email || !user.emailVerified) throw new HttpError(403, '招待を受け入れるには、招待先メールアドレスでログインし、メール確認を完了してください。')
+  const pendingAccount = await database.select().from(authAccounts).where(eq(authAccounts.uid, user.uid)).get()
+  if (pendingAccount?.initialPasswordOperation || pendingAccount?.mustChangePassword) throw new HttpError(409, '初期パスワードの処理を完了してから招待を受け入れてください。')
   const body = await readJson(request)
   const token = typeof body.code === 'string' ? body.code.trim() : ''
   if (!token || token.length > 200) throw new HttpError(400, '招待コードが不正です。')
@@ -182,7 +215,10 @@ async function removeMember(request: Request, env: Env, database: ReturnType<typ
   if (uid === context.user.uid) throw new HttpError(400, '自分自身は組織から削除できません。')
   if (context.organization.role === 'admin' && targetRole !== 'employee') throw new HttpError(403, '管理者は他の管理者を組織から削除できません。')
 
-  await database.delete(organizationMemberships).where(and(eq(organizationMemberships.organizationId, context.organization.organizationId), eq(organizationMemberships.uid, uid))).run()
+  const removed = await database.$client.prepare(`DELETE FROM organization_memberships WHERE organization_id = ? AND uid = ?
+    AND NOT EXISTS (SELECT 1 FROM auth_accounts WHERE uid = ? AND initial_password_operation IS NOT NULL)`)
+    .bind(context.organization.organizationId, uid, uid).run()
+  if (!removed.meta.changes) throw new HttpError(409, '初期パスワードの処理中です。完了後に再度操作してください。')
   return jsonResponse({ members: await listMembers(database, context.organization.organizationId, context.user.uid) }, 200, env)
 }
 

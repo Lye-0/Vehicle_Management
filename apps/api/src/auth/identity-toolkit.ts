@@ -5,6 +5,7 @@ type IdentityToolkitResponse = {
   idToken?: string
   email?: string
   requestType?: string
+  users?: Array<{ localId: string; passwordUpdatedAt?: number }>
   error?: { message?: string }
 }
 
@@ -26,6 +27,15 @@ export async function updatePasswordWithIdToken(env: Env, idToken: string, passw
   const response = await callIdentityToolkit(env, 'accounts:update', { idToken, password, returnSecureToken: true })
   if (!response.ok) throw new IdentityToolkitError(getErrorCode(response.body), getErrorCode(response.body))
   if (!response.body.localId) throw new IdentityToolkitError('INVALID_RESPONSE', 'Firebase Authenticationの応答が不正です。')
+}
+
+export async function getPasswordUpdatedAt(env: Env, uid: string, idToken: string) {
+  const response = await callIdentityToolkit(env, 'accounts:lookup', { idToken })
+  const timestamp = response.body.users?.find((user) => user.localId === uid)?.passwordUpdatedAt
+  if (!response.ok || typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+    throw new HttpError(503, '初期パスワードの登録状態を確認できませんでした。')
+  }
+  return timestamp
 }
 
 export async function deleteEmailPasswordUser(env: Env, idToken: string) {

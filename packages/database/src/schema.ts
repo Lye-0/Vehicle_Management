@@ -68,6 +68,9 @@ export const authAccounts = sqliteTable('auth_accounts', {
   mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull().default(false),
   initialPasswordIssuedAt: text('initial_password_issued_at'),
   initialPasswordChangedAt: text('initial_password_changed_at'),
+  initialPasswordOrganizationId: text('initial_password_organization_id'),
+  initialPasswordAuthUpdatedAt: real('initial_password_auth_updated_at'),
+  initialPasswordOperation: text('initial_password_operation'),
   ...timestamps,
 })
 

@@ -418,6 +418,7 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [temporaryPasswordEmail, setTemporaryPasswordEmail] = useState('')
   const [invitation, setInvitation] = useState<{ code: string; email: string; expiresAt: string } | null>(null)
   const [accountModal, setAccountModal] = useState<'displayName' | 'account-choice' | 'email' | 'password' | 'google' | null>(null)
 
@@ -652,18 +653,30 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
 
   async function addMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (memberLoading) return
     if (!newMemberName.trim() || !newMemberEmail.trim()) {
       setMemberError('表示名とメールアドレスを入力してください。')
       return
     }
     setMemberLoading('create')
+    setTemporaryPassword('')
+    setTemporaryPasswordEmail('')
+    setInvitation(null)
     setMemberError('')
     setMemberMessage('')
     try {
       const response = await createMember({ displayName: newMemberName, email: newMemberEmail })
       const createdMember = response.member
+      if (response.temporaryPassword) {
+        if (!createdMember?.uid || !createdMember.mustChangePassword || createdMember.status !== 'active' || createdMember.email?.toLowerCase() !== newMemberEmail.trim().toLowerCase() || response.invitation) {
+          throw new Error('従業員の登録結果を確認できませんでした。一覧を再読み込みしてください。')
+        }
+      } else if (!response.invitation || createdMember || response.invitation.email.toLowerCase() !== newMemberEmail.trim().toLowerCase()) {
+        throw new Error('従業員の登録結果を確認できませんでした。一覧を再読み込みしてください。')
+      }
       if (createdMember) setMembers((current) => current.some((member) => member.uid === createdMember.uid) ? current.map((member) => member.uid === createdMember.uid ? createdMember : member) : [...current, createdMember])
       setTemporaryPassword(response.temporaryPassword ?? '')
+      setTemporaryPasswordEmail(response.temporaryPassword ? createdMember!.email! : '')
       setInvitation(response.invitation ?? null)
       setNewMemberName('')
       setNewMemberEmail('')
@@ -823,11 +836,13 @@ function MemberSettingsPanel({ user, onUserUpdated }: { user: User; onUserUpdate
             <div className="settings-form-grid"><SettingsField label="表示名" value={newMemberName} onChange={setNewMemberName} placeholder="例：山本 翔太" required disabled={Boolean(memberLoading)} /><SettingsField label="メールアドレス" type="email" value={newMemberEmail} onChange={setNewMemberEmail} placeholder="employee@shop.jp" required disabled={Boolean(memberLoading)} /></div>
             <div className="account-modal-actions"><button className="button button-secondary" type="button" disabled={Boolean(memberLoading)} onClick={closeMemberModal}>キャンセル</button><button className="button button-primary" type="submit" disabled={Boolean(memberLoading)}>{memberLoading === 'create' ? '登録しています…' : '従業員を登録'}</button></div>
           </form> : memberModal === 'temporaryPassword' ? <div className="account-modal-content">
+            <p className="account-modal-note">{temporaryPasswordEmail} のログイン用初期パスワードです。</p>
             <p className="account-modal-note">従業員へ安全な方法で伝えてください。このパスワードはこの画面を閉じると再表示できません。</p>
             <div className="temporary-password-value"><code>{temporaryPassword}</code><button className="button button-secondary" type="button" onClick={() => void copyTemporaryPassword()}><Copy size={15} />コピー</button></div>
             {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
             <div className="account-modal-actions"><button className="button button-primary" type="button" onClick={closeMemberModal}>閉じる</button></div>
           </div> : <div className="account-modal-content">
+            <p className="account-modal-note">これは組織に参加するための招待コードです。ログイン用パスワードではありません。</p>
             <p className="account-modal-note">{invitation?.email} の本人がログイン後、このワンタイム招待コードを入力して組織へ参加します。有効期限は {invitation ? formatBackupDate(invitation.expiresAt) : '7日間'} です。</p>
             <div className="temporary-password-value"><code>{invitation?.code}</code><button className="button button-secondary" type="button" onClick={() => void copyInvitationCode()}><Copy size={15} />コピー</button></div>
             {memberMessage && <div className="settings-success" role="status">{memberMessage}</div>}
