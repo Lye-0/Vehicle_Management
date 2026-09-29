@@ -192,6 +192,23 @@ export async function fetchCustomerSummaries(options: { q?: string; field?: stri
   }
 }
 
+/** 書類の選択欄用。要約だけを全ページ取得し、途中失敗は呼び出し元へ通知する。 */
+export async function fetchAllCustomerSummaries(): Promise<CustomerSummary[]> {
+  const customers = new Map<string, CustomerSummary>()
+  const seenCursors = new Set<string>()
+  let cursor: string | null = null
+  while (true) {
+    const page = await fetchCustomerSummaries({ limit: 100, cursor })
+    for (const customer of page.customers) customers.set(customer.id, customer)
+    if (!page.hasMore) return [...customers.values()]
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
+      throw new Error('顧客候補の続きを取得できませんでした。画面を再読み込みしてください。')
+    }
+    seenCursors.add(page.nextCursor)
+    cursor = page.nextCursor
+  }
+}
+
 export async function fetchCustomerDetail(customerId: string) {
   const response = await apiFetch<{ customer: ApiCustomer }>(`/api/customers/${encodeURIComponent(customerId)}`)
   return mapCustomer(response.customer)

@@ -15,7 +15,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomerDetail, fetchCustomerSummaries, type Customer } from '../lib/customerApi'
+import { fetchCustomerDetail, fetchAllCustomerSummaries, type Customer } from '../lib/customerApi'
 import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
 import { createDraftRunId, deleteDraft, readDraft, type DraftRecord } from '../lib/draftStorage'
 import { fetchSyncPreview, type SyncPreviewInput, type SyncPreviewResponse } from '../lib/masterSyncApi'
@@ -171,11 +171,11 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchMaintenanceDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchCustomerSummaries({ limit: 100 }), fetchSettings()])
+    Promise.all([fetchMaintenanceDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchAllCustomerSummaries(), fetchSettings()])
       .then(([documentPage, customerPage, nextSettings]) => {
         if (cancelled) return
         const nextDocuments = documentPage.documents
-        const nextCustomers = customerPage.customers.map(mapCustomerSummaryToRecord)
+        const nextCustomers = customerPage.map(mapCustomerSummaryToRecord)
         const detailedInitialDocument = documentsRef.current.find((document) => document.id === initialDocumentId && (!document.isSummary || restoredDraftDocumentsRef.current.has(document.id)))
         const documentsWithInitialDetail = detailedInitialDocument ? [detailedInitialDocument, ...nextDocuments.filter((document) => document.id !== detailedInitialDocument.id)] : nextDocuments
         replaceDocuments(() => documentsWithInitialDetail)

@@ -18,7 +18,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { fetchCustomerDetail, fetchCustomerSummaries, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
+import { fetchCustomerDetail, fetchAllCustomerSummaries, fetchVehicleFile, type Customer, type Vehicle } from '../lib/customerApi'
 import { AutosaveBlockedError, useAutosave, type AutosaveStatus as AutosaveState } from '../hooks/useAutosave'
 import { createDraftRunId, deleteDraft, readDraft, type DraftRecord } from '../lib/draftStorage'
 import { useDraftRecovery } from '../hooks/draftRecoveryContext'
@@ -186,11 +186,11 @@ export function SalesPage({ initialDocumentId }: { initialDocumentId?: string } 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchSalesDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchCustomerSummaries({ limit: 100 }), fetchSettings()])
+    Promise.all([fetchSalesDocumentSummaries({ limit: 100, sortKey: initialSortRef.current.sortKey, sortDirection: initialSortRef.current.sortDirection }), fetchAllCustomerSummaries(), fetchSettings()])
       .then(([documentPage, customerPage, nextSettings]) => {
         if (cancelled) return
         const nextDocuments = documentPage.documents
-        const nextCustomers = customerPage.customers.map(mapCustomerSummaryToRecord)
+        const nextCustomers = customerPage.map(mapCustomerSummaryToRecord)
         const detailedInitialDocument = documentsRef.current.find((document) => document.id === initialDocumentId && !document.isSummary)
         const documentsWithInitialDetail = detailedInitialDocument ? [detailedInitialDocument, ...nextDocuments.filter((document) => document.id !== detailedInitialDocument.id)] : nextDocuments
         documentsRef.current = documentsWithInitialDetail
