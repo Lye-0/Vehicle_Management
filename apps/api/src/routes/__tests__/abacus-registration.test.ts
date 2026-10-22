@@ -1,18 +1,18 @@
 import { env, SELF } from 'cloudflare:test'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 const testOrganizationId = 'org-abacus-registration-test'
 const testUid = 'abacus-registration-test-user'
 const customerId = 'abacus-customer-group-registrationtest'
 const vehicleId = 'abacus-vehicle-registrationtest'
 
-beforeAll(async () => {
+beforeEach(async () => {
   await env.DB.prepare('INSERT OR IGNORE INTO organizations (id, name) VALUES (?, ?)').bind(testOrganizationId, 'ABACUS registration test').run()
   await env.DB.prepare('INSERT OR IGNORE INTO staff_profiles (uid, display_name, role) VALUES (?, ?, ?)').bind(testUid, 'ABACUS registration test', 'owner').run()
   await env.DB.prepare('INSERT OR IGNORE INTO organization_memberships (id, organization_id, uid, role, status) VALUES (?, ?, ?, ?, ?)').bind(`mem-${testUid}`, testOrganizationId, testUid, 'owner', 'active').run()
 })
 
-afterAll(async () => {
+afterEach(async () => {
   await env.DB.prepare('DELETE FROM sales_document_items WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM maintenance_items WHERE organization_id = ?').bind(testOrganizationId).run()
   await env.DB.prepare('DELETE FROM sales_documents WHERE organization_id = ?').bind(testOrganizationId).run()

@@ -1,15 +1,15 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it, afterAll, beforeAll } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 
 const TEST_ORG_ID = "org-sync-preview-test";
 
-beforeAll(async () => {
+beforeEach(async () => {
   await env.DB.prepare("INSERT OR IGNORE INTO organizations (id, name) VALUES (?, ?)")
     .bind(TEST_ORG_ID, "sync-preview-test-org")
     .run();
 });
 
-afterAll(async () => {
+afterEach(async () => {
   await env.DB.prepare("DELETE FROM mileage_histories WHERE organization_id = ?").bind(TEST_ORG_ID).run();
   await env.DB.prepare("DELETE FROM maintenance_items WHERE organization_id = ?").bind(TEST_ORG_ID).run();
   await env.DB.prepare("DELETE FROM sales_document_items WHERE organization_id = ?").bind(TEST_ORG_ID).run();

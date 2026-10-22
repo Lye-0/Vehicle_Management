@@ -2,26 +2,24 @@
   "name": "vehicle-management",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "pnpm@11.16.0",
+  "packageManager": "pnpm@11.28.7",
   "engines": {
-    "node": "24.18.0"
+    "node": "24.22.1"
   },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names auth,api,web \"pnpm dev:auth\" \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:auth": "firebase emulators:start --only auth --project demo-vehicle-management",
     "dev:api": "pnpm --filter api dev",
     "dev:web": "pnpm --filter web dev -- --mode development --host 127.0.0.1",
-
     "prod": "pnpm build:production && pnpm deploy:production",
     "build:production": "pnpm --filter web build:production",
     "deploy:production": "pnpm --filter api deploy:production",
-
     "test": "pnpm --filter api test --run",
     "lint": "pnpm --filter web lint",
     "migrate:local": "pnpm --filter api db:migrate:local",
     "migrate:production": "pnpm --filter api db:migrate:production"
   },
   "devDependencies": {
-    "concurrently": "^10.0.3"
+    "concurrently": "^10.0.6"
   }
 }
