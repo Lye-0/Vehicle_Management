@@ -34,7 +34,18 @@ beforeEach(async () => {
   ])
 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  // Workers storage is isolated per file; remove this test's fixtures explicitly.
+  await env.DB.prepare('DROP TRIGGER IF EXISTS fail_reissue').run()
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM organization_invites WHERE organization_id = ?').bind(org),
+    env.DB.prepare('DELETE FROM organization_memberships WHERE organization_id = ? OR uid IN (?, ?)').bind(org, uid, 'brand-new-employee'),
+    env.DB.prepare('DELETE FROM auth_accounts WHERE uid IN (?, ?)').bind(uid, 'brand-new-employee'),
+    env.DB.prepare('DELETE FROM staff_profiles WHERE uid IN (?, ?)').bind(uid, 'brand-new-employee'),
+    env.DB.prepare('DELETE FROM organizations WHERE id = ?').bind(org),
+  ])
+})
 
 describe('未利用従業員の再追加', () => {
   it('同じUIDで所属を戻し、招待を無効化してから初期パスワードを返す', async () => {

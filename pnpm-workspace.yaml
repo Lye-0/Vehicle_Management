@@ -9,3 +9,14 @@ allowBuilds:
   sharp: true
   tesseract.js: false
   workerd: true
+
+# Reviewed versions required for the security fixes below.
+minimumReleaseAgeExclude:
+  - '@cloudflare/vitest-plugin@1.4.7'
+  - miniflare@5.20261019.2-beta
+  - wrangler@4.152.0
+
+# Security fixes for Firestore gRPC and the legacy Drizzle esbuild loader.
+overrides:
+  "@firebase/firestore>@grpc/grpc-js": 1.13.7
+  "@esbuild-kit/core-utils>esbuild": 0.28.2

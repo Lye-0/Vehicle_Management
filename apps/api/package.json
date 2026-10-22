@@ -16,18 +16,18 @@
 		"db:seed:local": "pnpm run db:seed:development"
 	},
 	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.12.4",
-		"@types/node": "^26.1.1",
-		"drizzle-kit": "^0.31.10",
-		"typescript": "^5.5.2",
-		"vitest": "~3.2.0",
-		"wrangler": "^4.113.0"
+		"@types/node": "^26.6.5",
+		"drizzle-kit": "^0.31.11",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.12",
+		"wrangler": "^4.152.0",
+		"@cloudflare/vitest-plugin": "^1.4.7"
 	},
 	"dependencies": {
 		"@vehicle-management/database": "workspace:*",
 		"@vehicle-management/shared": "workspace:*",
 		"aws4fetch": "^1.0.20",
-		"drizzle-orm": "^0.45.2",
-		"jose": "^6.2.4"
+		"drizzle-orm": "^0.45.4",
+		"jose": "^6.2.13"
 	}
 }
