@@ -2,4 +2,4 @@
 java = "temurin-21.0.12+101.0.LTS"
 node = "24.22.1"
 "npm:firebase-tools" = "15.34.0"
-pnpm = "11.28.7"
+pnpm = "11.28.8"
