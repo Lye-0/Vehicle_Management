@@ -7,6 +7,7 @@ import { createDatabase } from '../db/client'
 import { restoreArchivedDocument } from '../document-archive'
 import { archiveDocumentFromRoute } from './archive-routes'
 import { nextDocumentNumber } from '../document-number'
+import { confirmedVehicleTransfer, transferStatements } from '../lib/vehicle-transfer'
 import { HttpError, jsonResponse, readJson } from '../http'
 import { normalizeCalendarDate } from '../lib/date-utils'
 import { parseAbacusDocumentImportMetadata } from '../lib/abacus-document-metadata'
@@ -275,9 +276,10 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
   }
 
   // 重複検出（新規車両）
+  let transfer: ReturnType<typeof confirmedVehicleTransfer> = null
   if (newVehicle) {
     const allVehicles = await database
-      .select({ id: vehicles.id, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
+      .select({ id: vehicles.id, customerId: vehicles.customerId, updatedAt: vehicles.updatedAt, maker: vehicles.maker, name: vehicles.name, registrationNumber: vehicles.registrationNumber, chassisNumber: vehicles.chassisNumber })
       .from(vehicles)
       .where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .all()
@@ -285,13 +287,14 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
 
     // 車台番号完全一致 → 拒否
     const vinDuplicate = duplicateVehicles.find((d) => d.matchReason === 'chassis_number')
-    if (vinDuplicate) {
+    transfer = confirmedVehicleTransfer(body.duplicateConfirmation, duplicateVehicles)
+    if (vinDuplicate && !transfer) {
       throw new HttpError(409, `車台番号が既存車両（${vinDuplicate.maker ?? ''} ${vinDuplicate.name}）と一致します。既存車両を選択してください。`)
     }
 
     // 登録番号一致 → 確認が必要
     const plateDuplicates = duplicateVehicles.filter((d) => d.matchReason === 'registration_number')
-    if (plateDuplicates.length > 0) {
+    if (!transfer && plateDuplicates.length > 0) {
       const dupConfirm = body.duplicateConfirmation
       if (!dupConfirm || typeof dupConfirm !== 'object' || Array.isArray(dupConfirm)) {
         throw new HttpError(409, '登録番号が既存車両と一致します。重複確認が必要です。')
@@ -409,7 +412,10 @@ async function createMaintenanceDocument(request: Request, env: Env, database: R
 
   // 新規車両INSERT
   let resolvedVehicleId = input.vehicleId
-  if (newVehicle) {
+  if (transfer) {
+    resolvedVehicleId = transfer.id
+    statements.push(...transferStatements(env.DB, transfer, organizationId, resolvedCustomerId, now))
+  } else if (newVehicle) {
     const newVehId = crypto.randomUUID()
     resolvedVehicleId = newVehId
     statements.push(env.DB.prepare(
@@ -532,7 +538,7 @@ async function updateMaintenanceDocument(request: Request, env: Env, database: R
     items: body.items === undefined ? currentItems.filter((item) => item.itemType === '作業' || item.itemType === '部品').map(toInputItem) : body.items,
     fees: body.fees === undefined ? extractFees(currentItems) : body.fees,
     adjustment: body.adjustment === undefined ? extractAdjustment(currentItems) : body.adjustment,
-  }, database, organizationId)
+  }, database, organizationId, undefined, undefined, undefined, undefined, current)
   const detailsForStorage = preserveAbacusMetadata(parseDetailsJson(current.detailsJson), input.details)
 
   // mileageSync検証
@@ -736,6 +742,7 @@ async function parseMaintenanceInput(
   overrideVehicleId?: string | null,
   newCustomer?: NewCustomerInput,
   _newVehicle?: NewVehicleInput,
+  persisted?: { customerId: string; vehicleId: string | null },
 ): Promise<MaintenanceInput> {
   const type = stringValue(body, 'type') || '整備請求書'
   if (!maintenanceDocumentTypes.has(type)) throw new HttpError(400, '書類種別が不正です。')
@@ -757,7 +764,7 @@ async function parseMaintenanceInput(
   // 既存車両の所有関係検証（新規車両の場合はスキップ）
   if (vehicleId && customerId && !newCustomer) {
     const vehicle = await database.select({ id: vehicles.id, customerId: vehicles.customerId }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt))).get()
-    if (!vehicle || vehicle.customerId !== customerId) throw new HttpError(400, '選択した車両が顧客と一致しません。')
+    if (!vehicle || (vehicle.customerId !== customerId && !(persisted?.customerId === customerId && persisted.vehicleId === vehicleId))) throw new HttpError(400, '選択した車両が顧客と一致しません。')
   }
 
   const items = parseMaintenanceItems(body.items)

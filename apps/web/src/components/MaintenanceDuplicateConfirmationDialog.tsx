@@ -7,6 +7,8 @@ export type MaintenanceDuplicateDialogState =
   | { kind: 'vehicle'; matchReason: 'chassis_number' | 'registration_number'; candidates: DuplicateVehicleCandidate[] }
 
 type Props = {
+  targetCustomerId?: string | null
+  onTransferVehicle: (candidate: DuplicateVehicleCandidate) => void
   state: MaintenanceDuplicateDialogState
   canUseExistingVehicle: (vehicleId: string) => boolean
   onUseExistingCustomer: (customerId: string) => void
@@ -18,6 +20,8 @@ type Props = {
 
 export function MaintenanceDuplicateConfirmationDialog({
   state,
+  targetCustomerId,
+  onTransferVehicle,
   canUseExistingVehicle,
   onUseExistingCustomer,
   onContinueAsNewCustomer,
@@ -64,13 +68,17 @@ export function MaintenanceDuplicateConfirmationDialog({
                         <span className="master-sync-diff-label"><CarFront size={14} />{candidate.maker} {candidate.name}</span>
                         <span className="master-sync-diff-note">車台番号: {candidate.chassisNumber || '未登録'}{candidate.registrationNumber ? ` ・ 登録番号: ${candidate.registrationNumber}` : ''}</span>
                       </div>
+                      {candidate.customerId && candidate.customerId !== targetCustomerId && candidate.updatedAt ? (
+                        <button className="button button-secondary" type="button" onClick={() => onTransferVehicle(candidate)}>所有者を書類の顧客に変更して保存</button>
+                      ) : (
                       <button className="button button-secondary" type="button" disabled={!canUse} onClick={() => onUseExistingVehicle(candidate.id)}>{canUse ? 'この既存車両を使用' : '別顧客のため選択不可'}</button>
+                      )}
                     </div>
                   )
                 })}
               </div>
               <p style={{ margin: '16px 0 0', color: 'var(--danger)', fontSize: 12, lineHeight: 1.6 }}>
-                現在の顧客に属する候補を使用できない場合は、顧客と車両の選択を確認してください。
+                所有者を変更すると、この車両と今後の点検予定は今回の書類の顧客に引き継がれます。過去の書類の宛名はそのままです。
               </p>
             </>
           ) : (

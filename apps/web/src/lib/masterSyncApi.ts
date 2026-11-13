@@ -38,6 +38,8 @@ export type DuplicateCustomerCandidate = {
 }
 
 export type DuplicateVehicleCandidate = {
+  customerId?: string
+  updatedAt?: string
   id: string
   maker: string | null
   name: string

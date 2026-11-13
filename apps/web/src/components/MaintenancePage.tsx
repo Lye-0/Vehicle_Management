@@ -80,7 +80,7 @@ type MaintenanceDraftContext = {
   openedMileage: number | null
 }
 
-type MaintenanceDuplicateConfirmation = { registrationNumberConfirmed: true; confirmedVehicleId: string }
+type MaintenanceDuplicateConfirmation = NonNullable<MaintenanceDocumentInput['duplicateConfirmation']>
 type MaintenanceMasterSync = NonNullable<MaintenanceDocumentInput['masterSync']>
 type MaintenanceMileageSync = NonNullable<MaintenanceDocumentInput['mileageSync']>
 
@@ -742,7 +742,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     }
 
     const chassisCandidates = (preview.duplicateVehicles ?? []).filter((candidate) => candidate.matchReason === 'chassis_number')
-    if (chassisCandidates.length > 0) {
+    const confirmedChassis = chassisCandidates.some(candidate => candidate.id === duplicateConfirmation?.confirmedVehicleId && Boolean(candidate.customerId) && candidate.customerId === duplicateConfirmation?.previousCustomerId)
+    if (chassisCandidates.length > 0 && !confirmedChassis) {
       setSaving(false)
       setMaintenanceDuplicateDialog({ kind: 'vehicle', matchReason: 'chassis_number', candidates: chassisCandidates })
       return
@@ -754,7 +755,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       && duplicateConfirmation.confirmedVehicleId
       && registrationCandidates.some((candidate) => candidate.id === duplicateConfirmation.confirmedVehicleId),
     )
-    if (registrationCandidates.length > 0 && !hasValidRegistrationConfirmation) {
+    if (!confirmedChassis && registrationCandidates.length > 0 && !hasValidRegistrationConfirmation) {
       setSaving(false)
       setMaintenanceDuplicateDialog({ kind: 'vehicle', matchReason: 'registration_number', candidates: registrationCandidates })
       return
@@ -785,6 +786,11 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
       const currentContext = draftContextRef.current ?? context
       const input = buildMaintenanceCreateInput(currentDraft, currentContext, duplicateConfirmation, masterSync, mileageSync)
       const saved = await createMaintenanceDocument(input)
+      if (duplicateConfirmation?.previousCustomerId) {
+        setCustomers(items => items.map(customer => customer.id === duplicateConfirmation.previousCustomerId
+          ? { ...customer, vehicles: customer.vehicles.filter(vehicle => vehicle.id !== duplicateConfirmation.confirmedVehicleId) }
+          : customer))
+      }
       const draftStorageKey = newDraftStorageKey
       discardedNewDraftRef.current = true
       try {
@@ -898,6 +904,8 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
   function canUseExistingVehicleForDraft(vehicleId: string) {
     const context = draftContextRef.current
     if (!context || context.customerMode !== 'existing' || !context.customerId) return false
+    const match = pendingDraftPreview?.duplicateVehicles?.find(candidate => candidate.id === vehicleId)
+    if (match?.customerId) return match.customerId === context.customerId
     return customers.some((customer) => customer.id === context.customerId && customer.vehicles.some((vehicle) => vehicle.id === vehicleId))
   }
 
@@ -905,7 +913,15 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     const currentDraft = draftDocumentRef.current
     const context = draftContextRef.current
     if (!currentDraft || !context || !canUseExistingVehicleForDraft(vehicleId)) return
-    const customer = customers.find((item) => item.id === context.customerId)
+    let customer = customers.find((item) => item.id === context.customerId)
+    if (!customer?.vehicles.some(vehicle => vehicle.id === vehicleId) && context.customerId) {
+      try {
+        customer = await fetchCustomerDetail(context.customerId)
+      } catch {
+        setError('車両情報を取得できませんでした。もう一度保存してください。')
+        return
+      }
+    }
     const vehicle = customer?.vehicles.find((item) => item.id === vehicleId)
     if (!customer || !vehicle) {
       setError('選択した既存車両を確認できません。顧客一覧を再読み込みしてください。')
@@ -937,6 +953,14 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     setSaving(true)
     setError('')
     await runMaintenanceDraftSyncPreview(nextDraft, nextContext)
+  }
+
+  async function handleTransferVehicle(candidate: NonNullable<SyncPreviewResponse['duplicateVehicles']>[number]) {
+    const preview = pendingDraftPreview
+    if (!preview || !candidate.customerId || !candidate.updatedAt) return
+    setMaintenanceDuplicateDialog(null)
+    setSaving(true)
+    await processMaintenanceDraftSyncPreview(preview, { confirmedVehicleId: candidate.id, previousCustomerId: candidate.customerId, expectedVehicleUpdatedAt: candidate.updatedAt })
   }
 
   async function handleContinueAsNewVehicle(vehicleId: string) {
@@ -1158,7 +1182,7 @@ export function MaintenancePage({ initialDocumentId }: { initialDocumentId?: str
     <div className="document-filter-panel maintenance-document-filter-panel mobile-filter-panel"><DocumentFilterGroup label="書類種別" value={typeFilter} options={maintenanceTypeFilterOptions} onChange={setTypeFilter} /><DocumentFilterGroup label="状態" value={statusFilter} options={maintenanceStatusFilterOptions} onChange={setStatusFilter} /><DocumentFilterGroup label="入庫区分" value={categoryFilter} options={maintenanceCategoryFilterOptions} onChange={setCategoryFilter} /><button className="text-button document-filter-reset" type="button" onClick={() => { setTypeFilter('すべて'); setStatusFilter('すべて'); setCategoryFilter('すべて') }} disabled={typeFilter === 'すべて' && statusFilter === 'すべて' && categoryFilter === 'すべて'}>条件をリセット</button></div>
      <div className={`maintenance-workspace mobile-workspace mobile-workspace-${mobileWorkspaceView}`}><div className="mobile-workspace-list"><MaintenanceDocumentList incompleteDocuments={incompleteDocuments} completedGroups={completedGroups} selectedDocumentId={draftDocument ? '' : selectedPersistedDocument?.id ?? ''} onSelect={selectPersistedDocument} hasMore={documentHasMore} loadingMore={loadingMoreDocuments} onLoadMore={() => void loadMoreDocuments()} /></div><div className="mobile-workspace-detail"><button className="mobile-workspace-back" type="button" onClick={openMobileList}><ChevronLeft size={16} />整備書類一覧へ戻る</button>{selectedDocument && totals ? <MaintenanceDocumentDetail document={selectedDocument} isDraft={!selectedDocument.id} draftDirty={draftDirty} customers={customers} settings={settings} itemPresets={settings.maintenanceItemPresets} view={documentView} saving={saving} saved={!draftDocument && savedDocumentId === selectedDocument.id} autosaveStatus={autosave.status} autosaveLastSavedAt={autosave.lastSavedAt} onViewChange={setDocumentView} onUpdateHeader={updateHeader} onUpdateDetails={updateDetails} onUpdateTaxRate={updateTaxRate} onSave={() => void handleSaveClick()} onArchive={() => void archiveSelectedDocument()} onCancelDraft={cancelDraftCreation} onPdfDownload={() => { if (selectedPersistedDocument) void downloadMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onPdfPreview={() => { if (selectedPersistedDocument) void previewMaintenanceDocumentPdf(selectedPersistedDocument, settings) }} onUpdateItem={updateItem} onAddItem={addItem} onRemoveItem={removeItem} onUpdateFee={updateFee} /> : <div className="panel maintenance-empty"><ClipboardCheck size={30} /><strong>{selectedPersistedDocument?.isSummary ? '整備書類の詳細を読み込んでいます' : '整備書類が見つかりません'}</strong><span>{selectedPersistedDocument?.isSummary ? 'しばらくお待ちください。' : loading ? '読み込み中です。' : '検索条件または絞り込み条件を変更してください。'}</span></div>}</div></div>
     {createDialogOpen && <MaintenanceDocumentDialog form={createForm} customers={customers} onChange={setCreateForm} onClose={() => setCreateDialogOpen(false)} onSubmit={startDraft} />}
-    {maintenanceDuplicateDialog && <MaintenanceDuplicateConfirmationDialog state={maintenanceDuplicateDialog} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleMaintenanceDuplicateCancel} />}
+    {maintenanceDuplicateDialog && <MaintenanceDuplicateConfirmationDialog state={maintenanceDuplicateDialog} onTransferVehicle={handleTransferVehicle} targetCustomerId={draftContextRef.current?.customerId} canUseExistingVehicle={canUseExistingVehicleForDraft} onUseExistingCustomer={(customerId) => { void handleUseExistingCustomer(customerId) }} onContinueAsNewCustomer={() => { void handleContinueAsNewCustomer() }} onUseExistingVehicle={(vehicleId) => { void handleUseExistingVehicle(vehicleId) }} onContinueAsNewVehicle={(vehicleId) => { void handleContinueAsNewVehicle(vehicleId) }} onCancel={handleMaintenanceDuplicateCancel} />}
     {masterSyncDialogResult && <MasterSyncConfirmationDialog isOlderThanLatestDocument={masterSyncDialogResult.isOlderThanLatestDocument} customerDiffs={masterSyncDialogResult.customerDiffs} vehicleDiffs={masterSyncDialogResult.vehicleDiffs} mileageDiff={masterSyncDialogResult.mileageDiff} hasCustomerConflict={masterSyncDialogResult.customerDiffs.some((d) => d.isConflict)} hasVehicleConflict={masterSyncDialogResult.vehicleDiffs.some((d) => d.isConflict)} onConfirm={handleMasterSyncConfirm} onCancel={handleMaintenanceMasterSyncCancel} />}
   </>
 }
@@ -1268,7 +1292,7 @@ function MaintenanceDocumentEditor({ document, isDraft, customers, defaultDueDat
     ? <option value={document.customerId}>{document.customerName}</option>
     : null
   return <>
-    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{selectedCustomerOption}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && document.abacusImport?.vehicleless && <option value="">ABACUS互換：車両なし</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select>{!isDraft && document.vehicleId === null && !document.abacusImport?.vehicleless && <small className="form-field-hint">通常のWeb書類は車両必須です。</small>}</label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><OptionalDateField id="maintenance-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} /></div></section>
+    <section className="document-header-editor maintenance-input-panel"><div className="document-header-editor-title"><div><h3>整備書類基本情報</h3><span>書類種別、顧客・車両、入庫日・出庫予定日などの基本情報を入力できます。</span></div></div><div className="form-grid"><label className="form-field"><span>書類種別</span><select value={document.type} onChange={(event) => onUpdateHeader('type', event.target.value)}>{maintenanceDocumentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label><label className="form-field"><span>状態</span><select value={document.status} onChange={(event) => onUpdateHeader('status', event.target.value)}>{maintenanceStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>入庫区分</span><select value={document.category} onChange={(event) => onUpdateHeader('category', event.target.value)}>{maintenanceCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-field"><span>顧客</span><select value={document.customerId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('customerId', event.target.value)}>{isDraft && !document.customerId && <option value="">新規顧客（書類本体で入力）</option>}{selectedCustomerOption}{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label className="form-field"><span>対象車両</span><select value={document.vehicleId ?? ''} disabled={isDraft} onChange={(event) => onUpdateHeader('vehicleId', event.target.value)}>{!isDraft && document.abacusImport?.vehicleless && <option value="">ABACUS互換：車両なし</option>}{isDraft && !document.vehicleId && <option value="">新規車両（書類本体で入力）</option>}{document.vehicleId && !selectedCustomer?.vehicles.some(item => item.id === document.vehicleId) && <option value={document.vehicleId}>{document.vehicle} ・ {document.plate}</option>}{selectedCustomer?.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.maker} {vehicle.model} ・ {vehicle.plate || '登録番号なし'}</option>)}</select>{!isDraft && document.vehicleId === null && !document.abacusImport?.vehicleless && <small className="form-field-hint">通常のWeb書類は車両必須です。</small>}</label><label className="form-field"><span>書類日付</span><input type="date" value={document.issuedAt.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('issuedAt', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>入庫日</span><input type="date" value={document.intakeDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('intakeDate', event.target.value.replaceAll('-', '/'))} /></label><label className="form-field"><span>出庫予定日</span><input type="date" value={document.plannedReleaseDate.replaceAll('/', '-')} onChange={(event) => onUpdateHeader('plannedReleaseDate', event.target.value.replaceAll('-', '/'))} /></label><OptionalDateField id="maintenance-due-date" label="支払期限" value={document.dueDate} defaultValue={defaultDueDate} onChange={(value) => onUpdateHeader('dueDate', value)} /></div></section>
     <details className="maintenance-details-accordion"><summary><span>詳細設定</span><ChevronDown size={16} aria-hidden="true" /></summary><div className="maintenance-details-accordion-content"><DocumentTaxSettings documentId={document.id} taxRate={Math.round(document.taxRate * 100)} onTaxRateChange={onUpdateTaxRate} /></div></details>
   </>
 }

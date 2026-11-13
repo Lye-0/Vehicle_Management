@@ -164,6 +164,8 @@ export type MaintenanceDocumentInput = {
     transmission?: string
   }
   duplicateConfirmation?: {
+    previousCustomerId?: string
+    expectedVehicleUpdatedAt?: string
     registrationNumberConfirmed?: boolean
     confirmedVehicleId?: string
   }

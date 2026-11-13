@@ -195,7 +195,9 @@ export type SalesCreateInput = {
     transmission?: string
   }
   duplicateConfirmation?: {
-    registrationNumberConfirmed: true
+    previousCustomerId?: string
+    expectedVehicleUpdatedAt?: string
+    registrationNumberConfirmed?: true
     confirmedVehicleId: string
   }
   masterSync?: {

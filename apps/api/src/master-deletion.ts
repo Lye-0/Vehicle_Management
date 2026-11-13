@@ -174,7 +174,10 @@ async function loadDeletionTarget(database: Database, organizationId: string, ki
 }
 
 function documentTarget(table: typeof salesDocuments | typeof maintenanceDocuments, target: DeletionTarget): SQL {
-  return target.kind === 'customer' ? eq(table.customerId, target.customerId) : eq(table.vehicleId, target.id)
+  if (target.kind === 'vehicle') return eq(table.vehicleId, target.id)
+  return sql`(${table.customerId} = ${target.customerId} OR ${table.vehicleId} IN (
+    SELECT id FROM vehicles WHERE customer_id = ${target.customerId} AND organization_id = ${table.organizationId} AND deleted_at IS NULL
+  ))`
 }
 
 function deletionGuard(target: DeletionTarget, organizationId: string): SQL {

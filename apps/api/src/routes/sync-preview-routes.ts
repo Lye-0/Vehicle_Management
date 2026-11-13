@@ -130,6 +130,7 @@ async function computeSyncPreview(
   const mileageContext = body.mileageContext && typeof body.mileageContext === 'object' && !Array.isArray(body.mileageContext)
     ? body.mileageContext as { openedMileage?: number | null }
     : undefined
+  let persistedPair = false
   let allowVehicleless = false
 
   // 1. documentId/documentTypeの整合性検証
@@ -148,6 +149,7 @@ async function computeSyncPreview(
     // 過去の販売書類と、ABACUS移行で作成された車両なし整備書類は、
     // 既存レコードの通常編集に限ってsync-previewの車両必須検証を緩和する。
     // 新規POST（documentIdなし）や通常の車両なし整備書類では車両を要求する。
+    persistedPair = doc.customerId === customerId && doc.vehicleId === vehicleId
     const isAbacusVehiclelessMaintenance = documentType === 'maintenance'
       && doc.vehicleId === null
       && parseAbacusDocumentImportMetadata(doc.detailsJson)?.vehicleless === true
@@ -201,7 +203,7 @@ async function computeSyncPreview(
       .get()
     if (!vehicle) throw new HttpError(404, '車両が見つかりません。')
     // 所有関係検証
-    if (resolvedCustomerId && vehicle.customerId !== resolvedCustomerId) {
+    if (!persistedPair && resolvedCustomerId && vehicle.customerId !== resolvedCustomerId) {
       throw new HttpError(400, '選択した車両が顧客と一致しません。')
     }
     resolvedVehicleId = vehicle.id
@@ -294,9 +296,11 @@ async function computeSyncPreview(
         name: vehicles.name,
         registrationNumber: vehicles.registrationNumber,
         chassisNumber: vehicles.chassisNumber,
+        customerId: vehicles.customerId,
+        updatedAt: vehicles.updatedAt,
       })
       .from(vehicles)
-      .where(eq(vehicles.organizationId, organizationId))
+      .where(and(eq(vehicles.organizationId, organizationId), isNull(vehicles.deletedAt)))
       .all()
     duplicateVehicles = findDuplicateVehicles(allVehicles, newVehicle, resolvedVehicleId ?? undefined)
   }

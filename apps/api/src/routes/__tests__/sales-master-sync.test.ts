@@ -14,6 +14,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await env.DB.prepare("DELETE FROM maintenance_documents WHERE organization_id = ?").bind(TEST_ORG).run();
   await env.DB.prepare("DELETE FROM sales_document_items WHERE organization_id = ?").bind(TEST_ORG).run();
   await env.DB.prepare("DELETE FROM sales_documents WHERE organization_id = ?").bind(TEST_ORG).run();
   await env.DB.prepare("DELETE FROM vehicles WHERE organization_id = ?").bind(TEST_ORG).run();
@@ -84,6 +85,27 @@ async function getVehicleUpdatedAt(id: string): Promise<string> {
 }
 
 describe("POST sales documents masterSync", () => {
+  it.each(["sales", "maintenance"])("所有者変更後も旧顧客の%s書類を保存できる", async (kind) => {
+    const url = `https://example.com/api/${kind}-documents`;
+    const fields = kind === "sales" ? { type: "見積書" } : { type: "整備見積書", category: "一般整備" };
+    const oldOwner = `old-${kind}`, newOwner = `new-${kind}`, vehicleId = `car-${kind}`;
+    await seedCustomer(oldOwner, "旧所有者");
+    await seedCustomer(newOwner, "新所有者");
+    await seedVehicle(vehicleId, oldOwner, "トヨタ", "ハイエース", undefined, vehicleId);
+    const first = await SELF.fetch(postReq(url, { ...fields, customerId: oldOwner, vehicleId, items: [] }));
+    expect(first.status).toBe(201);
+    const { document } = await first.json() as { document: { id: string } };
+    const request = { ...fields, customerId: newOwner, items: [], newVehicle: { maker: "トヨタ", name: "ハイエース", chassisNumber: vehicleId },
+      duplicateConfirmation: { previousCustomerId: oldOwner, confirmedVehicleId: vehicleId, expectedVehicleUpdatedAt: await getVehicleUpdatedAt(vehicleId) } };
+    const saved = await SELF.fetch(postReq(url, request));
+    expect(saved.status).toBe(201);
+    expect(await saved.json()).toMatchObject({ document: { customerId: newOwner, vehicleId } });
+    expect((await SELF.fetch(postReq(url, request))).status).toBe(409);
+    const historical = await SELF.fetch(patchReq(`${url}/${document.id}`, { note: "確認済み" }));
+    expect(historical.status).toBe(200);
+    expect(await historical.json()).toMatchObject({ document: { customerId: oldOwner, vehicleId } });
+  });
+
   it("新規顧客＋新規車両＋販売書類を一体作成", async () => {
     const res = await SELF.fetch(postReq("https://example.com/api/sales-documents", {
       type: "見積書",

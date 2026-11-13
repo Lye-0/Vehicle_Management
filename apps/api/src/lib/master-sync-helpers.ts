@@ -392,6 +392,8 @@ export type DuplicateCustomer = {
 }
 
 export type DuplicateVehicle = {
+  customerId?: string
+  updatedAt?: string
   id: string
   maker: string | null
   name: string
@@ -462,6 +464,8 @@ export function findDuplicateCustomers(
 
 export function findDuplicateVehicles(
   allVehicles: Array<{
+    customerId?: string
+    updatedAt?: string
     id: string
     maker: string | null
     name: string
@@ -485,10 +489,10 @@ export function findDuplicateVehicles(
       && normalizeRegistrationNumberForDuplicate(newVehicle.registrationNumber) !== ''
 
     if (vinMatch && !seen.has(v.id)) {
-      results.push({ id: v.id, maker: v.maker, name: v.name, registrationNumber: v.registrationNumber, chassisNumber: v.chassisNumber, matchReason: 'chassis_number', strength: 'strong' })
+      results.push({ customerId: v.customerId, updatedAt: v.updatedAt, id: v.id, maker: v.maker, name: v.name, registrationNumber: v.registrationNumber, chassisNumber: v.chassisNumber, matchReason: 'chassis_number', strength: 'strong' })
       seen.add(v.id)
     } else if (plateMatch && !seen.has(v.id)) {
-      results.push({ id: v.id, maker: v.maker, name: v.name, registrationNumber: v.registrationNumber, chassisNumber: v.chassisNumber, matchReason: 'registration_number', strength: 'strong' })
+      results.push({ customerId: v.customerId, updatedAt: v.updatedAt, id: v.id, maker: v.maker, name: v.name, registrationNumber: v.registrationNumber, chassisNumber: v.chassisNumber, matchReason: 'registration_number', strength: 'strong' })
       seen.add(v.id)
     }
   }

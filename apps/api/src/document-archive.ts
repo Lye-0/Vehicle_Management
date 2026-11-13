@@ -44,6 +44,11 @@ async function restoreDocumentWithParents(database: Database, kind: ArchivedDocu
     const restoreGuard = sql`EXISTS (SELECT 1 FROM ${kind === 'sales' ? salesDocuments : maintenanceDocuments} WHERE id = ${current.id} AND organization_id = ${organizationId} AND archived_at IS NOT NULL AND deletion_batch_id = ${current.deletionBatchId})`
     statements.push(database.update(customers).set({ deletedAt: null, deletedBy: null, deletionBatchId: null, updatedAt }).where(and(eq(customers.id, current.customerId), eq(customers.organizationId, organizationId), sql`${customers.deletedAt} IS NOT NULL`, eq(customers.deletionBatchId, current.deletionBatchId), restoreGuard)))
     if (current.vehicleId) {
+      // A historical document can reference a vehicle now owned by another customer.
+      statements.push(database.update(customers).set({ deletedAt: null, deletedBy: null, deletionBatchId: null, updatedAt }).where(and(
+        eq(customers.organizationId, organizationId), eq(customers.deletionBatchId, current.deletionBatchId),
+        sql`${customers.id} IN (SELECT customer_id FROM vehicles WHERE id = ${current.vehicleId} AND organization_id = ${organizationId} AND deletion_batch_id = ${current.deletionBatchId})`, restoreGuard,
+      )))
       statements.push(database.update(vehicles).set({ deletedAt: null, deletedBy: null, deletionBatchId: null, updatedAt }).where(and(eq(vehicles.id, current.vehicleId), eq(vehicles.organizationId, organizationId), sql`${vehicles.deletedAt} IS NOT NULL`, eq(vehicles.deletionBatchId, current.deletionBatchId), restoreGuard)))
     }
   }
